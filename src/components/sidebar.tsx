@@ -1,0 +1,193 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { cn } from "@/lib/cn";
+import { useState } from "react";
+
+const navSections = [
+  {
+    title: null,
+    items: [
+      { href: "/", label: "ダッシュボード" },
+      { href: "/diagnosis", label: "店舗診断" },
+    ],
+  },
+  {
+    title: "コンテンツ管理",
+    items: [
+      { href: "/reviews", label: "口コミ管理" },
+      { href: "/posts", label: "投稿管理" },
+      { href: "/aio", label: "AIO対策" },
+    ],
+  },
+  {
+    title: "店舗情報管理",
+    children: [
+      { href: "/shop-management", label: "店舗一覧" },
+      { href: "/ranking", label: "店舗検索ランキング" },
+      { href: "/reports", label: "店舗パフォーマンス" },
+      { href: "/basic-info", label: "基礎情報管理" },
+      { href: "/setup", label: "初期整備" },
+      { href: "/citation", label: "サイテーション" },
+    ],
+  },
+  {
+    title: "広告管理",
+    children: [
+      { href: "/pmax", label: "P-MAX広告" },
+      { href: "/ads", label: "広告管理" },
+    ],
+  },
+  {
+    title: "多媒体連携",
+    children: [
+      { href: "/media", label: "多媒体管理" },
+      { href: "/organic", label: "オーガニック投稿" },
+      { href: "/ota", label: "OTA連携" },
+    ],
+  },
+  {
+    title: null,
+    items: [
+      { href: "/lead", label: "リード獲得・分析" },
+      { href: "/chatbot", label: "チャットボット" },
+    ],
+  },
+  {
+    title: "システム管理",
+    children: [
+      { href: "/admin", label: "システム管理" },
+      { href: "/user-management", label: "ユーザー・権限管理" },
+      { href: "/customer-master", label: "顧客マスタ" },
+      { href: "/ai-integration", label: "AI社長・AI課長" },
+    ],
+  },
+];
+
+function AccordionSection({
+  title,
+  items,
+  pathname,
+}: {
+  title: string;
+  items: { href: string; label: string; badge?: number }[];
+  pathname: string;
+}) {
+  const hasActive = items.some(
+    (c) => c.href === "/" ? pathname === "/" : pathname.startsWith(c.href)
+  );
+  const [open, setOpen] = useState(hasActive);
+
+  return (
+    <div className="w-full">
+      <button
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        aria-label={`${title}メニューを${open ? "閉じる" : "開く"}`}
+        className="flex items-center w-full px-4 py-3 text-sm text-white hover:bg-white/10 transition"
+      >
+        <div className="rounded-full h-3.5 w-3.5 bg-white/80 mr-3 flex-shrink-0" />
+        <span className="flex-1 text-left">{title}</span>
+        <svg
+          className={cn("w-4 h-4 transition-transform text-white/60", open && "rotate-180")}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open && (
+        <div>
+          {items.map((child) => {
+            const isActive =
+              child.href === "/"
+                ? pathname === "/" || pathname === ""
+                : pathname.startsWith(child.href);
+            return (
+              <Link key={child.href} href={child.href}>
+                <div
+                  className={cn(
+                    "px-10 py-2.5 text-sm transition-all",
+                    isActive
+                      ? "bg-white text-[#003D6B] font-bold"
+                      : "text-white/90 hover:bg-white/10"
+                  )}
+                >
+                  {child.label}
+                  {child.badge && (
+                    <span className="ml-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                      {child.badge}
+                    </span>
+                  )}
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function Sidebar() {
+  const pathname = usePathname();
+
+  return (
+    <aside className="fixed left-0 top-[60px] h-[calc(100%-60px)] w-[15%] min-w-[200px] bg-[#003D6B] text-white flex flex-col z-40">
+      {/* Navigation */}
+      <nav className="flex-1 overflow-y-auto py-6" aria-label="メインナビゲーション">
+        {navSections.map((section, idx) => {
+          // Accordion (collapsible) sections
+          if (section.children) {
+            return (
+              <AccordionSection
+                key={section.title}
+                title={section.title!}
+                items={section.children}
+                pathname={pathname}
+              />
+            );
+          }
+
+          // Flat items
+          return (
+            <div key={idx}>
+              {section.items!.map((item) => {
+                const isActive =
+                  item.href === "/"
+                    ? pathname === "/" || pathname === ""
+                    : pathname.startsWith(item.href);
+                return (
+                  <Link key={item.href} href={item.href}>
+                    <div
+                      className={cn(
+                        "flex items-center px-4 py-3 text-sm transition-all",
+                        isActive
+                          ? "bg-white text-[#003D6B] font-bold"
+                          : "text-white hover:bg-white/10"
+                      )}
+                    >
+                      <div
+                        className={cn(
+                          "rounded-full h-3.5 w-3.5 mr-3 flex-shrink-0",
+                          isActive ? "bg-[#003D6B]" : "bg-white/80"
+                        )}
+                      />
+                      <span>{item.label}</span>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          );
+        })}
+      </nav>
+
+      {/* Bottom links */}
+      <div className="p-4 border-t border-white/20 text-xs space-y-2">
+        <p className="text-white/60 hover:text-white cursor-pointer">プライバシー・ポリシー</p>
+        <p className="text-white/60 hover:text-white cursor-pointer">利用規約</p>
+      </div>
+    </aside>
+  );
+}

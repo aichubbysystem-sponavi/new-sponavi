@@ -1,0 +1,253 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --primary: #003D6B;
+  --primary-light: #005a9e;
+  --primary-dark: #002a4a;
+  --accent: #E6EEFF;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --bg: #ffffff;
+  --bg-card: #ffffff;
+  --bg-sidebar: #003D6B;
+  --bg-header: #E6EEFF;
+  --text: #324567;
+  --text-light: #64748b;
+  --text-dark: #003D6B;
+  --border: #e2e8f0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: "Segoe UI", "Hiragino Sans", "Meiryo", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.8); opacity: 1; }
+  100% { transform: scale(1.4); opacity: 0; }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out forwards;
+}
+
+.animate-slide-in {
+  animation: slideIn 0.3s ease-out forwards;
+}
+
+/* Score gauge animation */
+@keyframes score-fill {
+  from { stroke-dashoffset: 283; }
+}
+
+.score-gauge-circle {
+  animation: score-fill 1.5s ease-out forwards;
+}
+
+/* Card hover */
+.card-hover {
+  transition: all 0.2s ease;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px -5px rgba(0, 0, 0, 0.1);
+}
+
+/* Badge styles */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.badge-success { background: #dcfce7; color: #166534; }
+.badge-warning { background: #fef3c7; color: #92400e; }
+.badge-danger { background: #fee2e2; color: #991b1b; }
+.badge-info { background: #dbeafe; color: #1e40af; }
+.badge-purple { background: #f3e8ff; color: #6b21a8; }
+
+/* Stars */
+.star { color: #fbbf24; }
+.star-empty { color: #d1d5db; }
+
+/* Tab styles */
+.tab-active {
+  border-bottom: 2px solid var(--primary);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* SPOTLIGHT NAVIGATOR Theme - Override dark theme pages */
+/* Cards on new pages that used dark bg */
+.bg-\[\#1e293b\] {
+  background-color: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+}
+
+.bg-\[\#0f172a\] {
+  background-color: #ffffff !important;
+}
+
+/* Text overrides for light theme */
+main .text-white {
+  color: #324567 !important;
+}
+
+/* Keep white text on dark backgrounds */
+.bg-\[\#003D6B\] .text-white,
+.bg-\[\#003D6B\].\!text-white,
+button.bg-\[\#003D6B\],
+[style*="color: white"] {
+  color: white !important;
+}
+
+.text-slate-400 {
+  color: #64748b !important;
+}
+
+.text-slate-300 {
+  color: #475569 !important;
+}
+
+.text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+/* Keep colored text as-is */
+.text-green-400 { color: #22c55e !important; }
+.text-red-400 { color: #f87171 !important; }
+.text-blue-400 { color: #003D6B !important; }
+.text-yellow-400 { color: #facc15 !important; }
+.text-orange-400 { color: #fb923c !important; }
+.text-purple-400 { color: #a855f7 !important; }
+
+/* Background overrides */
+.bg-white\/5 {
+  background-color: #f8fafc !important;
+}
+
+.bg-white\/10 {
+  background-color: #f1f5f9 !important;
+}
+
+/* Border overrides */
+.border-white\/5,
+.border-white\/10 {
+  border-color: #e2e8f0 !important;
+}
+
+/* Input overrides */
+.bg-white\/5.border.border-white\/10 {
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+  color: #324567 !important;
+}
+
+/* Gradient backgrounds for AI cards */
+.from-blue-600\/20 { --tw-gradient-from: rgba(0, 61, 107, 0.1) !important; }
+.from-green-600\/20 { --tw-gradient-from: rgba(16, 185, 129, 0.1) !important; }
+.to-purple-600\/20 { --tw-gradient-to: rgba(168, 85, 247, 0.1) !important; }
+.to-emerald-600\/20 { --tw-gradient-to: rgba(16, 185, 129, 0.05) !important; }
+
+/* Sidebar-specific: keep white text in sidebar */
+aside .text-white,
+aside.bg-\[\#003D6B\] .text-white {
+  color: #ffffff !important;
+}
+
+aside .text-white\/90 {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+aside .text-white\/60 {
+  color: rgba(255, 255, 255, 0.6) !important;
+}
+
+/* Header-specific: keep its colors */
+header .text-\[\#003D6B\] {
+  color: #003D6B !important;
+}
+
+header .text-\[\#324567\] {
+  color: #324567 !important;
+}
+
+/* Table styling */
+table {
+  border-collapse: collapse;
+}
+
+table th {
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+
+table tr {
+  border-bottom: 1px solid #f1f5f9;
+}
+
+table tr:hover {
+  background-color: #f8fafc;
+}
+
+/* Button overrides */
+.bg-blue-600 {
+  background-color: #003D6B !important;
+}
+
+.bg-blue-600:hover,
+.hover\:bg-blue-700:hover {
+  background-color: #002a4a !important;
+}
+
+.bg-green-600 {
+  background-color: #059669 !important;
+}
+
+/* Feature Card - keep light bg */
+.bg-white.group {
+  border-color: #e2e8f0 !important;
+}
+
+/* Specific fix: FeatureCard text */
+.text-slate-800 {
+  color: #1e293b !important;
+}
