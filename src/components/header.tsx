@@ -4,16 +4,21 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import api from "@/lib/api";
+import { useRole } from "@/components/role-provider";
+import { type Role, ROLE_LABELS } from "@/lib/roles";
 
 interface Shop {
   id: string;
   name: string;
 }
 
+const ROLES: Role[] = ["president", "manager", "part_time"];
+
 export default function Header() {
   const [shops, setShops] = useState<Shop[]>([]);
   const [selectedShop, setSelectedShop] = useState("");
   const router = useRouter();
+  const { role, setRoleOverride } = useRole();
 
   useEffect(() => {
     const fetchShops = async () => {
@@ -26,7 +31,6 @@ export default function Header() {
           }
         }
       } catch {
-        // API未接続時はモックデータを表示
         setShops([
           { id: "1", name: "店舗を読み込み中..." },
         ]);
@@ -49,7 +53,7 @@ export default function Header() {
         </h1>
       </div>
 
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3">
         <select
           aria-label="店舗を選択"
           className="bg-white border border-[#003D6B]/20 rounded-md px-3 py-1.5 text-sm text-[#324567] focus:outline-none focus:ring-2 focus:ring-[#003D6B]/30 max-w-[300px]"
@@ -61,12 +65,20 @@ export default function Header() {
           ))}
         </select>
 
-        <button
-          aria-label="設定"
-          className="text-sm text-[#324567] hover:text-[#003D6B] transition px-2 py-1 rounded hover:bg-white/50"
+        {/* ロール切替（デモ用） */}
+        <select
+          aria-label="ロールを切替"
+          className="bg-white border border-amber-300 rounded-md px-2 py-1.5 text-xs text-[#324567] focus:outline-none focus:ring-2 focus:ring-amber-300"
+          value={role}
+          onChange={(e) => {
+            setRoleOverride(e.target.value as Role);
+            router.push("/");
+          }}
         >
-          ⚙️ 設定
-        </button>
+          {ROLES.map((r) => (
+            <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+          ))}
+        </select>
 
         <button
           onClick={handleLogout}

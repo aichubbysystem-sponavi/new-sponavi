@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { useState } from "react";
+import { useRole } from "@/components/role-provider";
+import { canShowInSidebar } from "@/lib/roles";
 
 const navSections = [
   {
@@ -131,12 +133,40 @@ function AccordionSection({
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const { role, roleLabel } = useRole();
+
+  // ロールに応じてセクションをフィルタリング
+  const filteredSections = navSections
+    .map((section) => {
+      if (section.children) {
+        const filtered = section.children.filter((item) => canShowInSidebar(role, item.href));
+        if (filtered.length === 0) return null;
+        return { ...section, children: filtered };
+      }
+      if (section.items) {
+        const filtered = section.items.filter((item) => canShowInSidebar(role, item.href));
+        if (filtered.length === 0) return null;
+        return { ...section, items: filtered };
+      }
+      return section;
+    })
+    .filter(Boolean);
 
   return (
     <aside className="fixed left-0 top-[60px] h-[calc(100%-60px)] w-[15%] min-w-[200px] bg-[#003D6B] text-white flex flex-col z-40">
+      {/* ロール表示 */}
+      <div className="px-4 pt-4 pb-2">
+        <div className="bg-white/10 rounded-lg px-3 py-2">
+          <p className="text-[10px] text-white/60">ログイン中のロール</p>
+          <p className="text-sm font-bold text-white">{roleLabel}</p>
+        </div>
+      </div>
+
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto py-6" aria-label="メインナビゲーション">
-        {navSections.map((section, idx) => {
+      <nav className="flex-1 overflow-y-auto py-4" aria-label="メインナビゲーション">
+        {filteredSections.map((section, idx) => {
+          if (!section) return null;
+
           // Accordion (collapsible) sections
           if (section.children) {
             return (
