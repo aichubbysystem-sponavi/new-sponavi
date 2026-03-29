@@ -1,20 +1,42 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   LineChart, Line,
 } from "recharts";
-import { reviews, reviewTrend, reviewRatingDistribution, sentimentAnalysis, wordCloud } from "@/lib/mock-data";
+import { reviews as mockReviews, reviewTrend, reviewRatingDistribution, sentimentAnalysis, wordCloud } from "@/lib/mock-data";
 import { featureDetails } from "@/lib/feature-details";
+import api from "@/lib/api";
 
 export default function ReviewsPage() {
   const [selectedReview, setSelectedReview] = useState<number | null>(null);
   const [selectedReply, setSelectedReply] = useState<number | null>(null);
+  const [reviews, setReviews] = useState(mockReviews);
+  const [apiConnected, setApiConnected] = useState(false);
+
+  const fetchReviews = useCallback(async () => {
+    try {
+      const res = await api.get("/api/reviews");
+      if (Array.isArray(res.data) && res.data.length > 0) {
+        setReviews(res.data);
+        setApiConnected(true);
+      }
+    } catch {
+      // API未接続時はモックデータを使用
+    }
+  }, []);
+
+  useEffect(() => { fetchReviews(); }, [fetchReviews]);
 
   return (
     <div className="animate-fade-in">
+      {!apiConnected && (
+        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+          <span className="text-amber-600 text-sm">Go APIに未接続のため、デモデータを表示しています</span>
+        </div>
+      )}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">口コミ管理</h1>

@@ -13,6 +13,7 @@ import api from "@/lib/api";
 export default function Dashboard() {
   const [shopCount, setShopCount] = useState(0);
   const [storeName, setStoreName] = useState("読み込み中...");
+  const [apiConnected, setApiConnected] = useState<boolean | null>(null);
 
   useEffect(() => {
     const f = async () => {
@@ -21,12 +22,24 @@ export default function Dashboard() {
         const data = Array.isArray(res.data) ? res.data : [];
         setShopCount(data.length);
         if (data.length > 0) setStoreName(data[0].name);
-      } catch { /* mock fallback */ }
+        setApiConnected(true);
+      } catch {
+        setStoreName(currentStore.name);
+        setShopCount(1);
+        setApiConnected(false);
+      }
     }; f();
   }, []);
 
   return (
     <div className="animate-fade-in">
+      {/* API接続状態 */}
+      {apiConnected === false && (
+        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-2">
+          <span className="text-amber-600 text-sm">Go APIに未接続のため、デモデータを表示しています</span>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>

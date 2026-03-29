@@ -26,6 +26,9 @@ export default function ShopManagementPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortKey, setSortKey] = useState<keyof ShopRow>("name");
   const [sortAsc, setSortAsc] = useState(true);
+  const [editShop, setEditShop] = useState<ShopRow | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ShopRow | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -108,15 +111,16 @@ export default function ShopManagementPage() {
                 <th className="text-left py-3 px-2">電話番号</th>
                 <th className="text-center py-3 px-2">GBP</th>
                 <th className="text-center py-3 px-2">ステータス</th>
+                <th className="text-center py-3 px-2">操作</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={7} className="py-12 text-center text-slate-400">
+                <tr><td colSpan={8} className="py-12 text-center text-slate-400">
                   {shops.length === 0 ? "店舗が登録されていません" : "該当する店舗が見つかりません"}
                 </td></tr>
               ) : filtered.map((shop) => (
-                <tr key={shop.id} className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer transition">
+                <tr key={shop.id} className="border-b border-slate-100 hover:bg-slate-50 transition">
                   <td className="py-3 px-2 text-[#003D6B] font-mono text-xs">{shop.id.substring(0, 12)}...</td>
                   <td className="py-3 px-2 font-medium text-[#003D6B]">{shop.name}</td>
                   <td className="py-3 px-2 text-slate-600 text-xs">
@@ -137,10 +141,91 @@ export default function ShopManagementPage() {
                       {shop.status === "active" ? "稼働中" : shop.status === "paused" ? "一時停止" : "解約済"}
                     </span>
                   </td>
+                  <td className="py-3 px-2 text-center">
+                    <div className="flex items-center justify-center gap-1">
+                      <button onClick={() => setEditShop(shop)} className="text-[10px] px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition">編集</button>
+                      <button onClick={() => setDeleteTarget(shop)} className="text-[10px] px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition">削除</button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* 編集モーダル */}
+      {editShop && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setEditShop(null)}>
+          <div className="bg-white rounded-xl p-6 w-[500px] max-h-[80vh] overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-bold mb-4">店舗情報を編集</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-slate-600 block mb-1">店舗名</label>
+                <input className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" value={editShop.name} onChange={(e) => setEditShop({ ...editShop, name: e.target.value })} />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-600 block mb-1">電話番号</label>
+                <input className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" value={editShop.phone} onChange={(e) => setEditShop({ ...editShop, phone: e.target.value })} />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-600 block mb-1">ステータス</label>
+                <select className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" value={editShop.status} onChange={(e) => setEditShop({ ...editShop, status: e.target.value as ShopRow["status"] })}>
+                  <option value="active">稼働中</option>
+                  <option value="paused">一時停止</option>
+                  <option value="churned">解約済</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-6">
+              <button
+                disabled={saving}
+                onClick={async () => {
+                  setSaving(true);
+                  try {
+                    await api.put(`/api/shop/${editShop.id}`, { name: editShop.name, phone: editShop.phone });
+                    await fetchData();
+                    setEditShop(null);
+                  } catch { setError("更新に失敗しました"); }
+                  finally { setSaving(false); }
+                }}
+                className="flex-1 bg-[#003D6B] text-white py-2 rounded-lg text-sm font-medium hover:bg-[#002a4a] transition disabled:opacity-50"
+              >
+                {saving ? "保存中..." : "保存"}
+              </button>
+              <button onClick={() => setEditShop(null)} className="px-4 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50 transition">キャンセル</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 削除確認モーダル */}
+      {deleteTarget && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setDeleteTarget(null)}>
+          <div className="bg-white rounded-xl p-6 w-[400px] shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-red-600 mb-2">店舗を削除</h3>
+            <p className="text-sm text-slate-600 mb-1">以下の店舗を削除しますか？</p>
+            <p className="text-sm font-bold text-slate-800 mb-4">{deleteTarget.name}</p>
+            <p className="text-xs text-red-500 mb-6">この操作は取り消せません。関連するデータも全て削除されます。</p>
+            <div className="flex gap-2">
+              <button
+                disabled={saving}
+                onClick={async () => {
+                  setSaving(true);
+                  try {
+                    await api.delete(`/api/shop/${deleteTarget.id}`);
+                    await fetchData();
+                    setDeleteTarget(null);
+                  } catch { setError("削除に失敗しました"); }
+                  finally { setSaving(false); }
+                }}
+                className="flex-1 bg-red-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-red-700 transition disabled:opacity-50"
+              >
+                {saving ? "削除中..." : "削除する"}
+              </button>
+              <button onClick={() => setDeleteTarget(null)} className="px-4 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50 transition">キャンセル</button>
+            </div>
+          </div>
         </div>
       )}
 
