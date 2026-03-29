@@ -1,16 +1,68 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
-import { scheduledPosts, postCalendar } from "@/lib/mock-data";
+import { scheduledPosts as mockPosts, postCalendar } from "@/lib/mock-data";
 import { featureDetails } from "@/lib/feature-details";
 
 const postTypes = ["通常投稿", "特典投稿", "イベント投稿", "写真投稿", "多言語投稿"];
 
+interface Post {
+  id: number;
+  date: string;
+  time: string;
+  type: string;
+  title: string;
+  content: string;
+  status: string;
+  platform: string;
+}
+
 export default function PostsPage() {
   const [showGenerator, setShowGenerator] = useState(false);
+  const [showNewPost, setShowNewPost] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generatedText, setGeneratedText] = useState("");
+  const [posts, setPosts] = useState<Post[]>(mockPosts);
+  const [filter, setFilter] = useState("すべて");
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() };
+  });
+  const [newPost, setNewPost] = useState({ title: "", content: "", type: "通常投稿", date: "", time: "12:00", platform: "GBP" });
+
+  // カレンダーの日数を動的に計算
+  const calendarDays = useMemo(() => {
+    const { year, month } = calendarMonth;
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    return { firstDay, daysInMonth };
+  }, [calendarMonth]);
+
+  const monthLabel = `${calendarMonth.year}年${calendarMonth.month + 1}月`;
+
+  const filteredPosts = posts.filter((p) => {
+    if (filter === "すべて") return true;
+    if (filter === "予約済み") return p.status === "scheduled";
+    if (filter === "下書き") return p.status === "draft";
+    if (filter === "公開済み") return p.status === "published";
+    return true;
+  });
+
+  const handleAddPost = () => {
+    const post: Post = {
+      id: posts.length + 1,
+      ...newPost,
+      status: "scheduled",
+    };
+    setPosts([post, ...posts]);
+    setShowNewPost(false);
+    setNewPost({ title: "", content: "", type: "通常投稿", date: "", time: "12:00", platform: "GBP" });
+  };
+
+  const handleDeletePost = (id: number) => {
+    setPosts(posts.filter((p) => p.id !== id));
+  };
 
   const handleGenerate = () => {
     setGenerating(true);
@@ -43,7 +95,7 @@ export default function PostsPage() {
           >
             🤖 AI記事生成
           </button>
-          <button className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition">
+          <button onClick={() => setShowNewPost(true)} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition">
             + 新規投稿
           </button>
         </div>
@@ -135,19 +187,28 @@ export default function PostsPage() {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Calendar */}
         <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-          <h3 className="text-sm font-semibold text-slate-500 mb-4">投稿カレンダー（3月）</h3>
+          <div className="flex items-center justify-between mb-4">
+            <button onClick={() => setCalendarMonth((m) => { const d = new Date(m.year, m.month - 1); return { year: d.getFullYear(), month: d.getMonth() }; })} className="text-slate-400 hover:text-slate-600 text-sm px-2">◀</button>
+            <h3 className="text-sm font-semibold text-slate-500">{monthLabel}</h3>
+            <button onClick={() => setCalendarMonth((m) => { const d = new Date(m.year, m.month + 1); return { year: d.getFullYear(), month: d.getMonth() }; })} className="text-slate-400 hover:text-slate-600 text-sm px-2">▶</button>
+          </div>
           <div className="grid grid-cols-7 gap-1 text-center mb-2">
             {["日", "月", "火", "水", "木", "金", "土"].map((d) => (
               <span key={d} className="text-xs text-slate-400 font-medium py-1">{d}</span>
             ))}
           </div>
           <div className="grid grid-cols-7 gap-1 text-center">
-            {/* March 2026 starts on Sunday */}
-            {Array.from({ length: 31 }).map((_, i) => {
+            {/* 月初の空白 */}
+            {Array.from({ length: calendarDays.firstDay }).map((_, i) => (
+              <div key={`empty-${i}`} />
+            ))}
+            {Array.from({ length: calendarDays.daysInMonth }).map((_, i) => {
               const day = i + 1;
-              const dateStr = `2026-03-${String(day).padStart(2, "0")}`;
+              const dateStr = `${calendarMonth.year}-${String(calendarMonth.month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
               const post = postCalendar.find((p) => p.date === dateStr);
-              const isToday = day === 18;
+              const hasPost = posts.some((p) => p.date === dateStr);
+              const today = new Date();
+              const isToday = day === today.getDate() && calendarMonth.month === today.getMonth() && calendarMonth.year === today.getFullYear();
               return (
                 <div
                   key={day}
@@ -156,11 +217,11 @@ export default function PostsPage() {
                   }`}
                 >
                   {day}
-                  {post && (
+                  {(post || hasPost) && (
                     <div className={`w-1.5 h-1.5 rounded-full mx-auto mt-0.5 ${
-                      post.type === "通常" ? "bg-blue-400" :
-                      post.type === "特典" ? "bg-emerald-400" :
-                      post.type === "イベント" ? "bg-purple-400" :
+                      post?.type === "通常" ? "bg-blue-400" :
+                      post?.type === "特典" ? "bg-emerald-400" :
+                      post?.type === "イベント" ? "bg-purple-400" :
                       "bg-amber-400"
                     }`} />
                   )}
@@ -184,14 +245,14 @@ export default function PostsPage() {
             <h3 className="text-sm font-semibold text-slate-500">投稿一覧</h3>
             <div className="flex gap-2">
               {["すべて", "予約済み", "下書き", "公開済み"].map((f) => (
-                <button key={f} className="text-xs px-3 py-1.5 bg-slate-50 text-slate-600 rounded-lg font-medium hover:bg-slate-100">
+                <button key={f} onClick={() => setFilter(f)} className={`text-xs px-3 py-1.5 rounded-lg font-medium transition ${filter === f ? "bg-[#003D6B] text-white" : "bg-slate-50 text-slate-600 hover:bg-slate-100"}`}>
                   {f}
                 </button>
               ))}
             </div>
           </div>
           <div className="divide-y divide-slate-50">
-            {scheduledPosts.map((post) => (
+            {filteredPosts.map((post) => (
               <div key={post.id} className="p-5 hover:bg-slate-50/50 transition">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
@@ -214,7 +275,7 @@ export default function PostsPage() {
                     <p className="text-xs text-slate-400">{post.time}</p>
                     <div className="flex gap-1 mt-2">
                       <button className="text-xs px-2 py-1 bg-slate-100 text-slate-600 rounded hover:bg-slate-200">編集</button>
-                      <button className="text-xs px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100">削除</button>
+                      <button onClick={() => handleDeletePost(post.id)} className="text-xs px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100">削除</button>
                     </div>
                   </div>
                 </div>
@@ -223,6 +284,53 @@ export default function PostsPage() {
           </div>
         </div>
       </div>
+
+      {/* 新規投稿モーダル */}
+      {showNewPost && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowNewPost(false)}>
+          <div className="bg-white rounded-xl p-6 w-[500px] max-h-[80vh] overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-bold mb-4">新規投稿を作成</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-slate-600 block mb-1">タイトル</label>
+                <input className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" value={newPost.title} onChange={(e) => setNewPost({ ...newPost, title: e.target.value })} placeholder="投稿タイトル" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-600 block mb-1">投稿の種類</label>
+                <select className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" value={newPost.type} onChange={(e) => setNewPost({ ...newPost, type: e.target.value })}>
+                  {postTypes.map((t) => <option key={t}>{t}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-slate-600 block mb-1">投稿日</label>
+                  <input type="date" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" value={newPost.date} onChange={(e) => setNewPost({ ...newPost, date: e.target.value })} />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-600 block mb-1">時間</label>
+                  <input type="time" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" value={newPost.time} onChange={(e) => setNewPost({ ...newPost, time: e.target.value })} />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-600 block mb-1">プラットフォーム</label>
+                <select className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" value={newPost.platform} onChange={(e) => setNewPost({ ...newPost, platform: e.target.value })}>
+                  <option>GBP</option>
+                  <option>GBP + Instagram</option>
+                  <option>Instagram</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-600 block mb-1">本文</label>
+                <textarea className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm h-32" value={newPost.content} onChange={(e) => setNewPost({ ...newPost, content: e.target.value })} placeholder="投稿内容を入力..." />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-6">
+              <button onClick={handleAddPost} disabled={!newPost.title || !newPost.date} className="flex-1 bg-[#003D6B] text-white py-2 rounded-lg text-sm font-medium hover:bg-[#002a4a] transition disabled:opacity-50">予約投稿に追加</button>
+              <button onClick={() => setShowNewPost(false)} className="px-4 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50">キャンセル</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* All post features */}
       <h3 className="text-sm font-semibold text-slate-500 mb-3 mt-6">最新情報・投稿管理 全機能</h3>

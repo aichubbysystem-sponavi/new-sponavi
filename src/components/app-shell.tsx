@@ -20,7 +20,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <Header />
           <div className="flex w-full">
             <Sidebar />
-            <main className="w-[85%] ml-[15%] min-w-0 pt-[60px] min-h-screen p-6">
+            <main className="w-full lg:w-[85%] lg:ml-[15%] min-w-0 pt-[60px] min-h-screen p-4 lg:p-6">
               <RoleGuard>{children}</RoleGuard>
             </main>
           </div>

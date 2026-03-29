@@ -46,17 +46,17 @@ export default function Header() {
 
   return (
     <header className="bg-[#E6EEFF] shadow-xl h-[60px] w-full py-2 px-4 flex items-center justify-between fixed top-0 left-0 z-50 text-[#324567]">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 pl-10 lg:pl-0">
         <h1 className="text-lg font-bold tracking-tight">
           <span className="text-[#003D6B]">SPOTLIGHT</span>
-          <span className="text-[#324567]"> NAVIGATOR</span>
+          <span className="text-[#324567] hidden sm:inline"> NAVIGATOR</span>
         </h1>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 lg:gap-3">
         <select
           aria-label="店舗を選択"
-          className="bg-white border border-[#003D6B]/20 rounded-md px-3 py-1.5 text-sm text-[#324567] focus:outline-none focus:ring-2 focus:ring-[#003D6B]/30 max-w-[300px]"
+          className="bg-white border border-[#003D6B]/20 rounded-md px-2 lg:px-3 py-1.5 text-xs lg:text-sm text-[#324567] focus:outline-none focus:ring-2 focus:ring-[#003D6B]/30 max-w-[120px] lg:max-w-[300px]"
           value={selectedShop}
           onChange={(e) => setSelectedShop(e.target.value)}
         >
