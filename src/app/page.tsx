@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState, useEffect } from "react";
+import { useShop } from "@/components/shop-provider";
 
 const AreaChart = dynamic(() => import("recharts").then((m) => m.AreaChart), { ssr: false });
 const Area = dynamic(() => import("recharts").then((m) => m.Area), { ssr: false });
@@ -14,33 +14,16 @@ const Legend = dynamic(() => import("recharts").then((m) => m.Legend), { ssr: fa
 import KpiCard from "@/components/kpi-card";
 import MeoScore from "@/components/meo-score";
 import { kpiData, monthlyInsights, rankingData, scheduledPosts, currentStore } from "@/lib/mock-data";
-import api from "@/lib/api";
 
 export default function Dashboard() {
-  const [shopCount, setShopCount] = useState(0);
-  const [storeName, setStoreName] = useState("読み込み中...");
-  const [apiConnected, setApiConnected] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    const f = async () => {
-      try {
-        const res = await api.get("/api/shop");
-        const data = Array.isArray(res.data) ? res.data : [];
-        setShopCount(data.length);
-        if (data.length > 0) setStoreName(data[0].name);
-        setApiConnected(true);
-      } catch {
-        setStoreName(currentStore.name);
-        setShopCount(1);
-        setApiConnected(false);
-      }
-    }; f();
-  }, []);
+  const { shops, selectedShop, apiConnected } = useShop();
+  const storeName = selectedShop?.name || currentStore.name;
+  const shopCount = shops.length || 1;
 
   return (
     <div className="animate-fade-in">
       {/* API接続状態 */}
-      {apiConnected === false && (
+      {!apiConnected && (
         <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-2">
           <span className="text-amber-600 text-sm">Go APIに未接続のため、デモデータを表示しています</span>
         </div>

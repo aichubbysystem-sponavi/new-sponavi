@@ -1,43 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
-import api from "@/lib/api";
 import { useRole } from "@/components/role-provider";
+import { useShop } from "@/components/shop-provider";
 import { type Role, ROLE_LABELS } from "@/lib/roles";
-
-interface Shop {
-  id: string;
-  name: string;
-}
 
 const ROLES: Role[] = ["president", "manager", "part_time"];
 
 export default function Header() {
-  const [shops, setShops] = useState<Shop[]>([]);
-  const [selectedShop, setSelectedShop] = useState("");
   const router = useRouter();
   const { role, setRoleOverride } = useRole();
-
-  useEffect(() => {
-    const fetchShops = async () => {
-      try {
-        const res = await api.get("/api/shop");
-        if (res.data && Array.isArray(res.data)) {
-          setShops(res.data);
-          if (res.data.length > 0) {
-            setSelectedShop(res.data[0].id);
-          }
-        }
-      } catch {
-        setShops([
-          { id: "1", name: "店舗を読み込み中..." },
-        ]);
-      }
-    };
-    fetchShops();
-  }, []);
+  const { shops, selectedShopId, setSelectedShopId } = useShop();
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -57,9 +31,10 @@ export default function Header() {
         <select
           aria-label="店舗を選択"
           className="bg-white border border-[#003D6B]/20 rounded-md px-2 lg:px-3 py-1.5 text-xs lg:text-sm text-[#324567] focus:outline-none focus:ring-2 focus:ring-[#003D6B]/30 max-w-[120px] lg:max-w-[300px]"
-          value={selectedShop}
-          onChange={(e) => setSelectedShop(e.target.value)}
+          value={selectedShopId}
+          onChange={(e) => setSelectedShopId(e.target.value)}
         >
+          {shops.length === 0 && <option value="">店舗を読み込み中...</option>}
           {shops.map((shop) => (
             <option key={shop.id} value={shop.id}>{shop.name}</option>
           ))}

@@ -1,8 +1,11 @@
 "use client";
 
+import { useEffect, useCallback, useState } from "react";
 import FeatureCard from "@/components/feature-card";
+import api from "@/lib/api";
+import { useShop } from "@/components/shop-provider";
 
-const rankingData = [
+const mockRankingData = [
   { keyword: "渋谷 居酒屋", current: 3, prev: 5, best: 2, target: 3, trend: "up" },
   { keyword: "渋谷 飲み放題", current: 7, prev: 8, best: 4, target: 5, trend: "up" },
   { keyword: "渋谷 焼肉 デート", current: 2, prev: 2, best: 1, target: 3, trend: "stable" },
@@ -19,6 +22,23 @@ const scheduleData = [
 ];
 
 export default function RankingPage() {
+  const { selectedShopId } = useShop();
+  const [rankingData, setRankingData] = useState(mockRankingData);
+
+  const fetchRanking = useCallback(async () => {
+    if (!selectedShopId) return;
+    try {
+      const res = await api.get(`/api/shop/${selectedShopId}/ranking_search_setting`);
+      if (Array.isArray(res.data) && res.data.length > 0) {
+        setRankingData(res.data);
+      }
+    } catch {
+      // モックデータを使用
+    }
+  }, [selectedShopId]);
+
+  useEffect(() => { fetchRanking(); }, [fetchRanking]);
+
   return (
     <div className="animate-fade-in">
       <div className="mb-6">

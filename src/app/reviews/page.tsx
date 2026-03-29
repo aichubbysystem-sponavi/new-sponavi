@@ -9,30 +9,33 @@ import {
 import { reviews as mockReviews, reviewTrend, reviewRatingDistribution, sentimentAnalysis, wordCloud } from "@/lib/mock-data";
 import { featureDetails } from "@/lib/feature-details";
 import api from "@/lib/api";
+import { useShop } from "@/components/shop-provider";
 
 export default function ReviewsPage() {
   const [selectedReview, setSelectedReview] = useState<number | null>(null);
   const [selectedReply, setSelectedReply] = useState<number | null>(null);
   const [reviews, setReviews] = useState(mockReviews);
-  const [apiConnected, setApiConnected] = useState(false);
+  const [reviewApiConnected, setReviewApiConnected] = useState(false);
+  const { selectedShopId, apiConnected } = useShop();
 
   const fetchReviews = useCallback(async () => {
+    if (!selectedShopId) return;
     try {
-      const res = await api.get("/api/reviews");
+      const res = await api.get(`/api/shop/${selectedShopId}/review`);
       if (Array.isArray(res.data) && res.data.length > 0) {
         setReviews(res.data);
-        setApiConnected(true);
+        setReviewApiConnected(true);
       }
     } catch {
-      // API未接続時はモックデータを使用
+      // GBP未連携時はモックデータを使用
     }
-  }, []);
+  }, [selectedShopId]);
 
   useEffect(() => { fetchReviews(); }, [fetchReviews]);
 
   return (
     <div className="animate-fade-in">
-      {!apiConnected && (
+      {!reviewApiConnected && (
         <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
           <span className="text-amber-600 text-sm">Go APIに未接続のため、デモデータを表示しています</span>
         </div>

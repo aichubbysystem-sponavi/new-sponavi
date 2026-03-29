@@ -1,11 +1,14 @@
 "use client";
 
+import { useEffect, useCallback, useState } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   LineChart, Line,
 } from "recharts";
 import { competitors, rankingData, monthlyInsights } from "@/lib/mock-data";
+import api from "@/lib/api";
+import { useShop } from "@/components/shop-provider";
 
 const radarData = [
   { subject: "口コミ数", 自店舗: 70, 競合平均: 80 },
@@ -72,6 +75,24 @@ const realtimeReviews = [
 ];
 
 export default function ReportsPage() {
+  const { selectedShopId } = useShop();
+  const [performanceData, setPerformanceData] = useState(monthlyInsights);
+
+  const fetchPerformance = useCallback(async () => {
+    if (!selectedShopId) return;
+    try {
+      const res = await api.post("/api/shop/performance/metric", {
+        shop_id: selectedShopId,
+      });
+      if (res.data) {
+        setPerformanceData(res.data);
+      }
+    } catch {
+      // モックデータを使用
+    }
+  }, [selectedShopId]);
+
+  useEffect(() => { fetchPerformance(); }, [fetchPerformance]);
   return (
     <div className="animate-fade-in">
       <div className="flex items-center justify-between mb-6">

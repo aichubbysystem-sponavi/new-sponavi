@@ -1,9 +1,11 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { scheduledPosts as mockPosts, postCalendar } from "@/lib/mock-data";
 import { featureDetails } from "@/lib/feature-details";
+import api from "@/lib/api";
+import { useShop } from "@/components/shop-provider";
 
 const postTypes = ["通常投稿", "特典投稿", "イベント投稿", "写真投稿", "多言語投稿"];
 
@@ -23,8 +25,24 @@ export default function PostsPage() {
   const [showNewPost, setShowNewPost] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generatedText, setGeneratedText] = useState("");
+  const { selectedShopId } = useShop();
   const [posts, setPosts] = useState<Post[]>(mockPosts);
   const [filter, setFilter] = useState("すべて");
+
+  // Go APIから投稿データを取得
+  const fetchPosts = useCallback(async () => {
+    if (!selectedShopId) return;
+    try {
+      const res = await api.get(`/api/shop/${selectedShopId}/post/reservation`);
+      if (Array.isArray(res.data) && res.data.length > 0) {
+        setPosts(res.data);
+      }
+    } catch {
+      // API未接続時はモックデータ
+    }
+  }, [selectedShopId]);
+
+  useEffect(() => { fetchPosts(); }, [fetchPosts]);
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const now = new Date();
     return { year: now.getFullYear(), month: now.getMonth() };
@@ -49,13 +67,31 @@ export default function PostsPage() {
     return true;
   });
 
-  const handleAddPost = () => {
+  const handleAddPost = async () => {
     const post: Post = {
       id: posts.length + 1,
       ...newPost,
       status: "scheduled",
     };
-    setPosts([post, ...posts]);
+    // APIに送信を試みる
+    if (selectedShopId) {
+      try {
+        await api.post(`/api/shop/${selectedShopId}/post/reservation`, {
+          title: newPost.title,
+          content: newPost.content,
+          type: newPost.type,
+          scheduled_date: newPost.date,
+          scheduled_time: newPost.time,
+          platform: newPost.platform,
+        });
+        await fetchPosts();
+      } catch {
+        // API失敗時はローカルに追加
+        setPosts([post, ...posts]);
+      }
+    } else {
+      setPosts([post, ...posts]);
+    }
     setShowNewPost(false);
     setNewPost({ title: "", content: "", type: "通常投稿", date: "", time: "12:00", platform: "GBP" });
   };
