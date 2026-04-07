@@ -1,22 +1,67 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
+// レポートサブドメインのホスト名パターン
+const REPORT_HOSTNAME = "report.new-spotlight-navigator.com";
+const MAIN_HOSTNAME = "new-spotlight-navigator.com";
+
 export function middleware(request: NextRequest) {
-  const response = NextResponse.next();
+  const hostname = request.headers.get("host") || "";
+  const { pathname } = request.nextUrl;
+  const isReportSubdomain = hostname === REPORT_HOSTNAME || hostname.startsWith("report.localhost");
 
-  // === 壁5追加: リクエストID付与（フロントエンド側） ===
-  const requestId = crypto.randomUUID();
-  response.headers.set("X-Request-Id", requestId);
+  // === サブドメインルーティング ===
 
-  // === 壁6追加: CSP (Content-Security-Policy) ===
-  // next.config.mjs のヘッダーに加え、CSPをmiddlewareで動的に設定
+  // report.* サブドメイン → /report/* にリライト
+  if (isReportSubdomain) {
+    if (pathname === "/") {
+      // report.xxx.com/ → /report ページへリライト
+      const url = request.nextUrl.clone();
+      url.pathname = "/report";
+      return addHeaders(NextResponse.rewrite(url), request, true);
+    }
+    if (!pathname.startsWith("/report") && !pathname.startsWith("/_next") && !pathname.startsWith("/api") && pathname !== "/favicon.ico") {
+      // report.xxx.com/shopId → /report/shopId へリライト
+      const url = request.nextUrl.clone();
+      url.pathname = `/report${pathname}`;
+      return addHeaders(NextResponse.rewrite(url), request, true);
+    }
+    // report.xxx.com/report/... はそのまま通す
+    return addHeaders(NextResponse.next(), request, true);
+  }
+
+  // メインドメインで /report にアクセス → サブドメインへリダイレクト（本番のみ）
+  if (pathname.startsWith("/report") && (hostname === MAIN_HOSTNAME || hostname === `www.${MAIN_HOSTNAME}`)) {
+    const reportPath = pathname.replace(/^\/report/, "") || "/";
+    const url = new URL(`https://${REPORT_HOSTNAME}${reportPath}`);
+    url.search = request.nextUrl.search;
+    return NextResponse.redirect(url, 301);
+  }
+
+  // === 通常リクエスト ===
+  return addHeaders(NextResponse.next(), request, false);
+}
+
+function addHeaders(response: NextResponse, request: NextRequest, isReport: boolean): NextResponse {
+  // リクエストID付与
+  response.headers.set("X-Request-Id", crypto.randomUUID());
+
+  // CSP
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5555";
+  const fontSrc = isReport
+    ? "font-src 'self' data: https://fonts.gstatic.com"
+    : "font-src 'self' data:";
+  const styleSrc = isReport
+    ? "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com"
+    : "style-src 'self' 'unsafe-inline'";
+
   const csp = [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-eval' 'unsafe-inline'",  // Next.js dev mode requires unsafe-eval
-    "style-src 'self' 'unsafe-inline'",
+    "script-src 'self' 'unsafe-eval' 'unsafe-inline'",
+    styleSrc,
     "img-src 'self' data: blob: https:",
-    "font-src 'self' data:",
-    `connect-src 'self' https://*.supabase.co wss://*.supabase.co ${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5555"}`,
+    fontSrc,
+    `connect-src 'self' https://*.supabase.co wss://*.supabase.co ${apiUrl}`,
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",
@@ -24,7 +69,7 @@ export function middleware(request: NextRequest) {
 
   response.headers.set("Content-Security-Policy", csp);
 
-  // === セキュリティ: サーバー情報の隠蔽 ===
+  // サーバー情報の隠蔽
   response.headers.set("X-Powered-By", "");
   response.headers.delete("X-Powered-By");
 

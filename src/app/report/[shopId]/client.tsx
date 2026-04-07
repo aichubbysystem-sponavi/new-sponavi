@@ -131,9 +131,11 @@ function buildStackedOptions(titleText: string) {
 export default function ReportClient({
   data,
   shopId,
+  dataSource = "mock",
 }: {
   data: ReportData;
   shopId: string;
+  dataSource?: "api" | "mock";
 }) {
   const { shop, kpis, monthlyLabels, charts, keywords, reviewLabels, reviewCounts, reviewDelta, reviewAnalysis, comments } = data;
 
@@ -365,22 +367,38 @@ export default function ReportClient({
         >
           ← レポート一覧に戻る
         </Link>
-        <button
-          onClick={() => window.print()}
-          style={{
-            background: "linear-gradient(135deg, #e94560 0%, #c73050 100%)",
-            color: "#fff",
-            border: "none",
-            padding: "10px 24px",
-            borderRadius: 8,
-            fontSize: 14,
-            fontWeight: 600,
-            cursor: "pointer",
-            letterSpacing: "0.05em",
-          }}
-        >
-          PDFダウンロード
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {dataSource === "mock" && (
+            <span
+              style={{
+                fontSize: 11,
+                color: "#ffd54f",
+                background: "rgba(255,213,79,0.15)",
+                padding: "4px 12px",
+                borderRadius: 20,
+                border: "1px solid rgba(255,213,79,0.3)",
+              }}
+            >
+              デモデータ
+            </span>
+          )}
+          <button
+            onClick={() => window.print()}
+            style={{
+              background: "linear-gradient(135deg, #e94560 0%, #c73050 100%)",
+              color: "#fff",
+              border: "none",
+              padding: "10px 24px",
+              borderRadius: 8,
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: "pointer",
+              letterSpacing: "0.05em",
+            }}
+          >
+            PDFダウンロード
+          </button>
+        </div>
       </div>
 
       {/* ────── P1: Header + KPI ────── */}

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "レポート | SPOTLIGHT NAVIGATOR",
-  description: "MEO対策レポート",
+  description: "MEO対策レポート by 株式会社Chubby",
 };
 
 export default function ReportLayout({
@@ -12,10 +12,27 @@ export default function ReportLayout({
 }) {
   return (
     <>
+      {/* Google Fonts: Noto Sans JP */}
+      {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+      <link
+        rel="preconnect"
+        href="https://fonts.googleapis.com"
+        crossOrigin="anonymous"
+      />
+      {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+      <link
+        rel="preconnect"
+        href="https://fonts.gstatic.com"
+        crossOrigin="anonymous"
+      />
+      {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+      <link
+        href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700;900&display=swap"
+        rel="stylesheet"
+      />
       <style
         dangerouslySetInnerHTML={{
           __html: `
-            @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700;900&display=swap');
             @media print {
               body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
               .no-print { display: none !important; }
