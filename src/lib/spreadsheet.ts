@@ -1,0 +1,531 @@
+/**
+ * Google Spreadsheet CSV取得・パース・ReportData変換モジュール
+ *
+ * データソース:
+ *   Sheet2: 全店舗の口コミ評価・件数推移
+ *   Sheet3: 全店舗パフォーマンス（検索/マップ/アクション）
+ */
+
+import type {
+  ReportData,
+  ShopListItem,
+  KPI,
+  ChartData,
+  ReviewAnalysis,
+} from "./report-data";
+
+// ── スプレッドシート設定 ──
+
+const SHEET2_ID = "1czdHEs0cc2ci01uTlTgezVsuOGCHOBH6oyEGJAY-Ofk";
+const SHEET2_GID = "806898743";
+
+const SHEET3_ID = "1ZyBiy_TYO_xqdyEItXmjS4k4ORagLjN3C5KWetSe1vY";
+const SHEET3_GID = "17303928";
+
+// ── CSV パーサー（引用符付きフィールド対応）──
+
+function parseCSV(text: string): string[][] {
+  const rows: string[][] = [];
+  let i = 0;
+  const len = text.length;
+
+  while (i < len) {
+    const row: string[] = [];
+    while (i < len) {
+      if (text[i] === '"') {
+        // 引用符付きフィールド
+        i++;
+        let field = "";
+        while (i < len) {
+          if (text[i] === '"') {
+            if (i + 1 < len && text[i + 1] === '"') {
+              field += '"';
+              i += 2;
+            } else {
+              i++;
+              break;
+            }
+          } else {
+            field += text[i];
+            i++;
+          }
+        }
+        row.push(field);
+        if (i < len && text[i] === ",") i++;
+      } else {
+        // 通常フィールド
+        let field = "";
+        while (i < len && text[i] !== "," && text[i] !== "\n" && text[i] !== "\r") {
+          field += text[i];
+          i++;
+        }
+        row.push(field);
+        if (i < len && text[i] === ",") {
+          i++;
+        } else {
+          break;
+        }
+      }
+    }
+    // 改行スキップ
+    while (i < len && (text[i] === "\n" || text[i] === "\r")) i++;
+    if (row.length > 1 || (row.length === 1 && row[0] !== "")) {
+      rows.push(row);
+    }
+  }
+  return rows;
+}
+
+// ── CSV取得 ──
+
+async function fetchCSV(sheetId: string, gid: string): Promise<string[][] | null> {
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`;
+  try {
+    const res = await fetch(url, {
+      next: { revalidate: 1800 },
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      },
+      redirect: "follow",
+    });
+    if (!res.ok) {
+      console.error(`[spreadsheet] fetch failed: ${res.status} ${res.statusText}`);
+      return null;
+    }
+    const text = await res.text();
+    return parseCSV(text);
+  } catch (err) {
+    console.error("[spreadsheet] fetch error:", err);
+    return null;
+  }
+}
+
+// ── 日付パース ──
+
+/** "2025年3月" → { year: 2025, month: 3 } */
+function parseDateJP(s: string): { year: number; month: number } | null {
+  const m = s.match(/(\d{4})年(\d{1,2})月/);
+  if (!m) return null;
+  return { year: parseInt(m[1]), month: parseInt(m[2]) };
+}
+
+/** { year: 2025, month: 3 } → "2025/3" */
+function toLabel(d: { year: number; month: number }): string {
+  return `${d.year}/${d.month}`;
+}
+
+/** 日付ソート用の数値キー */
+function dateKey(d: { year: number; month: number }): number {
+  return d.year * 100 + d.month;
+}
+
+// ── 数値パース（カンマ・空白対応）──
+
+function num(s: string | undefined): number {
+  if (!s) return 0;
+  const cleaned = s.replace(/,/g, "").trim();
+  const n = parseInt(cleaned, 10);
+  return isNaN(n) ? 0 : n;
+}
+
+function numFloat(s: string | undefined): number {
+  if (!s) return 0;
+  const cleaned = s.replace(/,/g, "").trim();
+  const n = parseFloat(cleaned);
+  return isNaN(n) ? 0 : n;
+}
+
+// ── Sheet3 パース（全店舗パフォーマンス）──
+
+interface PerfRow {
+  date: { year: number; month: number };
+  shopName: string;
+  address: string;
+  searchMobile: number;
+  searchPC: number;
+  mapMobile: number;
+  mapPC: number;
+  calls: number;
+  messages: number;
+  bookings: number;
+  routes: number;
+  websites: number;
+  foodOrders: number;
+  foodMenus: number;
+  hotelBookings: number;
+}
+
+function parseSheet3(rows: string[][]): Map<string, PerfRow[]> {
+  const shopMap = new Map<string, PerfRow[]>();
+
+  // Row 0 = header, skip
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (r.length < 17) continue;
+
+    const dateStr = r[1]?.trim();
+    const shopName = r[2]?.trim();
+    if (!dateStr || !shopName) continue;
+
+    const d = parseDateJP(dateStr);
+    if (!d) continue;
+
+    const row: PerfRow = {
+      date: d,
+      shopName,
+      address: r[3]?.replace(/^Japan,\s*/, "").replace(/^〒\d{3}-?\d{4}\s*/, "").trim() || "",
+      searchMobile: num(r[5]),
+      searchPC: num(r[6]),
+      mapMobile: num(r[7]),
+      mapPC: num(r[8]),
+      calls: num(r[9]),
+      messages: num(r[10]),
+      bookings: num(r[11]),
+      routes: num(r[12]),
+      websites: num(r[13]),
+      foodOrders: num(r[14]),
+      foodMenus: num(r[15]),
+      hotelBookings: num(r[16]),
+    };
+
+    if (!shopMap.has(shopName)) {
+      shopMap.set(shopName, []);
+    }
+    shopMap.get(shopName)!.push(row);
+  }
+
+  // 各店舗を日付順にソート
+  shopMap.forEach((rows) => {
+    rows.sort((a, b) => dateKey(a.date) - dateKey(b.date));
+  });
+
+  return shopMap;
+}
+
+// ── Sheet2 パース（口コミデータ）──
+
+interface ReviewRow {
+  label: string;
+  rating: number;
+  count: number;
+}
+
+interface ShopReviewData {
+  monthly: ReviewRow[];
+  currentRating: number;
+  currentCount: number;
+}
+
+function parseSheet2(rows: string[][]): Map<string, ShopReviewData> {
+  const shopMap = new Map<string, ShopReviewData>();
+
+  if (rows.length < 3) return shopMap;
+
+  // Row 0: ヘッダー（月名）
+  const headerRow = rows[0];
+  // 月ラベルを抽出（col 8以降、2列おき）
+  const monthLabels: string[] = [];
+  for (let c = 8; c < headerRow.length; c += 2) {
+    const label = headerRow[c]?.trim();
+    if (!label) continue;
+    const d = parseDateJP(label);
+    if (d) {
+      monthLabels.push(toLabel(d));
+    }
+  }
+
+  // Row 2以降: データ
+  for (let i = 2; i < rows.length; i++) {
+    const r = rows[i];
+    const shopName = r[0]?.trim();
+    if (!shopName) continue;
+
+    const monthly: ReviewRow[] = [];
+    let lastRating = 0;
+    let lastCount = 0;
+
+    for (let j = 0; j < monthLabels.length; j++) {
+      const colIdx = 8 + j * 2;
+      const rating = numFloat(r[colIdx]);
+      const count = num(r[colIdx + 1]);
+
+      // データがある月のみ追加
+      if (rating > 0 || count > 0) {
+        monthly.push({
+          label: monthLabels[j],
+          rating,
+          count,
+        });
+        lastRating = rating;
+        lastCount = count;
+      }
+    }
+
+    if (monthly.length > 0) {
+      shopMap.set(shopName, {
+        monthly,
+        currentRating: lastRating,
+        currentCount: lastCount,
+      });
+    }
+  }
+
+  return shopMap;
+}
+
+// ── ReportData 構築 ──
+
+function pctText(cur: number, prev: number): string {
+  if (prev === 0 && cur === 0) return "±0.0%";
+  if (prev === 0) return "+∞";
+  const pct = ((cur - prev) / prev) * 100;
+  return `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
+}
+
+function generateComments(
+  kpis: KPI[],
+  reviewDelta: (number | null)[],
+  currentRating: number,
+  totalReviews: number,
+  currentLabel: string
+): string[] {
+  const comments: string[] = [];
+
+  // 検索数
+  const search = kpis[0];
+  const searchPct = pctText(search.value, search.prevValue);
+  comments.push(
+    `Google検索数は${search.value.toLocaleString()}回（前月比${searchPct}）。${
+      search.value >= search.prevValue
+        ? "検索経由の認知が拡大しています。"
+        : "季節的な変動の可能性もあるため、来月のデータで推移を確認します。"
+    }`
+  );
+
+  // マップ表示
+  const map = kpis[1];
+  const mapPct = pctText(map.value, map.prevValue);
+  comments.push(
+    `Googleマップ表示数は${map.value.toLocaleString()}回（前月比${mapPct}）。${
+      map.value >= map.prevValue
+        ? "マップ経由の集客力が強化されています。"
+        : "マップ上での視認性向上のため、GBP情報の最適化を継続します。"
+    }`
+  );
+
+  // 口コミ
+  const lastDelta = reviewDelta.filter((d) => d !== null);
+  const latestDelta = lastDelta.length > 0 ? lastDelta[lastDelta.length - 1] : 0;
+  comments.push(
+    `口コミ件数は${totalReviews.toLocaleString()}件、評価${currentRating}を維持。${currentLabel}は+${latestDelta}件の増加。`
+  );
+
+  // アクション
+  const actions = kpis[7];
+  const actionPct = pctText(actions.value, actions.prevValue);
+  comments.push(
+    `ユーザーアクション合計${actions.value.toLocaleString()}件（前月比${actionPct}）。${
+      actions.value >= actions.prevValue
+        ? "ユーザーの反応が改善傾向にあります。"
+        : "投稿頻度の向上やメニュー情報の充実で改善を図ります。"
+    }`
+  );
+
+  // 来月の方針
+  comments.push(
+    "来月はGBP投稿の強化と口コミ獲得施策を継続し、各指標の改善を目指します。"
+  );
+
+  return comments;
+}
+
+function generateReviewAnalysis(
+  currentRating: number,
+  totalReviews: number,
+  reviewDelta: (number | null)[]
+): ReviewAnalysis {
+  const avgDelta =
+    reviewDelta.filter((d): d is number => d !== null).reduce((a, b) => a + b, 0) /
+    Math.max(reviewDelta.filter((d) => d !== null).length, 1);
+
+  const ratingDesc = currentRating >= 4.5 ? "非常に高い" : currentRating >= 4.0 ? "高い" : currentRating >= 3.5 ? "標準的な" : "改善が必要な";
+
+  return {
+    positiveWords: [],
+    negativeWords: [],
+    summary: `口コミ評価は${currentRating}と${ratingDesc}水準を維持しています。総口コミ数は${totalReviews.toLocaleString()}件で、月平均約${Math.round(avgDelta)}件のペースで推移しています。今後も口コミ返信対応の質を維持し、顧客満足度の向上に取り組みます。`,
+  };
+}
+
+export function buildReportData(
+  shopName: string,
+  perfRows: PerfRow[],
+  reviewData: ShopReviewData | undefined
+): ReportData {
+  // 直近12ヶ月に絞り込み
+  const recent = perfRows.slice(-12);
+
+  const monthlyLabels = recent.map((r) => toLabel(r.date));
+
+  const charts: ChartData = {
+    searchMobile: recent.map((r) => r.searchMobile),
+    searchPC: recent.map((r) => r.searchPC),
+    mapMobile: recent.map((r) => r.mapMobile),
+    mapPC: recent.map((r) => r.mapPC),
+    calls: recent.map((r) => r.calls),
+    routes: recent.map((r) => r.routes),
+    websites: recent.map((r) => r.websites),
+    bookings: recent.map((r) => r.bookings),
+    foodMenus: recent.map((r) => r.foodMenus),
+  };
+
+  const cur = recent[recent.length - 1];
+  const prev = recent.length >= 2 ? recent[recent.length - 2] : null;
+
+  const curActions = cur.calls + cur.routes + cur.websites + cur.bookings + cur.foodMenus;
+  const prevActions = prev
+    ? prev.calls + prev.routes + prev.websites + prev.bookings + prev.foodMenus
+    : 0;
+
+  const kpis: KPI[] = [
+    { label: "Google検索数", value: cur.searchMobile + cur.searchPC, prevValue: prev ? prev.searchMobile + prev.searchPC : 0, unit: "回" },
+    { label: "Googleマップ表示", value: cur.mapMobile + cur.mapPC, prevValue: prev ? prev.mapMobile + prev.mapPC : 0, unit: "回" },
+    { label: "通話クリック", value: cur.calls, prevValue: prev?.calls ?? 0, unit: "件" },
+    { label: "ルート検索", value: cur.routes, prevValue: prev?.routes ?? 0, unit: "件" },
+    { label: "ウェブサイト", value: cur.websites, prevValue: prev?.websites ?? 0, unit: "件" },
+    { label: "予約数", value: cur.bookings, prevValue: prev?.bookings ?? 0, unit: "件" },
+    { label: "フードメニュー", value: cur.foodMenus, prevValue: prev?.foodMenus ?? 0, unit: "件" },
+    { label: "合計アクション", value: curActions, prevValue: prevActions, unit: "件" },
+  ];
+
+  // 口コミデータ（Sheet2）
+  let reviewLabels: string[] = [];
+  let reviewCounts: number[] = [];
+  let reviewDelta: (number | null)[] = [];
+  let currentRating = 0;
+  let totalReviews = 0;
+
+  if (reviewData && reviewData.monthly.length > 0) {
+    // 直近14ヶ月分
+    const recentReviews = reviewData.monthly.slice(-14);
+    reviewLabels = recentReviews.map((r) => r.label);
+    reviewCounts = recentReviews.map((r) => r.count);
+    reviewDelta = reviewCounts.map((c, i) => (i === 0 ? null : c - reviewCounts[i - 1]));
+    currentRating = reviewData.currentRating;
+    totalReviews = reviewData.currentCount;
+  }
+
+  // 対象期間
+  const curDate = cur.date;
+  const lastDay = new Date(curDate.year, curDate.month, 0).getDate();
+  const period = {
+    start: `${curDate.year}/${String(curDate.month).padStart(2, "0")}/01`,
+    end: `${curDate.year}/${String(curDate.month).padStart(2, "0")}/${lastDay}`,
+  };
+
+  // 対策開始月（最古のデータ）
+  const firstDate = perfRows[0].date;
+  const startDate = `${firstDate.year}年${firstDate.month}月`;
+
+  const currentLabel = toLabel(curDate);
+
+  const reviewAnalysis = generateReviewAnalysis(currentRating, totalReviews, reviewDelta);
+  const comments = generateComments(kpis, reviewDelta, currentRating, totalReviews, currentLabel);
+
+  return {
+    shop: {
+      name: shopName,
+      address: cur.address || perfRows.find((r) => r.address)?.address || "",
+      period,
+      startDate,
+      totalReviews,
+      rating: currentRating,
+    },
+    kpis,
+    monthlyLabels,
+    charts,
+    keywords: [], // Sheet1/4 未連携のためP7スキップ
+    reviewLabels,
+    reviewCounts,
+    reviewDelta,
+    reviewAnalysis,
+    comments,
+  };
+}
+
+// ── 公開API ──
+
+let cachedPerfData: Map<string, PerfRow[]> | null = null;
+let cachedReviewData: Map<string, ShopReviewData> | null = null;
+
+async function loadData(): Promise<{
+  perf: Map<string, PerfRow[]>;
+  reviews: Map<string, ShopReviewData>;
+} | null> {
+  if (cachedPerfData && cachedReviewData) {
+    return { perf: cachedPerfData, reviews: cachedReviewData };
+  }
+
+  const [sheet3Rows, sheet2Rows] = await Promise.all([
+    fetchCSV(SHEET3_ID, SHEET3_GID),
+    fetchCSV(SHEET2_ID, SHEET2_GID),
+  ]);
+
+  if (!sheet3Rows) return null;
+
+  const perf = parseSheet3(sheet3Rows);
+  const reviews = sheet2Rows ? parseSheet2(sheet2Rows) : new Map<string, ShopReviewData>();
+
+  cachedPerfData = perf;
+  cachedReviewData = reviews;
+
+  return { perf, reviews };
+}
+
+/**
+ * 全店舗リストを取得
+ */
+export async function getShopsFromSpreadsheet(): Promise<ShopListItem[] | null> {
+  const data = await loadData();
+  if (!data) return null;
+
+  const shops: ShopListItem[] = [];
+
+  data.perf.forEach((rows, shopName) => {
+    if (rows.length === 0) return;
+
+    const latest = rows[rows.length - 1];
+    const reviewInfo = data.reviews.get(shopName);
+
+    shops.push({
+      id: shopName,
+      name: shopName,
+      address: latest.address || rows.find((r) => r.address)?.address || "",
+      period: `${latest.date.year}年${latest.date.month}月`,
+      rating: reviewInfo?.currentRating ?? 0,
+      totalReviews: reviewInfo?.currentCount ?? 0,
+    });
+  });
+
+  // 店舗名でソート
+  shops.sort((a, b) => a.name.localeCompare(b.name, "ja"));
+
+  return shops;
+}
+
+/**
+ * 特定店舗のレポートデータを取得
+ */
+export async function getReportFromSpreadsheet(
+  shopName: string
+): Promise<ReportData | null> {
+  const data = await loadData();
+  if (!data) return null;
+
+  const perfRows = data.perf.get(shopName);
+  if (!perfRows || perfRows.length === 0) return null;
+
+  const reviewData = data.reviews.get(shopName);
+
+  return buildReportData(shopName, perfRows, reviewData);
+}

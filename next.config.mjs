@@ -9,6 +9,10 @@ const nextConfig = {
   async rewrites() {
     return [
       {
+        source: "/api/report/:path*",
+        destination: "/api/report/:path*", // レポートAPI はNext.js内部で処理
+      },
+      {
         source: "/api/:path*",
         destination: `${apiUrl}/api/:path*`,
       },

@@ -135,7 +135,7 @@ export default function ReportClient({
 }: {
   data: ReportData;
   shopId: string;
-  dataSource?: "api" | "mock";
+  dataSource?: "spreadsheet" | "mock";
 }) {
   const { shop, kpis, monthlyLabels, charts, keywords, reviewLabels, reviewCounts, reviewDelta, reviewAnalysis, comments } = data;
 

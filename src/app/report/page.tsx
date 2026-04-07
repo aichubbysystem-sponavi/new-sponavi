@@ -53,7 +53,7 @@ export default async function ReportListPage() {
               レポート管理
             </span>
           </h1>
-          {source === "mock" && (
+          {source !== "spreadsheet" && (
             <span
               style={{
                 fontSize: 11,
