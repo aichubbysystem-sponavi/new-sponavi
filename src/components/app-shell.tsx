@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import Sidebar from "@/components/sidebar";
 import Header from "@/components/header";
 import AuthGuard from "@/components/auth-guard";
@@ -10,8 +11,14 @@ import ShopProvider from "@/components/shop-provider";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const [isReportSubdomain, setIsReportSubdomain] = useState(false);
+
+  useEffect(() => {
+    setIsReportSubdomain(window.location.hostname.startsWith("report."));
+  }, []);
+
   const isLoginPage = pathname === "/login";
-  const isReportPage = pathname.startsWith("/report");
+  const isReportPage = pathname.startsWith("/report") || isReportSubdomain;
 
   return (
     <AuthGuard skipAuth={isReportPage}>
