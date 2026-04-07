@@ -403,95 +403,108 @@ export default function ReportClient({
 
       {/* ────── P1: Header + KPI ────── */}
       <div style={slideStyle} className="slide">
+        {/* ヘッダー */}
         <div
           style={{
-            background: "linear-gradient(135deg, #1a1a2e 0%, #0f3460 100%)",
+            background: "linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)",
             color: "#fff",
             padding: "28px 36px 20px",
             flexShrink: 0,
+            position: "relative",
           }}
         >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-            <div>
-              <div style={{ fontSize: 11, letterSpacing: "0.15em", color: "rgba(255,255,255,0.5)", marginBottom: 4 }}>
-                SPOTLIGHT NAVIGATOR MEO REPORT
-              </div>
-              <h1 style={{ margin: 0, fontSize: 28, fontWeight: 900, letterSpacing: "0.02em" }}>
-                {shop.name}
-              </h1>
-              <p style={{ margin: "6px 0 0", fontSize: 12, color: "rgba(255,255,255,0.6)" }}>
-                {shop.address}
-              </p>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)" }}>対象期間</div>
-              <div style={{ fontSize: 18, fontWeight: 700 }}>
-                {shop.period.start} - {shop.period.end}
-              </div>
-              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>
-                MEO対策開始: {shop.startDate} / 口コミ {shop.totalReviews.toLocaleString()}件 / ★{shop.rating}
-              </div>
-            </div>
+          <h1 style={{ margin: 0, fontSize: 26, fontWeight: 900, letterSpacing: 1 }}>
+            {shop.name}
+          </h1>
+          <div style={{ fontSize: 13, opacity: 0.7, marginTop: 2 }}>MEO対策 レポート報告</div>
+          <div style={{ fontSize: 12, opacity: 0.5, marginTop: 6 }}>{shop.address}</div>
+          <div style={{ position: "absolute", top: 28, right: 36, background: "rgba(255,255,255,0.12)", padding: "7px 18px", borderRadius: 8, fontSize: 13, fontWeight: 600 }}>
+            {shop.period.start} - {shop.period.end}
           </div>
         </div>
 
-        <div style={{ ...slideBodyStyle, display: "flex", flexDirection: "column", justifyContent: "center" }}>
-          <h2 style={{ fontSize: 16, fontWeight: 700, color: "#1a1a2e", margin: "0 0 20px", textAlign: "center" }}>
-            主要KPI サマリー
-          </h2>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14 }}>
+        {/* サマリーバー */}
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", padding: "10px 36px", background: "#e8eaf0", flexShrink: 0 }}>
+          <div style={{ background: "#fff", borderRadius: 10, padding: "7px 14px", fontSize: 12, display: "flex", alignItems: "center", gap: 5, boxShadow: "0 1px 3px rgba(0,0,0,.05)" }}>
+            <span style={{ color: "#888" }}>対策開始日</span>
+            <span style={{ fontWeight: 700 }}>{shop.startDate}</span>
+          </div>
+          <div style={{ background: "#fff", borderRadius: 10, padding: "7px 14px", fontSize: 12, display: "flex", alignItems: "center", gap: 5, boxShadow: "0 1px 3px rgba(0,0,0,.05)" }}>
+            <span style={{ color: "#888" }}>レポート対象</span>
+            <span style={{ fontWeight: 700 }}>{monthlyLabels[monthlyLabels.length - 1]}</span>
+          </div>
+          <div style={{ background: "#fff", borderRadius: 10, padding: "7px 14px", fontSize: 12, display: "flex", alignItems: "center", gap: 5, boxShadow: "0 1px 3px rgba(0,0,0,.05)" }}>
+            <span style={{ color: "#888" }}>口コミ合計</span>
+            <span style={{ fontWeight: 700 }}>{shop.totalReviews.toLocaleString()}件</span>
+          </div>
+          <div style={{ background: "#fff", borderRadius: 10, padding: "7px 14px", fontSize: 12, display: "flex", alignItems: "center", gap: 5, boxShadow: "0 1px 3px rgba(0,0,0,.05)" }}>
+            <span style={{ color: "#888" }}>評価</span>
+            <span style={{ fontWeight: 700 }}>{shop.rating}</span>
+          </div>
+        </div>
+
+        {/* KPIグリッド */}
+        <div style={{ flex: 1, padding: "16px 36px 20px", display: "flex", flexDirection: "column", justifyContent: "center", overflow: "hidden" }}>
+          <div style={{ fontSize: 17, fontWeight: 700, color: "#0f3460", borderLeft: "4px solid #e94560", paddingLeft: 12, marginBottom: 14 }}>
+            主要指標サマリー（{monthlyLabels[monthlyLabels.length - 1]}）
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, flex: 1 }}>
             {kpis.map((kpi, i) => {
               const ch = pctChange(kpi.value, kpi.prevValue);
+              const topColors = [
+                "linear-gradient(90deg,#4fc3f7,#0288d1)",
+                "linear-gradient(90deg,#81c784,#388e3c)",
+                "linear-gradient(90deg,#ffb74d,#f57c00)",
+                "linear-gradient(90deg,#ba68c8,#7b1fa2)",
+                "linear-gradient(90deg,#e57373,#d32f2f)",
+                "linear-gradient(90deg,#4db6ac,#00897b)",
+                "linear-gradient(90deg,#7986cb,#3949ab)",
+                "linear-gradient(90deg,#ffd54f,#fbc02d)",
+              ];
+              const isUp = kpi.value >= kpi.prevValue;
               return (
                 <div
                   key={i}
                   style={{
-                    background: kpiColors[i].bg,
+                    background: "#fff",
                     borderRadius: 12,
-                    padding: "18px 16px",
-                    color: "#fff",
+                    padding: "20px 20px",
                     position: "relative",
                     overflow: "hidden",
+                    boxShadow: "0 1px 6px rgba(0,0,0,.04)",
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "center",
                   }}
                 >
-                  <div style={{ position: "absolute", top: -20, right: -20, width: 80, height: 80, borderRadius: "50%", background: "rgba(255,255,255,0.1)" }} />
-                  <div style={{ fontSize: 11, fontWeight: 500, opacity: 0.9, marginBottom: 6 }}>{kpi.label}</div>
-                  <div style={{ fontSize: 28, fontWeight: 900, lineHeight: 1.1 }}>
+                  <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: 3, background: topColors[i] }} />
+                  <div style={{ fontSize: 11, color: "#888", fontWeight: 500 }}>{kpi.label}</div>
+                  <div style={{ fontSize: 28, fontWeight: 900, lineHeight: 1.1, margin: "4px 0", color: "#1a1a2e" }}>
                     {kpi.value.toLocaleString()}
-                    <span style={{ fontSize: 12, fontWeight: 400, marginLeft: 4 }}>{kpi.unit}</span>
+                    <span style={{ fontSize: 12, fontWeight: 400, color: "#aaa", marginLeft: 4 }}>{kpi.unit}</span>
                   </div>
-                  <div style={{ fontSize: 11, marginTop: 6, opacity: 0.85 }}>
-                    前月: {kpi.prevValue.toLocaleString()}
-                    <span
-                      style={{
-                        marginLeft: 8,
-                        padding: "2px 6px",
-                        borderRadius: 4,
-                        background: "rgba(255,255,255,0.2)",
-                        fontSize: 10,
-                        fontWeight: 700,
-                      }}
-                    >
-                      {ch.text}
-                    </span>
+                  <div style={{ fontSize: 11, color: "#aaa" }}>
+                    <span style={{ marginRight: 6 }}>前月: {kpi.prevValue.toLocaleString()}</span>
                   </div>
+                  <span
+                    style={{
+                      display: "inline-block",
+                      marginTop: 6,
+                      padding: "3px 8px",
+                      borderRadius: 16,
+                      fontSize: 10,
+                      fontWeight: 600,
+                      background: isUp ? "#e6f9ee" : "#fde8e8",
+                      color: isUp ? "#0a8f3c" : "#c0392b",
+                      alignSelf: "flex-start",
+                    }}
+                  >
+                    {isUp ? "▲" : "▼"} {ch.text}
+                  </span>
                 </div>
               );
             })}
           </div>
-        </div>
-
-        <div
-          style={{
-            background: "#1a1a2e",
-            color: "rgba(255,255,255,0.3)",
-            textAlign: "center",
-            padding: "8px",
-            fontSize: 10,
-            flexShrink: 0,
-          }}
-        >
-          株式会社Chubby - SPOTLIGHT NAVIGATOR
         </div>
       </div>
 
