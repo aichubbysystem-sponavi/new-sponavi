@@ -383,20 +383,7 @@ export function buildReportData(
   const prev = recent.length >= 2 ? recent[recent.length - 2] : null;
 
   const curActions = cur.calls + cur.routes + cur.websites + cur.bookings + cur.foodMenus;
-  const prevActions = prev
-    ? prev.calls + prev.routes + prev.websites + prev.bookings + prev.foodMenus
-    : 0;
-
-  const kpis: KPI[] = [
-    { label: "Google検索数", value: cur.searchMobile + cur.searchPC, prevValue: prev ? prev.searchMobile + prev.searchPC : 0, unit: "回" },
-    { label: "Googleマップ表示", value: cur.mapMobile + cur.mapPC, prevValue: prev ? prev.mapMobile + prev.mapPC : 0, unit: "回" },
-    { label: "通話クリック", value: cur.calls, prevValue: prev?.calls ?? 0, unit: "件" },
-    { label: "ルート検索", value: cur.routes, prevValue: prev?.routes ?? 0, unit: "件" },
-    { label: "ウェブサイト", value: cur.websites, prevValue: prev?.websites ?? 0, unit: "件" },
-    { label: "予約数", value: cur.bookings, prevValue: prev?.bookings ?? 0, unit: "件" },
-    { label: "フードメニュー", value: cur.foodMenus, prevValue: prev?.foodMenus ?? 0, unit: "件" },
-    { label: "合計アクション", value: curActions, prevValue: prevActions, unit: "件" },
-  ];
+  const curDate = cur.date;
 
   // 口コミデータ（Sheet2）
   let reviewLabels: string[] = [];
@@ -406,7 +393,6 @@ export function buildReportData(
   let totalReviews = 0;
 
   if (reviewData && reviewData.monthly.length > 0) {
-    // 直近14ヶ月分
     const recentReviews = reviewData.monthly.slice(-14);
     reviewLabels = recentReviews.map((r) => r.label);
     reviewCounts = recentReviews.map((r) => r.count);
@@ -415,8 +401,27 @@ export function buildReportData(
     totalReviews = reviewData.currentCount;
   }
 
+  // 口コミ増減（KPI 8番目用）
+  let reviewDeltaForKpi = 0;
+  let prevReviewCount = 0;
+  if (reviewData && reviewData.monthly.length >= 2) {
+    const rm = reviewData.monthly;
+    prevReviewCount = rm[rm.length - 2].count;
+    reviewDeltaForKpi = totalReviews - prevReviewCount;
+  }
+
+  const kpis: KPI[] = [
+    { label: "Google検索 合計", value: cur.searchMobile + cur.searchPC, prevValue: prev ? prev.searchMobile + prev.searchPC : 0, unit: "回" },
+    { label: "Googleマップ 合計", value: cur.mapMobile + cur.mapPC, prevValue: prev ? prev.mapMobile + prev.mapPC : 0, unit: "回" },
+    { label: "ウェブサイトクリック", value: cur.websites, prevValue: prev?.websites ?? 0, unit: "件" },
+    { label: "ルート検索", value: cur.routes, prevValue: prev?.routes ?? 0, unit: "件" },
+    { label: "通話", value: cur.calls, prevValue: prev?.calls ?? 0, unit: "件" },
+    { label: "フードメニュークリック", value: cur.foodMenus, prevValue: prev?.foodMenus ?? 0, unit: "件" },
+    { label: "予約", value: cur.bookings, prevValue: prev?.bookings ?? 0, unit: "件" },
+    { label: `口コミ増減【${toLabel(curDate)}】`, value: reviewDeltaForKpi, prevValue: prevReviewCount, unit: "件" },
+  ];
+
   // 対象期間
-  const curDate = cur.date;
   const lastDay = new Date(curDate.year, curDate.month, 0).getDate();
   const period = {
     start: `${curDate.year}/${String(curDate.month).padStart(2, "0")}/01`,

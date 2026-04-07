@@ -187,15 +187,29 @@ export default function ReportClient({
           <div style={{ ...stitleStyle, marginBottom: 14 }}>主要指標サマリー（{curLabel}）</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, flex: 1 }}>
             {kpis.map((kpi, i) => {
+              const isLastKpi = i === kpis.length - 1; // 口コミ増減カード
               const c = pctChange(kpi.value, kpi.prevValue);
               return (
                 <div key={i} style={{ background: "#fff", borderRadius: 12, padding: "20px 20px", position: "relative", overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", justifyContent: "center" }}>
                   <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: 3, background: kpiTopColors[i] }} />
                   <div style={{ fontSize: 11, color: "#888", fontWeight: 500 }}>{kpi.label}</div>
-                  <div style={{ fontSize: 28, fontWeight: 900, lineHeight: 1.1, margin: "4px 0" }}>{kpi.value.toLocaleString()}</div>
-                  <div style={{ fontSize: 11, color: "#aaa" }}><span style={{ marginRight: 6 }}>前月: {kpi.prevValue.toLocaleString()}</span></div>
+                  <div style={{ fontSize: 28, fontWeight: 900, lineHeight: 1.1, margin: "4px 0" }}>
+                    {isLastKpi ? `+${kpi.value.toLocaleString()}件` : kpi.value.toLocaleString()}
+                  </div>
+                  <div style={{ fontSize: 11, color: "#aaa" }}>
+                    {isLastKpi ? (
+                      <span>累計: {shop.totalReviews.toLocaleString()}件（評価 {shop.rating}）</span>
+                    ) : kpi.label.includes("検索") || kpi.label.includes("マップ") ? (
+                      <><span style={{ marginRight: 6 }}>モバイル: {i === 0 ? charts.searchMobile[charts.searchMobile.length-1]?.toLocaleString() : charts.mapMobile[charts.mapMobile.length-1]?.toLocaleString()}</span><span>PC: {i === 0 ? charts.searchPC[charts.searchPC.length-1]?.toLocaleString() : charts.mapPC[charts.mapPC.length-1]?.toLocaleString()}</span></>
+                    ) : (
+                      <span>&nbsp;</span>
+                    )}
+                  </div>
                   <span style={{ display: "inline-block", marginTop: 6, padding: "3px 8px", borderRadius: 16, fontSize: 10, fontWeight: 600, background: c.isUp ? "#e6f9ee" : "#fde8e8", color: c.isUp ? "#0a8f3c" : "#c0392b", alignSelf: "flex-start" }}>
-                    {c.isUp ? "▲" : "▼"} {c.text}
+                    {isLastKpi
+                      ? `${c.isUp ? "▲" : "▼"} ${kpi.prevValue.toLocaleString()}→${shop.totalReviews.toLocaleString()}件`
+                      : `${c.isUp ? "▲" : "▼"} ${c.text}（${kpi.prevValue.toLocaleString()}→${kpi.value.toLocaleString()}）`
+                    }
                   </span>
                 </div>
               );

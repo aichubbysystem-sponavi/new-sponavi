@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState, useMemo, useTransition } from "react";
 import type { ShopListItem } from "@/lib/report-data";
-import { syncReportData } from "./actions";
+import { syncAllData, syncShopData } from "./actions";
 
 type SortKey = "name" | "rating" | "totalReviews" | "period";
 type SortDir = "asc" | "desc";
@@ -32,6 +32,8 @@ export default function ReportListClient({
   const [ratingFilter, setRatingFilter] = useState(0);
   const [syncing, startSync] = useTransition();
   const [lastSync, setLastSync] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [toast, setToast] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     let result = shops;
@@ -67,12 +69,46 @@ export default function ReportListClient({
     setPage(1);
   }
 
-  function handleSync() {
+  function showToast(msg: string) {
+    setToast(msg);
+    setTimeout(() => setToast(null), 4000);
+  }
+
+  function handleSyncAll() {
     startSync(async () => {
-      const result = await syncReportData();
+      const result = await syncAllData();
       setLastSync(result.timestamp);
-      window.location.reload();
+      showToast(`全${shops.length}店舗のデータを反映しました`);
+      setTimeout(() => window.location.reload(), 1500);
     });
+  }
+
+  function handleSyncSelected() {
+    if (selected.size === 0) { showToast("店舗を選択してください"); return; }
+    startSync(async () => {
+      const ids = Array.from(selected);
+      const result = await syncShopData(ids);
+      setLastSync(result.timestamp);
+      setSelected(new Set());
+      showToast(`${result.count}店舗のデータを反映しました`);
+      setTimeout(() => window.location.reload(), 1500);
+    });
+  }
+
+  function toggleSelect(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (selected.size === filtered.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(filtered.map(s => s.id)));
+    }
   }
 
   const shopsWithRating = shops.filter((s) => s.rating > 0);
@@ -98,8 +134,19 @@ export default function ReportListClient({
             {lastSync && (
               <span className="text-xs text-slate-400">最終反映: {new Date(lastSync).toLocaleTimeString("ja-JP")}</span>
             )}
+            {selected.size > 0 && (
+              <button
+                onClick={handleSyncSelected}
+                disabled={syncing}
+                className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                  syncing ? "bg-slate-200 text-slate-400 cursor-wait" : "bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm"
+                }`}
+              >
+                {syncing ? "反映中..." : `選択した${selected.size}店舗を反映`}
+              </button>
+            )}
             <button
-              onClick={handleSync}
+              onClick={handleSyncAll}
               disabled={syncing}
               className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
                 syncing
@@ -113,7 +160,7 @@ export default function ReportListClient({
                   取得中...
                 </>
               ) : (
-                <>↻ 反映する</>
+                <>↻ 全店舗反映</>
               )}
             </button>
           </div>
@@ -194,11 +241,17 @@ export default function ReportListClient({
           </div>
         </div>
 
-        {/* 件数表示 */}
+        {/* 件数・選択表示 */}
         <div className="flex items-center justify-between mb-3 px-1">
-          <p className="text-xs text-slate-400">
-            {filtered.length}件の店舗{search && ` — 「${search}」で検索中`}
-          </p>
+          <div className="flex items-center gap-3">
+            <button onClick={toggleSelectAll} className="text-xs text-[#003D6B] hover:underline font-medium">
+              {selected.size === filtered.length ? "全解除" : "全選択"}
+            </button>
+            <p className="text-xs text-slate-400">
+              {filtered.length}件の店舗{search && ` — 「${search}」で検索中`}
+              {selected.size > 0 && <span className="ml-2 text-emerald-600 font-semibold">{selected.size}件選択中</span>}
+            </p>
+          </div>
           {totalPages > 1 && (
             <p className="text-xs text-slate-400">{page} / {totalPages} ページ</p>
           )}
@@ -213,7 +266,7 @@ export default function ReportListClient({
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
             {paged.map((shop) => (
-              <ShopCard key={shop.id} shop={shop} />
+              <ShopCard key={shop.id} shop={shop} checked={selected.has(shop.id)} onToggle={() => toggleSelect(shop.id)} />
             ))}
           </div>
         )}
@@ -237,6 +290,16 @@ export default function ReportListClient({
         <footer className="text-center py-8 text-xs text-slate-300">
           © {new Date().getFullYear()} SPOTLIGHT NAVIGATOR by 株式会社Chubby
         </footer>
+
+        {/* 完了トースト通知 */}
+        {toast && (
+          <div className="fixed bottom-6 right-6 z-50 bg-[#003D6B] text-white px-6 py-3 rounded-xl shadow-lg text-sm font-medium animate-fade-in flex items-center gap-2">
+            <svg className="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+            {toast}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -244,7 +307,7 @@ export default function ReportListClient({
 
 // ── サブコンポーネント ──
 
-function ShopCard({ shop }: { shop: ShopListItem }) {
+function ShopCard({ shop, checked, onToggle }: { shop: ShopListItem; checked: boolean; onToggle: () => void }) {
   const ratingBadge =
     shop.rating >= 4.5 ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
     shop.rating >= 4.0 ? "bg-blue-50 text-blue-700 border-blue-200" :
@@ -258,6 +321,13 @@ function ShopCard({ shop }: { shop: ShopListItem }) {
       className="group bg-white rounded-xl border border-slate-100 shadow-sm p-5 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 block"
     >
       <div className="flex items-start gap-3 mb-3">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => { e.preventDefault(); onToggle(); }}
+          onClick={(e) => e.stopPropagation()}
+          className="mt-3 w-4 h-4 rounded border-slate-300 text-[#003D6B] focus:ring-[#003D6B]/30 flex-shrink-0 cursor-pointer"
+        />
         <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-[#003D6B] to-[#005a9e] flex items-center justify-center text-white text-sm font-bold flex-shrink-0 shadow-sm">
           {shop.name.charAt(0)}
         </div>
