@@ -357,11 +357,11 @@ function generateReviewAnalysis(
   };
 }
 
-export function buildReportData(
+export async function buildReportData(
   shopName: string,
   perfRows: PerfRow[],
   reviewData: ShopReviewData | undefined
-): ReportData {
+): Promise<ReportData> {
   // 直近12ヶ月に絞り込み
   const recent = perfRows.slice(-12);
 
@@ -434,8 +434,26 @@ export function buildReportData(
 
   const currentLabel = toLabel(curDate);
 
-  const reviewAnalysis = generateReviewAnalysis(currentRating, totalReviews, reviewDelta);
-  const comments = generateComments(kpis, reviewDelta, currentRating, totalReviews, currentLabel);
+  // Claude API分析を試行（ANTHROPIC_API_KEY設定時）
+  const { analyzeReviews } = await import("./review-analyzer");
+  const search = kpis[0];
+  const map = kpis[1];
+  const totalActions = kpis.slice(2, 7).reduce((s, k) => s + k.value, 0);
+  const prevTotalActions = kpis.slice(2, 7).reduce((s, k) => s + k.prevValue, 0);
+  const latestDelta = reviewDelta.filter((d): d is number => d !== null);
+  const lastDelta = latestDelta.length > 0 ? latestDelta[latestDelta.length - 1] : 0;
+
+  const analyzed = await analyzeReviews(
+    shopName, shopName, currentLabel, currentRating, totalReviews, lastDelta,
+    {
+      searchPct: pctText(search.value, search.prevValue),
+      mapPct: pctText(map.value, map.prevValue),
+      actionPct: pctText(totalActions, prevTotalActions),
+    }
+  );
+
+  const reviewAnalysis = analyzed.analysis;
+  const comments = analyzed.comments;
 
   return {
     shop: {
@@ -540,5 +558,5 @@ export async function getReportFromSpreadsheet(
 
   const reviewData = data.reviews.get(shopName);
 
-  return buildReportData(shopName, perfRows, reviewData);
+  return await buildReportData(shopName, perfRows, reviewData);
 }
