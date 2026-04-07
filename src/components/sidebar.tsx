@@ -19,6 +19,7 @@ const navSections = [
     title: "コンテンツ管理",
     items: [
       { href: "/reviews", label: "口コミ管理" },
+      { href: "/review-analysis", label: "口コミ分析(AI)" },
       { href: "/posts", label: "投稿管理" },
       { href: "/aio", label: "AIO対策" },
     ],

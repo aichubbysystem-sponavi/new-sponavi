@@ -434,21 +434,21 @@ export async function buildReportData(
 
   const currentLabel = toLabel(curDate);
 
-  // Claude API分析を試行（ANTHROPIC_API_KEY設定時）
-  const { analyzeReviews } = await import("./review-analyzer");
+  // DB → テンプレートフォールバックで口コミ分析取得
+  const { getReviewAnalysis } = await import("./review-analyzer");
   const search = kpis[0];
   const map = kpis[1];
-  const totalActions = kpis.slice(2, 7).reduce((s, k) => s + k.value, 0);
-  const prevTotalActions = kpis.slice(2, 7).reduce((s, k) => s + k.prevValue, 0);
+  const totalActionsVal = kpis.slice(2, 7).reduce((s, k) => s + k.value, 0);
+  const prevTotalActionsVal = kpis.slice(2, 7).reduce((s, k) => s + k.prevValue, 0);
   const latestDelta = reviewDelta.filter((d): d is number => d !== null);
   const lastDelta = latestDelta.length > 0 ? latestDelta[latestDelta.length - 1] : 0;
 
-  const analyzed = await analyzeReviews(
-    shopName, shopName, currentLabel, currentRating, totalReviews, lastDelta,
+  const analyzed = await getReviewAnalysis(
+    shopName, currentLabel, currentRating, totalReviews, lastDelta,
     {
       searchPct: pctText(search.value, search.prevValue),
       mapPct: pctText(map.value, map.prevValue),
-      actionPct: pctText(totalActions, prevTotalActions),
+      actionPct: pctText(totalActionsVal, prevTotalActionsVal),
     }
   );
 
