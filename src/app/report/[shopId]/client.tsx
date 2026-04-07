@@ -16,490 +16,186 @@ import {
 import { Bar, Line } from "react-chartjs-2";
 import type { ReportData } from "@/lib/report-data";
 
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  LineElement,
-  PointElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler
-);
+ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, Filler);
 
-// ── Constants ──
+// ── Constants (HTML テンプレート準拠) ──
 
 const SLIDE_W = 1123;
 const SLIDE_H = 794;
 
-const kpiColors = [
-  { bg: "linear-gradient(135deg, #4fc3f7 0%, #0288d1 100%)" },
-  { bg: "linear-gradient(135deg, #81c784 0%, #388e3c 100%)" },
-  { bg: "linear-gradient(135deg, #ffb74d 0%, #f57c00 100%)" },
-  { bg: "linear-gradient(135deg, #ba68c8 0%, #7b1fa2 100%)" },
-  { bg: "linear-gradient(135deg, #e57373 0%, #d32f2f 100%)" },
-  { bg: "linear-gradient(135deg, #4db6ac 0%, #00897b 100%)" },
-  { bg: "linear-gradient(135deg, #7986cb 0%, #3949ab 100%)" },
-  { bg: "linear-gradient(135deg, #ffd54f 0%, #fbc02d 100%)" },
-];
-
 const slideStyle: React.CSSProperties = {
-  width: SLIDE_W,
-  height: SLIDE_H,
-  margin: "20px auto",
-  background: "#f0f2f5",
-  borderRadius: 8,
-  overflow: "hidden",
-  boxShadow: "0 8px 40px rgba(0,0,0,.4)",
-  display: "flex",
-  flexDirection: "column",
-  position: "relative",
-  pageBreakAfter: "always",
-  pageBreakInside: "avoid",
+  width: SLIDE_W, height: SLIDE_H, margin: "20px auto", background: "#f0f2f5",
+  borderRadius: 8, overflow: "hidden", boxShadow: "0 8px 40px rgba(0,0,0,.4)",
+  display: "flex", flexDirection: "column", position: "relative",
+  pageBreakAfter: "always", pageBreakInside: "avoid",
 };
 
-const headerBarStyle: React.CSSProperties = {
-  background: "linear-gradient(135deg, #1a1a2e 0%, #0f3460 100%)",
-  color: "#fff",
-  padding: "18px 36px",
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  flexShrink: 0,
+const slideBarStyle: React.CSSProperties = {
+  background: "linear-gradient(135deg,#1a1a2e,#0f3460)", color: "#fff",
+  padding: "12px 36px", fontSize: 14, fontWeight: 700,
+  display: "flex", justifyContent: "space-between", alignItems: "center",
+  flexShrink: 0, letterSpacing: 0.5,
 };
 
 const slideBodyStyle: React.CSSProperties = {
-  flex: 1,
-  padding: "20px 36px",
-  overflow: "hidden",
+  flex: 1, padding: "28px 36px", display: "flex", flexDirection: "column",
+  justifyContent: "center", overflow: "hidden",
 };
+
+const stitleStyle: React.CSSProperties = {
+  fontSize: 17, fontWeight: 700, color: "#0f3460",
+  borderLeft: "4px solid #e94560", paddingLeft: 12, marginBottom: 16,
+};
+
+const footerStyle: React.CSSProperties = {
+  background: "#1a1a2e", color: "rgba(255,255,255,0.3)", textAlign: "center",
+  padding: 8, fontSize: 10, flexShrink: 0,
+};
+
+// KPI top-bar colors
+const kpiTopColors = [
+  "linear-gradient(90deg,#4fc3f7,#0288d1)",
+  "linear-gradient(90deg,#81c784,#388e3c)",
+  "linear-gradient(90deg,#ffb74d,#f57c00)",
+  "linear-gradient(90deg,#ba68c8,#7b1fa2)",
+  "linear-gradient(90deg,#e57373,#d32f2f)",
+  "linear-gradient(90deg,#4db6ac,#00897b)",
+  "linear-gradient(90deg,#7986cb,#3949ab)",
+  "linear-gradient(90deg,#ffd54f,#fbc02d)",
+];
 
 // ── Helpers ──
 
-function pctChange(cur: number, prev: number): { text: string; color: string } {
-  if (prev === 0 && cur === 0) return { text: "±0.0%", color: "#666" };
-  if (prev === 0) return { text: "+∞", color: "#388e3c" };
+function pctChange(cur: number, prev: number): { pct: number; text: string; isUp: boolean } {
+  if (prev === 0 && cur === 0) return { pct: 0, text: "±0.0%", isUp: true };
+  if (prev === 0) return { pct: 999, text: "+∞", isUp: true };
   const pct = ((cur - prev) / prev) * 100;
-  const sign = pct >= 0 ? "+" : "";
-  const color = pct >= 0 ? "#388e3c" : "#d32f2f";
-  return { text: `${sign}${pct.toFixed(1)}%`, color };
+  return { pct, text: `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`, isUp: pct >= 0 };
 }
 
-function buildStackedOptions(titleText: string) {
+function buildStackedOptions() {
   return {
-    responsive: true,
-    maintainAspectRatio: true,
+    responsive: true, maintainAspectRatio: true,
     plugins: {
-      title: {
-        display: false,
-      },
-      legend: {
-        position: "top" as const,
-        labels: {
-          font: { family: "Noto Sans JP", size: 11 },
-        },
-      },
-      tooltip: {
-        mode: "index" as const,
-        intersect: false,
-        callbacks: {
-          afterBody: (items: any[]) => {
-            let total = 0;
-            items.forEach((i: any) => (total += i.parsed.y));
-            return "合計: " + total.toLocaleString();
-          },
-        },
-      },
+      title: { display: false },
+      legend: { position: "top" as const, labels: { font: { family: "Noto Sans JP", size: 11 } } },
+      tooltip: { mode: "index" as const, intersect: false, callbacks: {
+        afterBody: (items: any[]) => { let t = 0; items.forEach((i: any) => (t += i.parsed.y)); return "合計: " + t.toLocaleString(); },
+      }},
     },
     scales: {
       x: { stacked: true, grid: { display: false } },
-      y: {
-        stacked: true,
-        beginAtZero: true,
-        grid: { color: "#f0f0f0" },
-        ticks: {
-          callback: (v: any) => Number(v).toLocaleString(),
-        },
-      },
+      y: { stacked: true, beginAtZero: true, grid: { color: "#f0f0f0" }, ticks: { callback: (v: any) => Number(v).toLocaleString() } },
     },
   };
 }
+
+const lineOptions = {
+  responsive: true, maintainAspectRatio: true,
+  plugins: { legend: { display: false } },
+  scales: {
+    x: { grid: { display: false } },
+    y: { beginAtZero: false, grid: { color: "#f0f0f0" }, ticks: { callback: (v: any) => Number(v).toLocaleString() } },
+  },
+};
 
 // ── Component ──
 
 export default function ReportClient({
-  data,
-  shopId,
-  dataSource = "mock",
+  data, shopId, dataSource = "mock",
 }: {
-  data: ReportData;
-  shopId: string;
-  dataSource?: "spreadsheet" | "mock";
+  data: ReportData; shopId: string; dataSource?: "spreadsheet" | "mock";
 }) {
   const { shop, kpis, monthlyLabels, charts, keywords, reviewLabels, reviewCounts, reviewDelta, reviewAnalysis, comments } = data;
-
   const hasKeywords = keywords.length > 0;
+  const hasReviews = reviewCounts.length > 0;
+  const curLabel = monthlyLabels[monthlyLabels.length - 1] || "";
 
-  // Build monthly table data
+  // ── Page count ──
+  let totalPages = 10; // P1-P6, P8-P11
+  if (hasKeywords) totalPages = 11; // +P7
+
+  function pn(slideNum: number) {
+    return `${slideNum} / ${totalPages}`;
+  }
+
+  // ── Monthly table data ──
   const monthlyTableData = monthlyLabels.map((label, i) => ({
     label,
-    searchMobile: charts.searchMobile[i],
-    searchPC: charts.searchPC[i],
+    searchMobile: charts.searchMobile[i], searchPC: charts.searchPC[i],
     searchTotal: charts.searchMobile[i] + charts.searchPC[i],
-    mapMobile: charts.mapMobile[i],
-    mapPC: charts.mapPC[i],
+    mapMobile: charts.mapMobile[i], mapPC: charts.mapPC[i],
     mapTotal: charts.mapMobile[i] + charts.mapPC[i],
-    calls: charts.calls[i],
-    routes: charts.routes[i],
-    websites: charts.websites[i],
-    bookings: charts.bookings[i],
-    foodMenus: charts.foodMenus[i],
-    totalActions:
-      charts.calls[i] +
-      charts.routes[i] +
-      charts.websites[i] +
-      charts.bookings[i] +
-      charts.foodMenus[i],
+    calls: charts.calls[i], routes: charts.routes[i], websites: charts.websites[i],
+    bookings: charts.bookings[i], foodMenus: charts.foodMenus[i],
+    totalActions: charts.calls[i] + charts.routes[i] + charts.websites[i] + charts.bookings[i] + charts.foodMenus[i],
   }));
 
-  // MoM / YoY comparison
+  // ── Comparison rows ──
   const curIdx = monthlyLabels.length - 1;
   const prevIdx = curIdx - 1;
   const yoyIdx = curIdx - 12 >= 0 ? curIdx - 12 : -1;
 
-  function comparisonRow(label: string, curVal: number, prevVal: number) {
-    const ch = pctChange(curVal, prevVal);
-    return { label, curVal, prevVal, ...ch };
+  function cmpRow(label: string, cur: number, prev: number) {
+    const c = pctChange(cur, prev);
+    return { label, cur, prev, ...c };
   }
 
-  const momRows = prevIdx >= 0
-    ? [
-        comparisonRow("Google検索(モバイル)", charts.searchMobile[curIdx], charts.searchMobile[prevIdx]),
-        comparisonRow("Google検索(PC)", charts.searchPC[curIdx], charts.searchPC[prevIdx]),
-        comparisonRow("Googleマップ(モバイル)", charts.mapMobile[curIdx], charts.mapMobile[prevIdx]),
-        comparisonRow("Googleマップ(PC)", charts.mapPC[curIdx], charts.mapPC[prevIdx]),
-        comparisonRow("通話クリック", charts.calls[curIdx], charts.calls[prevIdx]),
-        comparisonRow("ルート検索", charts.routes[curIdx], charts.routes[prevIdx]),
-        comparisonRow("ウェブサイト", charts.websites[curIdx], charts.websites[prevIdx]),
-        comparisonRow("予約", charts.bookings[curIdx], charts.bookings[prevIdx]),
-        comparisonRow("メニュー閲覧", charts.foodMenus[curIdx], charts.foodMenus[prevIdx]),
-      ]
-    : [];
+  const cmpMetrics = [
+    { label: "Google検索合計", cur: (i: number) => charts.searchMobile[i] + charts.searchPC[i] },
+    { label: "Googleマップ合計", cur: (i: number) => charts.mapMobile[i] + charts.mapPC[i] },
+    { label: "ウェブサイト", cur: (i: number) => charts.websites[i] },
+    { label: "ルート", cur: (i: number) => charts.routes[i] },
+    { label: "通話", cur: (i: number) => charts.calls[i] },
+    { label: "メニュークリック", cur: (i: number) => charts.foodMenus[i] },
+    { label: "予約", cur: (i: number) => charts.bookings[i] },
+  ];
 
-  const yoyRows = yoyIdx >= 0
-    ? [
-        comparisonRow("Google検索(モバイル)", charts.searchMobile[curIdx], charts.searchMobile[yoyIdx]),
-        comparisonRow("Google検索(PC)", charts.searchPC[curIdx], charts.searchPC[yoyIdx]),
-        comparisonRow("Googleマップ(モバイル)", charts.mapMobile[curIdx], charts.mapMobile[yoyIdx]),
-        comparisonRow("Googleマップ(PC)", charts.mapPC[curIdx], charts.mapPC[yoyIdx]),
-        comparisonRow("通話クリック", charts.calls[curIdx], charts.calls[yoyIdx]),
-        comparisonRow("ルート検索", charts.routes[curIdx], charts.routes[yoyIdx]),
-        comparisonRow("ウェブサイト", charts.websites[curIdx], charts.websites[yoyIdx]),
-        comparisonRow("予約", charts.bookings[curIdx], charts.bookings[yoyIdx]),
-        comparisonRow("メニュー閲覧", charts.foodMenus[curIdx], charts.foodMenus[yoyIdx]),
-      ]
-    : [];
+  const momRows = prevIdx >= 0 ? cmpMetrics.map(m => cmpRow(m.label, m.cur(curIdx), m.cur(prevIdx))) : [];
+  const yoyRows = yoyIdx >= 0 ? cmpMetrics.map(m => cmpRow(m.label, m.cur(curIdx), m.cur(yoyIdx))) : [];
 
-  // Chart data
-  const searchChartData = {
-    labels: monthlyLabels,
-    datasets: [
-      {
-        label: "モバイル",
-        data: charts.searchMobile,
-        backgroundColor: "rgba(33,150,243,0.7)",
-      },
-      {
-        label: "PC",
-        data: charts.searchPC,
-        backgroundColor: "rgba(255,152,0,0.7)",
-      },
-    ],
-  };
-
-  const mapChartData = {
-    labels: monthlyLabels,
-    datasets: [
-      {
-        label: "モバイル",
-        data: charts.mapMobile,
-        backgroundColor: "rgba(76,175,80,0.7)",
-      },
-      {
-        label: "PC",
-        data: charts.mapPC,
-        backgroundColor: "rgba(156,39,176,0.7)",
-      },
-    ],
-  };
-
-  const actionChartData = {
-    labels: monthlyLabels,
-    datasets: [
-      {
-        label: "ウェブサイト",
-        data: charts.websites,
-        backgroundColor: "rgba(33,150,243,0.7)",
-      },
-      {
-        label: "ルート検索",
-        data: charts.routes,
-        backgroundColor: "rgba(76,175,80,0.7)",
-      },
-      {
-        label: "通話",
-        data: charts.calls,
-        backgroundColor: "rgba(255,152,0,0.7)",
-      },
-      {
-        label: "メニュー",
-        data: charts.foodMenus,
-        backgroundColor: "rgba(156,39,176,0.7)",
-      },
-      {
-        label: "予約",
-        data: charts.bookings,
-        backgroundColor: "rgba(233,69,96,0.7)",
-      },
-    ],
-  };
-
-  const reviewLineData = {
-    labels: reviewLabels,
-    datasets: [
-      {
-        label: "累計口コミ数",
-        data: reviewCounts,
-        borderColor: "#e94560",
-        backgroundColor: "rgba(233,69,96,0.1)",
-        fill: true,
-        tension: 0.3,
-        pointRadius: 4,
-        pointBackgroundColor: "#e94560",
-      },
-    ],
-  };
-
-  const reviewDeltaData = {
-    labels: reviewLabels.slice(1),
-    datasets: [
-      {
-        label: "月間増加数",
-        data: reviewDelta.slice(1),
-        backgroundColor: (reviewDelta.slice(1) as number[]).map((v) =>
-          v >= 20 ? "rgba(76,175,80,0.8)" : v >= 15 ? "rgba(255,152,0,0.8)" : "rgba(233,69,96,0.8)"
-        ),
-        borderRadius: 4,
-      },
-    ],
-  };
-
-  const reviewLineOptions = {
-    responsive: true,
-    maintainAspectRatio: true,
-    plugins: {
-      legend: {
-        position: "top" as const,
-        labels: { font: { family: "Noto Sans JP", size: 11 } },
-      },
-    },
-    scales: {
-      y: {
-        beginAtZero: false,
-        grid: { color: "#f0f0f0" },
-        ticks: { callback: (v: any) => Number(v).toLocaleString() },
-      },
-      x: { grid: { display: false } },
-    },
-  };
-
-  const reviewDeltaOptions = {
-    responsive: true,
-    maintainAspectRatio: true,
-    plugins: {
-      legend: {
-        display: false,
-      },
-      tooltip: {
-        callbacks: {
-          label: (ctx: any) => `増加数: ${ctx.parsed.y}件`,
-        },
-      },
-    },
-    scales: {
-      y: {
-        beginAtZero: true,
-        grid: { color: "#f0f0f0" },
-        ticks: { stepSize: 5 },
-      },
-      x: { grid: { display: false } },
-    },
-  };
+  // ── Page numbering tracker ──
+  let pageNum = 1;
 
   return (
-    <div style={{ fontFamily: "'Noto Sans JP', sans-serif" }}>
-      {/* Top bar */}
-      <div
-        className="no-print"
-        style={{
-          background: "rgba(0,0,0,0.3)",
-          padding: "12px 32px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          position: "sticky",
-          top: 0,
-          zIndex: 100,
-          backdropFilter: "blur(10px)",
-        }}
-      >
-        <Link
-          href="/report"
-          style={{
-            color: "rgba(255,255,255,0.8)",
-            textDecoration: "none",
-            fontSize: 14,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
-          ← レポート一覧に戻る
-        </Link>
+    <div style={{ fontFamily: "'Noto Sans JP', sans-serif", background: "#1a1a2e" }}>
+      {/* Top bar (no-print) */}
+      <div className="no-print" style={{ background: "rgba(0,0,0,0.3)", padding: "12px 32px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100, backdropFilter: "blur(10px)" }}>
+        <Link href="/report" style={{ color: "rgba(255,255,255,0.8)", textDecoration: "none", fontSize: 14 }}>← レポート一覧に戻る</Link>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {dataSource === "mock" && (
-            <span
-              style={{
-                fontSize: 11,
-                color: "#ffd54f",
-                background: "rgba(255,213,79,0.15)",
-                padding: "4px 12px",
-                borderRadius: 20,
-                border: "1px solid rgba(255,213,79,0.3)",
-              }}
-            >
-              デモデータ
-            </span>
-          )}
-          <button
-            onClick={() => window.print()}
-            style={{
-              background: "linear-gradient(135deg, #e94560 0%, #c73050 100%)",
-              color: "#fff",
-              border: "none",
-              padding: "10px 24px",
-              borderRadius: 8,
-              fontSize: 14,
-              fontWeight: 600,
-              cursor: "pointer",
-              letterSpacing: "0.05em",
-            }}
-          >
-            PDFダウンロード
-          </button>
+          {dataSource === "mock" && <span style={{ fontSize: 11, color: "#ffd54f", background: "rgba(255,213,79,0.15)", padding: "4px 12px", borderRadius: 20, border: "1px solid rgba(255,213,79,0.3)" }}>デモデータ</span>}
+          <button onClick={() => window.print()} style={{ background: "linear-gradient(135deg,#e94560,#c73050)", color: "#fff", border: "none", padding: "10px 24px", borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>PDFダウンロード</button>
         </div>
       </div>
 
-      {/* ────── P1: Header + KPI ────── */}
+      {/* ════ P1: ヘッダー + KPI ════ */}
       <div style={slideStyle} className="slide">
-        {/* ヘッダー */}
-        <div
-          style={{
-            background: "linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)",
-            color: "#fff",
-            padding: "28px 36px 20px",
-            flexShrink: 0,
-            position: "relative",
-          }}
-        >
-          <h1 style={{ margin: 0, fontSize: 26, fontWeight: 900, letterSpacing: 1 }}>
-            {shop.name}
-          </h1>
+        <div style={{ background: "linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%)", color: "#fff", padding: "28px 36px 20px", flexShrink: 0, position: "relative" }}>
+          <h1 style={{ margin: 0, fontSize: 26, fontWeight: 900, letterSpacing: 1 }}>{shop.name}</h1>
           <div style={{ fontSize: 13, opacity: 0.7, marginTop: 2 }}>MEO対策 レポート報告</div>
           <div style={{ fontSize: 12, opacity: 0.5, marginTop: 6 }}>{shop.address}</div>
-          <div style={{ position: "absolute", top: 28, right: 36, background: "rgba(255,255,255,0.12)", padding: "7px 18px", borderRadius: 8, fontSize: 13, fontWeight: 600 }}>
-            {shop.period.start} - {shop.period.end}
-          </div>
+          <div style={{ position: "absolute", top: 28, right: 36, background: "rgba(255,255,255,.12)", padding: "7px 18px", borderRadius: 8, fontSize: 13, fontWeight: 600 }}>{shop.period.start} - {shop.period.end}</div>
         </div>
-
-        {/* サマリーバー */}
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", padding: "10px 36px", background: "#e8eaf0", flexShrink: 0 }}>
-          <div style={{ background: "#fff", borderRadius: 10, padding: "7px 14px", fontSize: 12, display: "flex", alignItems: "center", gap: 5, boxShadow: "0 1px 3px rgba(0,0,0,.05)" }}>
-            <span style={{ color: "#888" }}>対策開始日</span>
-            <span style={{ fontWeight: 700 }}>{shop.startDate}</span>
-          </div>
-          <div style={{ background: "#fff", borderRadius: 10, padding: "7px 14px", fontSize: 12, display: "flex", alignItems: "center", gap: 5, boxShadow: "0 1px 3px rgba(0,0,0,.05)" }}>
-            <span style={{ color: "#888" }}>レポート対象</span>
-            <span style={{ fontWeight: 700 }}>{monthlyLabels[monthlyLabels.length - 1]}</span>
-          </div>
-          <div style={{ background: "#fff", borderRadius: 10, padding: "7px 14px", fontSize: 12, display: "flex", alignItems: "center", gap: 5, boxShadow: "0 1px 3px rgba(0,0,0,.05)" }}>
-            <span style={{ color: "#888" }}>口コミ合計</span>
-            <span style={{ fontWeight: 700 }}>{shop.totalReviews.toLocaleString()}件</span>
-          </div>
-          <div style={{ background: "#fff", borderRadius: 10, padding: "7px 14px", fontSize: 12, display: "flex", alignItems: "center", gap: 5, boxShadow: "0 1px 3px rgba(0,0,0,.05)" }}>
-            <span style={{ color: "#888" }}>評価</span>
-            <span style={{ fontWeight: 700 }}>{shop.rating}</span>
-          </div>
+          {[{ lb: "対策開始日", vl: shop.startDate }, { lb: "レポート対象", vl: curLabel }, { lb: "口コミ合計", vl: `${shop.totalReviews.toLocaleString()}件` }, { lb: "評価", vl: String(shop.rating) }].map((b, i) => (
+            <div key={i} style={{ background: "#fff", borderRadius: 10, padding: "7px 14px", fontSize: 12, display: "flex", alignItems: "center", gap: 5, boxShadow: "0 1px 3px rgba(0,0,0,.05)" }}>
+              <span style={{ color: "#888" }}>{b.lb}</span><span style={{ fontWeight: 700 }}>{b.vl}</span>
+            </div>
+          ))}
         </div>
-
-        {/* KPIグリッド */}
-        <div style={{ flex: 1, padding: "16px 36px 20px", display: "flex", flexDirection: "column", justifyContent: "center", overflow: "hidden" }}>
-          <div style={{ fontSize: 17, fontWeight: 700, color: "#0f3460", borderLeft: "4px solid #e94560", paddingLeft: 12, marginBottom: 14 }}>
-            主要指標サマリー（{monthlyLabels[monthlyLabels.length - 1]}）
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, flex: 1 }}>
+        <div style={{ flex: 1, padding: "16px 36px 20px", display: "flex", flexDirection: "column", justifyContent: "stretch", overflow: "hidden" }}>
+          <div style={{ ...stitleStyle, marginBottom: 14 }}>主要指標サマリー（{curLabel}）</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, flex: 1 }}>
             {kpis.map((kpi, i) => {
-              const ch = pctChange(kpi.value, kpi.prevValue);
-              const topColors = [
-                "linear-gradient(90deg,#4fc3f7,#0288d1)",
-                "linear-gradient(90deg,#81c784,#388e3c)",
-                "linear-gradient(90deg,#ffb74d,#f57c00)",
-                "linear-gradient(90deg,#ba68c8,#7b1fa2)",
-                "linear-gradient(90deg,#e57373,#d32f2f)",
-                "linear-gradient(90deg,#4db6ac,#00897b)",
-                "linear-gradient(90deg,#7986cb,#3949ab)",
-                "linear-gradient(90deg,#ffd54f,#fbc02d)",
-              ];
-              const isUp = kpi.value >= kpi.prevValue;
+              const c = pctChange(kpi.value, kpi.prevValue);
               return (
-                <div
-                  key={i}
-                  style={{
-                    background: "#fff",
-                    borderRadius: 12,
-                    padding: "20px 20px",
-                    position: "relative",
-                    overflow: "hidden",
-                    boxShadow: "0 1px 6px rgba(0,0,0,.04)",
-                    display: "flex",
-                    flexDirection: "column",
-                    justifyContent: "center",
-                  }}
-                >
-                  <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: 3, background: topColors[i] }} />
+                <div key={i} style={{ background: "#fff", borderRadius: 12, padding: "20px 20px", position: "relative", overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                  <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: 3, background: kpiTopColors[i] }} />
                   <div style={{ fontSize: 11, color: "#888", fontWeight: 500 }}>{kpi.label}</div>
-                  <div style={{ fontSize: 28, fontWeight: 900, lineHeight: 1.1, margin: "4px 0", color: "#1a1a2e" }}>
-                    {kpi.value.toLocaleString()}
-                    <span style={{ fontSize: 12, fontWeight: 400, color: "#aaa", marginLeft: 4 }}>{kpi.unit}</span>
-                  </div>
-                  <div style={{ fontSize: 11, color: "#aaa" }}>
-                    <span style={{ marginRight: 6 }}>前月: {kpi.prevValue.toLocaleString()}</span>
-                  </div>
-                  <span
-                    style={{
-                      display: "inline-block",
-                      marginTop: 6,
-                      padding: "3px 8px",
-                      borderRadius: 16,
-                      fontSize: 10,
-                      fontWeight: 600,
-                      background: isUp ? "#e6f9ee" : "#fde8e8",
-                      color: isUp ? "#0a8f3c" : "#c0392b",
-                      alignSelf: "flex-start",
-                    }}
-                  >
-                    {isUp ? "▲" : "▼"} {ch.text}
+                  <div style={{ fontSize: 28, fontWeight: 900, lineHeight: 1.1, margin: "4px 0" }}>{kpi.value.toLocaleString()}</div>
+                  <div style={{ fontSize: 11, color: "#aaa" }}><span style={{ marginRight: 6 }}>前月: {kpi.prevValue.toLocaleString()}</span></div>
+                  <span style={{ display: "inline-block", marginTop: 6, padding: "3px 8px", borderRadius: 16, fontSize: 10, fontWeight: 600, background: c.isUp ? "#e6f9ee" : "#fde8e8", color: c.isUp ? "#0a8f3c" : "#c0392b", alignSelf: "flex-start" }}>
+                    {c.isUp ? "▲" : "▼"} {c.text}
                   </span>
                 </div>
               );
@@ -508,420 +204,234 @@ export default function ReportClient({
         </div>
       </div>
 
-      {/* ────── P2: MoM & YoY ────── */}
+      {/* ════ P2: 前月比・前年比 ════ */}
+      {(() => { pageNum = 2; return null; })()}
       <div style={slideStyle} className="slide">
-        <div style={headerBarStyle}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>前月比 / 前年比 比較</h2>
-          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>{shop.period.start} - {shop.period.end}</span>
+        <div style={slideBarStyle}><span>{shop.name} — 前月比・前年比</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBodyStyle}>
+          <div style={stitleStyle}>前月比・前年比</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, flex: 1 }}>
+            <div style={{ background: "#fff", borderRadius: 12, padding: "28px 32px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column" }}>
+              <h4 style={{ fontSize: 16, fontWeight: 600, color: "#555", marginBottom: 18 }}>前月比（{prevIdx >= 0 ? monthlyLabels[prevIdx] : "—"} → {curLabel}）</h4>
+              {momRows.map((r, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 0, fontSize: 14, flex: 1 }}>
+                  <span style={{ color: "#444" }}>{r.label}</span>
+                  <span style={{ display: "inline-block", padding: "3px 8px", borderRadius: 16, fontSize: 10, fontWeight: 600, background: r.isUp ? "#e6f9ee" : "#fde8e8", color: r.isUp ? "#0a8f3c" : "#c0392b" }}>
+                    {r.isUp ? "▲" : "▼"} {r.prev.toLocaleString()}→{r.cur.toLocaleString()}（{r.text}）
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div style={{ background: "#fff", borderRadius: 12, padding: "28px 32px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column" }}>
+              <h4 style={{ fontSize: 16, fontWeight: 600, color: "#555", marginBottom: 18 }}>前年比（{yoyIdx >= 0 ? monthlyLabels[yoyIdx] : "—"} → {curLabel}）</h4>
+              {yoyRows.length > 0 ? yoyRows.map((r, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 0, fontSize: 14, flex: 1 }}>
+                  <span style={{ color: "#444" }}>{r.label}</span>
+                  <span style={{ display: "inline-block", padding: "3px 8px", borderRadius: 16, fontSize: 10, fontWeight: 600, background: r.isUp ? "#e6f9ee" : "#fde8e8", color: r.isUp ? "#0a8f3c" : "#c0392b" }}>
+                    {r.isUp ? "▲" : "▼"} {r.prev.toLocaleString()}→{r.cur.toLocaleString()}（{r.text}）
+                  </span>
+                </div>
+              )) : <div style={{ textAlign: "center", color: "#999", marginTop: 40, fontSize: 14 }}>前年データなし（12ヶ月分のデータが必要です）</div>}
+            </div>
+          </div>
         </div>
-        <div style={{ ...slideBodyStyle, display: "flex", gap: 24, overflow: "hidden" }}>
-          {/* MoM */}
-          <div style={{ flex: 1 }}>
-            <h3 style={{ fontSize: 14, fontWeight: 700, color: "#1a1a2e", margin: "0 0 12px", textAlign: "center" }}>
-              前月比（MoM）
-            </h3>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-              <thead>
-                <tr style={{ background: "#0f3460", color: "#fff" }}>
-                  <th style={{ padding: "8px 10px", textAlign: "left" }}>指標</th>
-                  <th style={{ padding: "8px 10px", textAlign: "right" }}>前月</th>
-                  <th style={{ padding: "8px 10px", textAlign: "right" }}>当月</th>
-                  <th style={{ padding: "8px 10px", textAlign: "right" }}>増減</th>
-                </tr>
-              </thead>
-              <tbody>
-                {momRows.map((r, i) => (
-                  <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#f8f9fa", borderBottom: "1px solid #e8e8e8" }}>
-                    <td style={{ padding: "7px 10px", fontWeight: 500 }}>{r.label}</td>
-                    <td style={{ padding: "7px 10px", textAlign: "right" }}>{r.prevVal.toLocaleString()}</td>
-                    <td style={{ padding: "7px 10px", textAlign: "right", fontWeight: 700 }}>{r.curVal.toLocaleString()}</td>
-                    <td style={{ padding: "7px 10px", textAlign: "right", color: r.color, fontWeight: 700 }}>{r.text}</td>
-                  </tr>
+      </div>
+
+      {/* ════ P3: 月次テーブル ════ */}
+      {(() => { pageNum = 3; return null; })()}
+      <div style={slideStyle} className="slide">
+        <div style={slideBarStyle}><span>{shop.name} — 月次推移データ</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBodyStyle}>
+          <div style={stitleStyle}>月次推移データ（直近12ヶ月）</div>
+          <div style={{ overflow: "hidden", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", fontSize: 13, flex: 1 }}>
+              <thead><tr>
+                {["月","検索モバイル","検索PC","検索合計","マップモバイル","マップPC","マップ合計","Web","ルート","通話","メニュー","予約","合計"].map((h,i) => (
+                  <th key={i} style={{ background: "#0f3460", color: "#fff", padding: "12px 10px", textAlign: "center", fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
                 ))}
+              </tr></thead>
+              <tbody>
+                {monthlyTableData.map((r, i) => {
+                  const isLast = i === monthlyTableData.length - 1;
+                  return (
+                    <tr key={i} style={{ background: isLast ? "#f0f4ff" : undefined, fontWeight: isLast ? 600 : undefined }}>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.label}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.searchMobile.toLocaleString()}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.searchPC.toLocaleString()}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.searchTotal.toLocaleString()}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.mapMobile.toLocaleString()}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.mapPC.toLocaleString()}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.mapTotal.toLocaleString()}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.websites.toLocaleString()}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.routes.toLocaleString()}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.calls.toLocaleString()}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.foodMenus.toLocaleString()}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.bookings.toLocaleString()}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0", fontWeight: 700 }}>{r.totalActions.toLocaleString()}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
-
-          {/* YoY */}
-          <div style={{ flex: 1 }}>
-            <h3 style={{ fontSize: 14, fontWeight: 700, color: "#1a1a2e", margin: "0 0 12px", textAlign: "center" }}>
-              前年比（YoY）
-            </h3>
-            {yoyRows.length > 0 ? (
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                <thead>
-                  <tr style={{ background: "#0f3460", color: "#fff" }}>
-                    <th style={{ padding: "8px 10px", textAlign: "left" }}>指標</th>
-                    <th style={{ padding: "8px 10px", textAlign: "right" }}>前年同月</th>
-                    <th style={{ padding: "8px 10px", textAlign: "right" }}>当月</th>
-                    <th style={{ padding: "8px 10px", textAlign: "right" }}>増減</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {yoyRows.map((r, i) => (
-                    <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#f8f9fa", borderBottom: "1px solid #e8e8e8" }}>
-                      <td style={{ padding: "7px 10px", fontWeight: 500 }}>{r.label}</td>
-                      <td style={{ padding: "7px 10px", textAlign: "right" }}>{r.prevVal.toLocaleString()}</td>
-                      <td style={{ padding: "7px 10px", textAlign: "right", fontWeight: 700 }}>{r.curVal.toLocaleString()}</td>
-                      <td style={{ padding: "7px 10px", textAlign: "right", color: r.color, fontWeight: 700 }}>{r.text}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <div style={{ textAlign: "center", color: "#999", marginTop: 60, fontSize: 14 }}>
-                前年データなし（12ヶ月分のデータが必要です）
-              </div>
-            )}
-          </div>
-        </div>
-        <div style={{ background: "#1a1a2e", color: "rgba(255,255,255,0.3)", textAlign: "center", padding: "8px", fontSize: 10, flexShrink: 0 }}>
-          株式会社Chubby - SPOTLIGHT NAVIGATOR
         </div>
       </div>
 
-      {/* ────── P3: Monthly Table ────── */}
+      {/* ════ P4: Google検索数推移 ════ */}
+      {(() => { pageNum = 4; return null; })()}
       <div style={slideStyle} className="slide">
-        <div style={headerBarStyle}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>月次データ一覧</h2>
-          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>過去12ヶ月</span>
-        </div>
-        <div style={{ ...slideBodyStyle, padding: "16px 20px", overflow: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5, lineHeight: 1.3 }}>
-            <thead>
-              <tr style={{ background: "#0f3460", color: "#fff" }}>
-                <th style={{ padding: "7px 6px", textAlign: "center", whiteSpace: "nowrap" }}>月</th>
-                <th style={{ padding: "7px 6px", textAlign: "right", whiteSpace: "nowrap" }}>検索(M)</th>
-                <th style={{ padding: "7px 6px", textAlign: "right", whiteSpace: "nowrap" }}>検索(PC)</th>
-                <th style={{ padding: "7px 6px", textAlign: "right", whiteSpace: "nowrap" }}>検索合計</th>
-                <th style={{ padding: "7px 6px", textAlign: "right", whiteSpace: "nowrap" }}>MAP(M)</th>
-                <th style={{ padding: "7px 6px", textAlign: "right", whiteSpace: "nowrap" }}>MAP(PC)</th>
-                <th style={{ padding: "7px 6px", textAlign: "right", whiteSpace: "nowrap" }}>MAP合計</th>
-                <th style={{ padding: "7px 6px", textAlign: "right", whiteSpace: "nowrap" }}>通話</th>
-                <th style={{ padding: "7px 6px", textAlign: "right", whiteSpace: "nowrap" }}>ルート</th>
-                <th style={{ padding: "7px 6px", textAlign: "right", whiteSpace: "nowrap" }}>Web</th>
-                <th style={{ padding: "7px 6px", textAlign: "right", whiteSpace: "nowrap" }}>予約</th>
-                <th style={{ padding: "7px 6px", textAlign: "right", whiteSpace: "nowrap" }}>メニュー</th>
-                <th style={{ padding: "7px 6px", textAlign: "right", whiteSpace: "nowrap", background: "#1a1a2e" }}>合計</th>
-              </tr>
-            </thead>
-            <tbody>
-              {monthlyTableData.map((row, i) => (
-                <tr
-                  key={i}
-                  style={{
-                    background: i === monthlyTableData.length - 1 ? "#e3f2fd" : i % 2 === 0 ? "#fff" : "#f8f9fa",
-                    fontWeight: i === monthlyTableData.length - 1 ? 700 : 400,
-                    borderBottom: "1px solid #e8e8e8",
-                  }}
-                >
-                  <td style={{ padding: "6px", textAlign: "center", whiteSpace: "nowrap" }}>{row.label}</td>
-                  <td style={{ padding: "6px", textAlign: "right" }}>{row.searchMobile.toLocaleString()}</td>
-                  <td style={{ padding: "6px", textAlign: "right" }}>{row.searchPC.toLocaleString()}</td>
-                  <td style={{ padding: "6px", textAlign: "right", fontWeight: 600 }}>{row.searchTotal.toLocaleString()}</td>
-                  <td style={{ padding: "6px", textAlign: "right" }}>{row.mapMobile.toLocaleString()}</td>
-                  <td style={{ padding: "6px", textAlign: "right" }}>{row.mapPC.toLocaleString()}</td>
-                  <td style={{ padding: "6px", textAlign: "right", fontWeight: 600 }}>{row.mapTotal.toLocaleString()}</td>
-                  <td style={{ padding: "6px", textAlign: "right" }}>{row.calls.toLocaleString()}</td>
-                  <td style={{ padding: "6px", textAlign: "right" }}>{row.routes.toLocaleString()}</td>
-                  <td style={{ padding: "6px", textAlign: "right" }}>{row.websites.toLocaleString()}</td>
-                  <td style={{ padding: "6px", textAlign: "right" }}>{row.bookings.toLocaleString()}</td>
-                  <td style={{ padding: "6px", textAlign: "right" }}>{row.foodMenus.toLocaleString()}</td>
-                  <td style={{ padding: "6px", textAlign: "right", fontWeight: 700, background: i === monthlyTableData.length - 1 ? "#bbdefb" : "rgba(15,52,96,0.05)" }}>
-                    {row.totalActions.toLocaleString()}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div style={{ background: "#1a1a2e", color: "rgba(255,255,255,0.3)", textAlign: "center", padding: "8px", fontSize: 10, flexShrink: 0 }}>
-          株式会社Chubby - SPOTLIGHT NAVIGATOR
-        </div>
-      </div>
-
-      {/* ────── P4: Search Impressions ────── */}
-      <div style={slideStyle} className="slide">
-        <div style={headerBarStyle}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Google検索 表示回数</h2>
-          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>モバイル / PC</span>
-        </div>
+        <div style={slideBarStyle}><span>{shop.name} — Google検索数推移</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={{ ...slideBodyStyle, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ width: "95%", maxHeight: 580 }}>
-            <Bar data={searchChartData} options={buildStackedOptions("Google検索 表示回数")} />
+          <div style={{ width: "95%", maxHeight: 600 }}>
+            <Bar data={{ labels: monthlyLabels, datasets: [
+              { label: "モバイル", data: charts.searchMobile, backgroundColor: "rgba(79,195,247,.75)" },
+              { label: "PC", data: charts.searchPC, backgroundColor: "rgba(2,136,209,.75)" },
+            ]}} options={buildStackedOptions()} />
           </div>
-        </div>
-        <div style={{ background: "#1a1a2e", color: "rgba(255,255,255,0.3)", textAlign: "center", padding: "8px", fontSize: 10, flexShrink: 0 }}>
-          株式会社Chubby - SPOTLIGHT NAVIGATOR
         </div>
       </div>
 
-      {/* ────── P5: Maps Impressions ────── */}
+      {/* ════ P5: Googleマップ表示数推移 ════ */}
+      {(() => { pageNum = 5; return null; })()}
       <div style={slideStyle} className="slide">
-        <div style={headerBarStyle}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Googleマップ 表示回数</h2>
-          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>モバイル / PC</span>
-        </div>
+        <div style={slideBarStyle}><span>{shop.name} — Googleマップ表示数推移</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={{ ...slideBodyStyle, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ width: "95%", maxHeight: 580 }}>
-            <Bar data={mapChartData} options={buildStackedOptions("Googleマップ 表示回数")} />
+          <div style={{ width: "95%", maxHeight: 600 }}>
+            <Bar data={{ labels: monthlyLabels, datasets: [
+              { label: "モバイル", data: charts.mapMobile, backgroundColor: "rgba(129,199,132,.75)" },
+              { label: "PC", data: charts.mapPC, backgroundColor: "rgba(56,142,60,.75)" },
+            ]}} options={buildStackedOptions()} />
           </div>
-        </div>
-        <div style={{ background: "#1a1a2e", color: "rgba(255,255,255,0.3)", textAlign: "center", padding: "8px", fontSize: 10, flexShrink: 0 }}>
-          株式会社Chubby - SPOTLIGHT NAVIGATOR
         </div>
       </div>
 
-      {/* ────── P6: User Actions ────── */}
+      {/* ════ P6: ユーザー反応数推移 ════ */}
+      {(() => { pageNum = 6; return null; })()}
       <div style={slideStyle} className="slide">
-        <div style={headerBarStyle}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>ユーザーアクション推移</h2>
-          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>Web / ルート / 通話 / メニュー / 予約</span>
-        </div>
+        <div style={slideBarStyle}><span>{shop.name} — ユーザー反応数推移</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={{ ...slideBodyStyle, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ width: "95%", maxHeight: 580 }}>
-            <Bar data={actionChartData} options={buildStackedOptions("ユーザーアクション")} />
+          <div style={{ width: "95%", maxHeight: 600 }}>
+            <Bar data={{ labels: monthlyLabels, datasets: [
+              { label: "ウェブサイト", data: charts.websites, backgroundColor: "rgba(255,183,77,.75)" },
+              { label: "ルート", data: charts.routes, backgroundColor: "rgba(186,104,200,.75)" },
+              { label: "通話", data: charts.calls, backgroundColor: "rgba(229,115,115,.75)" },
+              { label: "メニュー", data: charts.foodMenus, backgroundColor: "rgba(77,182,172,.75)" },
+              { label: "予約", data: charts.bookings, backgroundColor: "rgba(121,134,203,.75)" },
+            ]}} options={buildStackedOptions()} />
           </div>
-        </div>
-        <div style={{ background: "#1a1a2e", color: "rgba(255,255,255,0.3)", textAlign: "center", padding: "8px", fontSize: 10, flexShrink: 0 }}>
-          株式会社Chubby - SPOTLIGHT NAVIGATOR
         </div>
       </div>
 
-      {/* ────── P7: Keywords (skip if no data) ────── */}
-      {hasKeywords && (
+      {/* ════ P7: キーワード順位 (データある場合のみ) ════ */}
+      {hasKeywords && (() => { pageNum = 7; return (
         <div style={slideStyle} className="slide">
-          <div style={headerBarStyle}>
-            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>キーワード順位</h2>
-            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>主要キーワード推移</span>
-          </div>
-          <div style={{ ...slideBodyStyle, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 20, width: "100%" }}>
+          <div style={slideBarStyle}><span>{shop.name} — キーワード順位変動</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+          <div style={slideBodyStyle}>
+            <div style={stitleStyle}>キーワード順位変動</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16, flex: 1 }}>
               {keywords.map((kw, i) => {
                 const diff = kw.prevRank - kw.rank;
                 const arrow = diff > 0 ? "↑" : diff < 0 ? "↓" : "→";
-                const arrowColor = diff > 0 ? "#388e3c" : diff < 0 ? "#d32f2f" : "#666";
+                const arrowColor = diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888";
                 return (
-                  <div
-                    key={i}
-                    style={{
-                      background: "#fff",
-                      borderRadius: 12,
-                      padding: 24,
-                      textAlign: "center",
-                      boxShadow: "0 2px 12px rgba(0,0,0,0.08)",
-                    }}
-                  >
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1a1a2e", marginBottom: 12 }}>
-                      {kw.word}
+                  <div key={i} style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div style={{ fontSize: 16, fontWeight: 600 }}>{kw.word}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ fontSize: 13, color: "#999" }}>前月{kw.prevRank}位</span>
+                      <span style={{ fontSize: 22, color: arrowColor }}>{arrow}</span>
+                      <span style={{ fontSize: 36, fontWeight: 900, color: "#e94560" }}>{kw.rank}</span>
+                      <span style={{ fontSize: 14, color: "#666" }}>位</span>
                     </div>
-                    <div style={{ fontSize: 48, fontWeight: 900, color: "#0f3460", lineHeight: 1 }}>
-                      {kw.rank}
-                      <span style={{ fontSize: 16, fontWeight: 400, color: "#999" }}>位</span>
-                    </div>
-                    <div style={{ marginTop: 10, fontSize: 13, color: arrowColor, fontWeight: 700 }}>
-                      {arrow} {Math.abs(diff)}ランク{diff > 0 ? "UP" : diff < 0 ? "DOWN" : ""}
-                    </div>
-                    <div style={{ fontSize: 11, color: "#999", marginTop: 4 }}>前月: {kw.prevRank}位</div>
                   </div>
                 );
               })}
             </div>
           </div>
-          <div style={{ background: "#1a1a2e", color: "rgba(255,255,255,0.3)", textAlign: "center", padding: "8px", fontSize: 10, flexShrink: 0 }}>
-            株式会社Chubby - SPOTLIGHT NAVIGATOR
+        </div>
+      ); })()}
+
+      {/* ════ P8: 口コミ件数推移 ════ */}
+      {(() => { pageNum = hasKeywords ? 8 : 7; return null; })()}
+      {hasReviews && (
+        <div style={slideStyle} className="slide">
+          <div style={slideBarStyle}><span>{shop.name} — 口コミ件数推移</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+          <div style={{ ...slideBodyStyle, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ width: "95%", maxHeight: 600 }}>
+              <Line data={{ labels: reviewLabels, datasets: [{
+                label: "口コミ件数", data: reviewCounts,
+                borderColor: "#fbc02d", backgroundColor: "rgba(251,192,45,.15)",
+                fill: true, tension: 0.3, pointRadius: 4, pointBackgroundColor: "#fbc02d", borderWidth: 2,
+              }]}} options={lineOptions} />
+            </div>
           </div>
         </div>
       )}
 
-      {/* ────── P8: Review Count Trend ────── */}
-      <div style={slideStyle} className="slide">
-        <div style={headerBarStyle}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>口コミ件数推移</h2>
-          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>累計口コミ数</span>
-        </div>
-        <div style={{ ...slideBodyStyle, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ width: "95%", maxHeight: 580 }}>
-            <Line data={reviewLineData} options={reviewLineOptions} />
+      {/* ════ P9: 月間口コミ増加数 ════ */}
+      {(() => { pageNum++; return null; })()}
+      {hasReviews && (
+        <div style={slideStyle} className="slide">
+          <div style={slideBarStyle}><span>{shop.name} — 月間口コミ増加数</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+          <div style={{ ...slideBodyStyle, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ width: "95%", maxHeight: 600 }}>
+              <Bar data={{ labels: reviewLabels.slice(1), datasets: [{
+                label: "月間増加数", data: reviewDelta.slice(1),
+                backgroundColor: (reviewDelta.slice(1) as number[]).map(v => v >= 20 ? "rgba(39,174,96,.75)" : v >= 10 ? "rgba(251,192,45,.75)" : "rgba(229,115,115,.75)"),
+                borderRadius: 3,
+              }]}} options={{ responsive: true, maintainAspectRatio: true, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true, grid: { color: "#f0f0f0" } } } }} />
+            </div>
           </div>
         </div>
-        <div style={{ background: "#1a1a2e", color: "rgba(255,255,255,0.3)", textAlign: "center", padding: "8px", fontSize: 10, flexShrink: 0 }}>
-          株式会社Chubby - SPOTLIGHT NAVIGATOR
+      )}
+
+      {/* ════ P10: 口コミ分析 ════ */}
+      {(() => { pageNum++; return null; })()}
+      <div style={slideStyle} className="slide">
+        <div style={slideBarStyle}><span>{shop.name} — 口コミ分析</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBodyStyle}>
+          <div style={stitleStyle}>口コミ分析</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "auto 1fr", gap: 16, flex: 1 }}>
+            <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: "#27ae60", marginBottom: 14 }}>ポジティブワード（推定）</h3>
+              <div>{reviewAnalysis.positiveWords.length > 0 ? reviewAnalysis.positiveWords.map((w, i) => (
+                <span key={i} style={{ display: "inline-block", padding: "6px 16px", borderRadius: 16, fontSize: 13, margin: 5, fontWeight: 500, background: "#e6f9ee", color: "#0a8f3c" }}>{w}</span>
+              )) : <span style={{ color: "#bbb", fontSize: 14, fontStyle: "italic" }}>データ準備中</span>}</div>
+            </div>
+            <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: "#c0392b", marginBottom: 14 }}>ネガティブワード（推定）</h3>
+              <div>{reviewAnalysis.negativeWords.length > 0 ? reviewAnalysis.negativeWords.map((w, i) => (
+                <span key={i} style={{ display: "inline-block", padding: "6px 16px", borderRadius: 16, fontSize: 13, margin: 5, fontWeight: 500, background: "#fde8e8", color: "#c0392b" }}>{w}</span>
+              )) : <span style={{ color: "#bbb", fontSize: 14, fontStyle: "italic" }}>データ準備中</span>}</div>
+            </div>
+            <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", gridColumn: "1/-1", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>口コミ総評</h3>
+              <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 12 }}>
+                <div>
+                  <div style={{ fontSize: 32, color: "#fbc02d" }}>{"★".repeat(Math.floor(shop.rating))}{"☆".repeat(5 - Math.floor(shop.rating))}</div>
+                  <span style={{ fontSize: 56, fontWeight: 900, color: "#0f3460" }}>{shop.rating}</span>
+                  <span style={{ fontSize: 16, color: "#888", marginLeft: 8 }}>/ 5.0（{shop.totalReviews.toLocaleString()}件）</span>
+                </div>
+              </div>
+              <p style={{ fontSize: 15, lineHeight: 1.9, color: "#444", margin: 0 }}>{reviewAnalysis.summary}</p>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* ────── P9: Monthly Review Increase ────── */}
+      {/* ════ P11: 担当者コメント ════ */}
+      {(() => { pageNum++; return null; })()}
       <div style={slideStyle} className="slide">
-        <div style={headerBarStyle}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>月間口コミ増加数</h2>
-          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>
-            <span style={{ color: "rgba(76,175,80,0.9)" }}>■</span> 20件以上&nbsp;
-            <span style={{ color: "rgba(255,152,0,0.9)" }}>■</span> 15-19件&nbsp;
-            <span style={{ color: "rgba(233,69,96,0.9)" }}>■</span> 15件未満
-          </span>
-        </div>
-        <div style={{ ...slideBodyStyle, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ width: "95%", maxHeight: 580 }}>
-            <Bar data={reviewDeltaData} options={reviewDeltaOptions} />
+        <div style={slideBarStyle}><span>{shop.name} — 担当者コメント</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBodyStyle}>
+          <div style={stitleStyle}>担当者コメント</div>
+          <div style={{ background: "linear-gradient(135deg,#f0f4ff,#fff)", border: "2px solid #0f3460", borderRadius: 14, padding: "32px 36px", flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", marginBottom: 14 }}>{curLabel} 総評</h3>
+            <ul style={{ paddingLeft: 20 }}>
+              {comments.map((c, i) => (
+                <li key={i} style={{ fontSize: 14, lineHeight: 2, color: "#444" }}>{c}</li>
+              ))}
+            </ul>
           </div>
-        </div>
-        <div style={{ background: "#1a1a2e", color: "rgba(255,255,255,0.3)", textAlign: "center", padding: "8px", fontSize: 10, flexShrink: 0 }}>
-          株式会社Chubby - SPOTLIGHT NAVIGATOR
-        </div>
-      </div>
-
-      {/* ────── P10: Review Analysis ────── */}
-      <div style={slideStyle} className="slide">
-        <div style={headerBarStyle}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>口コミ分析</h2>
-          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>ポジティブ / ネガティブ要素</span>
-        </div>
-        <div style={{ ...slideBodyStyle, display: "flex", flexDirection: "column", gap: 20 }}>
-          <div style={{ display: "flex", gap: 24, flex: 1 }}>
-            {/* Positive */}
-            <div
-              style={{
-                flex: 1,
-                background: "#fff",
-                borderRadius: 12,
-                padding: 24,
-                boxShadow: "0 2px 12px rgba(0,0,0,0.06)",
-                borderTop: "4px solid #4caf50",
-              }}
-            >
-              <h3 style={{ margin: "0 0 16px", fontSize: 15, fontWeight: 700, color: "#388e3c" }}>
-                ポジティブワード
-              </h3>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-                {reviewAnalysis.positiveWords.map((w, i) => (
-                  <span
-                    key={i}
-                    style={{
-                      display: "inline-block",
-                      background: "#e8f5e9",
-                      color: "#2e7d32",
-                      padding: "8px 16px",
-                      borderRadius: 20,
-                      fontSize: 13,
-                      fontWeight: 500,
-                    }}
-                  >
-                    {w}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            {/* Negative */}
-            <div
-              style={{
-                flex: 1,
-                background: "#fff",
-                borderRadius: 12,
-                padding: 24,
-                boxShadow: "0 2px 12px rgba(0,0,0,0.06)",
-                borderTop: "4px solid #f44336",
-              }}
-            >
-              <h3 style={{ margin: "0 0 16px", fontSize: 15, fontWeight: 700, color: "#c62828" }}>
-                ネガティブワード
-              </h3>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-                {reviewAnalysis.negativeWords.map((w, i) => (
-                  <span
-                    key={i}
-                    style={{
-                      display: "inline-block",
-                      background: "#ffebee",
-                      color: "#c62828",
-                      padding: "8px 16px",
-                      borderRadius: 20,
-                      fontSize: 13,
-                      fontWeight: 500,
-                    }}
-                  >
-                    {w}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Summary */}
-          <div
-            style={{
-              background: "#fff",
-              borderRadius: 12,
-              padding: 24,
-              boxShadow: "0 2px 12px rgba(0,0,0,0.06)",
-              borderLeft: "4px solid #0f3460",
-            }}
-          >
-            <h3 style={{ margin: "0 0 12px", fontSize: 15, fontWeight: 700, color: "#1a1a2e" }}>
-              総合分析
-            </h3>
-            <p style={{ margin: 0, fontSize: 14, lineHeight: 1.8, color: "#333" }}>
-              {reviewAnalysis.summary}
-            </p>
-          </div>
-        </div>
-        <div style={{ background: "#1a1a2e", color: "rgba(255,255,255,0.3)", textAlign: "center", padding: "8px", fontSize: 10, flexShrink: 0 }}>
-          株式会社Chubby - SPOTLIGHT NAVIGATOR
-        </div>
-      </div>
-
-      {/* ────── P11: Staff Comments ────── */}
-      <div style={slideStyle} className="slide">
-        <div style={headerBarStyle}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>担当者コメント</h2>
-          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>今月の所感と来月の施策</span>
-        </div>
-        <div style={{ ...slideBodyStyle, display: "flex", flexDirection: "column", justifyContent: "center", gap: 16, padding: "28px 48px" }}>
-          {comments.map((comment, i) => (
-            <div
-              key={i}
-              style={{
-                display: "flex",
-                gap: 16,
-                alignItems: "flex-start",
-              }}
-            >
-              <div
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: "50%",
-                  background: "linear-gradient(135deg, #0f3460, #1a1a2e)",
-                  color: "#fff",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 13,
-                  fontWeight: 700,
-                  flexShrink: 0,
-                }}
-              >
-                {i + 1}
-              </div>
-              <div
-                style={{
-                  flex: 1,
-                  background: "#fff",
-                  borderRadius: 10,
-                  padding: "14px 20px",
-                  fontSize: 13,
-                  lineHeight: 1.8,
-                  color: "#333",
-                  boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
-                }}
-              >
-                {comment}
-              </div>
-            </div>
-          ))}
-        </div>
-        <div style={{ background: "#1a1a2e", color: "rgba(255,255,255,0.3)", textAlign: "center", padding: "8px", fontSize: 10, flexShrink: 0 }}>
-          株式会社Chubby - SPOTLIGHT NAVIGATOR
         </div>
       </div>
     </div>
