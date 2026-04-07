@@ -11,10 +11,11 @@ import ShopProvider from "@/components/shop-provider";
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isLoginPage = pathname === "/login";
+  const isReportPage = pathname.startsWith("/report");
 
   return (
-    <AuthGuard>
-      {isLoginPage ? (
+    <AuthGuard skipAuth={isReportPage}>
+      {isLoginPage || isReportPage ? (
         children
       ) : (
         <RoleProvider>

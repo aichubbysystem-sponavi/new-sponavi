@@ -7,7 +7,7 @@ import { useRouter, usePathname } from "next/navigation";
 // === 壁9追加: セッション自動タイムアウト ===
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30分
 
-export default function AuthGuard({ children }: { children: React.ReactNode }) {
+export default function AuthGuard({ children, skipAuth }: { children: React.ReactNode; skipAuth?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [authenticated, setAuthenticated] = useState(false);
   const router = useRouter();
@@ -75,7 +75,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     };
   }, [pathname, router]);
 
-  if (pathname === "/login") {
+  if (pathname === "/login" || skipAuth) {
     return <>{children}</>;
   }
 
