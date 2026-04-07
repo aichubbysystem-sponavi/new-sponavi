@@ -10,12 +10,11 @@ type SortDir = "asc" | "desc";
 
 const PER_PAGE = 30;
 
-// 評価フィルタ選択肢
 const RATING_FILTERS = [
-  { label: "すべて", min: 0, max: 5 },
-  { label: "★4.5+", min: 4.5, max: 5 },
-  { label: "★4.0+", min: 4.0, max: 5 },
-  { label: "★3.5+", min: 3.5, max: 5 },
+  { label: "すべて", min: 0, max: 6 },
+  { label: "★4.5+", min: 4.5, max: 6 },
+  { label: "★4.0+", min: 4.0, max: 6 },
+  { label: "★3.5+", min: 3.5, max: 6 },
   { label: "★3.5未満", min: 0, max: 3.5 },
 ];
 
@@ -30,52 +29,32 @@ export default function ReportListClient({
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [page, setPage] = useState(1);
-  const [ratingFilter, setRatingFilter] = useState(0); // index into RATING_FILTERS
+  const [ratingFilter, setRatingFilter] = useState(0);
   const [syncing, startSync] = useTransition();
   const [lastSync, setLastSync] = useState<string | null>(null);
 
-  // フィルタ＆ソート
   const filtered = useMemo(() => {
     let result = shops;
-
-    // テキスト検索
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       result = result.filter(
-        (s) =>
-          s.name.toLowerCase().includes(q) ||
-          s.address.toLowerCase().includes(q)
+        (s) => s.name.toLowerCase().includes(q) || s.address.toLowerCase().includes(q)
       );
     }
-
-    // 評価フィルタ
     const rf = RATING_FILTERS[ratingFilter];
-    if (rf.min > 0 || rf.max < 5) {
-      result = result.filter(
-        (s) => s.rating >= rf.min && s.rating < (rf.max === 5 ? 6 : rf.max)
-      );
+    if (rf.min > 0 || rf.max < 6) {
+      result = result.filter((s) => s.rating >= rf.min && s.rating < rf.max);
     }
-
-    // ソート
     result = [...result].sort((a, b) => {
       let cmp = 0;
       switch (sortKey) {
-        case "name":
-          cmp = a.name.localeCompare(b.name, "ja");
-          break;
-        case "rating":
-          cmp = a.rating - b.rating;
-          break;
-        case "totalReviews":
-          cmp = a.totalReviews - b.totalReviews;
-          break;
-        case "period":
-          cmp = a.period.localeCompare(b.period, "ja");
-          break;
+        case "name": cmp = a.name.localeCompare(b.name, "ja"); break;
+        case "rating": cmp = a.rating - b.rating; break;
+        case "totalReviews": cmp = a.totalReviews - b.totalReviews; break;
+        case "period": cmp = a.period.localeCompare(b.period, "ja"); break;
       }
       return sortDir === "asc" ? cmp : -cmp;
     });
-
     return result;
   }, [shops, search, sortKey, sortDir, ratingFilter]);
 
@@ -83,12 +62,8 @@ export default function ReportListClient({
   const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
   function toggleSort(key: SortKey) {
-    if (sortKey === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir(key === "name" ? "asc" : "desc");
-    }
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(key); setSortDir(key === "name" ? "asc" : "desc"); }
     setPage(1);
   }
 
@@ -100,93 +75,41 @@ export default function ReportListClient({
     });
   }
 
-  // 統計
   const shopsWithRating = shops.filter((s) => s.rating > 0);
-  const avgRating =
-    shopsWithRating.length > 0
-      ? (shopsWithRating.reduce((s, sh) => s + sh.rating, 0) / shopsWithRating.length).toFixed(1)
-      : "-";
+  const avgRating = shopsWithRating.length > 0
+    ? (shopsWithRating.reduce((s, sh) => s + sh.rating, 0) / shopsWithRating.length).toFixed(1)
+    : "-";
   const totalReviews = shops.reduce((s, sh) => s + sh.totalReviews, 0);
-
-  const sortArrow = (key: SortKey) =>
-    sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
+  const sortArrow = (key: SortKey) => sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)",
-        fontFamily: "'Noto Sans JP', sans-serif",
-        color: "#fff",
-      }}
-    >
+    <div className="min-h-screen bg-[#f1f5f9]" style={{ fontFamily: "'Segoe UI', 'Hiragino Sans', 'Meiryo', sans-serif" }}>
       {/* ヘッダー */}
-      <header
-        style={{
-          background: "rgba(255,255,255,0.04)",
-          backdropFilter: "blur(10px)",
-          borderBottom: "1px solid rgba(255,255,255,0.08)",
-          padding: "16px 0",
-          position: "sticky",
-          top: 0,
-          zIndex: 50,
-        }}
-      >
-        <div style={{ maxWidth: 1400, margin: "0 auto", padding: "0 24px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <div
-              style={{
-                width: 38,
-                height: 38,
-                borderRadius: 10,
-                background: "linear-gradient(135deg, #e94560, #c73050)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 14,
-                fontWeight: 900,
-                letterSpacing: 1,
-              }}
-            >
-              SN
-            </div>
-            <div>
-              <h1 style={{ fontSize: 18, fontWeight: 900, letterSpacing: 1, lineHeight: 1.2 }}>
-                <span style={{ color: "#e94560" }}>SPOTLIGHT</span> NAVIGATOR
-              </h1>
-              <p style={{ fontSize: 11, opacity: 0.5, letterSpacing: 0.5 }}>レポート管理システム</p>
-            </div>
+      <header className="bg-[#E6EEFF] shadow-sm border-b border-slate-200 sticky top-0 z-50">
+        <div className="max-w-[1440px] mx-auto px-6 h-[60px] flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <h1 className="text-lg font-bold text-[#003D6B] tracking-wide">SPOTLIGHT NAVIGATOR</h1>
+            <span className="text-xs text-slate-500 bg-white/60 px-2.5 py-0.5 rounded-full">レポート管理</span>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div className="flex items-center gap-3">
             {source !== "spreadsheet" && (
-              <span style={{ fontSize: 11, color: "#ffd54f", background: "rgba(255,213,79,0.12)", padding: "4px 14px", borderRadius: 20, border: "1px solid rgba(255,213,79,0.2)" }}>
-                デモデータ
-              </span>
+              <span className="text-xs text-amber-700 bg-amber-100 px-3 py-1 rounded-full font-medium">デモデータ</span>
+            )}
+            {lastSync && (
+              <span className="text-xs text-slate-400">最終反映: {new Date(lastSync).toLocaleTimeString("ja-JP")}</span>
             )}
             <button
               onClick={handleSync}
               disabled={syncing}
-              style={{
-                background: syncing
-                  ? "rgba(255,255,255,0.08)"
-                  : "linear-gradient(135deg, #e94560, #c73050)",
-                color: "#fff",
-                border: "none",
-                padding: "8px 20px",
-                borderRadius: 8,
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: syncing ? "wait" : "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                transition: "all 0.2s",
-                opacity: syncing ? 0.6 : 1,
-              }}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                syncing
+                  ? "bg-slate-200 text-slate-400 cursor-wait"
+                  : "bg-[#003D6B] text-white hover:bg-[#002a4a] shadow-sm"
+              }`}
             >
               {syncing ? (
                 <>
-                  <span style={{ display: "inline-block", width: 14, height: 14, border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+                  <span className="inline-block w-3.5 h-3.5 border-2 border-slate-300 border-t-slate-500 rounded-full animate-spin" />
                   取得中...
                 </>
               ) : (
@@ -197,111 +120,98 @@ export default function ReportListClient({
         </div>
       </header>
 
-      <div style={{ maxWidth: 1400, margin: "0 auto", padding: "24px" }}>
-        {/* 統計カード */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
-          <KpiMini label="管理店舗数" value={shops.length.toLocaleString()} unit="店舗" accent="#4fc3f7" />
-          <KpiMini label="平均評価" value={avgRating} unit="/ 5.0" accent="#ffd54f" />
-          <KpiMini label="総口コミ数" value={totalReviews.toLocaleString()} unit="件" accent="#81c784" />
-          <KpiMini label="表示中" value={filtered.length.toLocaleString()} unit={`/ ${shops.length}店舗`} accent="#ba68c8" />
+      <div className="max-w-[1440px] mx-auto px-6 py-6">
+        {/* KPIカード */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
+            <p className="text-xs font-medium text-slate-400 mb-1">管理店舗数</p>
+            <p className="text-2xl font-bold text-[#003D6B]">{shops.length.toLocaleString()}<span className="text-xs font-normal text-slate-400 ml-1">店舗</span></p>
+          </div>
+          <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
+            <p className="text-xs font-medium text-slate-400 mb-1">平均評価</p>
+            <p className="text-2xl font-bold text-amber-500">{avgRating}<span className="text-xs font-normal text-slate-400 ml-1">/ 5.0</span></p>
+          </div>
+          <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
+            <p className="text-xs font-medium text-slate-400 mb-1">総口コミ数</p>
+            <p className="text-2xl font-bold text-emerald-600">{totalReviews.toLocaleString()}<span className="text-xs font-normal text-slate-400 ml-1">件</span></p>
+          </div>
+          <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
+            <p className="text-xs font-medium text-slate-400 mb-1">表示中</p>
+            <p className="text-2xl font-bold text-purple-600">{filtered.length.toLocaleString()}<span className="text-xs font-normal text-slate-400 ml-1">/ {shops.length}店舗</span></p>
+          </div>
         </div>
 
         {/* 検索 & フィルタ */}
-        <div
-          style={{
-            background: "rgba(255,255,255,0.06)",
-            borderRadius: 14,
-            border: "1px solid rgba(255,255,255,0.08)",
-            padding: "16px 20px",
-            marginBottom: 20,
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 12,
-            alignItems: "center",
-          }}
-        >
-          {/* 検索 */}
-          <div style={{ flex: 1, minWidth: 240, position: "relative" }}>
-            <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 14, opacity: 0.4 }}>🔍</span>
-            <input
-              type="text"
-              placeholder="店舗名・住所で検索..."
-              value={search}
-              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-              style={{
-                width: "100%",
-                padding: "10px 14px 10px 36px",
-                background: "rgba(255,255,255,0.06)",
-                border: "1px solid rgba(255,255,255,0.12)",
-                borderRadius: 8,
-                color: "#fff",
-                fontSize: 13,
-                outline: "none",
-              }}
-            />
-          </div>
+        <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4 mb-6">
+          <div className="flex flex-col lg:flex-row gap-3 items-center">
+            {/* 検索入力 */}
+            <div className="relative flex-1 w-full">
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                type="text"
+                placeholder="店舗名・住所で検索..."
+                value={search}
+                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20 focus:border-[#003D6B]/40 transition-all"
+              />
+            </div>
 
-          {/* 評価フィルタ */}
-          <div style={{ display: "flex", gap: 4 }}>
-            {RATING_FILTERS.map((rf, i) => (
-              <button
-                key={i}
-                onClick={() => { setRatingFilter(i); setPage(1); }}
-                style={{
-                  padding: "8px 14px",
-                  borderRadius: 8,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  border: "none",
-                  cursor: "pointer",
-                  transition: "all 0.15s",
-                  background: ratingFilter === i ? "rgba(233,69,96,0.9)" : "rgba(255,255,255,0.06)",
-                  color: ratingFilter === i ? "#fff" : "rgba(255,255,255,0.6)",
-                }}
-              >
-                {rf.label}
-              </button>
-            ))}
-          </div>
+            {/* 評価フィルタ */}
+            <div className="flex gap-1.5 flex-shrink-0">
+              {RATING_FILTERS.map((rf, i) => (
+                <button
+                  key={i}
+                  onClick={() => { setRatingFilter(i); setPage(1); }}
+                  className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
+                    ratingFilter === i
+                      ? "bg-[#003D6B] text-white shadow-sm"
+                      : "bg-slate-50 text-slate-500 hover:bg-slate-100"
+                  }`}
+                >
+                  {rf.label}
+                </button>
+              ))}
+            </div>
 
-          {/* ソート */}
-          <div style={{ display: "flex", gap: 4 }}>
-            {([["name", "名前"], ["rating", "評価"], ["totalReviews", "口コミ"]] as [SortKey, string][]).map(([key, label]) => (
-              <button
-                key={key}
-                onClick={() => toggleSort(key)}
-                style={{
-                  padding: "8px 14px",
-                  borderRadius: 8,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  border: "none",
-                  cursor: "pointer",
-                  background: sortKey === key ? "rgba(79,195,247,0.2)" : "rgba(255,255,255,0.04)",
-                  color: sortKey === key ? "#4fc3f7" : "rgba(255,255,255,0.5)",
-                  transition: "all 0.15s",
-                }}
-              >
-                {label}{sortArrow(key)}
-              </button>
-            ))}
+            {/* 並べ替え */}
+            <div className="flex gap-1.5 flex-shrink-0">
+              {([["name", "名前"], ["rating", "評価"], ["totalReviews", "口コミ"]] as [SortKey, string][]).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => toggleSort(key)}
+                  className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
+                    sortKey === key
+                      ? "bg-blue-50 text-[#003D6B] border border-blue-200"
+                      : "bg-slate-50 text-slate-500 hover:bg-slate-100"
+                  }`}
+                >
+                  {label}{sortArrow(key)}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
-        {/* 結果件数 */}
-        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginBottom: 12, paddingLeft: 4 }}>
-          {filtered.length}件の店舗{search && ` — 「${search}」で検索中`}
-          {lastSync && <span style={{ marginLeft: 12 }}>最終反映: {new Date(lastSync).toLocaleTimeString("ja-JP")}</span>}
+        {/* 件数表示 */}
+        <div className="flex items-center justify-between mb-3 px-1">
+          <p className="text-xs text-slate-400">
+            {filtered.length}件の店舗{search && ` — 「${search}」で検索中`}
+          </p>
+          {totalPages > 1 && (
+            <p className="text-xs text-slate-400">{page} / {totalPages} ページ</p>
+          )}
         </div>
 
-        {/* 店舗一覧 */}
+        {/* 店舗カード一覧 */}
         {paged.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "80px 20px", color: "rgba(255,255,255,0.3)" }}>
-            <p style={{ fontSize: 16, marginBottom: 6 }}>該当する店舗がありません</p>
-            <p style={{ fontSize: 13 }}>検索条件を変更してください</p>
+          <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-20 text-center">
+            <p className="text-slate-400 text-sm mb-1">該当する店舗がありません</p>
+            <p className="text-slate-300 text-xs">検索条件を変更してください</p>
           </div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 14 }}>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
             {paged.map((shop) => (
               <ShopCard key={shop.id} shop={shop} />
             ))}
@@ -310,11 +220,11 @@ export default function ReportListClient({
 
         {/* ページネーション */}
         {totalPages > 1 && (
-          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 6, marginTop: 28, marginBottom: 20 }}>
+          <div className="flex items-center justify-center gap-1.5 mt-6 mb-8">
             <PageBtn disabled={page <= 1} onClick={() => setPage(page - 1)}>← 前へ</PageBtn>
             {generatePageNumbers(page, totalPages).map((p, i) =>
               p === -1 ? (
-                <span key={`dot-${i}`} style={{ color: "rgba(255,255,255,0.3)", fontSize: 12, padding: "0 4px" }}>…</span>
+                <span key={`dot-${i}`} className="text-slate-300 text-sm px-1">…</span>
               ) : (
                 <PageBtn key={p} active={p === page} onClick={() => setPage(p)}>{p}</PageBtn>
               )
@@ -324,117 +234,56 @@ export default function ReportListClient({
         )}
 
         {/* フッター */}
-        <footer style={{ textAlign: "center", padding: "32px 0", fontSize: 11, color: "rgba(255,255,255,0.2)" }}>
+        <footer className="text-center py-8 text-xs text-slate-300">
           © {new Date().getFullYear()} SPOTLIGHT NAVIGATOR by 株式会社Chubby
         </footer>
       </div>
-
-      {/* スピナーアニメーション */}
-      <style dangerouslySetInnerHTML={{ __html: `@keyframes spin { to { transform: rotate(360deg) } }` }} />
     </div>
   );
 }
 
 // ── サブコンポーネント ──
 
-function KpiMini({ label, value, unit, accent }: { label: string; value: string; unit: string; accent: string }) {
-  return (
-    <div
-      style={{
-        background: "rgba(255,255,255,0.05)",
-        borderRadius: 14,
-        border: "1px solid rgba(255,255,255,0.06)",
-        padding: "16px 20px",
-        position: "relative",
-        overflow: "hidden",
-      }}
-    >
-      <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: 3, background: accent }} />
-      <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 500, marginBottom: 6 }}>{label}</p>
-      <p style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-        <span style={{ fontSize: 28, fontWeight: 900, color: accent, lineHeight: 1 }}>{value}</span>
-        <span style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>{unit}</span>
-      </p>
-    </div>
-  );
-}
-
 function ShopCard({ shop }: { shop: ShopListItem }) {
-  const ratingBg =
-    shop.rating >= 4.5 ? "rgba(129,199,132,0.15)" :
-    shop.rating >= 4.0 ? "rgba(79,195,247,0.15)" :
-    shop.rating >= 3.5 ? "rgba(255,183,77,0.15)" :
-    shop.rating > 0 ? "rgba(229,115,115,0.15)" : "rgba(255,255,255,0.05)";
-  const ratingColor =
-    shop.rating >= 4.5 ? "#81c784" :
-    shop.rating >= 4.0 ? "#4fc3f7" :
-    shop.rating >= 3.5 ? "#ffb74d" :
-    shop.rating > 0 ? "#e57373" : "rgba(255,255,255,0.3)";
+  const ratingBadge =
+    shop.rating >= 4.5 ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+    shop.rating >= 4.0 ? "bg-blue-50 text-blue-700 border-blue-200" :
+    shop.rating >= 3.5 ? "bg-amber-50 text-amber-700 border-amber-200" :
+    shop.rating > 0 ? "bg-red-50 text-red-700 border-red-200" :
+    "bg-slate-50 text-slate-400 border-slate-200";
 
   return (
     <Link
       href={`/report/${encodeURIComponent(shop.id)}`}
-      style={{
-        display: "block",
-        background: "rgba(255,255,255,0.05)",
-        borderRadius: 14,
-        border: "1px solid rgba(255,255,255,0.06)",
-        padding: "18px 20px",
-        textDecoration: "none",
-        color: "#fff",
-        transition: "all 0.2s",
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = "rgba(255,255,255,0.09)";
-        e.currentTarget.style.transform = "translateY(-2px)";
-        e.currentTarget.style.boxShadow = "0 8px 30px rgba(0,0,0,0.3)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = "rgba(255,255,255,0.05)";
-        e.currentTarget.style.transform = "translateY(0)";
-        e.currentTarget.style.boxShadow = "none";
-      }}
+      className="group bg-white rounded-xl border border-slate-100 shadow-sm p-5 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 block"
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
-        <div
-          style={{
-            width: 40,
-            height: 40,
-            borderRadius: 10,
-            background: "linear-gradient(135deg, #e94560, #0f3460)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 16,
-            fontWeight: 700,
-            flexShrink: 0,
-          }}
-        >
+      <div className="flex items-start gap-3 mb-3">
+        <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-[#003D6B] to-[#005a9e] flex items-center justify-center text-white text-sm font-bold flex-shrink-0 shadow-sm">
           {shop.name.charAt(0)}
         </div>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", margin: 0 }}>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-bold text-slate-800 truncate group-hover:text-[#003D6B] transition-colors">
             {shop.name}
           </h3>
-          <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", margin: "2px 0 0" }}>
-            {shop.address}
-          </p>
+          <p className="text-[11px] text-slate-400 truncate mt-0.5">{shop.address}</p>
         </div>
-        <span style={{ fontSize: 16, color: "rgba(255,255,255,0.2)", flexShrink: 0 }}>›</span>
+        <svg className="w-4 h-4 text-slate-200 group-hover:text-[#003D6B] transition-colors flex-shrink-0 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
       </div>
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <div className="flex items-center gap-2 flex-wrap">
         {shop.rating > 0 && (
-          <span style={{ background: ratingBg, color: ratingColor, padding: "3px 10px", borderRadius: 20, fontSize: 12, fontWeight: 700 }}>
+          <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs font-semibold border ${ratingBadge}`}>
             ★ {shop.rating}
           </span>
         )}
         {shop.totalReviews > 0 && (
-          <span style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)", padding: "3px 10px", borderRadius: 20, fontSize: 12, fontWeight: 500 }}>
-            口コミ {shop.totalReviews.toLocaleString()}件
+          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-50 text-slate-500 border border-slate-100">
+            {shop.totalReviews.toLocaleString()}件
           </span>
         )}
-        <span style={{ background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.3)", padding: "3px 10px", borderRadius: 20, fontSize: 11 }}>
+        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] text-slate-400 bg-slate-50">
           {shop.period}
         </span>
       </div>
@@ -447,19 +296,13 @@ function PageBtn({ children, active, disabled, onClick }: { children: React.Reac
     <button
       onClick={onClick}
       disabled={disabled}
-      style={{
-        minWidth: 36,
-        height: 36,
-        padding: "0 10px",
-        borderRadius: 8,
-        fontSize: 13,
-        fontWeight: 600,
-        border: "none",
-        cursor: disabled ? "not-allowed" : "pointer",
-        transition: "all 0.15s",
-        background: active ? "#e94560" : disabled ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)",
-        color: active ? "#fff" : disabled ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.5)",
-      }}
+      className={`min-w-[36px] h-9 px-3 rounded-lg text-sm font-medium transition-all ${
+        active
+          ? "bg-[#003D6B] text-white shadow-sm"
+          : disabled
+            ? "bg-slate-50 text-slate-300 cursor-not-allowed"
+            : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
+      }`}
     >
       {children}
     </button>
@@ -470,9 +313,7 @@ function generatePageNumbers(current: number, total: number): number[] {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
   const pages: number[] = [1];
   if (current > 3) pages.push(-1);
-  for (let i = Math.max(2, current - 1); i <= Math.min(total - 1, current + 1); i++) {
-    pages.push(i);
-  }
+  for (let i = Math.max(2, current - 1); i <= Math.min(total - 1, current + 1); i++) pages.push(i);
   if (current < total - 2) pages.push(-1);
   pages.push(total);
   return pages;
