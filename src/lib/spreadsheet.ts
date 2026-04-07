@@ -528,13 +528,31 @@ export async function getShopsFromSpreadsheet(): Promise<ShopListItem[] | null> 
     const latest = rows[rows.length - 1];
     const reviewInfo = data.reviews.get(shopName);
 
+    const addr = latest.address || rows.find((r) => r.address)?.address || "";
+
+    // エリア自動判定
+    const areaMatch = addr.match(/(東京都|大阪府|北海道|京都府|愛知県|福岡県|神奈川県|埼玉県|千葉県|兵庫県|沖縄県|新潟県|広島県|宮城県|静岡県|岡山県|熊本県|鹿児島県|長野県|三重県|石川県|滋賀県|奈良県|和歌山県|岐阜県|群馬県|栃木県|茨城県|山梨県|長崎県|佐賀県|大分県|山口県|愛媛県|香川県|高知県|徳島県|福井県|富山県|岩手県|青森県|秋田県|山形県|福島県|鳥取県|島根県|宮崎県)/);
+    const area = areaMatch ? areaMatch[1] : "その他";
+
+    // 前月の口コミデータ
+    let prevRating = 0;
+    let prevTotalReviews = 0;
+    if (reviewInfo && reviewInfo.monthly.length >= 2) {
+      const prev = reviewInfo.monthly[reviewInfo.monthly.length - 2];
+      prevRating = prev.rating;
+      prevTotalReviews = prev.count;
+    }
+
     shops.push({
       id: shopName,
       name: shopName,
-      address: latest.address || rows.find((r) => r.address)?.address || "",
+      address: addr,
       period: `${latest.date.year}年${latest.date.month}月`,
       rating: reviewInfo?.currentRating ?? 0,
       totalReviews: reviewInfo?.currentCount ?? 0,
+      area,
+      prevRating,
+      prevTotalReviews,
     });
   });
 

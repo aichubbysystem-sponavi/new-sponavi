@@ -60,6 +60,10 @@ export interface ShopListItem {
   period: string;
   rating: number;
   totalReviews: number;
+  area?: string;
+  prevRating?: number;
+  prevTotalReviews?: number;
+  analyzed?: boolean;
 }
 
 // ── Mock Data ──
