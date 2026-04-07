@@ -1,13 +1,23 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useTransition } from "react";
 import type { ShopListItem } from "@/lib/report-data";
+import { syncReportData } from "./actions";
 
 type SortKey = "name" | "rating" | "totalReviews" | "period";
 type SortDir = "asc" | "desc";
 
-const PER_PAGE = 24;
+const PER_PAGE = 30;
+
+// 評価フィルタ選択肢
+const RATING_FILTERS = [
+  { label: "すべて", min: 0, max: 5 },
+  { label: "★4.5+", min: 4.5, max: 5 },
+  { label: "★4.0+", min: 4.0, max: 5 },
+  { label: "★3.5+", min: 3.5, max: 5 },
+  { label: "★3.5未満", min: 0, max: 3.5 },
+];
 
 export default function ReportListClient({
   shops,
@@ -20,11 +30,15 @@ export default function ReportListClient({
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [page, setPage] = useState(1);
+  const [ratingFilter, setRatingFilter] = useState(0); // index into RATING_FILTERS
+  const [syncing, startSync] = useTransition();
+  const [lastSync, setLastSync] = useState<string | null>(null);
 
   // フィルタ＆ソート
   const filtered = useMemo(() => {
     let result = shops;
 
+    // テキスト検索
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       result = result.filter(
@@ -34,6 +48,15 @@ export default function ReportListClient({
       );
     }
 
+    // 評価フィルタ
+    const rf = RATING_FILTERS[ratingFilter];
+    if (rf.min > 0 || rf.max < 5) {
+      result = result.filter(
+        (s) => s.rating >= rf.min && s.rating < (rf.max === 5 ? 6 : rf.max)
+      );
+    }
+
+    // ソート
     result = [...result].sort((a, b) => {
       let cmp = 0;
       switch (sortKey) {
@@ -54,12 +77,11 @@ export default function ReportListClient({
     });
 
     return result;
-  }, [shops, search, sortKey, sortDir]);
+  }, [shops, search, sortKey, sortDir, ratingFilter]);
 
   const totalPages = Math.ceil(filtered.length / PER_PAGE);
   const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
-  // ソートトグル
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -70,116 +92,216 @@ export default function ReportListClient({
     setPage(1);
   }
 
+  function handleSync() {
+    startSync(async () => {
+      const result = await syncReportData();
+      setLastSync(result.timestamp);
+      window.location.reload();
+    });
+  }
+
   // 統計
+  const shopsWithRating = shops.filter((s) => s.rating > 0);
   const avgRating =
-    shops.length > 0
-      ? (
-          shops.reduce((s, sh) => s + sh.rating, 0) /
-          shops.filter((s) => s.rating > 0).length
-        ).toFixed(1)
-      : "0";
+    shopsWithRating.length > 0
+      ? (shopsWithRating.reduce((s, sh) => s + sh.rating, 0) / shopsWithRating.length).toFixed(1)
+      : "-";
   const totalReviews = shops.reduce((s, sh) => s + sh.totalReviews, 0);
 
   const sortArrow = (key: SortKey) =>
     sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
 
   return (
-    <div className="min-h-screen bg-[#f1f5f9]">
+    <div
+      style={{
+        minHeight: "100vh",
+        background: "linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)",
+        fontFamily: "'Noto Sans JP', sans-serif",
+        color: "#fff",
+      }}
+    >
       {/* ヘッダー */}
-      <header className="bg-[#003D6B] text-white shadow-lg">
-        <div className="max-w-[1400px] mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-white/10 flex items-center justify-center text-sm font-bold">
+      <header
+        style={{
+          background: "rgba(255,255,255,0.04)",
+          backdropFilter: "blur(10px)",
+          borderBottom: "1px solid rgba(255,255,255,0.08)",
+          padding: "16px 0",
+          position: "sticky",
+          top: 0,
+          zIndex: 50,
+        }}
+      >
+        <div style={{ maxWidth: 1400, margin: "0 auto", padding: "0 24px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 10,
+                background: "linear-gradient(135deg, #e94560, #c73050)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 14,
+                fontWeight: 900,
+                letterSpacing: 1,
+              }}
+            >
               SN
             </div>
             <div>
-              <h1 className="text-lg font-bold tracking-wide">
-                SPOTLIGHT NAVIGATOR
+              <h1 style={{ fontSize: 18, fontWeight: 900, letterSpacing: 1, lineHeight: 1.2 }}>
+                <span style={{ color: "#e94560" }}>SPOTLIGHT</span> NAVIGATOR
               </h1>
-              <p className="text-xs text-white/60">レポート管理</p>
+              <p style={{ fontSize: 11, opacity: 0.5, letterSpacing: 0.5 }}>レポート管理システム</p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             {source !== "spreadsheet" && (
-              <span className="text-xs bg-amber-500/20 text-amber-200 px-3 py-1 rounded-full border border-amber-400/30">
+              <span style={{ fontSize: 11, color: "#ffd54f", background: "rgba(255,213,79,0.12)", padding: "4px 14px", borderRadius: 20, border: "1px solid rgba(255,213,79,0.2)" }}>
                 デモデータ
               </span>
             )}
+            <button
+              onClick={handleSync}
+              disabled={syncing}
+              style={{
+                background: syncing
+                  ? "rgba(255,255,255,0.08)"
+                  : "linear-gradient(135deg, #e94560, #c73050)",
+                color: "#fff",
+                border: "none",
+                padding: "8px 20px",
+                borderRadius: 8,
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: syncing ? "wait" : "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                transition: "all 0.2s",
+                opacity: syncing ? 0.6 : 1,
+              }}
+            >
+              {syncing ? (
+                <>
+                  <span style={{ display: "inline-block", width: 14, height: 14, border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+                  取得中...
+                </>
+              ) : (
+                <>↻ 反映する</>
+              )}
+            </button>
           </div>
         </div>
       </header>
 
-      <div className="max-w-[1400px] mx-auto px-6 py-6">
+      <div style={{ maxWidth: 1400, margin: "0 auto", padding: "24px" }}>
         {/* 統計カード */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          <StatCard label="管理店舗数" value={shops.length.toLocaleString()} unit="店舗" color="blue" />
-          <StatCard label="平均評価" value={avgRating} unit="/ 5.0" color="amber" />
-          <StatCard label="総口コミ数" value={totalReviews.toLocaleString()} unit="件" color="green" />
-          <StatCard
-            label="レポート対象"
-            value={filtered.length.toLocaleString()}
-            unit={`/ ${shops.length}`}
-            color="purple"
-          />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
+          <KpiMini label="管理店舗数" value={shops.length.toLocaleString()} unit="店舗" accent="#4fc3f7" />
+          <KpiMini label="平均評価" value={avgRating} unit="/ 5.0" accent="#ffd54f" />
+          <KpiMini label="総口コミ数" value={totalReviews.toLocaleString()} unit="件" accent="#81c784" />
+          <KpiMini label="表示中" value={filtered.length.toLocaleString()} unit={`/ ${shops.length}店舗`} accent="#ba68c8" />
         </div>
 
-        {/* 検索＆フィルタ */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-6">
-          <div className="flex flex-col md:flex-row gap-3 items-center">
-            <div className="relative flex-1 w-full">
-              <svg
-                className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                />
-              </svg>
-              <input
-                type="text"
-                placeholder="店舗名・住所で検索..."
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
-                  setPage(1);
-                }}
-                className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003D6B]/30 focus:border-[#003D6B]/50"
-              />
-            </div>
-            <div className="flex gap-2 flex-shrink-0">
-              <SortButton
-                label={`店舗名${sortArrow("name")}`}
-                active={sortKey === "name"}
-                onClick={() => toggleSort("name")}
-              />
-              <SortButton
-                label={`評価${sortArrow("rating")}`}
-                active={sortKey === "rating"}
-                onClick={() => toggleSort("rating")}
-              />
-              <SortButton
-                label={`口コミ数${sortArrow("totalReviews")}`}
-                active={sortKey === "totalReviews"}
-                onClick={() => toggleSort("totalReviews")}
-              />
-            </div>
+        {/* 検索 & フィルタ */}
+        <div
+          style={{
+            background: "rgba(255,255,255,0.06)",
+            borderRadius: 14,
+            border: "1px solid rgba(255,255,255,0.08)",
+            padding: "16px 20px",
+            marginBottom: 20,
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 12,
+            alignItems: "center",
+          }}
+        >
+          {/* 検索 */}
+          <div style={{ flex: 1, minWidth: 240, position: "relative" }}>
+            <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 14, opacity: 0.4 }}>🔍</span>
+            <input
+              type="text"
+              placeholder="店舗名・住所で検索..."
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+              style={{
+                width: "100%",
+                padding: "10px 14px 10px 36px",
+                background: "rgba(255,255,255,0.06)",
+                border: "1px solid rgba(255,255,255,0.12)",
+                borderRadius: 8,
+                color: "#fff",
+                fontSize: 13,
+                outline: "none",
+              }}
+            />
           </div>
+
+          {/* 評価フィルタ */}
+          <div style={{ display: "flex", gap: 4 }}>
+            {RATING_FILTERS.map((rf, i) => (
+              <button
+                key={i}
+                onClick={() => { setRatingFilter(i); setPage(1); }}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  border: "none",
+                  cursor: "pointer",
+                  transition: "all 0.15s",
+                  background: ratingFilter === i ? "rgba(233,69,96,0.9)" : "rgba(255,255,255,0.06)",
+                  color: ratingFilter === i ? "#fff" : "rgba(255,255,255,0.6)",
+                }}
+              >
+                {rf.label}
+              </button>
+            ))}
+          </div>
+
+          {/* ソート */}
+          <div style={{ display: "flex", gap: 4 }}>
+            {([["name", "名前"], ["rating", "評価"], ["totalReviews", "口コミ"]] as [SortKey, string][]).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => toggleSort(key)}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  border: "none",
+                  cursor: "pointer",
+                  background: sortKey === key ? "rgba(79,195,247,0.2)" : "rgba(255,255,255,0.04)",
+                  color: sortKey === key ? "#4fc3f7" : "rgba(255,255,255,0.5)",
+                  transition: "all 0.15s",
+                }}
+              >
+                {label}{sortArrow(key)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 結果件数 */}
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginBottom: 12, paddingLeft: 4 }}>
+          {filtered.length}件の店舗{search && ` — 「${search}」で検索中`}
+          {lastSync && <span style={{ marginLeft: 12 }}>最終反映: {new Date(lastSync).toLocaleTimeString("ja-JP")}</span>}
         </div>
 
         {/* 店舗一覧 */}
         {paged.length === 0 ? (
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-16 text-center">
-            <p className="text-slate-400 text-sm">
-              該当する店舗が見つかりません
-            </p>
+          <div style={{ textAlign: "center", padding: "80px 20px", color: "rgba(255,255,255,0.3)" }}>
+            <p style={{ fontSize: 16, marginBottom: 6 }}>該当する店舗がありません</p>
+            <p style={{ fontSize: 13 }}>検索条件を変更してください</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 14 }}>
             {paged.map((shop) => (
               <ShopCard key={shop.id} shop={shop} />
             ))}
@@ -188,205 +310,170 @@ export default function ReportListClient({
 
         {/* ページネーション */}
         {totalPages > 1 && (
-          <div className="flex items-center justify-center gap-2 mt-6 mb-8">
-            <PaginationButton
-              disabled={page <= 1}
-              onClick={() => setPage(page - 1)}
-            >
-              前へ
-            </PaginationButton>
-            {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
-              let p: number;
-              if (totalPages <= 7) {
-                p = i + 1;
-              } else if (page <= 4) {
-                p = i + 1;
-              } else if (page >= totalPages - 3) {
-                p = totalPages - 6 + i;
-              } else {
-                p = page - 3 + i;
-              }
-              return (
-                <PaginationButton
-                  key={p}
-                  active={p === page}
-                  onClick={() => setPage(p)}
-                >
-                  {p}
-                </PaginationButton>
-              );
-            })}
-            <PaginationButton
-              disabled={page >= totalPages}
-              onClick={() => setPage(page + 1)}
-            >
-              次へ
-            </PaginationButton>
+          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 6, marginTop: 28, marginBottom: 20 }}>
+            <PageBtn disabled={page <= 1} onClick={() => setPage(page - 1)}>← 前へ</PageBtn>
+            {generatePageNumbers(page, totalPages).map((p, i) =>
+              p === -1 ? (
+                <span key={`dot-${i}`} style={{ color: "rgba(255,255,255,0.3)", fontSize: 12, padding: "0 4px" }}>…</span>
+              ) : (
+                <PageBtn key={p} active={p === page} onClick={() => setPage(p)}>{p}</PageBtn>
+              )
+            )}
+            <PageBtn disabled={page >= totalPages} onClick={() => setPage(page + 1)}>次へ →</PageBtn>
           </div>
         )}
 
         {/* フッター */}
-        <footer className="text-center py-6 text-xs text-slate-400">
+        <footer style={{ textAlign: "center", padding: "32px 0", fontSize: 11, color: "rgba(255,255,255,0.2)" }}>
           © {new Date().getFullYear()} SPOTLIGHT NAVIGATOR by 株式会社Chubby
         </footer>
       </div>
+
+      {/* スピナーアニメーション */}
+      <style dangerouslySetInnerHTML={{ __html: `@keyframes spin { to { transform: rotate(360deg) } }` }} />
     </div>
   );
 }
 
 // ── サブコンポーネント ──
 
-function StatCard({
-  label,
-  value,
-  unit,
-  color,
-}: {
-  label: string;
-  value: string;
-  unit: string;
-  color: "blue" | "amber" | "green" | "purple";
-}) {
-  const colorMap = {
-    blue: "bg-blue-50 border-blue-100 text-blue-700",
-    amber: "bg-amber-50 border-amber-100 text-amber-700",
-    green: "bg-green-50 border-green-100 text-green-700",
-    purple: "bg-purple-50 border-purple-100 text-purple-700",
-  };
-  const valueColor = {
-    blue: "text-[#003D6B]",
-    amber: "text-amber-600",
-    green: "text-green-600",
-    purple: "text-purple-600",
-  };
-
+function KpiMini({ label, value, unit, accent }: { label: string; value: string; unit: string; accent: string }) {
   return (
     <div
-      className={`rounded-xl border p-4 ${colorMap[color]} transition-all hover:shadow-sm`}
+      style={{
+        background: "rgba(255,255,255,0.05)",
+        borderRadius: 14,
+        border: "1px solid rgba(255,255,255,0.06)",
+        padding: "16px 20px",
+        position: "relative",
+        overflow: "hidden",
+      }}
     >
-      <p className="text-xs font-medium opacity-70 mb-1">{label}</p>
-      <p className="flex items-baseline gap-1.5">
-        <span className={`text-2xl font-bold ${valueColor[color]}`}>
-          {value}
-        </span>
-        <span className="text-xs opacity-60">{unit}</span>
+      <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: 3, background: accent }} />
+      <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 500, marginBottom: 6 }}>{label}</p>
+      <p style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+        <span style={{ fontSize: 28, fontWeight: 900, color: accent, lineHeight: 1 }}>{value}</span>
+        <span style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>{unit}</span>
       </p>
     </div>
   );
 }
 
 function ShopCard({ shop }: { shop: ShopListItem }) {
+  const ratingBg =
+    shop.rating >= 4.5 ? "rgba(129,199,132,0.15)" :
+    shop.rating >= 4.0 ? "rgba(79,195,247,0.15)" :
+    shop.rating >= 3.5 ? "rgba(255,183,77,0.15)" :
+    shop.rating > 0 ? "rgba(229,115,115,0.15)" : "rgba(255,255,255,0.05)";
   const ratingColor =
-    shop.rating >= 4.5
-      ? "bg-green-100 text-green-700"
-      : shop.rating >= 4.0
-        ? "bg-blue-100 text-blue-700"
-        : shop.rating >= 3.5
-          ? "bg-amber-100 text-amber-700"
-          : shop.rating > 0
-            ? "bg-red-100 text-red-700"
-            : "bg-slate-100 text-slate-500";
+    shop.rating >= 4.5 ? "#81c784" :
+    shop.rating >= 4.0 ? "#4fc3f7" :
+    shop.rating >= 3.5 ? "#ffb74d" :
+    shop.rating > 0 ? "#e57373" : "rgba(255,255,255,0.3)";
 
   return (
     <Link
       href={`/report/${encodeURIComponent(shop.id)}`}
-      className="group bg-white rounded-xl border border-slate-200 shadow-sm p-5 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 block"
+      style={{
+        display: "block",
+        background: "rgba(255,255,255,0.05)",
+        borderRadius: 14,
+        border: "1px solid rgba(255,255,255,0.06)",
+        padding: "18px 20px",
+        textDecoration: "none",
+        color: "#fff",
+        transition: "all 0.2s",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = "rgba(255,255,255,0.09)";
+        e.currentTarget.style.transform = "translateY(-2px)";
+        e.currentTarget.style.boxShadow = "0 8px 30px rgba(0,0,0,0.3)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "rgba(255,255,255,0.05)";
+        e.currentTarget.style.transform = "translateY(0)";
+        e.currentTarget.style.boxShadow = "none";
+      }}
     >
-      <div className="flex items-start gap-3 mb-3">
-        <div className="w-10 h-10 rounded-lg bg-[#003D6B] flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+        <div
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 10,
+            background: "linear-gradient(135deg, #e94560, #0f3460)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 16,
+            fontWeight: 700,
+            flexShrink: 0,
+          }}
+        >
           {shop.name.charAt(0)}
         </div>
-        <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-semibold text-slate-800 truncate group-hover:text-[#003D6B] transition-colors">
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", margin: 0 }}>
             {shop.name}
           </h3>
-          <p className="text-xs text-slate-400 truncate mt-0.5">
+          <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", margin: "2px 0 0" }}>
             {shop.address}
           </p>
         </div>
+        <span style={{ fontSize: 16, color: "rgba(255,255,255,0.2)", flexShrink: 0 }}>›</span>
       </div>
 
-      <div className="flex items-center gap-2 flex-wrap">
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {shop.rating > 0 && (
-          <span
-            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold ${ratingColor}`}
-          >
+          <span style={{ background: ratingBg, color: ratingColor, padding: "3px 10px", borderRadius: 20, fontSize: 12, fontWeight: 700 }}>
             ★ {shop.rating}
           </span>
         )}
         {shop.totalReviews > 0 && (
-          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
-            {shop.totalReviews.toLocaleString()}件
+          <span style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)", padding: "3px 10px", borderRadius: 20, fontSize: 12, fontWeight: 500 }}>
+            口コミ {shop.totalReviews.toLocaleString()}件
           </span>
         )}
-        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs text-slate-400 bg-slate-50">
+        <span style={{ background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.3)", padding: "3px 10px", borderRadius: 20, fontSize: 11 }}>
           {shop.period}
         </span>
-        <svg
-          className="w-4 h-4 text-slate-300 group-hover:text-[#003D6B] ml-auto transition-colors"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M9 5l7 7-7 7"
-          />
-        </svg>
       </div>
     </Link>
   );
 }
 
-function SortButton({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
-        active
-          ? "bg-[#003D6B] text-white"
-          : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-      }`}
-    >
-      {label}
-    </button>
-  );
-}
-
-function PaginationButton({
-  children,
-  active,
-  disabled,
-  onClick,
-}: {
-  children: React.ReactNode;
-  active?: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
+function PageBtn({ children, active, disabled, onClick }: { children: React.ReactNode; active?: boolean; disabled?: boolean; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`min-w-[36px] h-9 px-3 rounded-lg text-sm font-medium transition-colors ${
-        active
-          ? "bg-[#003D6B] text-white shadow-sm"
-          : disabled
-            ? "bg-slate-50 text-slate-300 cursor-not-allowed"
-            : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
-      }`}
+      style={{
+        minWidth: 36,
+        height: 36,
+        padding: "0 10px",
+        borderRadius: 8,
+        fontSize: 13,
+        fontWeight: 600,
+        border: "none",
+        cursor: disabled ? "not-allowed" : "pointer",
+        transition: "all 0.15s",
+        background: active ? "#e94560" : disabled ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)",
+        color: active ? "#fff" : disabled ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.5)",
+      }}
     >
       {children}
     </button>
   );
+}
+
+function generatePageNumbers(current: number, total: number): number[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages: number[] = [1];
+  if (current > 3) pages.push(-1);
+  for (let i = Math.max(2, current - 1); i <= Math.min(total - 1, current + 1); i++) {
+    pages.push(i);
+  }
+  if (current < total - 2) pages.push(-1);
+  pages.push(total);
+  return pages;
 }

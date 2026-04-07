@@ -483,6 +483,14 @@ async function loadData(): Promise<{
 }
 
 /**
+ * キャッシュクリア（反映ボタン用）
+ */
+export function clearSpreadsheetCache() {
+  cachedPerfData = null;
+  cachedReviewData = null;
+}
+
+/**
  * 全店舗リストを取得
  */
 export async function getShopsFromSpreadsheet(): Promise<ShopListItem[] | null> {
