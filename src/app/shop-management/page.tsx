@@ -269,13 +269,16 @@ export default function ShopManagementPage() {
               <button
                 disabled={saving}
                 onClick={async () => {
-                  setSaving(true);
+                  setSaving(true); setError("");
                   try {
                     await api.delete(`/api/shop/${deleteTarget.id}`);
                     await fetchData();
                     setDeleteTarget(null);
-                  } catch { setError("削除に失敗しました"); }
-                  finally { setSaving(false); }
+                  } catch (e: any) {
+                    const detail = e?.response?.data?.message || e?.response?.data ? JSON.stringify(e.response.data) : "不明なエラー";
+                    setError(`削除に失敗しました: ${detail}`);
+                    setDeleteTarget(null);
+                  } finally { setSaving(false); }
                 }}
                 className="flex-1 bg-red-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-red-700 transition disabled:opacity-50"
               >
