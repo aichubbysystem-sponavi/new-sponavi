@@ -442,7 +442,7 @@ export default function ReportClient({
             <h3 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", marginBottom: 14 }}>{curLabel} 総評</h3>
             <ul style={{ paddingLeft: 20 }}>
               {comments.map((c, i) => (
-                <li key={i} style={{ fontSize: 14, lineHeight: 2, color: "#444" }}>{c}</li>
+                <li key={i} style={{ fontSize: 14, lineHeight: 2, color: "#444" }} dangerouslySetInnerHTML={{ __html: c }} />
               ))}
             </ul>
           </div>

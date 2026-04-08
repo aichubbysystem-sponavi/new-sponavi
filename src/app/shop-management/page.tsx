@@ -91,17 +91,24 @@ export default function ShopManagementPage() {
     setImportLoading(true); setImportMsg("");
     try {
       // locations/XXX → accounts/YYY/locations/XXX 形式に変換
-      const locationNames = Array.from(importSelected).map(name => {
+      const allNames = Array.from(importSelected).map(name => {
         if (name.startsWith("accounts/")) return name;
         if (gbpAccountName && name.startsWith("locations/")) return `${gbpAccountName}/${name}`;
         return name;
       });
-      await api.post(`/api/owner/${ownerId}/location/associate`, { location_names: locationNames });
-      setImportMsg(`${locationNames.length}店舗をインポートしました！`);
+      // 20店舗ずつバッチ処理（タイムアウト対策）
+      const batchSize = 20;
+      let imported = 0;
+      for (let i = 0; i < allNames.length; i += batchSize) {
+        const batch = allNames.slice(i, i + batchSize);
+        setImportMsg(`インポート中... ${imported}/${allNames.length}店舗完了`);
+        await api.post(`/api/owner/${ownerId}/location/associate`, { location_names: batch }, { timeout: 60000 });
+        imported += batch.length;
+      }
+      setImportMsg(`${imported}店舗をインポートしました！`);
       setImportSelected(new Set());
       await fetchData();
-      // 少し待ってモーダル閉じる
-      setTimeout(() => setShowImport(false), 1500);
+      setTimeout(() => setShowImport(false), 2000);
     } catch (e: any) {
       const detail = e?.response?.data ? JSON.stringify(e.response.data) : e?.message || "";
       setImportMsg(`インポートに失敗しました: ${detail}`);
