@@ -29,7 +29,7 @@ export default function CustomerMasterPage() {
       const shopData: Shop[] = Array.isArray(shopRes.data) ? shopRes.data : [];
       const ownerData: Owner[] = Array.isArray(ownerRes.data) ? ownerRes.data : [];
       setOwners(ownerData);
-      setShops(shopData.map((s) => ({ shopId: s.id, shopName: s.name, ownerName: s.owner?.name || "", agentName: s.owner?.agent?.name || "（直接契約）", city: s.owner?.city || s.city || "", state: s.owner?.state || s.state || "", phone: s.owner?.phone || s.phone || "", gbpConnected: !!s.gbp_location_name })));
+      setShops(shopData.map((s) => ({ shopId: s.id, shopName: s.name, ownerName: s.owner?.name || "", agentName: s.owner?.agent?.name || "（直接契約）", city: s.city || "", state: s.state || "", phone: s.phone || "", gbpConnected: !!s.gbp_location_name })));
     } catch { setError("API接続エラー"); } finally { setLoading(false); }
   }, []);
 
