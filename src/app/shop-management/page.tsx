@@ -1,8 +1,20 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import FeatureCard from "@/components/feature-card";
 import { fuzzyMatch } from "@/lib/normalize";
+
+// モーダルをbody直下にレンダリング（fixedが確実に効く）
+function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[9999]" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()}>{children}</div>
+    </div>,
+    document.body
+  );
+}
 import api from "@/lib/api";
 import type { Shop } from "@/lib/api-types";
 
@@ -221,8 +233,8 @@ export default function ShopManagementPage() {
 
       {/* 編集モーダル */}
       {editShop && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setEditShop(null)}>
-          <div className="bg-white rounded-xl p-6 w-[500px] max-h-[80vh] overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <Modal onClose={() => setEditShop(null)}>
+          <div className="bg-white rounded-xl p-6 w-[500px] max-h-[80vh] overflow-y-auto shadow-2xl">
             <h3 className="text-lg font-bold mb-4">店舗情報を編集</h3>
             <div className="space-y-3">
               <div>
@@ -261,13 +273,13 @@ export default function ShopManagementPage() {
               <button onClick={() => setEditShop(null)} className="px-4 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50 transition">キャンセル</button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* 削除確認モーダル */}
       {deleteTarget && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setDeleteTarget(null)}>
-          <div className="bg-white rounded-xl p-6 w-[400px] shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <Modal onClose={() => setDeleteTarget(null)}>
+          <div className="bg-white rounded-xl p-6 w-[400px] shadow-2xl">
             <h3 className="text-lg font-bold text-red-600 mb-2">店舗を削除</h3>
             <p className="text-sm text-slate-600 mb-1">以下の店舗を削除しますか？</p>
             <p className="text-sm font-bold text-slate-800 mb-4">{deleteTarget.name}</p>
@@ -294,13 +306,13 @@ export default function ShopManagementPage() {
               <button onClick={() => setDeleteTarget(null)} className="px-4 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50 transition">キャンセル</button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* GBPインポートモーダル */}
       {showImport && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowImport(false)}>
-          <div className="bg-white rounded-xl p-6 w-[600px] max-h-[80vh] overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <Modal onClose={() => setShowImport(false)}>
+          <div className="bg-white rounded-xl p-6 w-[600px] max-h-[80vh] overflow-y-auto shadow-2xl">
             <h3 className="text-lg font-bold mb-2">GBPから店舗をインポート</h3>
             <p className="text-xs text-slate-500 mb-4">GBPに登録されている店舗を選択してインポートします。店舗名・住所・電話番号がGBPから自動取得されます。</p>
 
@@ -363,7 +375,7 @@ export default function ShopManagementPage() {
               )}
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       <h2 className="text-lg font-bold mb-4">機能一覧</h2>
