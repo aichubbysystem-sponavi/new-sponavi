@@ -102,7 +102,10 @@ export default function ShopManagementPage() {
       await fetchData();
       // 少し待ってモーダル閉じる
       setTimeout(() => setShowImport(false), 1500);
-    } catch { setImportMsg("インポートに失敗しました"); }
+    } catch (e: any) {
+      const detail = e?.response?.data ? JSON.stringify(e.response.data) : e?.message || "";
+      setImportMsg(`インポートに失敗しました: ${detail}`);
+    }
     finally { setImportLoading(false); }
   };
 
