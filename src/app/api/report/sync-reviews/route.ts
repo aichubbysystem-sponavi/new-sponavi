@@ -31,50 +31,20 @@ interface ReviewsResponse {
   nextPageToken?: string;
 }
 
-// OAuthトークンをDBから取得
+// OAuthトークンをDBから取得（public.system_oauth_tokens ビュー経由）
 async function getOAuthToken(): Promise<string | null> {
   const supabase = getSupabase();
-  const { data, error } = await supabase.rpc("get_oauth_token").maybeSingle();
+  const { data, error } = await supabase
+    .from("system_oauth_tokens")
+    .select("access_token")
+    .limit(1)
+    .maybeSingle();
+
   if (error || !data) {
-    // RPC が無い場合は直接SQLで取得
-    const { data: sqlData } = await supabase
-      .from("shops")
-      .select("id")
-      .limit(1); // ダミー呼び出し
-
-    // 直接fetchでsystem.tokensを取得
-    try {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY,
-          Authorization: `Bearer ${SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY}`,
-        },
-      });
-    } catch {}
-
-    // フォールバック: 直接REST APIでsystemスキーマにアクセス
-    try {
-      const tokenRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/tokens?select=access_token&limit=1`,
-        {
-          headers: {
-            apikey: SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY,
-            Authorization: `Bearer ${SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY}`,
-            "Accept-Profile": "system",
-          },
-        }
-      );
-      if (tokenRes.ok) {
-        const tokens = await tokenRes.json();
-        if (tokens && tokens.length > 0) return tokens[0].access_token;
-      }
-    } catch {}
-
+    console.error("[sync-reviews] OAuth token fetch error:", error);
     return null;
   }
-  return (data as any)?.access_token || null;
+  return data.access_token || null;
 }
 
 // GBP Reviews APIからページネーション付きで全件取得
