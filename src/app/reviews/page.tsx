@@ -78,17 +78,26 @@ export default function ReviewsPage() {
 
   const handleSyncAll = async () => {
     setSyncing(true);
-    setSyncMsg("全店舗の口コミを同期中...（数分かかります）");
-    try {
-      const res = await api.post("/api/report/sync-reviews", { shopIds: [] }, { timeout: 300000 });
-      const data = res.data;
-      setSyncMsg(`${data.totalSynced}件の口コミを同期しました（${data.shops}店舗、エラー${data.totalErrors}件）`);
-      await fetchReviews();
-    } catch (e: any) {
-      setSyncMsg(`同期に失敗しました: ${e?.response?.data?.error || e?.message || "不明なエラー"}`);
-    } finally {
-      setSyncing(false);
+    let totalSynced = 0;
+    let totalErrors = 0;
+    const shopIds = shops.map((s) => s.id);
+    const batchSize = 10;
+
+    for (let i = 0; i < shopIds.length; i += batchSize) {
+      const batch = shopIds.slice(i, i + batchSize);
+      setSyncMsg(`全店舗同期中... ${i}/${shopIds.length}店舗完了`);
+      try {
+        const res = await api.post("/api/report/sync-reviews", { shopIds: batch }, { timeout: 120000 });
+        totalSynced += res.data.totalSynced || 0;
+        totalErrors += res.data.totalErrors || 0;
+      } catch {
+        totalErrors += batch.length;
+      }
     }
+
+    setSyncMsg(`${totalSynced}件の口コミを同期しました（${shopIds.length}店舗、エラー${totalErrors}件）`);
+    await fetchReviews();
+    setSyncing(false);
   };
 
   const starToNum = (s: string) => {
