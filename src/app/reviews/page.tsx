@@ -101,32 +101,34 @@ export default function ReviewsPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="flex items-center justify-between mb-2">
-        <div>
+      <div className="mb-4">
+        <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-slate-800">口コミ管理</h1>
-          <p className="text-sm text-slate-500 mt-1">口コミ一覧・返信・分析</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleSync}
-            disabled={syncing || !selectedShopId}
-            className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
-              syncing ? "bg-slate-200 text-slate-400" : "bg-emerald-600 hover:bg-emerald-700"
-            }`}
-            style={{ color: syncing ? undefined : "#fff" }}
-          >
-            {syncing ? "同期中..." : "この店舗を同期"}
-          </button>
-          <button
-            onClick={handleSyncAll}
-            disabled={syncing}
-            className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
-              syncing ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"
-            }`}
-            style={{ color: syncing ? undefined : "#fff" }}
-          >
-            {syncing ? "同期中..." : "全店舗同期"}
-          </button>
+        <div className="flex items-center justify-between mt-2">
+          <p className="text-sm text-slate-500">口コミ一覧・返信・分析</p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleSync}
+              disabled={syncing || !selectedShopId}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                syncing ? "bg-slate-200 text-slate-400" : "bg-emerald-600 hover:bg-emerald-700"
+              }`}
+              style={{ color: syncing ? undefined : "#fff" }}
+            >
+              {syncing ? "同期中..." : "この店舗を同期"}
+            </button>
+            <button
+              onClick={handleSyncAll}
+              disabled={syncing}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                syncing ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"
+              }`}
+              style={{ color: syncing ? undefined : "#fff" }}
+            >
+              {syncing ? "同期中..." : "全店舗同期"}
+            </button>
+          </div>
         </div>
       </div>
 
