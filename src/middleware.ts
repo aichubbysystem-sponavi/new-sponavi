@@ -31,7 +31,8 @@ export function middleware(request: NextRequest) {
   }
 
   // メインドメインで /report にアクセス → サブドメインへリダイレクト（本番のみ）
-  if (pathname.startsWith("/report") && (hostname === MAIN_HOSTNAME || hostname === `www.${MAIN_HOSTNAME}`)) {
+  // 注意: /reports 等の別ページはリダイレクトしない
+  if ((pathname === "/report" || pathname.startsWith("/report/")) && (hostname === MAIN_HOSTNAME || hostname === `www.${MAIN_HOSTNAME}`)) {
     const reportPath = pathname.replace(/^\/report/, "") || "/";
     const url = new URL(`https://${REPORT_HOSTNAME}${reportPath}`);
     url.search = request.nextUrl.search;

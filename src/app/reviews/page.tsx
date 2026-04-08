@@ -16,14 +16,17 @@ interface Review {
 export default function ReviewsPage() {
   const { selectedShopId, apiConnected } = useShop();
   const [reviews, setReviews] = useState<Review[]>([]);
+  const [error, setError] = useState("");
 
   const fetchReviews = useCallback(async () => {
     if (!selectedShopId) return;
+    setError("");
     try {
       const res = await api.get(`/api/shop/${selectedShopId}/review`);
       setReviews(res.data?.reviews || []);
-    } catch {
+    } catch (e: any) {
       setReviews([]);
+      setError(e?.response?.status === 500 ? "Go APIエラー（OAuthトークン期限切れの可能性）" : "口コミデータの取得に失敗しました");
     }
   }, [selectedShopId]);
 
@@ -43,6 +46,10 @@ export default function ReviewsPage() {
         <div className="bg-white rounded-xl p-12 shadow-sm border border-slate-100 text-center">
           <p className="text-slate-400 text-sm mb-2">Go APIに接続し、店舗を登録すると口コミが表示されます</p>
           <p className="text-slate-300 text-xs">GBPの口コミ取得・AI返信候補・感情分析</p>
+        </div>
+      ) : error ? (
+        <div className="bg-white rounded-xl p-12 shadow-sm border border-slate-100 text-center">
+          <p className="text-red-400 text-sm">{error}</p>
         </div>
       ) : reviews.length === 0 ? (
         <div className="bg-white rounded-xl p-12 shadow-sm border border-slate-100 text-center">
