@@ -4,102 +4,82 @@ import { useEffect, useCallback, useState } from "react";
 import api from "@/lib/api";
 import { useShop } from "@/components/shop-provider";
 
-interface RankingRow {
-  keyword: string;
-  current: number;
-  prev: number;
-  best: number;
-  target: number;
-  trend: string;
+interface RankingSetting {
+  id: string;
+  search_words: string[];
+  use: boolean;
+  use_shop_name: boolean;
+  day_of_week: number;
+  hour: number;
 }
 
 export default function RankingPage() {
-  const { apiConnected, selectedShopId } = useShop();
-  const [rankingData, setRankingData] = useState<RankingRow[]>([]);
+  const { apiConnected, selectedShopId, selectedShop } = useShop();
+  const [settings, setSettings] = useState<RankingSetting[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const fetchRanking = useCallback(async () => {
+  const fetchSettings = useCallback(async () => {
     if (!selectedShopId) return;
     setLoading(true);
     try {
       const res = await api.get(`/api/shop/${selectedShopId}/ranking_search_setting`);
-      if (Array.isArray(res.data) && res.data.length > 0) {
-        setRankingData(res.data);
-      }
-    } catch {
-      // API error - keep empty
-    } finally {
-      setLoading(false);
-    }
+      setSettings(Array.isArray(res.data) ? res.data : []);
+    } catch { setSettings([]); }
+    finally { setLoading(false); }
   }, [selectedShopId]);
 
-  useEffect(() => { fetchRanking(); }, [fetchRanking]);
+  useEffect(() => { fetchSettings(); }, [fetchSettings]);
 
-  if (!apiConnected) {
-    return (
-      <div className="animate-fade-in">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-white">ランキング・順位追跡</h1>
-          <p className="text-slate-400 text-sm mt-1">対策キーワードの検索順位をリアルタイムで追跡・分析</p>
-        </div>
-        <div className="bg-[#1e293b] rounded-xl p-8 border border-white/5 text-center">
-          <p className="text-slate-400">Go APIに接続し、店舗を登録すると利用できます</p>
-        </div>
-      </div>
-    );
-  }
+  const dayLabels = ["日", "月", "火", "水", "木", "金", "土"];
 
   return (
     <div className="animate-fade-in">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-white">ランキング・順位追跡</h1>
-        <p className="text-slate-400 text-sm mt-1">対策キーワードの検索順位をリアルタイムで追跡・分析</p>
-      </div>
+      <h1 className="text-2xl font-bold text-slate-800 mb-2">店舗検索ランキング</h1>
+      <p className="text-sm text-slate-500 mb-6">対策キーワードの検索順位を追跡・分析</p>
 
-      {loading ? (
-        <div className="bg-[#1e293b] rounded-xl p-8 border border-white/5 text-center">
-          <p className="text-slate-400">読み込み中...</p>
+      {!apiConnected || !selectedShopId ? (
+        <div className="bg-white rounded-xl p-12 shadow-sm border border-slate-100 text-center">
+          <p className="text-slate-400 text-sm">{apiConnected ? "店舗を選択してください" : "Go APIに接続し、店舗を登録すると利用できます"}</p>
         </div>
-      ) : rankingData.length === 0 ? (
-        <div className="bg-[#1e293b] rounded-xl p-8 border border-white/5 text-center">
-          <p className="text-slate-400">データなし</p>
+      ) : loading ? (
+        <div className="bg-white rounded-xl p-12 shadow-sm border border-slate-100 text-center">
+          <p className="text-slate-400 text-sm">読み込み中...</p>
         </div>
       ) : (
-        <div className="bg-[#1e293b] rounded-xl p-5 border border-white/5 mb-6">
-          <h2 className="text-lg font-bold text-white mb-4">キーワード別順位</h2>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-slate-400 border-b border-white/10">
-                <th className="text-left py-2 px-3">キーワード</th>
-                <th className="text-center py-2 px-3">現在順位</th>
-                <th className="text-center py-2 px-3">前回</th>
-                <th className="text-center py-2 px-3">最高順位</th>
-                <th className="text-center py-2 px-3">目標</th>
-                <th className="text-center py-2 px-3">変動</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rankingData.map((row) => (
-                <tr key={row.keyword} className="border-b border-white/5 hover:bg-white/5">
-                  <td className="py-3 px-3 text-white font-medium">{row.keyword}</td>
-                  <td className="py-3 px-3 text-center">
-                    <span className={`text-lg font-bold ${row.current <= row.target ? "text-green-400" : "text-orange-400"}`}>
-                      {row.current}位
-                    </span>
-                  </td>
-                  <td className="py-3 px-3 text-center text-slate-400">{row.prev}位</td>
-                  <td className="py-3 px-3 text-center text-blue-400">{row.best}位</td>
-                  <td className="py-3 px-3 text-center text-slate-300">{row.target}位</td>
-                  <td className="py-3 px-3 text-center">
-                    {row.trend === "up" && <span className="text-green-400">上昇</span>}
-                    {row.trend === "down" && <span className="text-red-400">下降</span>}
-                    {row.trend === "stable" && <span className="text-slate-400">維持</span>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100 mb-6">
+            <h3 className="text-sm font-semibold text-slate-500 mb-4">ランキング計測設定</h3>
+            {settings.length === 0 ? (
+              <p className="text-slate-400 text-sm text-center py-6">ランキング計測設定がありません。店舗管理画面から設定してください。</p>
+            ) : (
+              <div className="space-y-3">
+                {settings.map((s) => (
+                  <div key={s.id} className="border border-slate-100 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className={`w-2 h-2 rounded-full ${s.use ? "bg-emerald-500" : "bg-slate-300"}`} />
+                        <span className="text-sm font-medium text-slate-700">{s.use ? "有効" : "無効"}</span>
+                      </div>
+                      <span className="text-xs text-slate-400">計測: 毎週{dayLabels[s.day_of_week]}曜 {s.hour}:00</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {s.search_words.map((w, i) => (
+                        <span key={i} className="px-3 py-1 bg-blue-50 text-blue-700 text-xs rounded-full font-medium border border-blue-100">
+                          {w}
+                        </span>
+                      ))}
+                      {s.use_shop_name && (
+                        <span className="px-3 py-1 bg-amber-50 text-amber-700 text-xs rounded-full font-medium border border-amber-100">
+                          + 店舗名
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
