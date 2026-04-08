@@ -194,7 +194,7 @@ function SettingsDemo({ title }: { title: string }) {
         </div>
       </div>
       <div className="flex gap-2">
-        <button className="flex-1 px-4 py-2.5 bg-blue-600 text-white text-sm rounded-lg font-medium">設定を保存</button>
+        <button className="flex-1 px-4 py-2.5 bg-[#003D6B] text-sm rounded-lg font-medium" style={{ color: "#fff" }}>設定を保存</button>
         <button className="px-4 py-2.5 border border-slate-200 text-sm rounded-lg">リセット</button>
       </div>
     </div>
