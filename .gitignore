@@ -46,3 +46,7 @@ next-env.d.ts
 
 # Claude Code
 .claude/
+client_secret*.json
+メモ.txt
+ログ.txt
+貼り付け用.txt
