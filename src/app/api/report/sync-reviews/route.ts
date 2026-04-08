@@ -8,6 +8,8 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
+const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
+const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
 
 function getSupabase() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
@@ -31,12 +33,12 @@ interface ReviewsResponse {
   nextPageToken?: string;
 }
 
-// OAuthトークンをDBから取得（public.system_oauth_tokens ビュー経由）
+// OAuthトークンをDBから取得し、期限切れなら自動リフレッシュ
 async function getOAuthToken(): Promise<string | null> {
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("system_oauth_tokens")
-    .select("access_token")
+    .select("access_token, refresh_token, expiry")
     .limit(1)
     .maybeSingle();
 
@@ -44,7 +46,64 @@ async function getOAuthToken(): Promise<string | null> {
     console.error("[sync-reviews] OAuth token fetch error:", error);
     return null;
   }
-  return data.access_token || null;
+
+  // トークンが有効か確認（5分のバッファ）
+  const expiry = new Date(data.expiry);
+  const now = new Date();
+  if (expiry.getTime() - now.getTime() > 5 * 60 * 1000) {
+    return data.access_token;
+  }
+
+  // 期限切れ → リフレッシュ
+  console.log("[sync-reviews] Token expired, refreshing...");
+  try {
+    const res = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: GBP_CLIENT_ID,
+        client_secret: GBP_CLIENT_SECRET,
+        refresh_token: data.refresh_token,
+        grant_type: "refresh_token",
+      }),
+    });
+
+    if (!res.ok) {
+      console.error("[sync-reviews] Token refresh failed:", await res.text());
+      return null;
+    }
+
+    const tokenData = await res.json();
+    const newAccessToken = tokenData.access_token;
+    const newExpiry = new Date(Date.now() + (tokenData.expires_in || 3600) * 1000).toISOString();
+
+    // DBを更新（system.tokensテーブルに直接）
+    // ビューは読み取り専用なので、直接REST APIでsystemスキーマにアクセス
+    await fetch(
+      `${SUPABASE_URL}/rest/v1/tokens?account_id=not.is.null`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY}`,
+          "Content-Profile": "system",
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify({
+          access_token: newAccessToken,
+          expiry: newExpiry,
+          ...(tokenData.refresh_token ? { refresh_token: tokenData.refresh_token } : {}),
+        }),
+      }
+    );
+
+    console.log("[sync-reviews] Token refreshed successfully");
+    return newAccessToken;
+  } catch (err) {
+    console.error("[sync-reviews] Token refresh error:", err);
+    return data.access_token; // フォールバック: 古いトークンを試す
+  }
 }
 
 // GBP Reviews APIからページネーション付きで全件取得
