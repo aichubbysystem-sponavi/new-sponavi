@@ -76,7 +76,15 @@ export default function CustomerMasterPage() {
         setTimeout(() => setSuccess(""), 3000);
         await fetchData();
       }
-    } catch { setError("オーナーの登録に失敗しました"); }
+    } catch (e: unknown) {
+      if (e && typeof e === "object" && "response" in e) {
+        const axiosErr = e as { response?: { data?: Record<string, string> } };
+        const data = axiosErr.response?.data;
+        if (data && typeof data === "object") {
+          setError(Object.values(data).join("、"));
+        } else { setError("オーナーの登録に失敗しました"); }
+      } else { setError("オーナーの登録に失敗しました"); }
+    }
     finally { setSubmitting(false); }
   };
 
@@ -158,8 +166,20 @@ export default function CustomerMasterPage() {
           <div className="space-y-3">
             <div><label className="text-xs text-slate-500 block mb-1">オーナー名 *</label>
               <input className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" placeholder="例: 株式会社〇〇" value={ownerForm.name} onChange={(e) => setOwnerForm({...ownerForm, name: e.target.value})} /></div>
-            <div><label className="text-xs text-slate-500 block mb-1">メモ</label>
-              <input className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" placeholder="備考（任意）" value={ownerForm.building} onChange={(e) => setOwnerForm({...ownerForm, building: e.target.value})} /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="text-xs text-slate-500 block mb-1">郵便番号 *</label>
+                <input className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" placeholder="5410041" value={ownerForm.postal_code} onChange={(e) => setOwnerForm({...ownerForm, postal_code: e.target.value})} /></div>
+              <div><label className="text-xs text-slate-500 block mb-1">電話番号</label>
+                <input className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" placeholder="06-1234-5678" value={ownerForm.phone} onChange={(e) => setOwnerForm({...ownerForm, phone: e.target.value})} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="text-xs text-slate-500 block mb-1">都道府県 *</label>
+                <input className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" placeholder="大阪府" value={ownerForm.state} onChange={(e) => setOwnerForm({...ownerForm, state: e.target.value})} /></div>
+              <div><label className="text-xs text-slate-500 block mb-1">市区町村 *</label>
+                <input className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" placeholder="大阪市" value={ownerForm.city} onChange={(e) => setOwnerForm({...ownerForm, city: e.target.value})} /></div>
+            </div>
+            <div><label className="text-xs text-slate-500 block mb-1">住所 *</label>
+              <input className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" placeholder="中央区北浜1-9-10" value={ownerForm.address} onChange={(e) => setOwnerForm({...ownerForm, address: e.target.value})} /></div>
           </div>
           <div className="flex justify-end gap-3 mt-6">
             <button onClick={() => setShowOwnerModal(false)} className="text-sm px-4 py-2 rounded-lg border border-slate-200 hover:bg-slate-50">キャンセル</button>
