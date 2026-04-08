@@ -34,7 +34,7 @@ export default function Header() {
           value={selectedShopId}
           onChange={(e) => setSelectedShopId(e.target.value)}
         >
-          {shops.length === 0 && <option value="">店舗を読み込み中...</option>}
+          {shops.length === 0 && <option value="">店舗未登録</option>}
           {shops.map((shop) => (
             <option key={shop.id} value={shop.id}>{shop.name}</option>
           ))}

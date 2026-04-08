@@ -18,7 +18,9 @@ export default function CustomerMasterPage() {
   const [sortKey, setSortKey] = useState<keyof MasterRow>("shopName");
   const [sortAsc, setSortAsc] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [showOwnerModal, setShowOwnerModal] = useState(false);
   const [formData, setFormData] = useState({ owner_id: "", name: "", postal_code: "", state: "", city: "", address: "", building: "", phone: "" });
+  const [ownerForm, setOwnerForm] = useState({ name: "", postal_code: "", state: "", city: "", address: "", building: "", phone: "" });
   const [submitting, setSubmitting] = useState(false);
 
   const fetchData = useCallback(async () => {
@@ -62,6 +64,22 @@ export default function CustomerMasterPage() {
     finally { setSubmitting(false); }
   };
 
+  const handleCreateOwner = async () => {
+    if (!ownerForm.name) { setError("オーナー名は必須です"); return; }
+    setSubmitting(true); setError("");
+    try {
+      const res = await api.post("/api/owner", ownerForm);
+      if (res.data?.id) {
+        setShowOwnerModal(false);
+        setOwnerForm({ name: "", postal_code: "", state: "", city: "", address: "", building: "", phone: "" });
+        setSuccess("オーナーを登録しました");
+        setTimeout(() => setSuccess(""), 3000);
+        await fetchData();
+      }
+    } catch { setError("オーナーの登録に失敗しました"); }
+    finally { setSubmitting(false); }
+  };
+
   const handleDelete = async (shopId: string, shopName: string) => {
     if (!confirm(`「${shopName}」を削除しますか？`)) return;
     try {
@@ -92,7 +110,8 @@ export default function CustomerMasterPage() {
     <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm mb-4"><div className="flex items-center gap-3">
       <div className="flex-1 relative"><input className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#003D6B]/30" placeholder="店舗名・ID・オーナー・エリア・電話で検索（全角/半角OK）" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
         {searchQuery && <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-lg">×</button>}</div>
-      <button onClick={() => { setShowModal(true); if (owners.length > 0 && !formData.owner_id) setFormData({...formData, owner_id: owners[0].id}); }} className="bg-[#003D6B] text-white text-xs px-4 py-2 rounded-lg hover:bg-[#002a4a]">+ 新規登録</button>
+      <button onClick={() => setShowOwnerModal(true)} className="bg-emerald-600 text-white text-xs px-4 py-2 rounded-lg hover:bg-emerald-700">+ オーナー追加</button>
+      <button onClick={() => { setShowModal(true); if (owners.length > 0 && !formData.owner_id) setFormData({...formData, owner_id: owners[0].id}); }} className="bg-[#003D6B] text-white text-xs px-4 py-2 rounded-lg hover:bg-[#002a4a]">+ 店舗登録</button>
     </div>{searchQuery && <p className="text-xs text-slate-500 mt-2">「{searchQuery}」— {filtered.length}件</p>}</div>
     {success && <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4 text-sm text-green-700">{success}</div>}
     {error && <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4 text-sm text-red-700">{error}</div>}
@@ -128,6 +147,37 @@ export default function CustomerMasterPage() {
           <div className="flex justify-end gap-3 mt-6">
             <button onClick={() => setShowModal(false)} className="text-sm px-4 py-2 rounded-lg border border-slate-200 hover:bg-slate-50">キャンセル</button>
             <button onClick={handleCreate} disabled={submitting} className="text-sm px-4 py-2 rounded-lg bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-50">{submitting ? "登録中..." : "登録する"}</button>
+          </div>
+        </div>
+      </div>
+    )}
+    {showOwnerModal && (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowOwnerModal(false)}>
+        <div className="bg-white rounded-xl p-6 w-[500px] shadow-2xl" onClick={(e) => e.stopPropagation()}>
+          <h3 className="text-lg font-bold mb-4">新規オーナー登録</h3>
+          <div className="space-y-3">
+            <div><label className="text-xs text-slate-500 block mb-1">オーナー名 *</label>
+              <input className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" placeholder="例: 株式会社〇〇" value={ownerForm.name} onChange={(e) => setOwnerForm({...ownerForm, name: e.target.value})} /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="text-xs text-slate-500 block mb-1">郵便番号</label>
+                <input className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" placeholder="5410041" value={ownerForm.postal_code} onChange={(e) => setOwnerForm({...ownerForm, postal_code: e.target.value})} /></div>
+              <div><label className="text-xs text-slate-500 block mb-1">電話番号</label>
+                <input className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" placeholder="06-1234-5678" value={ownerForm.phone} onChange={(e) => setOwnerForm({...ownerForm, phone: e.target.value})} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="text-xs text-slate-500 block mb-1">都道府県</label>
+                <input className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" placeholder="大阪府" value={ownerForm.state} onChange={(e) => setOwnerForm({...ownerForm, state: e.target.value})} /></div>
+              <div><label className="text-xs text-slate-500 block mb-1">市区町村</label>
+                <input className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" placeholder="大阪市" value={ownerForm.city} onChange={(e) => setOwnerForm({...ownerForm, city: e.target.value})} /></div>
+            </div>
+            <div><label className="text-xs text-slate-500 block mb-1">住所</label>
+              <input className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" placeholder="中央区北浜1-9-10" value={ownerForm.address} onChange={(e) => setOwnerForm({...ownerForm, address: e.target.value})} /></div>
+            <div><label className="text-xs text-slate-500 block mb-1">建物名</label>
+              <input className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" placeholder="〇〇ビル 503" value={ownerForm.building} onChange={(e) => setOwnerForm({...ownerForm, building: e.target.value})} /></div>
+          </div>
+          <div className="flex justify-end gap-3 mt-6">
+            <button onClick={() => setShowOwnerModal(false)} className="text-sm px-4 py-2 rounded-lg border border-slate-200 hover:bg-slate-50">キャンセル</button>
+            <button onClick={handleCreateOwner} disabled={submitting} className="text-sm px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">{submitting ? "登録中..." : "登録する"}</button>
           </div>
         </div>
       </div>
