@@ -20,6 +20,7 @@ const navSections = [
     items: [
       { href: "/reviews", label: "口コミ管理" },
       { href: "/review-analysis", label: "口コミ分析(AI)" },
+      { href: "https://report.new-spotlight-navigator.com", label: "レポートページ ↗" },
       { href: "/posts", label: "投稿管理" },
       { href: "/aio", label: "AIO対策" },
     ],
