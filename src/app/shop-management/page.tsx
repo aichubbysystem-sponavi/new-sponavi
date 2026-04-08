@@ -29,6 +29,12 @@ export default function ShopManagementPage() {
   const [editShop, setEditShop] = useState<ShopRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ShopRow | null>(null);
   const [saving, setSaving] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [gbpLocations, setGbpLocations] = useState<{ name: string; title: string }[]>([]);
+  const [importSelected, setImportSelected] = useState<Set<string>>(new Set());
+  const [importLoading, setImportLoading] = useState(false);
+  const [importMsg, setImportMsg] = useState("");
+  const [ownerId, setOwnerId] = useState("");
 
   const fetchData = useCallback(async () => {
     try {
@@ -51,6 +57,43 @@ export default function ShopManagementPage() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  const openImport = async () => {
+    setShowImport(true);
+    setImportMsg("");
+    setImportSelected(new Set());
+    setGbpLocations([]);
+    setImportLoading(true);
+    try {
+      // オーナー一覧取得
+      const ownerRes = await api.get("/api/owner");
+      const owners = Array.isArray(ownerRes.data) ? ownerRes.data : [];
+      if (owners.length === 0) { setImportMsg("オーナーを先に登録してください"); setImportLoading(false); return; }
+      const oId = owners[0].id;
+      setOwnerId(oId);
+      // 未紐付けロケーション取得
+      const locRes = await api.get(`/api/owner/${oId}/location?is_associated=0`);
+      const locs = Array.isArray(locRes.data) ? locRes.data : [];
+      setGbpLocations(locs);
+      if (locs.length === 0) setImportMsg("全てのGBPロケーションが紐付け済みです");
+    } catch { setImportMsg("GBPロケーションの取得に失敗しました。GBPアカウントが紐付けられているか確認してください。"); }
+    finally { setImportLoading(false); }
+  };
+
+  const handleImport = async () => {
+    if (importSelected.size === 0 || !ownerId) return;
+    setImportLoading(true); setImportMsg("");
+    try {
+      const locationNames = Array.from(importSelected);
+      await api.post(`/api/owner/${ownerId}/location/associate`, { location_names: locationNames });
+      setImportMsg(`${locationNames.length}店舗をインポートしました！`);
+      setImportSelected(new Set());
+      await fetchData();
+      // 少し待ってモーダル閉じる
+      setTimeout(() => setShowImport(false), 1500);
+    } catch { setImportMsg("インポートに失敗しました"); }
+    finally { setImportLoading(false); }
+  };
 
   const filtered = useMemo(() => {
     let r = shops.filter((row) => !searchQuery || fuzzyMatch(searchQuery, row.id, row.name, row.owner, row.agent, row.area, row.phone, row.gbpShopName));
@@ -91,6 +134,7 @@ export default function ShopManagementPage() {
             <input className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#003D6B]/30" placeholder="店舗名・ID・オーナー・エリア・電話番号で検索（全角/半角OK）" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
             {searchQuery && <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-lg">×</button>}
           </div>
+          <button onClick={openImport} className="bg-emerald-600 text-xs px-4 py-2 rounded-lg hover:bg-emerald-700 flex-shrink-0" style={{ color: "#fff" }}>GBPから店舗インポート</button>
         </div>
         {searchQuery && <p className="text-xs text-slate-500 mt-2">「{searchQuery}」— {filtered.length}件</p>}
       </div>
@@ -224,6 +268,75 @@ export default function ShopManagementPage() {
                 {saving ? "削除中..." : "削除する"}
               </button>
               <button onClick={() => setDeleteTarget(null)} className="px-4 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50 transition">キャンセル</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* GBPインポートモーダル */}
+      {showImport && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowImport(false)}>
+          <div className="bg-white rounded-xl p-6 w-[600px] max-h-[80vh] overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-bold mb-2">GBPから店舗をインポート</h3>
+            <p className="text-xs text-slate-500 mb-4">GBPに登録されている店舗を選択してインポートします。店舗名・住所・電話番号がGBPから自動取得されます。</p>
+
+            {importMsg && (
+              <div className={`p-3 rounded-lg mb-4 text-sm ${importMsg.includes("失敗") || importMsg.includes("先に") ? "bg-red-50 text-red-700 border border-red-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}>
+                {importMsg}
+              </div>
+            )}
+
+            {importLoading ? (
+              <div className="py-12 text-center text-slate-500 text-sm">GBPロケーションを読み込み中...</div>
+            ) : gbpLocations.length > 0 ? (
+              <>
+                <div className="flex items-center justify-between mb-3">
+                  <button
+                    onClick={() => {
+                      if (importSelected.size === gbpLocations.length) setImportSelected(new Set());
+                      else setImportSelected(new Set(gbpLocations.map(l => l.name)));
+                    }}
+                    className="text-xs text-[#003D6B] hover:underline font-medium"
+                  >
+                    {importSelected.size === gbpLocations.length ? "全解除" : `全選択 (${gbpLocations.length}件)`}
+                  </button>
+                  <span className="text-xs text-slate-400">{importSelected.size}件選択中</span>
+                </div>
+                <div className="border border-slate-200 rounded-lg overflow-hidden mb-4 max-h-[400px] overflow-y-auto">
+                  {gbpLocations.map((loc) => (
+                    <label key={loc.name} className={`flex items-center gap-3 px-4 py-3 border-b border-slate-50 cursor-pointer hover:bg-slate-50 transition ${importSelected.has(loc.name) ? "bg-blue-50" : ""}`}>
+                      <input
+                        type="checkbox"
+                        checked={importSelected.has(loc.name)}
+                        onChange={() => {
+                          const next = new Set(importSelected);
+                          if (next.has(loc.name)) next.delete(loc.name); else next.add(loc.name);
+                          setImportSelected(next);
+                        }}
+                        className="w-4 h-4 rounded border-slate-300"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-slate-800">{loc.title}</p>
+                        <p className="text-[10px] text-slate-400 truncate">{loc.name}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </>
+            ) : null}
+
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setShowImport(false)} className="text-sm px-4 py-2 rounded-lg border border-slate-200 hover:bg-slate-50">閉じる</button>
+              {gbpLocations.length > 0 && (
+                <button
+                  onClick={handleImport}
+                  disabled={importSelected.size === 0 || importLoading}
+                  className="text-sm px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50"
+                  style={{ color: "#fff" }}
+                >
+                  {importLoading ? "インポート中..." : `${importSelected.size}店舗をインポート`}
+                </button>
+              )}
             </div>
           </div>
         </div>
