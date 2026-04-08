@@ -35,6 +35,7 @@ export default function ShopManagementPage() {
   const [importLoading, setImportLoading] = useState(false);
   const [importMsg, setImportMsg] = useState("");
   const [ownerId, setOwnerId] = useState("");
+  const [gbpAccountName, setGbpAccountName] = useState("");
 
   const fetchData = useCallback(async () => {
     try {
@@ -71,6 +72,11 @@ export default function ShopManagementPage() {
       if (owners.length === 0) { setImportMsg("オーナーを先に登録してください"); setImportLoading(false); return; }
       const oId = owners[0].id;
       setOwnerId(oId);
+      // GBPアカウント名を取得（business_groupから）
+      const ownerDetail = await api.get(`/api/owner/${oId}`);
+      const bgGroups = ownerDetail.data?.business_groups || ownerDetail.data?.BusinessGroups || [];
+      const accName = bgGroups[0]?.gbp_account_name || bgGroups[0]?.GbpAccountName || "";
+      setGbpAccountName(accName);
       // 未紐付けロケーション取得
       const locRes = await api.get(`/api/owner/${oId}/location?is_associated=0`);
       const locs = Array.isArray(locRes.data) ? locRes.data : [];
@@ -84,7 +90,12 @@ export default function ShopManagementPage() {
     if (importSelected.size === 0 || !ownerId) return;
     setImportLoading(true); setImportMsg("");
     try {
-      const locationNames = Array.from(importSelected);
+      // locations/XXX → accounts/YYY/locations/XXX 形式に変換
+      const locationNames = Array.from(importSelected).map(name => {
+        if (name.startsWith("accounts/")) return name;
+        if (gbpAccountName && name.startsWith("locations/")) return `${gbpAccountName}/${name}`;
+        return name;
+      });
       await api.post(`/api/owner/${ownerId}/location/associate`, { location_names: locationNames });
       setImportMsg(`${locationNames.length}店舗をインポートしました！`);
       setImportSelected(new Set());
