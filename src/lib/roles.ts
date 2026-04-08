@@ -34,6 +34,7 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
     "/customer-master",
     "/ai-integration",
     "/feature",
+    "/review-analysis",
   ],
   manager: [
     "/",
@@ -56,6 +57,7 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
     "/chatbot",
     "/ai-integration",
     "/feature",
+    "/review-analysis",
   ],
   part_time: [
     "/",
