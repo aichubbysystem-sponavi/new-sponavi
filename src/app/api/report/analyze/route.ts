@@ -171,10 +171,21 @@ export async function POST(request: NextRequest) {
   const supabase = getSupabaseAdmin();
   const results: { shopId: string; shopName: string; status: string }[] = [];
 
-  // 各店舗を逐次処理（レート制限対策）
+  // 分析済み店舗を取得（スキップ用）
+  const { data: existingAnalysis } = await supabase
+    .from("report_analysis")
+    .select("shop_name");
+  const analyzedNames = new Set((existingAnalysis || []).map((a: any) => a.shop_name));
+
+  // 各店舗を逐次処理
   for (const shop of shopIds) {
+    // 分析済みならスキップ
+    if (analyzedNames.has(shop.name)) {
+      results.push({ shopId: shop.id, shopName: shop.name, status: "already_done" });
+      continue;
+    }
+
     try {
-      // Go APIから口コミ取得
       const reviewData = await fetchReviews(shop.id);
       if (!reviewData || !reviewData.reviews || reviewData.reviews.length === 0) {
         results.push({ shopId: shop.id, shopName: shop.name, status: "no_reviews" });

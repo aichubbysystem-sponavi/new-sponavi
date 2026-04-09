@@ -144,14 +144,13 @@ export default function ReviewAnalysisPage() {
                 <span className="text-slate-600 truncate">{r.shopName}</span>
                 <span
                   className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                    r.status === "success"
-                      ? "bg-emerald-100 text-emerald-700"
-                      : r.status === "no_reviews"
-                        ? "bg-slate-100 text-slate-500"
-                        : "bg-red-100 text-red-700"
+                    r.status === "success" ? "bg-emerald-100 text-emerald-700"
+                      : r.status === "already_done" ? "bg-blue-100 text-blue-600"
+                      : r.status === "no_reviews" ? "bg-slate-100 text-slate-500"
+                      : "bg-red-100 text-red-700"
                   }`}
                 >
-                  {r.status === "success" ? "完了" : r.status === "no_reviews" ? "口コミなし" : "失敗"}
+                  {r.status === "success" ? "完了" : r.status === "already_done" ? "分析済み" : r.status === "no_reviews" ? "口コミなし" : "失敗"}
                 </span>
               </div>
             ))}
