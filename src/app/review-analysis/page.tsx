@@ -44,21 +44,21 @@ export default function ReviewAnalysisPage() {
 
     setProgress({ current: 0, total: selectedShops.length });
 
-    // バッチ処理（5店舗ずつ）
-    const batchSize = 5;
+    // 1店舗ずつ処理（確実に進行）
     const allResults: AnalysisResult[] = [];
 
-    for (let i = 0; i < selectedShops.length; i += batchSize) {
-      const batch = selectedShops.slice(i, i + batchSize);
+    for (let i = 0; i < selectedShops.length; i++) {
+      const shop = selectedShops[i];
+      setProgress({ current: i, total: selectedShops.length });
       try {
-        const res = await api.post("/api/report/analyze", { shops: batch }, { timeout: 120000 });
+        const res = await api.post("/api/report/analyze", { shops: [shop] }, { timeout: 60000 });
         const data = res.data;
         allResults.push(...(data.results || []));
         setResults([...allResults]);
-        setProgress({ current: Math.min(i + batchSize, selectedShops.length), total: selectedShops.length });
       } catch (err: any) {
-        setError(`バッチ ${Math.floor(i / batchSize) + 1} でエラー: ${err?.userMessage || err?.message || "不明"}（続行中...）`);
-        // breakしない — 残りのバッチを続行
+        allResults.push({ shopId: shop.id, shopName: shop.name, status: "error" });
+        setResults([...allResults]);
+        // 続行
       }
     }
 
