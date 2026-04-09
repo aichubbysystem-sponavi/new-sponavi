@@ -220,8 +220,8 @@ export async function POST(request: NextRequest) {
 
       // 悪い口コミ（★3以下）をアラートテーブルに追加
       const badReviews = reviews.filter((r) => {
-        const rating = { ONE_STAR: 1, TWO_STARS: 2, THREE_STARS: 3 }[r.starRating as string];
-        return rating !== undefined && rating <= 3;
+        const s = (r.starRating || "").toUpperCase();
+        return s === "ONE" || s === "TWO" || s === "THREE" || s === "ONE_STAR" || s === "TWO_STARS" || s === "THREE_STARS";
       });
       if (badReviews.length > 0) {
         const alerts = badReviews.map((r) => ({
