@@ -29,7 +29,7 @@ interface StoredAnalysis {
  */
 export async function getStoredAnalysis(
   shopName: string
-): Promise<{ analysis: ReviewAnalysis; comments: string[]; source: "db" } | null> {
+): Promise<{ analysis: ReviewAnalysis; comments: string[]; rating?: number; reviewCount?: number; source: "db" } | null> {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return null;
 
   try {
