@@ -30,17 +30,30 @@ interface ReviewListResponse {
   totalReviewCount: number;
 }
 
-// Go APIから口コミ取得
-async function fetchReviews(shopId: string, jwt: string): Promise<ReviewListResponse | null> {
+// Supabase DBから口コミ取得（Go API不要）
+async function fetchReviews(shopId: string): Promise<ReviewListResponse | null> {
   try {
-    const res = await fetch(`${API_URL}/api/shop/${shopId}/review`, {
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${jwt}`,
-      },
-    });
-    if (!res.ok) return null;
-    return await res.json();
+    const supabase = getSupabaseAdmin();
+    const { data: reviews, count } = await supabase
+      .from("reviews")
+      .select("review_id, reviewer_name, star_rating, comment, create_time", { count: "exact" })
+      .eq("shop_id", shopId)
+      .order("create_time", { ascending: false })
+      .limit(50);
+
+    if (!reviews || reviews.length === 0) return null;
+
+    return {
+      reviews: reviews.map((r: any) => ({
+        reviewId: r.review_id,
+        reviewer: { displayName: r.reviewer_name || "匿名" },
+        starRating: r.star_rating,
+        comment: r.comment?.split(/\s*\(Translated by Google\)\s*/)[0] || "",
+        createTime: r.create_time,
+      })),
+      averageRating: 0,
+      totalReviewCount: count || 0,
+    };
   } catch {
     return null;
   }
@@ -115,7 +128,7 @@ ${reviewTexts}
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
 
-    return JSON.parse(jsonMatch[0]);
+    try { return JSON.parse(jsonMatch[0]); } catch { return null; }
   } catch (err) {
     console.error("[analyze] Claude error:", err);
     return null;
@@ -146,7 +159,7 @@ export async function POST(request: NextRequest) {
   for (const shop of shopIds) {
     try {
       // Go APIから口コミ取得
-      const reviewData = await fetchReviews(shop.id, jwt);
+      const reviewData = await fetchReviews(shop.id);
       if (!reviewData || !reviewData.reviews || reviewData.reviews.length === 0) {
         results.push({ shopId: shop.id, shopName: shop.name, status: "no_reviews" });
         continue;

@@ -314,10 +314,10 @@ function generateComments(
   );
 
   // 口コミ
-  const lastDelta = reviewDelta.filter((d) => d !== null);
-  const latestDelta = lastDelta.length > 0 ? lastDelta[lastDelta.length - 1] : 0;
+  const deltaValues = reviewDelta.filter((d): d is number => d !== null);
+  const latestReviewDelta = deltaValues.length > 0 ? deltaValues[deltaValues.length - 1] : 0;
   comments.push(
-    `口コミ件数は${totalReviews.toLocaleString()}件、評価${currentRating}を維持。${currentLabel}は+${latestDelta}件の増加。`
+    `口コミ件数は${totalReviews.toLocaleString()}件、評価${currentRating}を維持。${currentLabel}は+${latestReviewDelta}件の増加。`
   );
 
   // アクション

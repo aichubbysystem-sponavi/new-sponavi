@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useShop } from "@/components/shop-provider";
+import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
 import KpiCard from "@/components/kpi-card";
 
@@ -28,6 +29,8 @@ export default function Dashboard() {
   const shopCount = shops.length;
   const [perf, setPerf] = useState<PerformanceLog[]>([]);
   const [loading, setLoading] = useState(false);
+  const [badAlerts, setBadAlerts] = useState<any[]>([]);
+  const [topPhotos, setTopPhotos] = useState<any[]>([]);
 
   const fetchPerformance = useCallback(async () => {
     if (!selectedShopId) return;
@@ -43,6 +46,24 @@ export default function Dashboard() {
   }, [selectedShopId]);
 
   useEffect(() => { fetchPerformance(); }, [fetchPerformance]);
+
+  // 悪い口コミアラート取得
+  useEffect(() => {
+    supabase
+      .from("bad_review_alerts")
+      .select("*")
+      .eq("confirmed", false)
+      .order("created_at", { ascending: false })
+      .limit(5)
+      .then(({ data }) => setBadAlerts(data || []));
+    // 写真TOP5
+    supabase
+      .from("media")
+      .select("shop_name, google_url, thumbnail_url, category, view_count")
+      .order("view_count", { ascending: false })
+      .limit(5)
+      .then(({ data }) => setTopPhotos(data || []));
+  }, []);
 
   const v = (n: number | null | undefined) => n ?? 0;
   const latest = perf.length > 0 ? perf[perf.length - 1] : null;
@@ -151,6 +172,51 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      {/* 要注意口コミアラート */}
+      {badAlerts.length > 0 && (
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-red-200 mt-6">
+          <h3 className="text-sm font-semibold text-red-600 mb-4">⚠ 要注意口コミ（★3以下）— {badAlerts.length}件</h3>
+          <div className="space-y-3">
+            {badAlerts.map((alert: any) => {
+              const stars = { ONE_STAR: 1, TWO_STARS: 2, THREE_STARS: 3 }[alert.star_rating as string] || 0;
+              return (
+                <div key={alert.id} className="border border-red-100 rounded-lg p-3 bg-red-50/50">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-slate-700">{alert.shop_name}</span>
+                      <span className="text-amber-400 text-xs">{"★".repeat(stars)}{"☆".repeat(5 - stars)}</span>
+                      <span className="text-xs text-slate-500">{alert.reviewer_name}</span>
+                    </div>
+                    <span className="text-xs text-slate-400">{new Date(alert.created_at).toLocaleDateString("ja-JP")}</span>
+                  </div>
+                  {alert.comment && <p className="text-xs text-slate-600 line-clamp-2">{alert.comment}</p>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {/* 写真パフォーマンスTOP5 */}
+      {topPhotos.length > 0 && (
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mt-6">
+          <h3 className="text-sm font-semibold text-slate-500 mb-4">写真パフォーマンス TOP5（閲覧数）</h3>
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+            {topPhotos.map((photo: any, i: number) => (
+              <div key={i} className="text-center">
+                {photo.thumbnail_url ? (
+                  <img src={photo.thumbnail_url} alt="" className="w-full h-24 object-cover rounded-lg mb-2" />
+                ) : (
+                  <div className="w-full h-24 bg-slate-100 rounded-lg mb-2 flex items-center justify-center text-slate-300 text-xs">No image</div>
+                )}
+                <p className="text-lg font-bold text-[#003D6B]">{(photo.view_count || 0).toLocaleString()}</p>
+                <p className="text-[10px] text-slate-400">{photo.shop_name}</p>
+                <p className="text-[10px] text-slate-300">{photo.category}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

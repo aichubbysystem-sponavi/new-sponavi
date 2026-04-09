@@ -218,6 +218,26 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // 悪い口コミ（★3以下）をアラートテーブルに追加
+      const badReviews = reviews.filter((r) => {
+        const rating = { ONE_STAR: 1, TWO_STARS: 2, THREE_STARS: 3 }[r.starRating as string];
+        return rating !== undefined && rating <= 3;
+      });
+      if (badReviews.length > 0) {
+        const alerts = badReviews.map((r) => ({
+          shop_id: shop.id,
+          shop_name: shop.name,
+          review_id: r.reviewId,
+          reviewer_name: r.reviewer?.displayName || "匿名",
+          star_rating: r.starRating,
+          comment: r.comment?.split(/\s*\(Translated by Google\)\s*/)[0] || null,
+        }));
+        await supabase
+          .from("bad_review_alerts")
+          .upsert(alerts, { onConflict: "review_id" })
+          .then(({ error }) => { if (error) console.error("[sync-reviews] Alert upsert error:", error); });
+      }
+
       totalSynced += reviews.length;
       results.push({ shopName: shop.name, count: reviews.length, status: "success" });
     } catch (err) {
