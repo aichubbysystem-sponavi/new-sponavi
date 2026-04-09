@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300; // 5分（多数店舗対応）
+export const maxDuration = 60; // Vercel Hobby上限
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5555";
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
@@ -39,7 +39,7 @@ async function fetchReviews(shopId: string): Promise<ReviewListResponse | null> 
       .select("review_id, reviewer_name, star_rating, comment, create_time", { count: "exact" })
       .eq("shop_id", shopId)
       .order("create_time", { ascending: false })
-      .limit(50);
+      .limit(20);
 
     if (!reviews || reviews.length === 0) return null;
 
@@ -115,8 +115,11 @@ ${reviewTexts}
 }`;
 
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 45000); // 45秒タイムアウト
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
+      signal: controller.signal,
       headers: {
         "Content-Type": "application/json",
         "x-api-key": ANTHROPIC_API_KEY,
@@ -128,6 +131,8 @@ ${reviewTexts}
         messages: [{ role: "user", content: prompt }],
       }),
     });
+
+    clearTimeout(timeout);
 
     if (!res.ok) {
       console.error("[analyze] Claude API error:", res.status, await res.text());
