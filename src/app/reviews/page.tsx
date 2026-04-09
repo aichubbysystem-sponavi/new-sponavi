@@ -80,22 +80,36 @@ export default function ReviewsPage() {
     setSyncing(true);
     let totalSynced = 0;
     let totalErrors = 0;
+    let stoppedAt = 0;
     const shopIds = shops.map((s) => s.id);
     const batchSize = 10;
 
     for (let i = 0; i < shopIds.length; i += batchSize) {
       const batch = shopIds.slice(i, i + batchSize);
-      setSyncMsg(`全店舗同期中... ${i}/${shopIds.length}店舗完了`);
+      setSyncMsg(`全店舗同期中... ${i}/${shopIds.length}店舗完了（${totalSynced}件取得済み）`);
       try {
         const res = await api.post("/api/report/sync-reviews", { shopIds: batch }, { timeout: 120000 });
         totalSynced += res.data.totalSynced || 0;
         totalErrors += res.data.totalErrors || 0;
-      } catch {
-        totalErrors += batch.length;
+        stoppedAt = i + batchSize;
+
+        // エラーが5件以上なら中断（レート制限の可能性）
+        if (totalErrors >= 5) {
+          setSyncMsg(`⚠ レート制限の可能性があるため中断しました。${stoppedAt}/${shopIds.length}店舗完了、${totalSynced}件取得済み。しばらく待ってから再実行してください。`);
+          await fetchReviews();
+          setSyncing(false);
+          return;
+        }
+      } catch (e: any) {
+        stoppedAt = i;
+        setSyncMsg(`⚠ ${stoppedAt}/${shopIds.length}店舗で中断しました（${totalSynced}件取得済み）。原因: ${e?.message || "タイムアウト"}。しばらく待ってから再実行してください。`);
+        await fetchReviews();
+        setSyncing(false);
+        return;
       }
     }
 
-    setSyncMsg(`${totalSynced}件の口コミを同期しました（${shopIds.length}店舗、エラー${totalErrors}件）`);
+    setSyncMsg(`✓ ${totalSynced}件の口コミを同期しました（${shopIds.length}店舗完了、エラー${totalErrors}件）`);
     await fetchReviews();
     setSyncing(false);
   };
