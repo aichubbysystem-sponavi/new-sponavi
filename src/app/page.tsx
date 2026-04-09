@@ -213,7 +213,7 @@ export default function Dashboard() {
       {/* 写真パフォーマンスTOP5 */}
       {topPhotos.length > 0 && (
         <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mt-6">
-          <h3 className="text-sm font-semibold text-slate-500 mb-4">写真パフォーマンス TOP5（閲覧数）</h3>
+          <h3 className="text-sm font-semibold text-slate-500 mb-4">GBP写真一覧</h3>
           <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
             {topPhotos.map((photo: any, i: number) => (
               <div key={i} className="text-center">
@@ -222,9 +222,8 @@ export default function Dashboard() {
                 ) : (
                   <div className="w-full h-24 bg-slate-100 rounded-lg mb-2 flex items-center justify-center text-slate-300 text-xs">No image</div>
                 )}
-                <p className="text-lg font-bold text-[#003D6B]">{(photo.view_count || 0).toLocaleString()}</p>
-                <p className="text-[10px] text-slate-400">{photo.shop_name}</p>
-                <p className="text-[10px] text-slate-300">{photo.category}</p>
+                <p className="text-xs font-medium text-slate-600 truncate">{photo.shop_name}</p>
+                <p className="text-[10px] text-slate-400">{photo.category}</p>
               </div>
             ))}
           </div>
