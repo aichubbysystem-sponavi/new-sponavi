@@ -56,13 +56,16 @@ function addHeaders(response: NextResponse, request: NextRequest, isReport: bool
     ? "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com"
     : "style-src 'self' 'unsafe-inline'";
 
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://kxxwspavskhhjtiixcep.supabase.co";
+  const supabaseWs = supabaseUrl.replace("https://", "wss://");
+
   const csp = [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-eval' 'unsafe-inline'",
+    "script-src 'self' 'unsafe-inline'",  // unsafe-eval削除（Chart.js v4はeval不要）
     styleSrc,
     "img-src 'self' data: blob: https:",
     fontSrc,
-    `connect-src 'self' https://*.supabase.co wss://*.supabase.co ${apiUrl}`,
+    `connect-src 'self' ${supabaseUrl} ${supabaseWs} https://api.anthropic.com ${apiUrl}`,
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",

@@ -1,5 +1,6 @@
 "use client";
 
+import DOMPurify from "isomorphic-dompurify";
 import Link from "next/link";
 import {
   Chart as ChartJS,
@@ -426,7 +427,7 @@ export default function ReportClient({
                   <span style={{ fontSize: 16, color: "#888", marginLeft: 8 }}>/ 5.0（{shop.totalReviews.toLocaleString()}件）</span>
                 </div>
               </div>
-              <p style={{ fontSize: 15, lineHeight: 1.9, color: "#444", margin: 0 }} dangerouslySetInnerHTML={{ __html: reviewAnalysis.summary }} />
+              <p style={{ fontSize: 15, lineHeight: 1.9, color: "#444", margin: 0 }} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(reviewAnalysis.summary, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
             </div>
           </div>
         </div>
@@ -442,7 +443,7 @@ export default function ReportClient({
             <h3 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", marginBottom: 14 }}>{curLabel} 総評</h3>
             <ul style={{ paddingLeft: 20 }}>
               {comments.map((c, i) => (
-                <li key={i} style={{ fontSize: 14, lineHeight: 2, color: "#444" }} dangerouslySetInnerHTML={{ __html: c }} />
+                <li key={i} style={{ fontSize: 14, lineHeight: 2, color: "#444" }} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(c, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
               ))}
             </ul>
           </div>

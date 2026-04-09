@@ -135,7 +135,7 @@ ${reviewTexts}
     clearTimeout(timeout);
 
     if (!res.ok) {
-      console.error("[analyze] Claude API error:", res.status, await res.text());
+      console.error("[analyze] Claude API error:", res.status, res.statusText);
       return null;
     }
 
@@ -153,12 +153,12 @@ ${reviewTexts}
 
 // POST /api/report/analyze
 export async function POST(request: NextRequest) {
-  // 認証チェック
-  const authHeader = request.headers.get("authorization");
-  if (!authHeader?.startsWith("Bearer ")) {
+  // 認証チェック（JWT署名検証）
+  const { verifyAuth } = await import("@/lib/auth-verify");
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) {
     return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   }
-  const jwt = authHeader.replace("Bearer ", "");
 
   // リクエスト解析
   const body = await request.json();

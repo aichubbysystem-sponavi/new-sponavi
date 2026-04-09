@@ -69,7 +69,7 @@ async function getOAuthToken(): Promise<string | null> {
     });
 
     if (!res.ok) {
-      console.error("[sync-reviews] Token refresh failed:", await res.text());
+      console.error("[sync-reviews] Token refresh failed:", res.status, res.statusText);
       return null;
     }
 
@@ -147,8 +147,9 @@ async function fetchAllReviews(
 
 // POST /api/report/sync-reviews
 export async function POST(request: NextRequest) {
-  const authHeader = request.headers.get("authorization");
-  if (!authHeader?.startsWith("Bearer ")) {
+  const { verifyAuth } = await import("@/lib/auth-verify");
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) {
     return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   }
 
