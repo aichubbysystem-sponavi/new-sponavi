@@ -51,7 +51,7 @@ export default function ReviewAnalysisPage() {
     for (let i = 0; i < selectedShops.length; i += batchSize) {
       const batch = selectedShops.slice(i, i + batchSize);
       try {
-        const res = await api.post("/api/report/analyze", { shops: batch });
+        const res = await api.post("/api/report/analyze", { shops: batch }, { timeout: 120000 });
         const data = res.data;
         allResults.push(...(data.results || []));
         setResults([...allResults]);
