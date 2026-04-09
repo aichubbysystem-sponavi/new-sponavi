@@ -16,6 +16,7 @@ export default function ReviewAnalysisPage() {
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
   const [results, setResults] = useState<AnalysisResult[]>([]);
+  const [forceReanalyze, setForceReanalyze] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const toggleSelect = (id: string) => {
@@ -51,7 +52,7 @@ export default function ReviewAnalysisPage() {
       const shop = selectedShops[i];
       setProgress({ current: i, total: selectedShops.length });
       try {
-        const res = await api.post("/api/report/analyze", { shops: [shop] }, { timeout: 60000 });
+        const res = await api.post("/api/report/analyze", { shops: [shop], force: forceReanalyze }, { timeout: 60000 });
         const data = res.data;
         allResults.push(...(data.results || []));
         setResults([...allResults]);
@@ -122,6 +123,10 @@ export default function ReviewAnalysisPage() {
             )}
           </button>
         </div>
+        <label className="flex items-center gap-2 mt-2 ml-auto cursor-pointer">
+          <input type="checkbox" checked={forceReanalyze} onChange={(e) => setForceReanalyze(e.target.checked)} className="w-3.5 h-3.5 rounded" />
+          <span className="text-xs text-slate-500">分析済みも再分析する</span>
+        </label>
       </div>
 
       {/* 進捗・結果 */}

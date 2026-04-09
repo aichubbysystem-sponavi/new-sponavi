@@ -163,6 +163,7 @@ export async function POST(request: NextRequest) {
   // リクエスト解析
   const body = await request.json();
   const shopIds: { id: string; name: string }[] = body.shops || [];
+  const forceReanalyze: boolean = body.force || false;
 
   if (shopIds.length === 0) {
     return NextResponse.json({ error: "店舗が指定されていません" }, { status: 400 });
@@ -183,8 +184,8 @@ export async function POST(request: NextRequest) {
 
   // 各店舗を逐次処理
   for (const shop of shopIds) {
-    // 分析済みならスキップ
-    if (analyzedNames.has(shop.name)) {
+    // 分析済みならスキップ（forceの場合は再分析）
+    if (!forceReanalyze && analyzedNames.has(shop.name)) {
       results.push({ shopId: shop.id, shopName: shop.name, status: "already_done" });
       continue;
     }
