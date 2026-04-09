@@ -47,15 +47,16 @@ export default function Dashboard() {
 
   useEffect(() => { fetchPerformance(); }, [fetchPerformance]);
 
-  // 悪い口コミアラート取得
+  // 悪い口コミアラート取得（選択中の店舗でフィルタ、なければ全店舗）
   useEffect(() => {
-    supabase
+    let query = supabase
       .from("bad_review_alerts")
       .select("*")
       .eq("confirmed", false)
       .order("created_at", { ascending: false })
-      .limit(5)
-      .then(({ data }) => setBadAlerts(data || []));
+      .limit(5);
+    if (selectedShopId) query = query.eq("shop_id", selectedShopId);
+    query.then(({ data }) => setBadAlerts(data || []));
     // 写真TOP5
     supabase
       .from("media")
@@ -63,7 +64,7 @@ export default function Dashboard() {
       .order("view_count", { ascending: false })
       .limit(5)
       .then(({ data }) => setTopPhotos(data || []));
-  }, []);
+  }, [selectedShopId]);
 
   const v = (n: number | null | undefined) => n ?? 0;
   const latest = perf.length > 0 ? perf[perf.length - 1] : null;
@@ -190,7 +191,11 @@ export default function Dashboard() {
                     </div>
                     <span className="text-xs text-slate-400">{new Date(alert.created_at).toLocaleDateString("ja-JP")}</span>
                   </div>
-                  {alert.comment && <p className="text-xs text-slate-600 line-clamp-2">{alert.comment}</p>}
+                  {alert.comment && <p className="text-xs text-slate-600 line-clamp-2">{
+                    alert.comment.includes("(Original)")
+                      ? alert.comment.split("(Original)").pop()?.trim()
+                      : alert.comment.split(/\s*\(Translated by Google\)\s*/)[0] || alert.comment
+                  }</p>}
                 </div>
               );
             })}

@@ -230,7 +230,7 @@ export async function POST(request: NextRequest) {
           review_id: r.reviewId,
           reviewer_name: r.reviewer?.displayName || "匿名",
           star_rating: r.starRating,
-          comment: r.comment?.split(/\s*\(Translated by Google\)\s*/)[0] || null,
+          comment: r.comment || null,
         }));
         await supabase
           .from("bad_review_alerts")
