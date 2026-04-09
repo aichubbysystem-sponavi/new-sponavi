@@ -114,10 +114,11 @@ export default function ReviewsPage() {
     setSyncing(false);
   };
 
-  const starToNum = (s: string) => {
+  const starToNum = (s: string | null | undefined) => {
+    if (!s) return 0;
     const map: Record<string, number> = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5 };
-    const num = s.replace("_STAR", "").replace("_STARS", "");
-    return map[num] || 0;
+    const normalized = s.toUpperCase().replace(/_STARS?/, "");
+    return map[normalized] || 0;
   };
 
   const totalPages = Math.ceil(totalCount / PER_PAGE);
@@ -204,8 +205,8 @@ export default function ReviewsPage() {
                 </div>
                 {review.comment && <p className="text-sm text-slate-600 mb-3">{
                   review.comment.includes("(Original)")
-                    ? review.comment.split("(Original)").pop()?.trim()
-                    : review.comment.split(/\s*\(Translated by Google\)\s*/)[0] || review.comment
+                    ? (review.comment.split("(Original)").pop()?.trim() || review.comment)
+                    : (review.comment.split(/\s*\(Translated by Google\)\s*/)[0] || review.comment)
                 }</p>}
                 {review.reply_comment && (
                   <div className="bg-blue-50 rounded-lg p-3 border border-blue-100">

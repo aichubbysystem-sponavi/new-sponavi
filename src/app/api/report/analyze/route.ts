@@ -43,16 +43,27 @@ async function fetchReviews(shopId: string): Promise<ReviewListResponse | null> 
 
     if (!reviews || reviews.length === 0) return null;
 
+    // 平均評価を算出
+    const ratingMap: Record<string, number> = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5, ONE_STAR: 1, TWO_STARS: 2, THREE_STARS: 3, FOUR_STARS: 4, FIVE_STARS: 5 };
+    const ratings = reviews.map((r: any) => ratingMap[(r.star_rating || "").toUpperCase()] || 0).filter((r: number) => r > 0);
+    const avgRating = ratings.length > 0 ? Math.round((ratings.reduce((a: number, b: number) => a + b, 0) / ratings.length) * 10) / 10 : 0;
+
     return {
-      reviews: reviews.map((r: any) => ({
-        reviewId: r.review_id,
-        reviewer: { displayName: r.reviewer_name || "匿名" },
-        starRating: r.star_rating,
-        comment: r.comment?.split(/\s*\(Translated by Google\)\s*/)[0] || "",
-        createTime: r.create_time,
-      })),
-      averageRating: 0,
-      totalReviewCount: count || 0,
+      reviews: reviews.map((r: any) => {
+        const comment = r.comment || "";
+        const displayComment = comment.includes("(Original)")
+          ? (comment.split("(Original)").pop()?.trim() || comment)
+          : comment.split(/\s*\(Translated by Google\)\s*/)[0] || comment;
+        return {
+          reviewId: r.review_id,
+          reviewer: { displayName: r.reviewer_name || "匿名" },
+          starRating: (r.star_rating || "").toUpperCase().replace(/_STARS?/, ""),
+          comment: displayComment,
+          createTime: r.create_time,
+        };
+      }),
+      averageRating: avgRating,
+      totalReviewCount: count || reviews.length,
     };
   } catch {
     return null;

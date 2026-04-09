@@ -57,13 +57,14 @@ export default function Dashboard() {
       .limit(5);
     if (selectedShopId) query = query.eq("shop_id", selectedShopId);
     query.then(({ data }) => setBadAlerts(data || []));
-    // 写真TOP5
-    supabase
+    // 写真TOP5（選択店舗でフィルタ）
+    let mediaQuery = supabase
       .from("media")
       .select("shop_name, google_url, thumbnail_url, category, view_count")
       .order("view_count", { ascending: false })
-      .limit(5)
-      .then(({ data }) => setTopPhotos(data || []));
+      .limit(5);
+    if (selectedShopId) mediaQuery = mediaQuery.eq("shop_id", selectedShopId);
+    mediaQuery.then(({ data }) => setTopPhotos(data || []));
   }, [selectedShopId]);
 
   const v = (n: number | null | undefined) => n ?? 0;
@@ -180,7 +181,8 @@ export default function Dashboard() {
           <h3 className="text-sm font-semibold text-red-600 mb-4">⚠ 要注意口コミ（★3以下）— {badAlerts.length}件</h3>
           <div className="space-y-3">
             {badAlerts.map((alert: any) => {
-              const stars = { ONE: 1, TWO: 2, THREE: 3, ONE_STAR: 1, TWO_STARS: 2, THREE_STARS: 3 }[alert.star_rating as string] || 0;
+              const ratingMap: Record<string, number> = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5, ONE_STAR: 1, TWO_STARS: 2, THREE_STARS: 3, FOUR_STARS: 4, FIVE_STARS: 5 };
+              const stars = ratingMap[(alert.star_rating || "").toUpperCase()] || 0;
               return (
                 <div key={alert.id} className="border border-red-100 rounded-lg p-3 bg-red-50/50">
                   <div className="flex items-center justify-between mb-1">

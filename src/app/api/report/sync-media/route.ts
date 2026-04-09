@@ -138,7 +138,7 @@ export async function POST(request: NextRequest) {
         google_url: m.googleUrl || null,
         thumbnail_url: m.thumbnailUrl || null,
         category: m.locationAssociation?.category || "ADDITIONAL",
-        view_count: parseInt(m.insights?.viewCount || "0", 10) || 0,
+        view_count: Math.max(0, parseInt(m.insights?.viewCount || "0", 10) || 0),
         description: m.description || null,
         create_time: m.createTime || null,
         synced_at: new Date().toISOString(),

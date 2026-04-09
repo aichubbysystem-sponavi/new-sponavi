@@ -57,8 +57,8 @@ export default function ReviewAnalysisPage() {
         setResults([...allResults]);
         setProgress({ current: Math.min(i + batchSize, selectedShops.length), total: selectedShops.length });
       } catch (err: any) {
-        setError(err.userMessage || "分析中にエラーが発生しました");
-        break;
+        setError(`バッチ ${Math.floor(i / batchSize) + 1} でエラー: ${err?.userMessage || err?.message || "不明"}（続行中...）`);
+        // breakしない — 残りのバッチを続行
       }
     }
 
