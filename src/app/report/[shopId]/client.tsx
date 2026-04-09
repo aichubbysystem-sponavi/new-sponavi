@@ -426,7 +426,7 @@ export default function ReportClient({
                   <span style={{ fontSize: 16, color: "#888", marginLeft: 8 }}>/ 5.0（{shop.totalReviews.toLocaleString()}件）</span>
                 </div>
               </div>
-              <p style={{ fontSize: 15, lineHeight: 1.9, color: "#444", margin: 0 }}>{reviewAnalysis.summary}</p>
+              <p style={{ fontSize: 15, lineHeight: 1.9, color: "#444", margin: 0 }} dangerouslySetInnerHTML={{ __html: reviewAnalysis.summary }} />
             </div>
           </div>
         </div>
