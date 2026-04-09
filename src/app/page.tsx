@@ -180,7 +180,7 @@ export default function Dashboard() {
           <h3 className="text-sm font-semibold text-red-600 mb-4">⚠ 要注意口コミ（★3以下）— {badAlerts.length}件</h3>
           <div className="space-y-3">
             {badAlerts.map((alert: any) => {
-              const stars = { ONE_STAR: 1, TWO_STARS: 2, THREE_STARS: 3 }[alert.star_rating as string] || 0;
+              const stars = { ONE: 1, TWO: 2, THREE: 3, ONE_STAR: 1, TWO_STARS: 2, THREE_STARS: 3 }[alert.star_rating as string] || 0;
               return (
                 <div key={alert.id} className="border border-red-100 rounded-lg p-3 bg-red-50/50">
                   <div className="flex items-center justify-between mb-1">
