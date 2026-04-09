@@ -51,6 +51,8 @@ export async function getStoredAnalysis(
         summary: stored.summary || "",
       },
       comments: stored.comments || [],
+      rating: stored.average_rating || 0,
+      reviewCount: stored.review_count || 0,
       source: "db",
     };
   } catch {
@@ -104,7 +106,7 @@ export async function getReviewAnalysis(
   totalReviews: number,
   reviewDelta: number,
   kpiData: { searchPct: string; mapPct: string; actionPct: string }
-): Promise<{ analysis: ReviewAnalysis; comments: string[]; source: "db" | "template" }> {
+): Promise<{ analysis: ReviewAnalysis; comments: string[]; rating?: number; reviewCount?: number; source: "db" | "template" }> {
   // まずDBから取得を試行
   const stored = await getStoredAnalysis(shopName);
   if (stored) return stored;

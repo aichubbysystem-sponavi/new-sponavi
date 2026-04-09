@@ -455,6 +455,14 @@ export async function buildReportData(
   const reviewAnalysis = analyzed.analysis;
   const comments = analyzed.comments;
 
+  // DBの評価・口コミ数があればSpreadsheetデータを上書き
+  if (analyzed.source === "db" && analyzed.rating && analyzed.rating > 0) {
+    currentRating = analyzed.rating;
+  }
+  if (analyzed.source === "db" && analyzed.reviewCount && analyzed.reviewCount > 0) {
+    totalReviews = analyzed.reviewCount;
+  }
+
   return {
     shop: {
       name: shopName,
