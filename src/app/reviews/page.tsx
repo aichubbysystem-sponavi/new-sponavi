@@ -114,6 +114,19 @@ export default function ReviewsPage() {
     setSyncing(false);
   };
 
+  const handleSyncMedia = async () => {
+    setSyncing(true);
+    setSyncMsg("写真を同期中...");
+    try {
+      const res = await api.post("/api/report/sync-media", { shopIds: selectedShopId ? [selectedShopId] : [] }, { timeout: 300000 });
+      setSyncMsg(`✓ ${res.data.totalSynced}枚の写真を同期しました（${res.data.shops}店舗）`);
+    } catch (e: any) {
+      setSyncMsg(`写真同期に失敗しました: ${e?.response?.data?.error || e?.message || "不明なエラー"}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const starToNum = (s: string | null | undefined) => {
     if (!s) return 0;
     const map: Record<string, number> = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5 };
@@ -151,6 +164,16 @@ export default function ReviewsPage() {
               style={{ color: syncing ? undefined : "#fff" }}
             >
               {syncing ? "同期中..." : "全店舗同期"}
+            </button>
+            <button
+              onClick={handleSyncMedia}
+              disabled={syncing}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                syncing ? "bg-slate-200 text-slate-400" : "bg-purple-600 hover:bg-purple-700"
+              }`}
+              style={{ color: syncing ? undefined : "#fff" }}
+            >
+              {syncing ? "同期中..." : "写真同期"}
             </button>
           </div>
         </div>
