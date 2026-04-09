@@ -202,7 +202,7 @@ export default function ReviewsPage() {
                   </div>
                   <span className="text-xs text-slate-400">{new Date(review.create_time).toLocaleDateString("ja-JP")}</span>
                 </div>
-                {review.comment && <p className="text-sm text-slate-600 mb-3">{review.comment}</p>}
+                {review.comment && <p className="text-sm text-slate-600 mb-3">{review.comment.split(/\s*\(Translated by Google\)\s*/)[0]}</p>}
                 {review.reply_comment && (
                   <div className="bg-blue-50 rounded-lg p-3 border border-blue-100">
                     <p className="text-xs text-blue-500 font-semibold mb-1">返信済み</p>
