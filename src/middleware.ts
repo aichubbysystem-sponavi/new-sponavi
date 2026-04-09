@@ -5,9 +5,72 @@ import type { NextRequest } from "next/server";
 const REPORT_HOSTNAME = "report.new-spotlight-navigator.com";
 const MAIN_HOSTNAME = "new-spotlight-navigator.com";
 
+// === 壁10: APIレート制限 ===
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+const RATE_LIMIT = 60; // 1分あたり60リクエスト
+const RATE_WINDOW = 60 * 1000; // 1分
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = rateLimitMap.get(ip);
+  if (!entry || now > entry.resetAt) {
+    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_WINDOW });
+    return true;
+  }
+  entry.count++;
+  return entry.count <= RATE_LIMIT;
+}
+
+// === 壁11: ログインブルートフォース防止 ===
+const loginAttemptMap = new Map<string, { count: number; blockedUntil: number }>();
+const MAX_LOGIN_ATTEMPTS = 10; // 10回まで
+const LOGIN_BLOCK_DURATION = 5 * 60 * 1000; // 5分ブロック
+
+function checkLoginAttempt(ip: string): boolean {
+  const now = Date.now();
+  const entry = loginAttemptMap.get(ip);
+  if (!entry) {
+    loginAttemptMap.set(ip, { count: 1, blockedUntil: 0 });
+    return true;
+  }
+  if (now < entry.blockedUntil) return false;
+  if (entry.count >= MAX_LOGIN_ATTEMPTS) {
+    entry.blockedUntil = now + LOGIN_BLOCK_DURATION;
+    entry.count = 0;
+    return false;
+  }
+  entry.count++;
+  return true;
+}
+
+// 許可されたオリジン
+const ALLOWED_ORIGINS = [
+  `https://${MAIN_HOSTNAME}`,
+  `https://www.${MAIN_HOSTNAME}`,
+  `https://${REPORT_HOSTNAME}`,
+  "https://new-sponavi.vercel.app",
+  "http://localhost:3000",
+  "http://localhost:3001",
+];
+
 export function middleware(request: NextRequest) {
   const hostname = request.headers.get("host") || "";
   const { pathname } = request.nextUrl;
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "unknown";
+
+  // === 壁10: APIレート制限（/api/* パス） ===
+  if (pathname.startsWith("/api/")) {
+    if (!checkRateLimit(ip)) {
+      return NextResponse.json({ error: "リクエストが多すぎます。しばらく待ってからお試しください。" }, { status: 429 });
+    }
+  }
+
+  // === 壁11: ログインブルートフォース防止 ===
+  if (pathname === "/login" && request.method === "POST") {
+    if (!checkLoginAttempt(ip)) {
+      return NextResponse.json({ error: "ログイン試行回数が上限に達しました。5分後にお試しください。" }, { status: 429 });
+    }
+  }
   const isReportSubdomain = hostname === REPORT_HOSTNAME || hostname.startsWith("report.localhost");
 
   // === サブドメインルーティング ===
@@ -76,6 +139,15 @@ function addHeaders(response: NextResponse, request: NextRequest, isReport: bool
   // サーバー情報の隠蔽
   response.headers.set("X-Powered-By", "");
   response.headers.delete("X-Powered-By");
+
+  // === 壁12: CORS制限 ===
+  const origin = request.headers.get("origin");
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    response.headers.set("Access-Control-Allow-Origin", origin);
+    response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH");
+    response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    response.headers.set("Access-Control-Allow-Credentials", "true");
+  }
 
   return response;
 }
