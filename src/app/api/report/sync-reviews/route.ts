@@ -231,6 +231,7 @@ export async function POST(request: NextRequest) {
           reviewer_name: r.reviewer?.displayName || "匿名",
           star_rating: r.starRating,
           comment: r.comment || null,
+          reply_comment: r.reviewReply?.comment || null,
         }));
         await supabase
           .from("bad_review_alerts")

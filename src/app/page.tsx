@@ -196,6 +196,12 @@ export default function Dashboard() {
                       ? alert.comment.split("(Original)").pop()?.trim()
                       : alert.comment.split(/\s*\(Translated by Google\)\s*/)[0] || alert.comment
                   }</p>}
+                  {alert.reply_comment && (
+                    <div className="mt-1.5 bg-blue-50 rounded p-2 border border-blue-100">
+                      <p className="text-[10px] text-blue-500 font-semibold mb-0.5">返信済み</p>
+                      <p className="text-xs text-blue-700 line-clamp-2">{alert.reply_comment}</p>
+                    </div>
+                  )}
                 </div>
               );
             })}
