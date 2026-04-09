@@ -171,10 +171,14 @@ export async function POST(request: NextRequest) {
   const supabase = getSupabaseAdmin();
   const results: { shopId: string; shopName: string; status: string }[] = [];
 
-  // 分析済み店舗を取得（スキップ用）
+  // 今月分析済み店舗を取得（スキップ用）
+  const thisMonthStart = new Date();
+  thisMonthStart.setDate(1);
+  thisMonthStart.setHours(0, 0, 0, 0);
   const { data: existingAnalysis } = await supabase
     .from("report_analysis")
-    .select("shop_name");
+    .select("shop_name, analyzed_at")
+    .gte("analyzed_at", thisMonthStart.toISOString());
   const analyzedNames = new Set((existingAnalysis || []).map((a: any) => a.shop_name));
 
   // 各店舗を逐次処理
