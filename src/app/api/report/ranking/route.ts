@@ -166,7 +166,7 @@ export async function GET(request: NextRequest) {
     .eq("shop_id", shopId)
     .eq("is_display", true)
     .order("searched_at", { ascending: false })
-    .limit(100);
+    .limit(500);
 
   return NextResponse.json(data || []);
 }

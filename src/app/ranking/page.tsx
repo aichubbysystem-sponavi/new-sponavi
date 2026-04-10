@@ -292,9 +292,67 @@ export default function RankingPage() {
             </div>
           )}
 
+          {/* 順位推移サマリー */}
+          {history.length > 0 && (() => {
+            // キーワードごとにグループ化して最新と前回を比較
+            const groups = new Map<string, RankLog[]>();
+            history.forEach((log) => {
+              const kw = (() => { try { return JSON.parse(log.search_words).join(", "); } catch { return log.search_words; } })();
+              if (!groups.has(kw)) groups.set(kw, []);
+              groups.get(kw)!.push(log);
+            });
+
+            const summaries = Array.from(groups.entries()).map(([kw, logs]) => {
+              const sorted = [...logs].sort((a, b) => new Date(b.searched_at).getTime() - new Date(a.searched_at).getTime());
+              const latest = sorted[0];
+              const prev = sorted.length >= 2 ? sorted[1] : null;
+              const change = prev && latest.rank > 0 && prev.rank > 0 ? prev.rank - latest.rank : null;
+              return { keyword: kw, latest, prev, change, history: sorted.slice(0, 10) };
+            });
+
+            return (
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-6">
+                <h3 className="text-sm font-semibold text-slate-500 mb-4">キーワード順位サマリー</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {summaries.map((s, i) => (
+                    <div key={i} className="border border-slate-100 rounded-xl p-4">
+                      <p className="text-sm font-medium text-slate-700 mb-2">{s.keyword}</p>
+                      <div className="flex items-end gap-3 mb-3">
+                        <span className={`text-3xl font-bold ${s.latest.rank > 0 ? (s.latest.rank <= 3 ? "text-emerald-600" : s.latest.rank <= 10 ? "text-blue-600" : s.latest.rank <= 20 ? "text-amber-600" : "text-orange-600") : "text-slate-400"}`}>
+                          {s.latest.rank > 0 ? `${s.latest.rank}位` : "圏外"}
+                        </span>
+                        {s.change !== null && (
+                          <span className={`text-sm font-semibold mb-1 ${s.change > 0 ? "text-emerald-600" : s.change < 0 ? "text-red-600" : "text-slate-400"}`}>
+                            {s.change > 0 ? `↑${s.change}` : s.change < 0 ? `↓${Math.abs(s.change)}` : "→"}
+                          </span>
+                        )}
+                      </div>
+                      {/* ミニ推移バー */}
+                      <div className="flex gap-1 items-end h-10">
+                        {s.history.slice().reverse().map((h, j) => {
+                          const val = h.rank > 0 ? Math.max(5, 100 - h.rank) : 5;
+                          const color = h.rank > 0 ? (h.rank <= 3 ? "bg-emerald-400" : h.rank <= 10 ? "bg-blue-400" : h.rank <= 20 ? "bg-amber-400" : "bg-orange-400") : "bg-slate-200";
+                          return (
+                            <div key={j} className="flex-1 flex flex-col items-center gap-0.5" title={`${new Date(h.searched_at).toLocaleDateString("ja-JP")}: ${h.rank > 0 ? h.rank + "位" : "圏外"}`}>
+                              <div className={`w-full rounded-sm ${color}`} style={{ height: `${val}%` }} />
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-1">
+                        最終計測: {new Date(s.latest.searched_at).toLocaleString("ja-JP")}
+                        {s.prev && ` | 前回: ${s.prev.rank > 0 ? s.prev.rank + "位" : "圏外"}`}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* 計測履歴 */}
           <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
-            <h3 className="text-sm font-semibold text-slate-500 mb-4">計測履歴（最新100件）</h3>
+            <h3 className="text-sm font-semibold text-slate-500 mb-4">全計測履歴</h3>
             {history.length === 0 ? (
               <p className="text-slate-400 text-sm text-center py-6">計測履歴がありません</p>
             ) : (
@@ -303,11 +361,12 @@ export default function RankingPage() {
                   <tr className="border-b border-slate-200">
                     <th className="text-left py-2 px-3 text-slate-500 font-medium">キーワード</th>
                     <th className="text-center py-2 px-3 text-slate-500 font-medium">順位</th>
+                    <th className="text-center py-2 px-3 text-slate-500 font-medium">座標</th>
                     <th className="text-right py-2 px-3 text-slate-500 font-medium">計測日時</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {history.map((log) => {
+                  {history.slice(0, 50).map((log) => {
                     const kws = (() => { try { return JSON.parse(log.search_words).join(", "); } catch { return log.search_words; } })();
                     return (
                       <tr key={log.id} className="border-b border-slate-50 hover:bg-slate-50">
@@ -316,6 +375,9 @@ export default function RankingPage() {
                           <span className={`font-bold ${log.rank > 0 ? (log.rank <= 3 ? "text-emerald-600" : log.rank <= 10 ? "text-blue-600" : "text-amber-600") : "text-slate-400"}`}>
                             {log.rank > 0 ? `${log.rank}位` : "圏外"}
                           </span>
+                        </td>
+                        <td className="py-2 px-3 text-center text-xs text-slate-400">
+                          {log.gbp_latitude ? `${log.gbp_latitude.toFixed(2)}, ${log.gbp_longitude.toFixed(2)}` : "-"}
                         </td>
                         <td className="py-2 px-3 text-right text-xs text-slate-400">{new Date(log.searched_at).toLocaleString("ja-JP")}</td>
                       </tr>
