@@ -135,7 +135,8 @@ export async function PUT(request: NextRequest) {
   const { shopId, keyword, rank, lat, lng } = body;
 
   const supabase = getSupabase();
-  await supabase.from("ranking_search_logs").insert({
+  const { error: insertErr } = await supabase.from("ranking_search_logs").insert({
+    id: crypto.randomUUID(),
     shop_id: shopId,
     search_words: JSON.stringify([keyword]),
     searched_at: new Date().toISOString(),
@@ -146,6 +147,7 @@ export async function PUT(request: NextRequest) {
     radius: 2000,
     is_display: true,
   });
+  if (insertErr) console.error("[ranking] Insert error:", insertErr.message);
 
   return NextResponse.json({ success: true });
 }
