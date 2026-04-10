@@ -95,8 +95,12 @@ export async function POST(request: NextRequest) {
     const pos = startPosition || 0;
     let rank = 0;
 
+    const matchNames: string[] = [];
     for (let i = 0; i < places.length; i++) {
-      if (places[i].displayName?.text === targetName) {
+      const placeName = places[i].displayName?.text || "";
+      matchNames.push(placeName);
+      // 完全一致 or 部分一致（店舗名を含む）
+      if (placeName === targetName || placeName.includes(targetName) || targetName.includes(placeName)) {
         rank = pos + i + 1;
         break;
       }
@@ -109,6 +113,7 @@ export async function POST(request: NextRequest) {
       nextPosition: pos + places.length,
       placesCount: places.length,
       shopName: targetName,
+      topResults: matchNames.slice(0, 5),
     });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || "検索エラー" }, { status: 500 });
