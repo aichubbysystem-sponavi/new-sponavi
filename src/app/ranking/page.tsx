@@ -14,6 +14,8 @@ interface RankResult {
   keyword: string;
   point: string;
   rank: number;
+  shopName?: string;
+  topResults?: string[];
 }
 
 interface RankLog {
@@ -40,9 +42,13 @@ export default function RankingPage() {
   const [history, setHistory] = useState<RankLog[]>([]);
   const [error, setError] = useState("");
 
-  // 店舗のGBP座標をデフォルト地点として追加
+  // 店舗ごとの計測地点をlocalStorageから読み込み/保存
   useEffect(() => {
-    if (selectedShop) {
+    if (!selectedShopId) return;
+    const saved = localStorage.getItem(`ranking-points-${selectedShopId}`);
+    if (saved) {
+      try { setPoints(JSON.parse(saved)); } catch { setPoints([]); }
+    } else if (selectedShop) {
       const lat = (selectedShop as any).gbp_latitude;
       const lng = (selectedShop as any).gbp_longitude;
       if (lat && lng && lat !== 0) {
@@ -51,7 +57,14 @@ export default function RankingPage() {
         setPoints([]);
       }
     }
-  }, [selectedShop]);
+  }, [selectedShopId, selectedShop]);
+
+  // 地点変更時にlocalStorageに保存
+  useEffect(() => {
+    if (selectedShopId && points.length > 0) {
+      localStorage.setItem(`ranking-points-${selectedShopId}`, JSON.stringify(points));
+    }
+  }, [points, selectedShopId]);
 
   const fetchHistory = useCallback(async () => {
     if (!selectedShopId) return;
@@ -72,7 +85,15 @@ export default function RankingPage() {
   };
 
   const removePoint = (idx: number) => {
-    setPoints(points.filter((_, i) => i !== idx));
+    const next = points.filter((_, i) => i !== idx);
+    setPoints(next);
+    if (selectedShopId) {
+      if (next.length > 0) {
+        localStorage.setItem(`ranking-points-${selectedShopId}`, JSON.stringify(next));
+      } else {
+        localStorage.removeItem(`ranking-points-${selectedShopId}`);
+      }
+    }
   };
 
   const handleMeasure = async () => {
@@ -93,6 +114,8 @@ export default function RankingPage() {
         let pageToken: string | undefined;
         let startPosition = 0;
         let finalRank = 0;
+        let lastShopName = "";
+        let lastTopResults: string[] = [];
 
         for (let page = 0; page < 5; page++) {
           try {
@@ -106,6 +129,7 @@ export default function RankingPage() {
             }, { timeout: 30000 });
 
             const d = res.data;
+            if (page === 0) { lastShopName = d.shopName || ""; lastTopResults = d.topResults || []; }
             if (d.found) { finalRank = d.rank; break; }
             if (!d.nextPageToken) break;
             pageToken = d.nextPageToken;
@@ -124,7 +148,7 @@ export default function RankingPage() {
           }, { timeout: 10000 });
         } catch {}
 
-        allResults.push({ keyword: kw, point: point.label, rank: finalRank });
+        allResults.push({ keyword: kw, point: point.label, rank: finalRank, shopName: lastShopName, topResults: lastTopResults });
         setResults([...allResults]);
       }
     }
@@ -253,6 +277,13 @@ export default function RankingPage() {
                         <span className={`text-lg font-bold ${r.rank > 0 ? (r.rank <= 3 ? "text-emerald-600" : r.rank <= 10 ? "text-blue-600" : r.rank <= 20 ? "text-amber-600" : "text-orange-600") : "text-slate-400"}`}>
                           {r.rank > 0 ? `${r.rank}位` : "圏外"}
                         </span>
+                        {r.shopName && <p className="text-[10px] text-slate-400 mt-0.5">検索対象: {r.shopName}</p>}
+                        {r.rank === 0 && r.topResults && r.topResults.length > 0 && (
+                          <div className="mt-1 text-left">
+                            <p className="text-[10px] text-slate-400">上位表示:</p>
+                            {r.topResults.map((t, j) => <p key={j} className="text-[10px] text-slate-300">{j+1}. {t}</p>)}
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}
