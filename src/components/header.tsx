@@ -15,11 +15,19 @@ export default function Header() {
   const { shops, selectedShopId, setSelectedShopId, selectedShop } = useShop();
   const [shopSearch, setShopSearch] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
+  const [showAll, setShowAll] = useState(true);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const filteredShops = shopSearch
-    ? shops.filter((s) => s.name.toLowerCase().includes(shopSearch.toLowerCase()))
-    : shops;
+  const filteredShops = (() => {
+    let list = shops;
+    if (!showAll && selectedShopId) {
+      list = shops.filter((s) => s.id === selectedShopId);
+    }
+    if (shopSearch) {
+      list = list.filter((s) => s.name.toLowerCase().includes(shopSearch.toLowerCase()));
+    }
+    return list;
+  })();
 
   // 外部クリックで閉じる
   useEffect(() => {
@@ -63,26 +71,48 @@ export default function Header() {
             </div>
           )}
           {showDropdown && (
-            <div className="absolute top-full left-0 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-[300px] overflow-y-auto z-[9999]">
-              {filteredShops.length === 0 ? (
-                <div className="px-3 py-2 text-xs text-slate-400">該当なし</div>
-              ) : (
-                filteredShops.map((shop) => (
-                  <button
-                    key={shop.id}
-                    onClick={() => {
-                      setSelectedShopId(shop.id);
-                      setShowDropdown(false);
-                      setShopSearch("");
-                    }}
-                    className={`w-full text-left px-3 py-2 text-xs hover:bg-blue-50 transition truncate ${
-                      shop.id === selectedShopId ? "bg-blue-50 text-[#003D6B] font-semibold" : "text-slate-700"
-                    }`}
-                  >
-                    {shop.name}
-                  </button>
-                ))
-              )}
+            <div className="absolute top-full left-0 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-[360px] overflow-hidden z-[9999] flex flex-col">
+              {/* 全表示/選択店舗のみ 切替 */}
+              <div className="flex border-b border-slate-100 flex-shrink-0">
+                <button
+                  onClick={() => setShowAll(true)}
+                  className={`flex-1 px-2 py-1.5 text-[10px] font-semibold transition ${
+                    showAll ? "bg-[#003D6B] text-white" : "bg-slate-50 text-slate-500 hover:bg-slate-100"
+                  }`}
+                >
+                  全店舗（{shops.length}）
+                </button>
+                <button
+                  onClick={() => setShowAll(false)}
+                  disabled={!selectedShopId}
+                  className={`flex-1 px-2 py-1.5 text-[10px] font-semibold transition ${
+                    !showAll ? "bg-[#003D6B] text-white" : "bg-slate-50 text-slate-500 hover:bg-slate-100"
+                  } ${!selectedShopId ? "opacity-50" : ""}`}
+                >
+                  選択中のみ
+                </button>
+              </div>
+              <div className="overflow-y-auto max-h-[300px]">
+                {filteredShops.length === 0 ? (
+                  <div className="px-3 py-2 text-xs text-slate-400">該当なし</div>
+                ) : (
+                  filteredShops.map((shop) => (
+                    <button
+                      key={shop.id}
+                      onClick={() => {
+                        setSelectedShopId(shop.id);
+                        setShowDropdown(false);
+                        setShopSearch("");
+                      }}
+                      className={`w-full text-left px-3 py-2 text-xs hover:bg-blue-50 transition truncate ${
+                        shop.id === selectedShopId ? "bg-blue-50 text-[#003D6B] font-semibold" : "text-slate-700"
+                      }`}
+                    >
+                      {shop.name}
+                    </button>
+                  ))
+                )}
+              </div>
             </div>
           )}
         </div>
