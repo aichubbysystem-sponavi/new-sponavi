@@ -132,7 +132,7 @@ export async function PUT(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { shopId, keyword, rank, lat, lng } = body;
+  const { shopId, keyword, rank, lat, lng, pointLabel } = body;
 
   const supabase = getSupabase();
   const { error: insertErr } = await supabase.from("ranking_search_logs").insert({
@@ -146,6 +146,7 @@ export async function PUT(request: NextRequest) {
     gbp_longitude: lng || 0,
     radius: 2000,
     is_display: true,
+    point_label: pointLabel || null,
   });
   if (insertErr) {
     return NextResponse.json({ success: false, error: insertErr.message }, { status: 500 });

@@ -145,6 +145,7 @@ export default function RankingPage() {
             rank: finalRank,
             lat: point.lat,
             lng: point.lng,
+            pointLabel: point.label,
           }, { timeout: 10000 });
         } catch {}
 
@@ -361,7 +362,7 @@ export default function RankingPage() {
                   <tr className="border-b border-slate-200">
                     <th className="text-left py-2 px-3 text-slate-500 font-medium">キーワード</th>
                     <th className="text-center py-2 px-3 text-slate-500 font-medium">順位</th>
-                    <th className="text-center py-2 px-3 text-slate-500 font-medium">座標</th>
+                    <th className="text-center py-2 px-3 text-slate-500 font-medium">計測地点</th>
                     <th className="text-right py-2 px-3 text-slate-500 font-medium">計測日時</th>
                   </tr>
                 </thead>
@@ -376,8 +377,8 @@ export default function RankingPage() {
                             {log.rank > 0 ? `${log.rank}位` : "圏外"}
                           </span>
                         </td>
-                        <td className="py-2 px-3 text-center text-xs text-slate-400">
-                          {log.gbp_latitude ? `${log.gbp_latitude.toFixed(2)}, ${log.gbp_longitude.toFixed(2)}` : "-"}
+                        <td className="py-2 px-3 text-center text-xs text-slate-600">
+                          {(log as any).point_label || (log.gbp_latitude ? `${log.gbp_latitude.toFixed(2)}, ${log.gbp_longitude.toFixed(2)}` : "-")}
                         </td>
                         <td className="py-2 px-3 text-right text-xs text-slate-400">{new Date(log.searched_at).toLocaleString("ja-JP")}</td>
                       </tr>
