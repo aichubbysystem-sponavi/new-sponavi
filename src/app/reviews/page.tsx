@@ -29,6 +29,9 @@ export default function ReviewsPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState("");
   const [lastSynced, setLastSynced] = useState<string | null>(null);
+  const [aiReplyId, setAiReplyId] = useState<string | null>(null);
+  const [aiReply, setAiReply] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
 
   const fetchReviews = useCallback(async () => {
     if (!selectedShopId) return;
@@ -134,6 +137,26 @@ export default function ReviewsPage() {
     return map[normalized] || 0;
   };
 
+  const handleAiReply = async (review: ReviewRow) => {
+    if (aiReplyId === review.id) { setAiReplyId(null); setAiReply(""); return; }
+    setAiReplyId(review.id);
+    setAiLoading(true);
+    setAiReply("");
+    try {
+      const res = await api.post("/api/report/reply-suggest", {
+        comment: review.comment || "",
+        starRating: starToNum(review.star_rating),
+        shopName: selectedShop?.name || review.shop_name || "",
+        reviewerName: review.reviewer_name,
+      }, { timeout: 25000 });
+      setAiReply(res.data.reply || "返信を生成できませんでした");
+    } catch (e: any) {
+      setAiReply(`エラー: ${e?.response?.data?.error || e?.message || "返信生成に失敗しました"}`);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   const totalPages = Math.ceil(totalCount / PER_PAGE);
 
   return (
@@ -232,9 +255,34 @@ export default function ReviewsPage() {
                     : (review.comment.split(/\s*\(Translated by Google\)\s*/)[0] || review.comment)
                 }</p>}
                 {review.reply_comment && (
-                  <div className="bg-blue-50 rounded-lg p-3 border border-blue-100">
+                  <div className="bg-blue-50 rounded-lg p-3 border border-blue-100 mb-2">
                     <p className="text-xs text-blue-500 font-semibold mb-1">返信済み</p>
                     <p className="text-sm text-blue-700">{review.reply_comment}</p>
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleAiReply(review)}
+                    disabled={aiLoading && aiReplyId === review.id}
+                    className={`px-3 py-1 rounded-lg text-[11px] font-semibold transition-all ${
+                      aiReplyId === review.id ? "bg-purple-100 text-purple-700" : "bg-purple-50 text-purple-600 hover:bg-purple-100"
+                    }`}
+                  >
+                    {aiLoading && aiReplyId === review.id ? "AI生成中..." : aiReplyId === review.id ? "閉じる" : "AI返信提案"}
+                  </button>
+                </div>
+                {aiReplyId === review.id && aiReply && (
+                  <div className="bg-purple-50 rounded-lg p-3 border border-purple-100 mt-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-xs text-purple-500 font-semibold">AI返信案</p>
+                      <button
+                        onClick={() => { navigator.clipboard.writeText(aiReply); }}
+                        className="text-[10px] text-purple-500 hover:text-purple-700 px-2 py-0.5 rounded bg-white border border-purple-200"
+                      >
+                        コピー
+                      </button>
+                    </div>
+                    <p className="text-sm text-purple-800">{aiReply}</p>
                   </div>
                 )}
               </div>
