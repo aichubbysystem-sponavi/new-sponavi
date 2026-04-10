@@ -138,7 +138,7 @@ export async function PUT(request: NextRequest) {
   const { error: insertErr } = await supabase.from("ranking_search_logs").insert({
     id: crypto.randomUUID(),
     shop_id: shopId,
-    search_words: JSON.stringify([keyword]),
+    search_words: [keyword],
     searched_at: new Date().toISOString(),
     schedule_at: new Date().toISOString(),
     rank: rank || 0,
@@ -147,7 +147,9 @@ export async function PUT(request: NextRequest) {
     radius: 2000,
     is_display: true,
   });
-  if (insertErr) console.error("[ranking] Insert error:", insertErr.message);
+  if (insertErr) {
+    return NextResponse.json({ success: false, error: insertErr.message }, { status: 500 });
+  }
 
   return NextResponse.json({ success: true });
 }
