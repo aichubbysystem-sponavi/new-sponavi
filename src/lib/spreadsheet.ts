@@ -10,6 +10,7 @@ import type {
   ReportData,
   ShopListItem,
   KPI,
+  Keyword,
   ChartData,
   ReviewAnalysis,
 } from "./report-data";
@@ -357,6 +358,73 @@ function generateReviewAnalysis(
   };
 }
 
+// ── ランキングデータ取得（Supabase → レポートP7用）──
+
+async function fetchRankingKeywords(shopName: string): Promise<Keyword[]> {
+  const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!SUPABASE_URL || !SUPABASE_KEY) return [];
+
+  try {
+    const { createClient } = await import("@supabase/supabase-js");
+    const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    // 店舗名からshop_idを特定
+    const { data: shop } = await supabase
+      .from("shops")
+      .select("id")
+      .or(`name.eq.${shopName},gbp_shop_name.eq.${shopName}`)
+      .limit(1)
+      .maybeSingle();
+
+    if (!shop) return [];
+
+    // ランキングログを取得（最新200件）
+    const { data: logs } = await supabase
+      .from("ranking_search_logs")
+      .select("search_words, rank, searched_at, point_label")
+      .eq("shop_id", shop.id)
+      .eq("is_display", true)
+      .order("searched_at", { ascending: false })
+      .limit(200);
+
+    if (!logs || logs.length === 0) return [];
+
+    // キーワードごとにグループ化し、最新順位と前回順位を取得
+    const groups = new Map<string, { rank: number; prevRank: number }>();
+
+    for (const log of logs) {
+      let kw: string;
+      try {
+        const parsed = JSON.parse(log.search_words);
+        kw = Array.isArray(parsed) ? parsed.join(", ") : String(log.search_words);
+      } catch {
+        kw = String(log.search_words);
+      }
+
+      if (!groups.has(kw)) {
+        groups.set(kw, { rank: log.rank || 0, prevRank: 0 });
+      } else {
+        const existing = groups.get(kw)!;
+        if (existing.prevRank === 0) {
+          existing.prevRank = log.rank || 0;
+        }
+      }
+    }
+
+    return Array.from(groups.entries())
+      .filter(([, data]) => data.rank > 0)
+      .map(([word, data]) => ({
+        word,
+        rank: data.rank,
+        prevRank: data.prevRank || data.rank,
+      }));
+  } catch (err) {
+    console.error("[spreadsheet] fetchRankingKeywords error:", err);
+    return [];
+  }
+}
+
 export async function buildReportData(
   shopName: string,
   perfRows: PerfRow[],
@@ -440,8 +508,8 @@ export async function buildReportData(
   const map = kpis[1];
   const totalActionsVal = kpis.slice(2, 7).reduce((s, k) => s + k.value, 0);
   const prevTotalActionsVal = kpis.slice(2, 7).reduce((s, k) => s + k.prevValue, 0);
-  const latestDelta = reviewDelta.filter((d): d is number => d !== null);
-  const lastDelta = latestDelta.length > 0 ? latestDelta[latestDelta.length - 1] : 0;
+  const filteredDeltas = reviewDelta.filter((d): d is number => d !== null);
+  const lastDelta = filteredDeltas.length > 0 ? filteredDeltas[filteredDeltas.length - 1] : 0;
 
   const analyzed = await getReviewAnalysis(
     shopName, currentLabel, currentRating, totalReviews, lastDelta,
@@ -475,7 +543,7 @@ export async function buildReportData(
     kpis,
     monthlyLabels,
     charts,
-    keywords: [], // Sheet1/4 未連携のためP7スキップ
+    keywords: await fetchRankingKeywords(shopName),
     reviewLabels,
     reviewCounts,
     reviewDelta,

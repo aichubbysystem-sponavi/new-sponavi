@@ -3,6 +3,18 @@
 import { useEffect, useCallback, useState } from "react";
 import api from "@/lib/api";
 import { useShop } from "@/components/shop-provider";
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  LineElement,
+  PointElement,
+  Tooltip,
+  Legend,
+} from "chart.js";
+import { Line } from "react-chartjs-2";
+
+ChartJS.register(CategoryScale, LinearScale, LineElement, PointElement, Tooltip, Legend);
 
 interface MeasurePoint {
   label: string;
@@ -393,6 +405,75 @@ export default function RankingPage() {
                     </div>
                   ))}
                 </div>
+              </div>
+            );
+          })()}
+
+          {/* 順位推移チャート */}
+          {history.length > 0 && (() => {
+            // キーワードごとにグループ化
+            const kwGroups = new Map<string, { date: string; rank: number }[]>();
+            history.forEach((log) => {
+              const kw = (() => { try { return JSON.parse(log.search_words).join(", "); } catch { return log.search_words; } })();
+              if (!kwGroups.has(kw)) kwGroups.set(kw, []);
+              kwGroups.get(kw)!.push({
+                date: new Date(log.searched_at).toLocaleDateString("ja-JP", { month: "short", day: "numeric" }),
+                rank: log.rank,
+              });
+            });
+
+            // 日付ラベルを統合（全キーワード共通、古い順）
+            const allDates = new Set<string>();
+            kwGroups.forEach((logs) => logs.forEach((l) => allDates.add(l.date)));
+            const dateLabels = Array.from(allDates).reverse().slice(-20);
+
+            const COLORS = ["#003D6B", "#e94560", "#27ae60", "#f39c12", "#8e44ad", "#e67e22", "#2980b9", "#c0392b"];
+            const datasets = Array.from(kwGroups.entries()).map(([kw, logs], i) => {
+              const dataMap = new Map<string, number>();
+              logs.forEach((l) => { if (l.rank > 0) dataMap.set(l.date, l.rank); });
+              return {
+                label: kw,
+                data: dateLabels.map((d) => dataMap.get(d) ?? null),
+                borderColor: COLORS[i % COLORS.length],
+                backgroundColor: COLORS[i % COLORS.length] + "20",
+                tension: 0.3,
+                pointRadius: 4,
+                borderWidth: 2,
+                spanGaps: true,
+              };
+            });
+
+            return (
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-6">
+                <h3 className="text-sm font-semibold text-slate-500 mb-4">順位推移チャート（直近20回）</h3>
+                <div style={{ height: 300 }}>
+                  <Line
+                    data={{ labels: dateLabels, datasets }}
+                    options={{
+                      responsive: true,
+                      maintainAspectRatio: false,
+                      plugins: {
+                        legend: { position: "top", labels: { font: { size: 11 }, usePointStyle: true } },
+                        tooltip: {
+                          callbacks: {
+                            label: (ctx: any) => `${ctx.dataset.label}: ${ctx.parsed.y > 0 ? ctx.parsed.y + "位" : "圏外"}`,
+                          },
+                        },
+                      },
+                      scales: {
+                        x: { grid: { display: false } },
+                        y: {
+                          reverse: true,
+                          min: 1,
+                          title: { display: true, text: "順位", font: { size: 11 } },
+                          grid: { color: "#f0f0f0" },
+                          ticks: { callback: (v: any) => v + "位", stepSize: 10 },
+                        },
+                      },
+                    }}
+                  />
+                </div>
+                <p className="text-[10px] text-slate-400 mt-2">※ 上に行くほど順位が高い。圏外（100位以上）はチャートに含まれません。</p>
               </div>
             );
           })()}

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import DOMPurify from "isomorphic-dompurify";
 import Link from "next/link";
 import {
@@ -111,6 +112,40 @@ export default function ReportClient({
   const hasKeywords = keywords.length > 0;
   const hasReviews = reviewCounts.length > 0;
   const curLabel = monthlyLabels[monthlyLabels.length - 1] || "";
+  const [pdfGenerating, setPdfGenerating] = useState(false);
+
+  const handlePdfDownload = async () => {
+    setPdfGenerating(true);
+    try {
+      const html2canvas = (await import("html2canvas")).default;
+      const { jsPDF } = await import("jspdf");
+      const slides = document.querySelectorAll(".slide");
+      if (slides.length === 0) { setPdfGenerating(false); return; }
+
+      const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+      const pdfW = 297;
+      const pdfH = 210;
+
+      for (let i = 0; i < slides.length; i++) {
+        const canvas = await html2canvas(slides[i] as HTMLElement, {
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          backgroundColor: "#f0f2f5",
+        });
+        const imgData = canvas.toDataURL("image/jpeg", 0.92);
+        if (i > 0) pdf.addPage();
+        pdf.addImage(imgData, "JPEG", 0, 0, pdfW, pdfH);
+      }
+
+      pdf.save(`${shop.name}_レポート_${curLabel.replace("/", "-")}.pdf`);
+    } catch (err) {
+      console.error("PDF generation error:", err);
+      window.print(); // フォールバック
+    } finally {
+      setPdfGenerating(false);
+    }
+  };
 
   // ── Page count ──
   let totalPages = 10; // P1-P6, P8-P11
@@ -165,7 +200,9 @@ export default function ReportClient({
         <Link href="/report" style={{ color: "rgba(255,255,255,0.8)", textDecoration: "none", fontSize: 14 }}>← レポート一覧に戻る</Link>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {dataSource === "mock" && <span style={{ fontSize: 11, color: "#ffd54f", background: "rgba(255,213,79,0.15)", padding: "4px 12px", borderRadius: 20, border: "1px solid rgba(255,213,79,0.3)" }}>デモデータ</span>}
-          <button onClick={() => window.print()} style={{ background: "linear-gradient(135deg,#e94560,#c73050)", color: "#fff", border: "none", padding: "10px 24px", borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>PDFダウンロード</button>
+          <button onClick={handlePdfDownload} disabled={pdfGenerating} style={{ background: pdfGenerating ? "#999" : "linear-gradient(135deg,#e94560,#c73050)", color: "#fff", border: "none", padding: "10px 24px", borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: pdfGenerating ? "wait" : "pointer" }}>
+            {pdfGenerating ? "PDF生成中..." : "PDFダウンロード"}
+          </button>
         </div>
       </div>
 

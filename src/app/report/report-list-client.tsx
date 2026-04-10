@@ -227,10 +227,28 @@ export default function ReportListClient({
             {source !== "spreadsheet" && <span className="text-xs text-amber-700 bg-amber-100 px-3 py-1 rounded-full font-medium">デモデータ</span>}
             {lastSync && <span className="text-xs text-slate-400">反映: {new Date(lastSync).toLocaleTimeString("ja-JP")}</span>}
             {selected.size > 0 && (
-              <button onClick={handleSyncSelected} disabled={syncing}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing ? "bg-slate-200 text-slate-400" : "bg-emerald-600 text-white hover:bg-emerald-700"}`}>
-                {syncing ? "反映中..." : `${selected.size}店舗反映`}
-              </button>
+              <>
+                <button onClick={handleSyncSelected} disabled={syncing}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing ? "bg-slate-200 text-slate-400" : "bg-emerald-600 text-white hover:bg-emerald-700"}`}>
+                  {syncing ? "反映中..." : `${selected.size}店舗反映`}
+                </button>
+                <button
+                  onClick={() => {
+                    const ids = Array.from(selected);
+                    const batch = ids.slice(0, 10);
+                    if (ids.length > 10) showToast(`最大10店舗ずつ開きます（${batch.length}/${ids.length}件）`);
+                    batch.forEach((id, i) => {
+                      setTimeout(() => {
+                        window.open(`/report/${encodeURIComponent(id)}`, `_report_${i}`);
+                      }, i * 500);
+                    });
+                    showToast(`${batch.length}店舗のレポートを開いています。各タブでPDFダウンロードしてください。`);
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-purple-600 text-white hover:bg-purple-700 transition-all"
+                >
+                  一括PDF（{Math.min(selected.size, 10)}件）
+                </button>
+              </>
             )}
             <button onClick={handleSyncAll} disabled={syncing}
               className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] text-white hover:bg-[#002a4a]"}`}>
