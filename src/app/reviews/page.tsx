@@ -275,12 +275,34 @@ export default function ReviewsPage() {
                   <div className="bg-purple-50 rounded-lg p-3 border border-purple-100 mt-2">
                     <div className="flex items-center justify-between mb-1">
                       <p className="text-xs text-purple-500 font-semibold">AI返信案</p>
-                      <button
-                        onClick={() => { navigator.clipboard.writeText(aiReply); }}
-                        className="text-[10px] text-purple-500 hover:text-purple-700 px-2 py-0.5 rounded bg-white border border-purple-200"
-                      >
-                        コピー
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => { navigator.clipboard.writeText(aiReply); }}
+                          className="text-[10px] text-purple-500 hover:text-purple-700 px-2 py-0.5 rounded bg-white border border-purple-200"
+                        >
+                          コピー
+                        </button>
+                        {selectedShopId && !review.reply_comment && (
+                          <button
+                            onClick={async () => {
+                              try {
+                                await api.put(`/api/shop/${selectedShopId}/review/${review.review_id}/reply`, {
+                                  comment: aiReply,
+                                }, { timeout: 15000 });
+                                setSyncMsg("GBPに返信を投稿しました！");
+                                await fetchReviews();
+                                setAiReplyId(null);
+                                setAiReply("");
+                              } catch (e: any) {
+                                setSyncMsg(`返信投稿に失敗: ${e?.response?.data?.message || e?.message || "不明なエラー"}`);
+                              }
+                            }}
+                            className="text-[10px] text-white px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-700 font-semibold"
+                          >
+                            GBPに返信
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <p className="text-sm text-purple-800">{aiReply}</p>
                   </div>

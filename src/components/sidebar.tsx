@@ -33,7 +33,7 @@ const navSections = [
       { href: "/reports", label: "店舗パフォーマンス" },
       { href: "/basic-info", label: "基礎情報管理" },
       { href: "/setup", label: "初期整備" },
-      { href: "/citation", label: "サイテーション" },
+      { href: "/citation", label: "NAP整合性" },
     ],
   },
   {
@@ -46,7 +46,7 @@ const navSections = [
   {
     title: "多媒体連携",
     children: [
-      { href: "/media", label: "多媒体管理" },
+      { href: "/media", label: "写真管理" },
       { href: "/organic", label: "オーガニック投稿" },
       { href: "/ota", label: "OTA連携" },
     ],
@@ -55,7 +55,7 @@ const navSections = [
     title: null,
     items: [
       { href: "/lead", label: "リード獲得・分析" },
-      { href: "/chatbot", label: "チャットボット" },
+      { href: "/chatbot", label: "AI社長" },
     ],
   },
   {

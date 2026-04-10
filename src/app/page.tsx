@@ -31,6 +31,8 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(false);
   const [badAlerts, setBadAlerts] = useState<any[]>([]);
   const [topPhotos, setTopPhotos] = useState<any[]>([]);
+  const [rankingSummary, setRankingSummary] = useState<any[]>([]);
+  const [postCount, setPostCount] = useState(0);
 
   const fetchPerformance = useCallback(async () => {
     if (!selectedShopId) return;
@@ -65,6 +67,37 @@ export default function Dashboard() {
       .limit(5);
     if (selectedShopId) mediaQuery = mediaQuery.eq("shop_id", selectedShopId);
     mediaQuery.then(({ data }) => setTopPhotos(data || []));
+
+    // 順位サマリー取得
+    if (selectedShopId) {
+      supabase
+        .from("ranking_search_logs")
+        .select("search_words, rank, searched_at")
+        .eq("shop_id", selectedShopId)
+        .eq("is_display", true)
+        .order("searched_at", { ascending: false })
+        .limit(50)
+        .then(({ data }) => {
+          if (!data || data.length === 0) { setRankingSummary([]); return; }
+          const groups = new Map<string, { rank: number; prevRank: number }>();
+          for (const log of data) {
+            let kw: string;
+            try { kw = JSON.parse(log.search_words).join(", "); } catch { kw = log.search_words; }
+            if (!groups.has(kw)) groups.set(kw, { rank: log.rank, prevRank: 0 });
+            else if (groups.get(kw)!.prevRank === 0) groups.get(kw)!.prevRank = log.rank;
+          }
+          setRankingSummary(Array.from(groups.entries()).slice(0, 5).map(([kw, d]) => ({
+            keyword: kw, rank: d.rank, prevRank: d.prevRank || d.rank,
+          })));
+        });
+
+      // 投稿数取得
+      api.get(`/api/shop/${selectedShopId}/local_post`).then((res) => {
+        const posts = res.data?.localPosts || [];
+        const last30 = posts.filter((p: any) => p.createTime && Date.now() - new Date(p.createTime).getTime() < 30 * 24 * 60 * 60 * 1000);
+        setPostCount(last30.length);
+      }).catch(() => setPostCount(0));
+    }
   }, [selectedShopId]);
 
   const v = (n: number | null | undefined) => n ?? 0;
@@ -174,6 +207,59 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      {/* 順位サマリー＋投稿頻度 */}
+      {(rankingSummary.length > 0 || postCount > 0) && (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-6">
+          {rankingSummary.length > 0 && (
+            <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+              <h3 className="text-sm font-semibold text-slate-500 mb-4">キーワード順位（最新）</h3>
+              <div className="space-y-2">
+                {rankingSummary.map((r: any, i: number) => {
+                  const diff = r.prevRank - r.rank;
+                  return (
+                    <div key={i} className="flex items-center justify-between py-1.5 border-b border-slate-50">
+                      <span className="text-sm text-slate-700 truncate flex-1">{r.keyword}</span>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {diff !== 0 && (
+                          <span className={`text-xs font-semibold ${diff > 0 ? "text-emerald-600" : "text-red-600"}`}>
+                            {diff > 0 ? `↑${diff}` : `↓${Math.abs(diff)}`}
+                          </span>
+                        )}
+                        <span className={`text-lg font-bold ${
+                          r.rank <= 3 ? "text-emerald-600" : r.rank <= 10 ? "text-blue-600" : r.rank <= 20 ? "text-amber-600" : r.rank > 0 ? "text-orange-600" : "text-slate-400"
+                        }`}>
+                          {r.rank > 0 ? `${r.rank}位` : "圏外"}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+            <h3 className="text-sm font-semibold text-slate-500 mb-4">投稿頻度</h3>
+            <div className="flex items-center gap-4">
+              <div className="flex-1">
+                <p className="text-3xl font-bold text-[#003D6B]">{postCount}<span className="text-sm font-normal text-slate-400 ml-1">件 / 30日</span></p>
+                <p className={`text-sm font-semibold mt-1 ${postCount >= 8 ? "text-emerald-600" : postCount >= 4 ? "text-blue-600" : postCount >= 1 ? "text-amber-600" : "text-red-600"}`}>
+                  {postCount >= 8 ? "優秀" : postCount >= 4 ? "良好" : postCount >= 1 ? "改善余地あり" : "要改善"}
+                </p>
+                <p className="text-xs text-slate-400 mt-0.5">推奨: 週2回以上（月8件）</p>
+              </div>
+              <div className="w-20 h-20 rounded-full border-4 flex items-center justify-center" style={{
+                borderColor: postCount >= 8 ? "#059669" : postCount >= 4 ? "#2563eb" : postCount >= 1 ? "#d97706" : "#dc2626",
+              }}>
+                <span className="text-lg font-bold" style={{
+                  color: postCount >= 8 ? "#059669" : postCount >= 4 ? "#2563eb" : postCount >= 1 ? "#d97706" : "#dc2626",
+                }}>{Math.min(Math.round((postCount / 8) * 100), 100)}%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 要注意口コミアラート */}
       {badAlerts.length > 0 && (
