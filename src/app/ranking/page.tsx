@@ -174,7 +174,28 @@ export default function RankingPage() {
             {/* キーワード入力 */}
             <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
               <h3 className="text-sm font-semibold text-slate-500 mb-3">計測キーワード</h3>
-              <p className="text-xs text-slate-400 mb-2">1行に1つ入力</p>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs text-slate-400">1行に1つ入力</p>
+                <button
+                  onClick={async () => {
+                    if (!selectedShop) return;
+                    try {
+                      const res = await api.get(`/api/report/ranking-keywords?shopName=${encodeURIComponent(selectedShop.name)}`);
+                      if (res.data.found && res.data.keywords.length > 0) {
+                        setKeywords(res.data.keywords.join("\n"));
+                      } else {
+                        setError("シートにキーワードが見つかりませんでした");
+                      }
+                    } catch (e: any) {
+                      setError(e?.response?.data?.error || "シート取得に失敗しました");
+                    }
+                  }}
+                  className="px-3 py-1 rounded-lg text-[11px] font-semibold bg-purple-600 hover:bg-purple-700"
+                  style={{ color: "#fff" }}
+                >
+                  シートから反映
+                </button>
+              </div>
               <textarea
                 value={keywords}
                 onChange={(e) => setKeywords(e.target.value)}
