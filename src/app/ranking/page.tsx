@@ -42,26 +42,59 @@ export default function RankingPage() {
     setResults([]);
 
     const kwList = keywords.split("\n").map((k) => k.trim()).filter(Boolean);
+    const allResults: RankResult[] = [];
 
-    try {
-      const res = await api.post("/api/report/ranking", {
-        shopId: selectedShopId,
-        keywords: kwList,
-      }, { timeout: 50000 });
+    for (const kw of kwList) {
+      let pageToken: string | undefined;
+      let startPosition = 0;
+      let found = false;
+      let finalRank = 0;
 
-      setResults(res.data.results || []);
-      await fetchHistory();
-    } catch (e: any) {
-      setError(e?.response?.data?.error || e?.message || "計測に失敗しました");
-    } finally {
-      setMeasuring(false);
+      // 最大5ページ（100位）までループ
+      for (let page = 0; page < 5; page++) {
+        try {
+          const res = await api.post("/api/report/ranking", {
+            shopId: selectedShopId,
+            keyword: kw,
+            pageToken,
+            startPosition,
+          }, { timeout: 30000 });
+
+          const d = res.data;
+          if (d.found) {
+            finalRank = d.rank;
+            found = true;
+            break;
+          }
+          if (!d.nextPageToken) break;
+          pageToken = d.nextPageToken;
+          startPosition = d.nextPosition;
+        } catch {
+          break;
+        }
+      }
+
+      // 結果をDBに保存
+      try {
+        await api.put("/api/report/ranking", {
+          shopId: selectedShopId,
+          keyword: kw,
+          rank: finalRank,
+        }, { timeout: 10000 });
+      } catch {}
+
+      allResults.push({ keyword: kw, rank: finalRank, totalResults: startPosition });
+      setResults([...allResults]);
     }
+
+    await fetchHistory();
+    setMeasuring(false);
   };
 
   return (
     <div className="animate-fade-in">
       <h1 className="text-2xl font-bold text-slate-800 mb-2">店舗検索ランキング</h1>
-      <p className="text-sm text-slate-500 mb-6">キーワード順位を計測（最大20位まで検出）</p>
+      <p className="text-sm text-slate-500 mb-6">キーワード順位を計測（最大100位まで検出）</p>
 
       {!apiConnected || !selectedShopId ? (
         <div className="bg-white rounded-xl p-12 shadow-sm border border-slate-100 text-center">

@@ -13,81 +13,11 @@ function getSupabase() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
 }
 
-interface PlaceResult {
-  displayName?: { text?: string };
-  formattedAddress?: string;
-}
-
 /**
- * Google Places API v1で検索し、店舗の順位を返す
+ * POST /api/report/ranking
+ * 1ページ分（20件）を検索し、結果を返す
+ * フロントエンドが最大5回ループして100位まで計測
  */
-async function searchRank(
-  keyword: string,
-  shopName: string,
-  lat: number,
-  lng: number
-): Promise<{ rank: number; totalResults: number }> {
-  let rank = 0;
-  let position = 0;
-  let totalResults = 0;
-
-  // 1ページ検索（20件、高速化）
-  for (let page = 0; page < 1; page++) {
-    try {
-      const body: any = {
-        textQuery: keyword,
-        languageCode: "ja",
-        rankPreference: "RELEVANCE",
-        locationBias: {
-          circle: {
-            center: { latitude: lat, longitude: lng },
-            radius: 2000,
-          },
-        },
-        pageSize: 20,
-      };
-
-      const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Goog-Api-Key": GCP_API_KEY,
-          "X-Goog-FieldMask": "places.displayName,places.formattedAddress,nextPageToken",
-        },
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) {
-        console.error("[ranking] Places API error:", res.status, res.statusText);
-        break;
-      }
-
-      const data = await res.json();
-      const places: PlaceResult[] = data.places || [];
-
-      for (const place of places) {
-        position++;
-        totalResults++;
-        if (place.displayName?.text === shopName) {
-          rank = position;
-          return { rank, totalResults };
-        }
-      }
-
-      if (!data.nextPageToken) break;
-
-      // 次ページ用にtokenを設定
-      body.pageToken = data.nextPageToken;
-    } catch (err) {
-      console.error("[ranking] Search error:", err);
-      break;
-    }
-  }
-
-  return { rank, totalResults };
-}
-
-// POST /api/report/ranking
 export async function POST(request: NextRequest) {
   const { verifyAuth } = await import("@/lib/auth-verify");
   const auth = await verifyAuth(request.headers.get("authorization"));
@@ -96,10 +26,15 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { shopId, keywords } = body as { shopId: string; keywords: string[] };
+  const { shopId, keyword, pageToken, startPosition } = body as {
+    shopId: string;
+    keyword: string;
+    pageToken?: string;
+    startPosition?: number;
+  };
 
-  if (!shopId || !keywords || keywords.length === 0) {
-    return NextResponse.json({ error: "shopIdとkeywordsが必要です" }, { status: 400 });
+  if (!shopId || !keyword) {
+    return NextResponse.json({ error: "shopIdとkeywordが必要です" }, { status: 400 });
   }
 
   if (!GCP_API_KEY) {
@@ -108,7 +43,7 @@ export async function POST(request: NextRequest) {
 
   const supabase = getSupabase();
 
-  // 店舗情報取得（座標）
+  // 店舗情報取得
   const { data: shop } = await supabase
     .from("shops")
     .select("id, name, gbp_latitude, gbp_longitude, gbp_shop_name")
@@ -119,36 +54,98 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "店舗が見つかりません" }, { status: 404 });
   }
 
-  // 座標がない場合はジオコーディングで代替
-  const lat = shop.gbp_latitude || 35.6812;  // デフォルト: 東京
+  const lat = shop.gbp_latitude || 35.6812;
   const lng = shop.gbp_longitude || 139.7671;
   const targetName = shop.gbp_shop_name || shop.name;
 
-  const results: { keyword: string; rank: number; totalResults: number }[] = [];
+  // Google Places API v1 検索
+  try {
+    const reqBody: any = {
+      textQuery: keyword,
+      languageCode: "ja",
+      rankPreference: "RELEVANCE",
+      locationBias: {
+        circle: {
+          center: { latitude: lat, longitude: lng },
+          radius: 2000,
+        },
+      },
+      pageSize: 20,
+    };
+    if (pageToken) reqBody.pageToken = pageToken;
 
-  for (const keyword of keywords) {
-    const { rank, totalResults } = await searchRank(keyword, targetName, lat, lng);
-
-    // DBに保存
-    await supabase.from("ranking_search_logs").insert({
-      shop_id: shopId,
-      search_words: JSON.stringify([keyword]),
-      searched_at: new Date().toISOString(),
-      schedule_at: new Date().toISOString(),
-      rank: rank || 0,
-      gbp_latitude: lat,
-      gbp_longitude: lng,
-      radius: 2000,
-      is_display: true,
+    const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": GCP_API_KEY,
+        "X-Goog-FieldMask": "places.displayName,places.formattedAddress,nextPageToken",
+      },
+      body: JSON.stringify(reqBody),
     });
 
-    results.push({ keyword, rank: rank || 0, totalResults });
-  }
+    if (!res.ok) {
+      return NextResponse.json({ error: `Places API error: ${res.status}` }, { status: 500 });
+    }
 
-  return NextResponse.json({ success: true, shopName: targetName, results });
+    const data = await res.json();
+    const places = data.places || [];
+    const pos = startPosition || 0;
+    let rank = 0;
+
+    for (let i = 0; i < places.length; i++) {
+      if (places[i].displayName?.text === targetName) {
+        rank = pos + i + 1;
+        break;
+      }
+    }
+
+    return NextResponse.json({
+      found: rank > 0,
+      rank,
+      nextPageToken: data.nextPageToken || null,
+      nextPosition: pos + places.length,
+      placesCount: places.length,
+      shopName: targetName,
+    });
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message || "検索エラー" }, { status: 500 });
+  }
 }
 
-// GET /api/report/ranking - 過去の計測結果を取得
+/**
+ * PUT /api/report/ranking
+ * 計測結果をDBに保存（フロントエンドが全ページ検索完了後に呼ぶ）
+ */
+export async function PUT(request: NextRequest) {
+  const { verifyAuth } = await import("@/lib/auth-verify");
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) {
+    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  }
+
+  const body = await request.json();
+  const { shopId, keyword, rank, lat, lng } = body;
+
+  const supabase = getSupabase();
+  await supabase.from("ranking_search_logs").insert({
+    shop_id: shopId,
+    search_words: JSON.stringify([keyword]),
+    searched_at: new Date().toISOString(),
+    schedule_at: new Date().toISOString(),
+    rank: rank || 0,
+    gbp_latitude: lat || 0,
+    gbp_longitude: lng || 0,
+    radius: 2000,
+    is_display: true,
+  });
+
+  return NextResponse.json({ success: true });
+}
+
+/**
+ * GET /api/report/ranking - 過去の計測結果を取得
+ */
 export async function GET(request: NextRequest) {
   const shopId = request.nextUrl.searchParams.get("shopId");
   if (!shopId) {
