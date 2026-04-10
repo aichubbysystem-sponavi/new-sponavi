@@ -31,8 +31,8 @@ async function searchRank(
   let position = 0;
   let totalResults = 0;
 
-  // 最大5ページ検索（約100件）
-  for (let page = 0; page < 5; page++) {
+  // 1ページ検索（20件、高速化）
+  for (let page = 0; page < 1; page++) {
     try {
       const body: any = {
         textQuery: keyword,

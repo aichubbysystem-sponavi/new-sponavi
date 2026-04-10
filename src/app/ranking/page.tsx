@@ -47,7 +47,7 @@ export default function RankingPage() {
       const res = await api.post("/api/report/ranking", {
         shopId: selectedShopId,
         keywords: kwList,
-      }, { timeout: 60000 });
+      }, { timeout: 50000 });
 
       setResults(res.data.results || []);
       await fetchHistory();
@@ -61,7 +61,7 @@ export default function RankingPage() {
   return (
     <div className="animate-fade-in">
       <h1 className="text-2xl font-bold text-slate-800 mb-2">店舗検索ランキング</h1>
-      <p className="text-sm text-slate-500 mb-6">キーワード順位を計測（最大100位まで検出）</p>
+      <p className="text-sm text-slate-500 mb-6">キーワード順位を計測（最大20位まで検出）</p>
 
       {!apiConnected || !selectedShopId ? (
         <div className="bg-white rounded-xl p-12 shadow-sm border border-slate-100 text-center">
