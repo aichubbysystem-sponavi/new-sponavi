@@ -12,22 +12,14 @@ const ROLES: Role[] = ["president", "manager", "part_time"];
 export default function Header() {
   const router = useRouter();
   const { role, setRoleOverride } = useRole();
-  const { shops, selectedShopId, setSelectedShopId, selectedShop } = useShop();
+  const { shops, selectedShopId, setSelectedShopId, selectedShop, shopFilterMode, setShopFilterMode } = useShop();
   const [shopSearch, setShopSearch] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
-  const [showAll, setShowAll] = useState(true);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const filteredShops = (() => {
-    let list = shops;
-    if (!showAll && selectedShopId) {
-      list = shops.filter((s) => s.id === selectedShopId);
-    }
-    if (shopSearch) {
-      list = list.filter((s) => s.name.toLowerCase().includes(shopSearch.toLowerCase()));
-    }
-    return list;
-  })();
+  const filteredShops = shopSearch
+    ? shops.filter((s) => s.name.toLowerCase().includes(shopSearch.toLowerCase()))
+    : shops;
 
   // 外部クリックで閉じる
   useEffect(() => {
@@ -59,39 +51,34 @@ export default function Header() {
         <div className="relative" ref={dropdownRef}>
           <input
             type="text"
-            placeholder={selectedShop?.name || "店舗を検索..."}
+            placeholder={shopFilterMode === "all" ? "全店舗表示中" : (selectedShop?.name || "店舗を検索...")}
             value={showDropdown ? shopSearch : ""}
             onChange={(e) => setShopSearch(e.target.value)}
             onFocus={() => { setShowDropdown(true); setShopSearch(""); }}
             className="bg-white border border-[#003D6B]/20 rounded-md px-3 py-1.5 text-xs lg:text-sm text-[#324567] focus:outline-none focus:ring-2 focus:ring-[#003D6B]/30 w-[160px] lg:w-[280px]"
           />
-          {!showDropdown && selectedShop && (
+          {!showDropdown && (
             <div className="absolute inset-0 flex items-center px-3 pointer-events-none">
-              <span className="text-xs lg:text-sm text-[#324567] truncate">{selectedShop.name}</span>
+              <span className="text-xs lg:text-sm text-[#324567] truncate">
+                {shopFilterMode === "all" ? `全店舗（${shops.length}）` : selectedShop?.name || ""}
+              </span>
             </div>
           )}
           {showDropdown && (
             <div className="absolute top-full left-0 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-[360px] overflow-hidden z-[9999] flex flex-col">
-              {/* 全表示/選択店舗のみ 切替 */}
-              <div className="flex border-b border-slate-100 flex-shrink-0">
-                <button
-                  onClick={() => setShowAll(true)}
-                  className={`flex-1 px-2 py-1.5 text-[10px] font-semibold transition ${
-                    showAll ? "bg-[#003D6B] text-white" : "bg-slate-50 text-slate-500 hover:bg-slate-100"
-                  }`}
-                >
-                  全店舗（{shops.length}）
-                </button>
-                <button
-                  onClick={() => setShowAll(false)}
-                  disabled={!selectedShopId}
-                  className={`flex-1 px-2 py-1.5 text-[10px] font-semibold transition ${
-                    !showAll ? "bg-[#003D6B] text-white" : "bg-slate-50 text-slate-500 hover:bg-slate-100"
-                  } ${!selectedShopId ? "opacity-50" : ""}`}
-                >
-                  選択中のみ
-                </button>
-              </div>
+              {/* 全店舗ボタン */}
+              <button
+                onClick={() => {
+                  setShopFilterMode("all");
+                  setShowDropdown(false);
+                  setShopSearch("");
+                }}
+                className={`w-full text-left px-3 py-2.5 text-xs font-bold border-b border-slate-100 transition ${
+                  shopFilterMode === "all" ? "bg-[#003D6B] text-white" : "bg-slate-50 text-[#003D6B] hover:bg-blue-50"
+                }`}
+              >
+                全店舗表示（{shops.length}店舗）
+              </button>
               <div className="overflow-y-auto max-h-[300px]">
                 {filteredShops.length === 0 ? (
                   <div className="px-3 py-2 text-xs text-slate-400">該当なし</div>
@@ -101,11 +88,12 @@ export default function Header() {
                       key={shop.id}
                       onClick={() => {
                         setSelectedShopId(shop.id);
+                        setShopFilterMode("single");
                         setShowDropdown(false);
                         setShopSearch("");
                       }}
                       className={`w-full text-left px-3 py-2 text-xs hover:bg-blue-50 transition truncate ${
-                        shop.id === selectedShopId ? "bg-blue-50 text-[#003D6B] font-semibold" : "text-slate-700"
+                        shopFilterMode === "single" && shop.id === selectedShopId ? "bg-blue-50 text-[#003D6B] font-semibold" : "text-slate-700"
                       }`}
                     >
                       {shop.name}

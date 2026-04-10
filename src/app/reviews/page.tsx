@@ -18,10 +18,11 @@ interface ReviewRow {
   synced_at: string;
 }
 
+type ReplyFilter = "all" | "unreplied" | "replied";
 const PER_PAGE = 20;
 
 export default function ReviewsPage() {
-  const { selectedShopId, selectedShop, apiConnected, shops } = useShop();
+  const { selectedShopId, selectedShop, apiConnected, shops, shopFilterMode } = useShop();
   const [reviews, setReviews] = useState<ReviewRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(1);
@@ -32,24 +33,40 @@ export default function ReviewsPage() {
   const [aiReplyId, setAiReplyId] = useState<string | null>(null);
   const [aiReply, setAiReply] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [replyFilter, setReplyFilter] = useState<ReplyFilter>("all");
+  const [unrepliedCount, setUnrepliedCount] = useState(0);
+
+  const isAllMode = shopFilterMode === "all";
 
   const fetchReviews = useCallback(async () => {
-    if (!selectedShopId) return;
+    if (!isAllMode && !selectedShopId) return;
     setLoading(true);
     try {
       const from = (page - 1) * PER_PAGE;
       const to = from + PER_PAGE - 1;
-      const { data, count } = await supabase
+
+      let query = supabase
         .from("reviews")
         .select("*", { count: "exact" })
-        .eq("shop_id", selectedShopId)
         .order("create_time", { ascending: false })
         .range(from, to);
 
+      // 店舗フィルタ
+      if (!isAllMode && selectedShopId) {
+        query = query.eq("shop_id", selectedShopId);
+      }
+
+      // 返信フィルタ
+      if (replyFilter === "unreplied") {
+        query = query.is("reply_comment", null);
+      } else if (replyFilter === "replied") {
+        query = query.not("reply_comment", "is", null);
+      }
+
+      const { data, count } = await query;
       setReviews(data || []);
       setTotalCount(count || 0);
 
-      // 最終同期日時
       if (data && data.length > 0) {
         setLastSynced(data[0].synced_at);
       }
@@ -58,10 +75,26 @@ export default function ReviewsPage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedShopId, page]);
+  }, [selectedShopId, page, isAllMode, replyFilter]);
+
+  // 未返信件数を取得
+  const fetchUnrepliedCount = useCallback(async () => {
+    let query = supabase
+      .from("reviews")
+      .select("id", { count: "exact", head: true })
+      .is("reply_comment", null);
+
+    if (!isAllMode && selectedShopId) {
+      query = query.eq("shop_id", selectedShopId);
+    }
+
+    const { count } = await query;
+    setUnrepliedCount(count || 0);
+  }, [selectedShopId, isAllMode]);
 
   useEffect(() => { fetchReviews(); }, [fetchReviews]);
-  useEffect(() => { setPage(1); }, [selectedShopId]);
+  useEffect(() => { fetchUnrepliedCount(); }, [fetchUnrepliedCount]);
+  useEffect(() => { setPage(1); }, [selectedShopId, replyFilter, shopFilterMode]);
 
   const handleSync = async () => {
     setSyncing(true);
@@ -69,9 +102,9 @@ export default function ReviewsPage() {
     try {
       const shopIds = selectedShopId ? [selectedShopId] : [];
       const res = await api.post("/api/report/sync-reviews", { shopIds }, { timeout: 300000 });
-      const data = res.data;
-      setSyncMsg(`${data.totalSynced}件の口コミを同期しました（${data.shops}店舗）`);
+      setSyncMsg(`${res.data.totalSynced}件の口コミを同期しました（${res.data.shops}店舗）`);
       await fetchReviews();
+      await fetchUnrepliedCount();
     } catch (e: any) {
       setSyncMsg(`同期に失敗しました: ${e?.response?.data?.error || e?.message || "不明なエラー"}`);
     } finally {
@@ -95,25 +128,24 @@ export default function ReviewsPage() {
         totalSynced += res.data.totalSynced || 0;
         totalErrors += res.data.totalErrors || 0;
         stoppedAt = i + batchSize;
-
-        // エラーが5件以上なら中断（レート制限の可能性）
         if (totalErrors >= 5) {
-          setSyncMsg(`⚠ レート制限の可能性があるため中断しました。${stoppedAt}/${shopIds.length}店舗完了、${totalSynced}件取得済み。しばらく待ってから再実行してください。`);
+          setSyncMsg(`⚠ レート制限の可能性があるため中断。${stoppedAt}/${shopIds.length}店舗完了、${totalSynced}件取得済み。`);
           await fetchReviews();
+          await fetchUnrepliedCount();
           setSyncing(false);
           return;
         }
       } catch (e: any) {
         stoppedAt = i;
-        setSyncMsg(`⚠ ${stoppedAt}/${shopIds.length}店舗で中断しました（${totalSynced}件取得済み）。原因: ${e?.message || "タイムアウト"}。しばらく待ってから再実行してください。`);
+        setSyncMsg(`⚠ ${stoppedAt}/${shopIds.length}店舗で中断（${totalSynced}件取得済み）。原因: ${e?.message || "タイムアウト"}`);
         await fetchReviews();
         setSyncing(false);
         return;
       }
     }
-
     setSyncMsg(`✓ ${totalSynced}件の口コミを同期しました（${shopIds.length}店舗完了、エラー${totalErrors}件）`);
     await fetchReviews();
+    await fetchUnrepliedCount();
     setSyncing(false);
   };
 
@@ -159,6 +191,10 @@ export default function ReviewsPage() {
 
   const totalPages = Math.ceil(totalCount / PER_PAGE);
 
+  const displayLabel = isAllMode
+    ? `全店舗 — ${totalCount}件`
+    : `${selectedShop?.name || "店舗未選択"} — ${totalCount}件`;
+
   return (
     <div className="animate-fade-in">
       <div className="mb-4">
@@ -168,62 +204,66 @@ export default function ReviewsPage() {
         <div className="flex items-center justify-between mt-2">
           <p className="text-sm text-slate-500">口コミ一覧・返信・分析</p>
           <div className="flex items-center gap-2">
-            <button
-              onClick={handleSync}
-              disabled={syncing || !selectedShopId}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                syncing ? "bg-slate-200 text-slate-400" : "bg-emerald-600 hover:bg-emerald-700"
-              }`}
-              style={{ color: syncing ? undefined : "#fff" }}
-            >
+            <button onClick={handleSync} disabled={syncing || !selectedShopId}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing ? "bg-slate-200 text-slate-400" : "bg-emerald-600 hover:bg-emerald-700"}`}
+              style={{ color: syncing ? undefined : "#fff" }}>
               {syncing ? "同期中..." : "この店舗を同期"}
             </button>
-            <button
-              onClick={handleSyncAll}
-              disabled={syncing}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                syncing ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"
-              }`}
-              style={{ color: syncing ? undefined : "#fff" }}
-            >
+            <button onClick={handleSyncAll} disabled={syncing}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
+              style={{ color: syncing ? undefined : "#fff" }}>
               {syncing ? "同期中..." : "全店舗同期"}
             </button>
-            <button
-              onClick={handleSyncMedia}
-              disabled={syncing}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                syncing ? "bg-slate-200 text-slate-400" : "bg-purple-600 hover:bg-purple-700"
-              }`}
-              style={{ color: syncing ? undefined : "#fff" }}
-            >
+            <button onClick={handleSyncMedia} disabled={syncing}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing ? "bg-slate-200 text-slate-400" : "bg-purple-600 hover:bg-purple-700"}`}
+              style={{ color: syncing ? undefined : "#fff" }}>
               {syncing ? "同期中..." : "写真同期"}
             </button>
           </div>
         </div>
       </div>
 
-      {/* 同期メッセージ */}
       {syncMsg && (
-        <div className={`p-3 rounded-lg mb-4 text-sm ${syncMsg.includes("失敗") ? "bg-red-50 text-red-700 border border-red-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}>
+        <div className={`p-3 rounded-lg mb-4 text-sm ${syncMsg.includes("失敗") || syncMsg.includes("⚠") ? "bg-red-50 text-red-700 border border-red-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}>
           {syncMsg}
         </div>
       )}
 
-      {/* 統計バー */}
-      <div className="flex items-center gap-4 mb-4 text-xs text-slate-500">
-        <span>口コミ: {totalCount}件</span>
-        {lastSynced && <span>最終同期: {new Date(lastSynced).toLocaleString("ja-JP")}</span>}
-        {selectedShop && <span>店舗: {selectedShop.name}</span>}
+      {/* フィルタタブ */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-4 text-xs text-slate-500">
+          <span>{displayLabel}</span>
+          {lastSynced && <span>最終同期: {new Date(lastSynced).toLocaleString("ja-JP")}</span>}
+        </div>
+        <div className="flex border border-slate-200 rounded-lg overflow-hidden">
+          <button
+            onClick={() => setReplyFilter("all")}
+            className={`px-3 py-1.5 text-xs font-semibold transition ${replyFilter === "all" ? "bg-[#003D6B] text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}
+          >
+            すべて
+          </button>
+          <button
+            onClick={() => setReplyFilter("unreplied")}
+            className={`px-3 py-1.5 text-xs font-semibold transition ${replyFilter === "unreplied" ? "bg-red-600 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}
+          >
+            未返信{unrepliedCount > 0 && ` (${unrepliedCount})`}
+          </button>
+          <button
+            onClick={() => setReplyFilter("replied")}
+            className={`px-3 py-1.5 text-xs font-semibold transition ${replyFilter === "replied" ? "bg-emerald-600 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}
+          >
+            返信済み
+          </button>
+        </div>
       </div>
 
       {!apiConnected ? (
         <div className="bg-white rounded-xl p-12 shadow-sm border border-slate-100 text-center">
           <p className="text-slate-400 text-sm mb-2">Go APIに接続し、店舗を登録すると口コミが表示されます</p>
-          <p className="text-slate-300 text-xs">GBPの口コミ取得・AI返信候補・感情分析</p>
         </div>
-      ) : !selectedShopId ? (
+      ) : (!isAllMode && !selectedShopId) ? (
         <div className="bg-white rounded-xl p-12 shadow-sm border border-slate-100 text-center">
-          <p className="text-slate-400 text-sm">店舗を選択してください</p>
+          <p className="text-slate-400 text-sm">店舗を選択するか、ヘッダーから「全店舗表示」を選択してください</p>
         </div>
       ) : loading ? (
         <div className="bg-white rounded-xl p-12 shadow-sm border border-slate-100 text-center">
@@ -231,14 +271,16 @@ export default function ReviewsPage() {
         </div>
       ) : reviews.length === 0 ? (
         <div className="bg-white rounded-xl p-12 shadow-sm border border-slate-100 text-center">
-          <p className="text-slate-400 text-sm mb-2">口コミデータがありません</p>
-          <p className="text-slate-300 text-xs">「この店舗を同期」ボタンでGBPから口コミを取得してください</p>
+          <p className="text-slate-400 text-sm mb-2">
+            {replyFilter === "unreplied" ? "未返信の口コミはありません" : replyFilter === "replied" ? "返信済みの口コミはありません" : "口コミデータがありません"}
+          </p>
+          {replyFilter === "all" && <p className="text-slate-300 text-xs">「この店舗を同期」ボタンでGBPから口コミを取得してください</p>}
         </div>
       ) : (
         <>
           <div className="space-y-3">
             {reviews.map((review) => (
-              <div key={review.id} className="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
+              <div key={review.id} className={`bg-white rounded-xl p-5 shadow-sm border ${!review.reply_comment ? "border-amber-200" : "border-slate-100"}`}>
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-slate-700">{review.reviewer_name}</span>
@@ -246,8 +288,19 @@ export default function ReviewsPage() {
                       {"★".repeat(starToNum(review.star_rating))}
                       {"☆".repeat(5 - starToNum(review.star_rating))}
                     </span>
+                    {!review.reply_comment && (
+                      <span className="text-[10px] font-semibold text-red-500 bg-red-50 px-1.5 py-0.5 rounded">未返信</span>
+                    )}
                   </div>
-                  <span className="text-xs text-slate-400">{new Date(review.create_time).toLocaleDateString("ja-JP")}</span>
+                  <div className="flex items-center gap-2">
+                    {/* 全店舗モード時に店舗名を表示 */}
+                    {isAllMode && (
+                      <span className="text-[10px] text-slate-400 bg-slate-50 px-2 py-0.5 rounded-full truncate max-w-[150px]">
+                        {review.shop_name}
+                      </span>
+                    )}
+                    <span className="text-xs text-slate-400">{new Date(review.create_time).toLocaleDateString("ja-JP")}</span>
+                  </div>
                 </div>
                 {review.comment && <p className="text-sm text-slate-600 mb-3">{
                   review.comment.includes("(Original)")
@@ -282,15 +335,16 @@ export default function ReviewsPage() {
                         >
                           コピー
                         </button>
-                        {selectedShopId && !review.reply_comment && (
+                        {review.shop_id && !review.reply_comment && (
                           <button
                             onClick={async () => {
                               try {
-                                await api.put(`/api/shop/${selectedShopId}/review/${review.review_id}/reply`, {
+                                await api.put(`/api/shop/${review.shop_id}/review/${review.review_id}/reply`, {
                                   comment: aiReply,
                                 }, { timeout: 15000 });
                                 setSyncMsg("GBPに返信を投稿しました！");
                                 await fetchReviews();
+                                await fetchUnrepliedCount();
                                 setAiReplyId(null);
                                 setAiReply("");
                               } catch (e: any) {
@@ -311,24 +365,13 @@ export default function ReviewsPage() {
             ))}
           </div>
 
-          {/* ページネーション */}
           {totalPages > 1 && (
             <div className="flex items-center justify-center gap-2 mt-6">
-              <button
-                onClick={() => setPage(Math.max(1, page - 1))}
-                disabled={page <= 1}
-                className="px-3 py-1.5 rounded-lg text-xs border border-slate-200 disabled:opacity-30"
-              >
-                ← 前へ
-              </button>
+              <button onClick={() => setPage(Math.max(1, page - 1))} disabled={page <= 1}
+                className="px-3 py-1.5 rounded-lg text-xs border border-slate-200 disabled:opacity-30">← 前へ</button>
               <span className="text-xs text-slate-500">{page} / {totalPages}</span>
-              <button
-                onClick={() => setPage(Math.min(totalPages, page + 1))}
-                disabled={page >= totalPages}
-                className="px-3 py-1.5 rounded-lg text-xs border border-slate-200 disabled:opacity-30"
-              >
-                次へ →
-              </button>
+              <button onClick={() => setPage(Math.min(totalPages, page + 1))} disabled={page >= totalPages}
+                className="px-3 py-1.5 rounded-lg text-xs border border-slate-200 disabled:opacity-30">次へ →</button>
             </div>
           )}
         </>

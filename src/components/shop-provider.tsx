@@ -12,6 +12,8 @@ interface ShopContextType {
   loading: boolean;
   apiConnected: boolean;
   refreshShops: () => Promise<void>;
+  shopFilterMode: "all" | "single";
+  setShopFilterMode: (mode: "all" | "single") => void;
 }
 
 const ShopContext = createContext<ShopContextType>({
@@ -22,6 +24,8 @@ const ShopContext = createContext<ShopContextType>({
   loading: true,
   apiConnected: false,
   refreshShops: async () => {},
+  shopFilterMode: "single",
+  setShopFilterMode: () => {},
 });
 
 export function useShop() {
@@ -33,6 +37,7 @@ export default function ShopProvider({ children }: { children: React.ReactNode }
   const [selectedShopId, setSelectedShopId] = useState("");
   const [loading, setLoading] = useState(true);
   const [apiConnected, setApiConnected] = useState(false);
+  const [shopFilterMode, setShopFilterMode] = useState<"all" | "single">("single");
 
   const fetchShops = useCallback(async () => {
     try {
@@ -62,6 +67,8 @@ export default function ShopProvider({ children }: { children: React.ReactNode }
       loading,
       apiConnected,
       refreshShops: fetchShops,
+      shopFilterMode,
+      setShopFilterMode,
     }}>
       {children}
     </ShopContext.Provider>
