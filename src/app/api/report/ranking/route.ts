@@ -26,11 +26,13 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { shopId, keyword, pageToken, startPosition } = body as {
+  const { shopId, keyword, pageToken, startPosition, lat: reqLat, lng: reqLng } = body as {
     shopId: string;
     keyword: string;
     pageToken?: string;
     startPosition?: number;
+    lat?: number;
+    lng?: number;
   };
 
   if (!shopId || !keyword) {
@@ -54,8 +56,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "店舗が見つかりません" }, { status: 404 });
   }
 
-  const lat = shop.gbp_latitude || 35.6812;
-  const lng = shop.gbp_longitude || 139.7671;
+  const lat = reqLat || shop.gbp_latitude || 35.6812;
+  const lng = reqLng || shop.gbp_longitude || 139.7671;
   const targetName = shop.gbp_shop_name || shop.name;
 
   // Google Places API v1 検索
