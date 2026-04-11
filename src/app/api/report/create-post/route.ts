@@ -129,7 +129,7 @@ export async function POST(request: NextRequest) {
 
     const result = await res.json();
 
-    // 投稿ログをSupabaseに保存
+    // 投稿ログをSupabaseに保存（searchUrl含む）
     try {
       await supabase.from("post_logs").insert({
         id: crypto.randomUUID(),
@@ -140,6 +140,8 @@ export async function POST(request: NextRequest) {
         media_url: photoUrl || null,
         action_type: callToAction?.actionType || null,
         action_url: callToAction?.url || null,
+        search_url: result.searchUrl || null,
+        gbp_post_name: result.name || null,
       });
     } catch {}
 
