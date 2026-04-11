@@ -87,21 +87,9 @@ export default function CitationPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800">NAP整合性チェック</h1>
-          <p className="text-sm text-slate-500 mt-1">管理DB vs GBP — 店舗名・住所・電話番号の一括照合</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {lastChecked && (
-            <span className="text-[10px] text-slate-400">最終チェック: {new Date(lastChecked).toLocaleString("ja-JP")}</span>
-          )}
-          <button onClick={handleCheck} disabled={checking || !apiConnected}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold ${checking ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
-            style={{ color: checking ? undefined : "#fff" }}>
-            {checking ? "チェック中..." : "NAP一括チェック"}
-          </button>
-        </div>
+      <div className="mb-4">
+        <h1 className="text-2xl font-bold text-slate-800">NAP整合性チェック</h1>
+        <p className="text-sm text-slate-500 mt-1">管理DB vs GBP — 店舗名・住所・電話番号の一括照合</p>
       </div>
 
       {error && <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm text-red-700">{error}</div>}
@@ -137,6 +125,18 @@ export default function CitationPage() {
               <p className="text-[11px] font-medium text-slate-400 mb-1">電話NG</p>
               <p className="text-2xl font-bold text-purple-600">{phoneNG}</p>
             </div>
+          </div>
+
+          {/* アクションバー */}
+          <div className="flex items-center justify-between mb-5">
+            <div className="text-xs text-slate-400">
+              {lastChecked && `最終チェック: ${new Date(lastChecked).toLocaleString("ja-JP")}`}
+            </div>
+            <button onClick={handleCheck} disabled={checking}
+              className={`px-5 py-2.5 rounded-lg text-sm font-semibold ${checking ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
+              style={{ color: checking ? undefined : "#fff" }}>
+              {checking ? "チェック中..." : "NAP一括チェック実行"}
+            </button>
           </div>
 
           {/* フィルタ */}
