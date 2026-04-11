@@ -53,7 +53,6 @@ const navSections = [
   {
     title: null,
     items: [
-      { href: "/lead", label: "リード獲得・分析" },
       { href: "/chatbot", label: "AI社長" },
     ],
   },
