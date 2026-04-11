@@ -37,6 +37,21 @@ async function getOAuthToken(): Promise<string | null> {
   } catch { return data.access_token; }
 }
 
+/**
+ * Dropbox共有URLをGBP APIが読める直接ダウンロードURLに変換
+ * www.dropbox.com → dl.dropboxusercontent.com
+ */
+function convertDropboxUrl(url: string): string {
+  if (!url || !url.includes("dropbox.com")) return url;
+  // www.dropbox.com/scl/fi/xxx → dl.dropboxusercontent.com/scl/fi/xxx
+  let direct = url.replace("www.dropbox.com", "dl.dropboxusercontent.com");
+  // dl=0やst=xxxパラメータを除去
+  direct = direct.replace(/[&?]dl=\d/g, "").replace(/[&?]st=[^&]*/g, "");
+  // 末尾の?や&を整理
+  direct = direct.replace(/[?&]$/, "");
+  return direct;
+}
+
 function parseCSV(text: string): string[][] {
   const rows: string[][] = [];
   let i = 0;
@@ -134,8 +149,8 @@ export async function POST(request: NextRequest) {
           // 日付を含むURLを優先
           const dated = urls.find((u) => u.includes(dateCompact));
           photoUrl = dated || urls[0] || photoCell.trim();
-          // Dropbox修正
-          if (photoUrl.includes("dropbox.com")) photoUrl = photoUrl.replace("dl=0", "raw=1");
+          // Dropbox URLを直接ダウンロードURLに変換
+          photoUrl = convertDropboxUrl(photoUrl);
         }
 
         allMatches.push({ shopName, summary: postText, photoUrl, tab, rawPhotoCell: photoCell, rawDateCell: dateCell });
@@ -187,7 +202,8 @@ export async function POST(request: NextRequest) {
     const trimmedSummary = match.summary.slice(0, 1500);
     const postBody: any = { summary: trimmedSummary, topicType: "STANDARD", languageCode: "ja" };
     if (match.photoUrl) {
-      postBody.media = [{ mediaFormat: "PHOTO", sourceUrl: match.photoUrl }];
+      const directUrl = convertDropboxUrl(match.photoUrl);
+      postBody.media = [{ mediaFormat: "PHOTO", sourceUrl: directUrl }];
     }
 
     try {

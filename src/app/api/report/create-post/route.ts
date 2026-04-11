@@ -100,13 +100,11 @@ export async function POST(request: NextRequest) {
   }
 
   if (photoUrl) {
-    // Dropbox URL修正（dl=0 → raw=1）
+    // Dropbox URLを直接ダウンロードURLに変換
     let fixedUrl = photoUrl;
-    if (fixedUrl.includes("dropbox.com") && fixedUrl.includes("dl=0")) {
-      fixedUrl = fixedUrl.replace("dl=0", "raw=1");
-    }
-    if (fixedUrl.includes("dropbox.com") && !fixedUrl.includes("raw=1") && !fixedUrl.includes("dl=1")) {
-      fixedUrl += (fixedUrl.includes("?") ? "&" : "?") + "raw=1";
+    if (fixedUrl.includes("dropbox.com")) {
+      fixedUrl = fixedUrl.replace("www.dropbox.com", "dl.dropboxusercontent.com");
+      fixedUrl = fixedUrl.replace(/[&?]dl=\d/g, "").replace(/[&?]st=[^&]*/g, "").replace(/[?&]$/, "");
     }
     postBody.media = [{ mediaFormat: "PHOTO", sourceUrl: fixedUrl }];
   }
