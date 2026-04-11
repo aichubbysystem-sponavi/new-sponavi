@@ -94,9 +94,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "店舗のGBP情報が見つかりません" }, { status: 404 });
   }
 
+  // locationNameを accounts/XXX/locations/YYY 形式に正規化
+  const locationName = shop.gbp_location_name.startsWith("accounts/")
+    ? shop.gbp_location_name
+    : `accounts/111148362910776147900/${shop.gbp_location_name}`;
+
   // GBP API v4: PUT {locationName}/reviews/{reviewId}/reply
-  const reviewName = `${shop.gbp_location_name}/reviews/${reviewId}`;
-  const replyUrl = `${GBP_API_BASE}/${reviewName}/reply`;
+  const replyUrl = `${GBP_API_BASE}/${locationName}/reviews/${reviewId}/reply`;
+  console.log("[reply-review] URL:", replyUrl);
 
   try {
     const res = await fetch(replyUrl, {
@@ -110,10 +115,10 @@ export async function POST(request: NextRequest) {
 
     if (!res.ok) {
       const errBody = await res.text().catch(() => "");
-      console.error(`[reply-review] GBP API error: ${res.status}`, errBody);
+      console.error(`[reply-review] GBP API error: ${res.status}`, errBody, "URL:", replyUrl);
       return NextResponse.json(
-        { error: `GBP API error: ${res.status} ${errBody.slice(0, 200)}` },
-        { status: res.status }
+        { error: `GBP返信エラー (${res.status}): ${errBody.slice(0, 300)}`, url: replyUrl },
+        { status: 500 }
       );
     }
 
