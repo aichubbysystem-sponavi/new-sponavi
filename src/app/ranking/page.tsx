@@ -291,6 +291,33 @@ export default function RankingPage() {
                 >
                   シートから反映
                 </button>
+                <button
+                  onClick={async () => {
+                    if (!selectedShop) return;
+                    setError("");
+                    try {
+                      const res = await api.post("/api/report/reply-suggest", {
+                        comment: `店舗「${selectedShop.name}」のMEO対策に最適な検索キーワード候補を8個提案してください。
+
+条件:
+- 地域名+業種の組み合わせ
+- 検索ボリュームが高そうなもの
+- 具体的で自然な検索クエリ
+- 1行に1キーワード、番号なし、説明なし、キーワードのみ出力`,
+                        starRating: 5,
+                        shopName: selectedShop.name,
+                      }, { timeout: 20000 });
+                      if (res.data.reply) {
+                        const kws = res.data.reply.split("\n").map((l: string) => l.trim()).filter(Boolean);
+                        setKeywords((prev) => prev ? prev + "\n" + kws.join("\n") : kws.join("\n"));
+                      }
+                    } catch (e: any) { setError("AI候補生成に失敗: " + (e?.message || "")); }
+                  }}
+                  className="px-3 py-1 rounded-lg text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-700"
+                  style={{ color: "#fff" }}
+                >
+                  AIで候補提案
+                </button>
               </div>
               <textarea
                 value={keywords}
