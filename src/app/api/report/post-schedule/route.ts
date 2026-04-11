@@ -34,7 +34,11 @@ export async function GET(request: NextRequest) {
   }
 
   const { data, error } = await query;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error("[post-schedule GET] error:", error.message, error.code);
+    // テーブルが存在しない場合やRLSエラーの場合は空配列を返す
+    return NextResponse.json([]);
+  }
   return NextResponse.json(data || []);
 }
 
