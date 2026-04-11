@@ -24,7 +24,7 @@ export default function PostsPage() {
   const [localPosts, setLocalPosts] = useState<LocalPost[]>([]);
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
-  const [newPost, setNewPost] = useState({ summary: "", topicType: "STANDARD", actionType: "", actionUrl: "" });
+  const [newPost, setNewPost] = useState({ summary: "", topicType: "STANDARD", actionType: "", actionUrl: "", photoUrl: "" });
   const [creating, setCreating] = useState(false);
   const [msg, setMsg] = useState("");
   const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
@@ -50,10 +50,29 @@ export default function PostsPage() {
       if (newPost.actionType && newPost.actionUrl) {
         body.callToAction = { actionType: newPost.actionType, url: newPost.actionUrl };
       }
+      if (newPost.photoUrl.trim()) {
+        body.media = [{ mediaFormat: "PHOTO", sourceUrl: newPost.photoUrl.trim() }];
+      }
       await api.post(`/api/shop/${selectedShopId}/local_post`, body, { timeout: 30000 });
+
+      // 投稿ログをSupabaseに保存
+      try {
+        const { supabase } = await import("@/lib/supabase");
+        await supabase.from("post_logs").insert({
+          id: crypto.randomUUID(),
+          shop_id: selectedShopId,
+          shop_name: selectedShop?.name || "",
+          summary: newPost.summary,
+          topic_type: newPost.topicType,
+          media_url: newPost.photoUrl || null,
+          action_type: newPost.actionType || null,
+          action_url: newPost.actionUrl || null,
+        });
+      } catch {}
+
       setMsg("投稿を作成しました！");
       setShowCreate(false);
-      setNewPost({ summary: "", topicType: "STANDARD", actionType: "", actionUrl: "" });
+      setNewPost({ summary: "", topicType: "STANDARD", actionType: "", actionUrl: "", photoUrl: "" });
       await fetchData();
     } catch (e: any) {
       setMsg(`投稿に失敗しました: ${e?.response?.data?.message || e?.message || "不明なエラー"}`);
@@ -168,6 +187,23 @@ export default function PostsPage() {
                     placeholder="投稿の内容を入力..."
                     className="w-full border border-slate-200 rounded-lg px-4 py-3 text-sm min-h-[120px] resize-y focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20" />
                   <p className="text-xs text-slate-400 mt-1">{newPost.summary.length} / 1500文字</p>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1">写真URL（任意）</label>
+                  <div className="flex gap-2">
+                    <input type="text" value={newPost.photoUrl}
+                      onChange={(e) => setNewPost({ ...newPost, photoUrl: e.target.value })}
+                      placeholder="https://example.com/photo.jpg"
+                      className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  {newPost.photoUrl && (
+                    <div className="mt-2">
+                      <img src={newPost.photoUrl} alt="プレビュー"
+                        className="h-20 rounded-lg object-cover border border-slate-200"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                    </div>
+                  )}
+                  <p className="text-[10px] text-slate-400 mt-1">公開URLを入力してください（Googleドライブ、ウェブサイト等）</p>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
