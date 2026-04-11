@@ -27,15 +27,18 @@ export default function CitationPage() {
   const { selectedShopId, selectedShop, apiConnected } = useShop();
   const [gbpData, setGbpData] = useState<GBPLocation | null>(null);
   const [loading, setLoading] = useState(false);
+  const [fetchError, setFetchError] = useState("");
 
   const fetchData = useCallback(async () => {
     if (!selectedShopId) return;
     setLoading(true);
+    setFetchError("");
     try {
       const res = await api.get(`/api/shop/${selectedShopId}/location`);
       setGbpData(res.data || null);
-    } catch {
+    } catch (e: any) {
       setGbpData(null);
+      setFetchError(e?.response?.data?.message || e?.message || "GBP情報の取得に失敗しました");
     } finally {
       setLoading(false);
     }
@@ -43,22 +46,27 @@ export default function CitationPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // NAP比較
-  const napItems: { label: string; db: string; gbp: string }[] = [];
-  if (selectedShop) {
-    const shop = selectedShop as any;
-    const addr = gbpData?.storefrontAddress;
-    napItems.push(
-      { label: "店舗名", db: shop.name || "", gbp: gbpData?.title || "" },
-      { label: "住所", db: `${shop.state || ""}${shop.city || ""}${shop.address || ""}${shop.building || ""}`, gbp: addr ? `${addr.administrativeArea || ""}${addr.locality || ""}${(addr.addressLines || []).join("")}` : "" },
-      { label: "電話番号", db: shop.phone || "", gbp: gbpData?.phoneNumbers?.primaryPhone || "" },
-    );
-  }
+  // NAP比較データ（安全にプロパティアクセス）
+  const shop = selectedShop as any;
+  const dbName = shop?.name || "";
+  const dbAddress = [shop?.state, shop?.city, shop?.address, shop?.building].filter(Boolean).join("");
+  const dbPhone = shop?.phone || "";
+
+  const gbpName = gbpData?.title || "";
+  const gbpAddr = gbpData?.storefrontAddress;
+  const gbpAddress = gbpAddr ? [gbpAddr.administrativeArea, gbpAddr.locality, ...(gbpAddr.addressLines || [])].filter(Boolean).join("") : "";
+  const gbpPhone = gbpData?.phoneNumbers?.primaryPhone || "";
+
+  const napItems = [
+    { label: "店舗名", db: dbName, gbp: gbpName },
+    { label: "住所", db: dbAddress, gbp: gbpAddress },
+    { label: "電話番号", db: dbPhone, gbp: gbpPhone },
+  ];
 
   const checkMatch = (db: string, gbp: string) => {
     if (!db && !gbp) return "empty";
     if (!db || !gbp) return "missing";
-    return db.replace(/[\s\-−ー]/g, "") === gbp.replace(/[\s\-−ー]/g, "") ? "match" : "mismatch";
+    return db.replace(/[\s\-−ー　]/g, "") === gbp.replace(/[\s\-−ー　]/g, "") ? "match" : "mismatch";
   };
 
   const statusStyles: Record<string, { icon: string; color: string; bg: string; label: string }> = {
@@ -87,6 +95,12 @@ export default function CitationPage() {
         </div>
       ) : (
         <>
+          {fetchError && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-sm text-amber-700">
+              GBP情報: {fetchError}（管理DB情報のみ表示中）
+            </div>
+          )}
+
           {/* スコアカード */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-6">
             <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
@@ -98,7 +112,7 @@ export default function CitationPage() {
                 <span className="text-lg text-slate-400 mb-1">/ 3</span>
               </div>
               <p className="text-xs text-slate-400 mt-1">
-                {matchCount === 3 ? "すべて一致しています" : "不一致の項目があります"}
+                {matchCount === 3 ? "すべて一致" : gbpData ? "不一致の項目あり" : "GBP未接続"}
               </p>
             </div>
 
@@ -127,7 +141,7 @@ export default function CitationPage() {
                 <thead>
                   <tr className="bg-slate-50">
                     <th className="text-left p-3 text-slate-500 font-medium w-28">項目</th>
-                    <th className="text-left p-3 text-slate-500 font-medium">管理DB（Go API）</th>
+                    <th className="text-left p-3 text-slate-500 font-medium">管理DB</th>
                     <th className="text-left p-3 text-slate-500 font-medium">Google Business Profile</th>
                     <th className="text-center p-3 text-slate-500 font-medium w-24">状態</th>
                   </tr>
