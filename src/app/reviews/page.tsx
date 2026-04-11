@@ -368,9 +368,11 @@ export default function ReviewsPage() {
                           <button
                             onClick={async () => {
                               try {
-                                await api.put(`/api/shop/${review.shop_id}/review/${review.review_id}/reply`, {
+                                await api.post("/api/report/reply-review", {
+                                  shopId: review.shop_id,
+                                  reviewId: review.review_id,
                                   comment: aiReply,
-                                }, { timeout: 15000 });
+                                }, { timeout: 30000 });
                                 setSyncMsg("GBPに返信を投稿しました！");
                                 await fetchReviews();
                                 await fetchUnrepliedCount();
