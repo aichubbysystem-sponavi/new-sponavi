@@ -61,6 +61,11 @@ export default function PostsPage() {
   const [planEditDay, setPlanEditDay] = useState<number | null>(null);
   const [planEditType, setPlanEditType] = useState("STANDARD");
   const [planEditNote, setPlanEditNote] = useState("");
+  const [aiPosts, setAiPosts] = useState<string[]>([]);
+  const [aiGenerating, setAiGenerating] = useState(false);
+  const [aiKeywords, setAiKeywords] = useState("");
+  const [proofResult, setProofResult] = useState<string | null>(null);
+  const [proofing, setProofing] = useState(false);
 
   const isAllMode = shopFilterMode === "all";
 
@@ -457,7 +462,84 @@ export default function PostsPage() {
                   <label className="text-xs text-slate-500 block mb-1">投稿本文 *</label>
                   <textarea value={newPost.summary} onChange={(e) => setNewPost({ ...newPost, summary: e.target.value })}
                     placeholder="投稿の内容を入力..." className="w-full border border-slate-200 rounded-lg px-4 py-3 text-sm min-h-[120px] resize-y focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20" />
-                  <p className="text-xs text-slate-400 mt-1">{newPost.summary.length} / 1500文字</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <p className="text-xs text-slate-400">{newPost.summary.length} / 1500文字</p>
+                    <div className="flex items-center gap-1.5 ml-auto">
+                      {/* AI校正 */}
+                      {newPost.summary.trim().length > 10 && (
+                        <button onClick={async () => {
+                          setProofing(true); setProofResult(null);
+                          try {
+                            const token = (await supabase.auth.getSession()).data.session?.access_token;
+                            const res = await fetch("/api/report/generate-post", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+                              body: JSON.stringify({ shopName: selectedShop?.name || "", topicType: "PROOF", keywords: newPost.summary }),
+                            });
+                            const data = await res.json();
+                            setProofResult(data.posts?.[0] || "修正なし");
+                          } catch { setProofResult("校正に失敗しました"); }
+                          setProofing(false);
+                        }} disabled={proofing}
+                          className="text-[10px] px-2 py-1 rounded bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100 font-semibold">
+                          {proofing ? "校正中..." : "AI校正"}
+                        </button>
+                      )}
+                      {/* AI生成 */}
+                      <button onClick={async () => {
+                        setAiGenerating(true); setAiPosts([]);
+                        try {
+                          const token = (await supabase.auth.getSession()).data.session?.access_token;
+                          const res = await fetch("/api/report/generate-post", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+                            body: JSON.stringify({
+                              shopName: selectedShop?.name || "",
+                              topicType: newPost.topicType,
+                              keywords: aiKeywords || undefined,
+                              count: 3,
+                            }),
+                          });
+                          const data = await res.json();
+                          setAiPosts(data.posts || []);
+                        } catch { setMsg("AI生成に失敗しました"); }
+                        setAiGenerating(false);
+                      }} disabled={aiGenerating}
+                        className="text-[10px] px-2 py-1 rounded bg-purple-50 text-purple-600 border border-purple-200 hover:bg-purple-100 font-semibold">
+                        {aiGenerating ? "生成中..." : "AI文章生成"}
+                      </button>
+                    </div>
+                  </div>
+                  {/* AI生成キーワード入力 */}
+                  <input type="text" value={aiKeywords} onChange={(e) => setAiKeywords(e.target.value)}
+                    placeholder="含めたいキーワード（任意: テイクアウト, ランチ 等）"
+                    className="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-[11px] mt-1" />
+                  {/* 校正結果 */}
+                  {proofResult && (
+                    <div className="bg-amber-50 rounded-lg p-3 border border-amber-200 mt-2">
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="text-[10px] text-amber-600 font-semibold">AI校正結果</p>
+                        <button onClick={() => { setNewPost({ ...newPost, summary: proofResult }); setProofResult(null); }}
+                          className="text-[10px] px-2 py-0.5 rounded bg-amber-100 text-amber-700 hover:bg-amber-200 font-semibold">適用</button>
+                      </div>
+                      <p className="text-xs text-amber-800">{proofResult}</p>
+                    </div>
+                  )}
+                  {/* AI生成候補 */}
+                  {aiPosts.length > 0 && (
+                    <div className="bg-purple-50 rounded-lg p-3 border border-purple-200 mt-2">
+                      <p className="text-[10px] text-purple-600 font-semibold mb-2">AI生成候補（クリックで挿入）</p>
+                      <div className="space-y-2">
+                        {aiPosts.map((post, i) => (
+                          <div key={i} onClick={() => { setNewPost({ ...newPost, summary: post }); setAiPosts([]); }}
+                            className="bg-white rounded-lg p-2.5 border border-purple-100 cursor-pointer hover:border-purple-300 transition">
+                            <span className="text-[9px] text-purple-400 font-bold">候補 {i + 1}</span>
+                            <p className="text-xs text-slate-700 mt-0.5">{post.slice(0, 150)}...</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="text-xs text-slate-500 block mb-1">写真URL（任意）</label>

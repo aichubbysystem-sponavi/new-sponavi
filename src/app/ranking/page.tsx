@@ -72,6 +72,8 @@ export default function RankingPage() {
   const [kwLoading, setKwLoading] = useState(false);
   const [historyDateSort, setHistoryDateSort] = useState<"desc" | "asc">("desc");
   const [kwHistory, setKwHistory] = useState<{ period: string; keywords: { keyword: string; count: number }[] }[]>([]);
+  const [volumeResults, setVolumeResults] = useState<{ keyword: string; resultCount: number; level: string }[]>([]);
+  const [volumeLoading, setVolumeLoading] = useState(false);
 
   // 店舗ごとの計測地点をlocalStorageから読み込み/保存
   useEffect(() => {
@@ -583,6 +585,66 @@ export default function RankingPage() {
               </div>
             );
           })()}
+
+          {/* キーワードボリューム推定 */}
+          {keywords.trim() && (
+            <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-slate-500">対策KWボリューム推定</h3>
+                <button onClick={async () => {
+                  setVolumeLoading(true);
+                  try {
+                    const kws = keywords.split("\n").map((k: string) => k.trim()).filter(Boolean);
+                    const shop = selectedShop as any;
+                    const token = (await (await import("@/lib/supabase")).supabase.auth.getSession()).data.session?.access_token;
+                    const res = await fetch("/api/report/keyword-volume", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+                      body: JSON.stringify({ keywords: kws, lat: shop?.gbp_latitude, lng: shop?.gbp_longitude }),
+                    });
+                    const data = await res.json();
+                    setVolumeResults(data.results || []);
+                  } catch { setVolumeResults([]); }
+                  setVolumeLoading(false);
+                }} disabled={volumeLoading}
+                  className={`px-3 py-1 rounded-lg text-[11px] font-semibold ${volumeLoading ? "bg-slate-200 text-slate-400" : "bg-amber-500 hover:bg-amber-600"}`}
+                  style={{ color: volumeLoading ? undefined : "#fff" }}>
+                  {volumeLoading ? "推定中..." : "ボリューム推定"}
+                </button>
+              </div>
+              {volumeResults.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-200">
+                        <th className="text-left py-1.5 px-2 text-slate-500 font-medium">キーワード</th>
+                        <th className="text-center py-1.5 px-2 text-slate-500 font-medium">周辺店舗数</th>
+                        <th className="text-center py-1.5 px-2 text-slate-500 font-medium">競争レベル</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {volumeResults.map((v, i) => (
+                        <tr key={i} className="border-b border-slate-50">
+                          <td className="py-1.5 px-2 text-slate-700 font-medium">{v.keyword}</td>
+                          <td className="py-1.5 px-2 text-center font-semibold text-[#003D6B]">{v.resultCount}件</td>
+                          <td className="py-1.5 px-2 text-center">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                              v.level.includes("多") ? "bg-red-50 text-red-600" :
+                              v.level.includes("中") ? "bg-amber-50 text-amber-600" :
+                              v.level.includes("少") ? "bg-emerald-50 text-emerald-600" :
+                              v.level.includes("極少") ? "bg-blue-50 text-blue-600" :
+                              "bg-slate-50 text-slate-500"
+                            }`}>{v.level}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="text-[9px] text-slate-400 mt-2">※ 半径5km以内のPlaces API検索結果数に基づく推定。「少（狙い目）」は競争が少なく上位表示しやすいキーワードです。</p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* 検索語句 */}
           <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-6">

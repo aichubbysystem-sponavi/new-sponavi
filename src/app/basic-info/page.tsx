@@ -4,18 +4,62 @@ import { useState, useEffect, useCallback } from "react";
 import { useShop } from "@/components/shop-provider";
 import api from "@/lib/api";
 
+interface ChangeAlert {
+  field: string;
+  before: string;
+  after: string;
+}
+
 export default function BasicInfoPage() {
   const { apiConnected, selectedShopId, selectedShop } = useShop();
   const [location, setLocation] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [changeAlerts, setChangeAlerts] = useState<ChangeAlert[]>([]);
+  const [alertDismissed, setAlertDismissed] = useState(false);
 
   const fetchLocation = useCallback(async () => {
     if (!selectedShopId) return;
-    setLoading(true); setError("");
+    setLoading(true); setError(""); setChangeAlerts([]); setAlertDismissed(false);
     try {
       const res = await api.get(`/api/shop/${selectedShopId}/location`);
-      setLocation(res.data);
+      const data = res.data;
+      setLocation(data);
+
+      // 変更検知: 前回保存と比較
+      const storageKey = `gbp-snapshot-${selectedShopId}`;
+      const saved = localStorage.getItem(storageKey);
+      if (saved && data) {
+        try {
+          const prev = JSON.parse(saved);
+          const alerts: ChangeAlert[] = [];
+          const check = (field: string, prevVal: string, curVal: string) => {
+            const p = (prevVal || "").trim();
+            const c = (curVal || "").trim();
+            if (p && c && p !== c) alerts.push({ field, before: p, after: c });
+          };
+          check("店舗名", prev.title, data.title);
+          check("電話番号", prev.phone, data.phoneNumbers?.primaryPhone);
+          check("Webサイト", prev.website, data.websiteUri);
+          check("メインカテゴリ", prev.category, data.categories?.primaryCategory?.displayName);
+          const prevAddr = prev.address || "";
+          const curAddr = (data.storefrontAddress?.addressLines || []).join(" ");
+          check("住所", prevAddr, curAddr);
+          if (alerts.length > 0) setChangeAlerts(alerts);
+        } catch {}
+      }
+
+      // 現在の情報を保存
+      if (data) {
+        localStorage.setItem(storageKey, JSON.stringify({
+          title: data.title || "",
+          phone: data.phoneNumbers?.primaryPhone || "",
+          website: data.websiteUri || "",
+          category: data.categories?.primaryCategory?.displayName || "",
+          address: (data.storefrontAddress?.addressLines || []).join(" "),
+          savedAt: new Date().toISOString(),
+        }));
+      }
     } catch { setError("GBPロケーション情報の取得に失敗しました"); setLocation(null); }
     finally { setLoading(false); }
   }, [selectedShopId]);
@@ -26,6 +70,30 @@ export default function BasicInfoPage() {
     <div className="animate-fade-in">
       <h1 className="text-2xl font-bold text-slate-800 mb-2">基礎情報管理</h1>
       <p className="text-sm text-slate-500 mb-6">GBPの基本情報を管理・編集</p>
+
+      {/* GBP変更検知アラート */}
+      {changeAlerts.length > 0 && !alertDismissed && (
+        <div className="bg-red-50 rounded-xl p-5 shadow-sm border border-red-200 mb-5">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-red-600">GBP情報の変更を検知しました（{changeAlerts.length}件）</h3>
+            <button onClick={() => setAlertDismissed(true)}
+              className="text-[10px] text-red-400 hover:text-red-600 font-semibold">確認済み</button>
+          </div>
+          <div className="space-y-2">
+            {changeAlerts.map((alert, i) => (
+              <div key={i} className="bg-white rounded-lg p-3 border border-red-100">
+                <p className="text-xs font-semibold text-red-700 mb-1">{alert.field}</p>
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="bg-red-50 px-2 py-0.5 rounded text-red-600 line-through">{alert.before}</span>
+                  <span className="text-slate-400">→</span>
+                  <span className="bg-emerald-50 px-2 py-0.5 rounded text-emerald-700 font-medium">{alert.after}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="text-[9px] text-red-400 mt-2">※ Googleや第三者による情報変更の可能性があります。正しい情報か確認してください。</p>
+        </div>
+      )}
 
       {!apiConnected || !selectedShopId ? (
         <div className="bg-white rounded-xl p-12 shadow-sm border border-slate-100 text-center">
