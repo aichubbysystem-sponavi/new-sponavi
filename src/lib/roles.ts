@@ -4,7 +4,7 @@ export type Role = "president" | "manager" | "part_time";
 
 export const ROLE_LABELS: Record<Role, string> = {
   president: "社長",
-  manager: "マネージャー",
+  manager: "社員",
   part_time: "バイト",
 };
 

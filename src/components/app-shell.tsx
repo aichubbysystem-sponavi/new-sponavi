@@ -8,6 +8,7 @@ import AuthGuard from "@/components/auth-guard";
 import RoleProvider from "@/components/role-provider";
 import RoleGuard from "@/components/role-guard";
 import ShopProvider from "@/components/shop-provider";
+import FloatingTasks from "@/components/floating-tasks";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -34,6 +35,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 <RoleGuard>{children}</RoleGuard>
               </main>
             </div>
+            <FloatingTasks />
           </ShopProvider>
         </RoleProvider>
       )}
