@@ -71,6 +71,8 @@ export default function PostsPage() {
   const [bulkGenCount, setBulkGenCount] = useState(4);
   const [bulkGenning, setBulkGenning] = useState(false);
   const [bulkGenResult, setBulkGenResult] = useState<any>(null);
+  const [bulkPostMode, setBulkPostMode] = useState(false);
+  const [bulkPostShopIds, setBulkPostShopIds] = useState<string[]>([]);
 
   const isAllMode = shopFilterMode === "all";
 
@@ -670,12 +672,34 @@ export default function PostsPage() {
                     min={new Date().toISOString().slice(0, 16)} />
                   <p className="text-[10px] text-slate-400 mt-1">{newPost.scheduledAt ? "予約モード: 指定日時にGBPへ自動投稿されます" : "空欄の場合は即時投稿"}</p>
                 </div>
+                {/* 系列店一括投稿 */}
+                <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={bulkPostMode} onChange={(e) => {
+                      setBulkPostMode(e.target.checked);
+                      if (e.target.checked) setBulkPostShopIds(shops.map(s => s.id));
+                      else setBulkPostShopIds([]);
+                    }} className="rounded" />
+                    <span className="text-xs font-semibold text-slate-600">系列店にも同時投稿（{shops.length}店舗）</span>
+                  </label>
+                  {bulkPostMode && (
+                    <div className="mt-2 max-h-[100px] overflow-y-auto">
+                      {shops.map(s => (
+                        <label key={s.id} className="flex items-center gap-1.5 text-[10px] text-slate-500 py-0.5">
+                          <input type="checkbox" checked={bulkPostShopIds.includes(s.id)}
+                            onChange={(e) => setBulkPostShopIds(e.target.checked ? [...bulkPostShopIds, s.id] : bulkPostShopIds.filter(id => id !== s.id))} />
+                          {s.name}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <div className="flex justify-end gap-2 pt-2">
                   <button onClick={() => setShowCreate(false)} className="px-4 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">キャンセル</button>
                   <button onClick={handleCreate} disabled={creating || !newPost.summary.trim()}
                     className={`px-6 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 ${newPost.scheduledAt ? "bg-purple-600 hover:bg-purple-700" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
                     style={{ color: "#fff" }}>
-                    {creating ? "処理中..." : newPost.scheduledAt ? "予約する" : "GBPに投稿"}
+                    {creating ? "処理中..." : bulkPostMode ? `${bulkPostShopIds.length}店舗に投稿` : newPost.scheduledAt ? "予約する" : "GBPに投稿"}
                   </button>
                 </div>
               </div>

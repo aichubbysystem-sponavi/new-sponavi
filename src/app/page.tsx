@@ -403,6 +403,74 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* 売上予測 */}
+      {perf.length >= 3 && (
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mt-6">
+          <h3 className="text-sm font-semibold text-slate-500 mb-4">売上予測（3ヶ月）</h3>
+          {(() => {
+            // 線形回帰で予測
+            const data = perf.slice(-6).map((p, i) => ({
+              x: i,
+              search: v(p.mobile_search_impressions) + v(p.pc_search_impressions),
+              calls: v(p.call_clicks),
+              routes: v(p.direction_requests),
+            }));
+            const n = data.length;
+            const sumX = data.reduce((s, d) => s + d.x, 0);
+            const predict = (key: 'search' | 'calls' | 'routes') => {
+              const sumY = data.reduce((s, d) => s + d[key], 0);
+              const sumXY = data.reduce((s, d) => s + d.x * d[key], 0);
+              const sumX2 = data.reduce((s, d) => s + d.x * d.x, 0);
+              const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX) || 0;
+              const intercept = (sumY - slope * sumX) / n;
+              return [1, 2, 3].map(m => Math.max(0, Math.round(intercept + slope * (n - 1 + m))));
+            };
+            const searchPred = predict('search');
+            const callPred = predict('calls');
+            const routePred = predict('routes');
+            const avgSpend = (selectedShop as any)?.average_spending || 3000;
+            const groupSize = (selectedShop as any)?.customers_per_group || 1.5;
+            const months = [1, 2, 3].map(m => {
+              const d = new Date();
+              d.setMonth(d.getMonth() + m);
+              return `${d.getFullYear()}/${d.getMonth() + 1}`;
+            });
+
+            return (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-200">
+                      <th className="text-left py-2 px-2 text-slate-500 font-medium">月</th>
+                      <th className="text-right py-2 px-2 text-slate-500 font-medium">予測検索数</th>
+                      <th className="text-right py-2 px-2 text-slate-500 font-medium">予測電話</th>
+                      <th className="text-right py-2 px-2 text-slate-500 font-medium">予測経路</th>
+                      <th className="text-right py-2 px-2 text-slate-500 font-medium">推定売上</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {months.map((month, i) => {
+                      const visits = Math.round(callPred[i] * 0.3 + routePred[i] * 0.5);
+                      const revenue = Math.round(visits * avgSpend * groupSize);
+                      return (
+                        <tr key={i} className="border-b border-slate-50">
+                          <td className="py-2 px-2 text-slate-600 font-medium">{month}</td>
+                          <td className="py-2 px-2 text-right text-[#003D6B] font-semibold">{searchPred[i].toLocaleString()}</td>
+                          <td className="py-2 px-2 text-right text-purple-600">{callPred[i].toLocaleString()}</td>
+                          <td className="py-2 px-2 text-right text-red-600">{routePred[i].toLocaleString()}</td>
+                          <td className="py-2 px-2 text-right text-emerald-600 font-bold">¥{revenue.toLocaleString()}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <p className="text-[9px] text-slate-400 mt-2">※ 直近6ヶ月のデータから線形回帰で予測。実際の売上を保証するものではありません。</p>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
       {/* 要注意口コミアラート */}
       {badAlerts.length > 0 && (
         <div className="bg-white rounded-xl p-6 shadow-sm border border-red-200 mt-6">

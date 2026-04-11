@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useShop } from "@/components/shop-provider";
+import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
 
 interface DiagnosisItem {
@@ -27,6 +28,7 @@ export default function DiagnosisPage() {
   const [myShopData, setMyShopData] = useState<Competitor | null>(null);
   const [compLoading, setCompLoading] = useState(false);
   const [compQuery, setCompQuery] = useState("");
+  const [benchmark, setBenchmark] = useState<{avgRating: number; avgReviewCount: number; myRating: number; myReviewCount: number; shopCount: number} | null>(null);
 
   const fetchDiagnosis = useCallback(async () => {
     if (!selectedShopId) return;
@@ -81,6 +83,38 @@ export default function DiagnosisPage() {
   }, [selectedShopId]);
 
   useEffect(() => { fetchDiagnosis(); }, [fetchDiagnosis]);
+
+  // ベンチマーク取得
+  useEffect(() => {
+    if (!selectedShopId) return;
+    (async () => {
+      const { data: allReviews } = await supabase
+        .from("reviews")
+        .select("shop_id, star_rating")
+        .limit(10000);
+      if (!allReviews) return;
+      const shopStats = new Map<string, {count: number; total: number}>();
+      const ratingMap: Record<string, number> = {ONE:1,TWO:2,THREE:3,FOUR:4,FIVE:5,ONE_STAR:1,TWO_STARS:2,THREE_STARS:3,FOUR_STARS:4,FIVE_STARS:5};
+      allReviews.forEach((r: any) => {
+        if (!shopStats.has(r.shop_id)) shopStats.set(r.shop_id, {count:0,total:0});
+        const s = shopStats.get(r.shop_id)!;
+        s.count++;
+        const key = (r.star_rating||"").toUpperCase().replace(/_STARS?/,"");
+        s.total += ratingMap[key] || 0;
+      });
+      const shops = Array.from(shopStats.values());
+      const avgRating = shops.length > 0 ? shops.reduce((s,sh) => s + (sh.count > 0 ? sh.total/sh.count : 0), 0) / shops.length : 0;
+      const avgReviewCount = shops.length > 0 ? shops.reduce((s,sh) => s + sh.count, 0) / shops.length : 0;
+      const my = shopStats.get(selectedShopId);
+      setBenchmark({
+        avgRating: Math.round(avgRating * 100) / 100,
+        avgReviewCount: Math.round(avgReviewCount),
+        myRating: my && my.count > 0 ? Math.round((my.total / my.count) * 100) / 100 : 0,
+        myReviewCount: my?.count || 0,
+        shopCount: shopStats.size,
+      });
+    })();
+  }, [selectedShopId]);
 
   const statusColor = (s: string) =>
     s === "good" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
@@ -141,6 +175,41 @@ export default function DiagnosisPage() {
               </div>
             ))}
           </div>
+
+          {/* 業界平均ベンチマーク */}
+          {benchmark && (
+            <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-6">
+              <h3 className="text-sm font-semibold text-slate-500 mb-4">業界平均ベンチマーク（全{benchmark.shopCount}店舗比較）</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-slate-50 rounded-lg p-4">
+                  <p className="text-[10px] text-slate-500 mb-2">平均評価</p>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-slate-400">自店</p>
+                      <p className={`text-2xl font-bold ${benchmark.myRating >= benchmark.avgRating ? "text-emerald-600" : "text-red-600"}`}>★ {benchmark.myRating}</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-xs text-slate-400">全体平均</p>
+                      <p className="text-2xl font-bold text-slate-500">★ {benchmark.avgRating}</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-slate-50 rounded-lg p-4">
+                  <p className="text-[10px] text-slate-500 mb-2">口コミ数</p>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-slate-400">自店</p>
+                      <p className={`text-2xl font-bold ${benchmark.myReviewCount >= benchmark.avgReviewCount ? "text-emerald-600" : "text-red-600"}`}>{benchmark.myReviewCount}</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-xs text-slate-400">全体平均</p>
+                      <p className="text-2xl font-bold text-slate-500">{benchmark.avgReviewCount}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* 競合分析セクション */}
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
