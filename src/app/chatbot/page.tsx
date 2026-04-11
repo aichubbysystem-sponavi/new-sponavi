@@ -11,12 +11,12 @@ interface Message {
 }
 
 const QUICK_QUESTIONS = [
-  "MEO対策の基本的な流れを教えて",
-  "口コミ返信のコツは？",
+  "今やるべきタスクを教えて",
+  "口コミ未返信の対応方法は？",
   "GBP投稿のベストプラクティスは？",
   "順位が下がった時の対処法",
-  "新規店舗の初期整備手順",
-  "写真投稿のポイント",
+  "MEO対策の基本的な流れを教えて",
+  "今月の業務優先順位を決めて",
 ];
 
 export default function ChatbotPage() {
@@ -26,12 +26,22 @@ export default function ChatbotPage() {
   const [loading, setLoading] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [taskSummary, setTaskSummary] = useState("");
+  const [taskCount, setTaskCount] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, loading]);
+
+  // タスク状況を取得
+  useEffect(() => {
+    api.get("/api/report/tasks").then((res) => {
+      setTaskSummary(res.data.summary || "");
+      setTaskCount(res.data.totalTasks || 0);
+    }).catch(() => {});
+  }, []);
 
   const sendMessage = async (text?: string) => {
     const query = text || input.trim();
@@ -44,8 +54,14 @@ export default function ChatbotPage() {
     setLoading(true);
 
     try {
+      // 初回メッセージ時にタスク状況をコンテキストとして注入
+      const contextPrefix = !conversationId && taskSummary
+        ? `【現在の業務状況】\n${taskSummary}\n\n【質問】`
+        : "";
+      const fullQuery = contextPrefix ? `${contextPrefix}${query}` : query;
+
       const res = await api.post("/api/chat", {
-        query,
+        query: fullQuery,
         conversationId,
         userId: `web-${selectedShop?.name || "user"}`,
       }, { timeout: 100000 });
@@ -95,6 +111,11 @@ export default function ChatbotPage() {
             >
               新しい会話
             </button>
+          )}
+          {taskCount > 0 && (
+            <div className="px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200">
+              <span className="text-xs font-medium text-amber-700">未完了タスク: {taskCount}件</span>
+            </div>
           )}
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200">
             <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
