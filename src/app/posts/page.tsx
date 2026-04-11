@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useShop } from "@/components/shop-provider";
+import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
 
 interface LocalPost {
@@ -34,8 +35,30 @@ export default function PostsPage() {
     if (!selectedShopId) return;
     setLoading(true);
     try {
-      const res = await api.get(`/api/shop/${selectedShopId}/local_post`);
-      setLocalPosts(res.data?.localPosts || []);
+      // GBP APIから取得
+      const gbpRes = await api.get(`/api/shop/${selectedShopId}/local_post`).catch(() => ({ data: { localPosts: [] } }));
+      const gbpPosts: LocalPost[] = gbpRes.data?.localPosts || [];
+
+      // Supabase post_logsからも取得（GBPに反映されていない投稿も表示）
+      const { data: logs } = await supabase
+        .from("post_logs")
+        .select("summary, topic_type, media_url, action_type, action_url, created_at")
+        .eq("shop_id", selectedShopId)
+        .order("created_at", { ascending: false });
+
+      // ログからLocalPost形式に変換し、GBPデータにない投稿を追加
+      const logPosts: LocalPost[] = (logs || []).map((log) => ({
+        summary: log.summary,
+        topicType: log.topic_type,
+        createTime: log.created_at,
+        callToAction: log.action_type ? { actionType: log.action_type, url: log.action_url } : undefined,
+      }));
+
+      // GBPの投稿本文で重複排除（GBP側を優先）
+      const gbpSummaries = new Set(gbpPosts.map((p) => p.summary?.slice(0, 30)));
+      const uniqueLogPosts = logPosts.filter((p) => !gbpSummaries.has(p.summary?.slice(0, 30)));
+
+      setLocalPosts([...gbpPosts, ...uniqueLogPosts]);
     } catch { setLocalPosts([]); }
     finally { setLoading(false); }
   }, [selectedShopId]);
@@ -57,31 +80,8 @@ export default function PostsPage() {
       if (newPost.photoUrl.trim()) {
         postData.photoUrl = newPost.photoUrl.trim();
       }
-      // 写真付き→Next.js API（GBP直接）、写真なし→Go API
-      if (postData.photoUrl) {
-        await api.post("/api/report/create-post", postData, { timeout: 30000 });
-      } else {
-        const goBody: any = { summary: newPost.summary, topicType: newPost.topicType };
-        if (newPost.actionType && newPost.actionUrl) {
-          goBody.callToAction = { actionType: newPost.actionType, url: newPost.actionUrl };
-        }
-        await api.post(`/api/shop/${selectedShopId}/local_post`, goBody, { timeout: 30000 });
-      }
-
-      // 投稿ログをSupabaseに保存
-      try {
-        const { supabase } = await import("@/lib/supabase");
-        await supabase.from("post_logs").insert({
-          id: crypto.randomUUID(),
-          shop_id: selectedShopId,
-          shop_name: selectedShop?.name || "",
-          summary: newPost.summary,
-          topic_type: newPost.topicType,
-          media_url: newPost.photoUrl || null,
-          action_type: newPost.actionType || null,
-          action_url: newPost.actionUrl || null,
-        });
-      } catch {}
+      // 常にNext.js API経由（ログ保存+写真対応）
+      await api.post("/api/report/create-post", postData, { timeout: 30000 });
 
       setMsg("投稿を作成しました！");
       setShowCreate(false);

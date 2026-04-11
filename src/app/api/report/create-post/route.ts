@@ -128,6 +128,21 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await res.json();
+
+    // 投稿ログをSupabaseに保存
+    try {
+      await supabase.from("post_logs").insert({
+        id: crypto.randomUUID(),
+        shop_id: shopId,
+        shop_name: shop.name || "",
+        summary,
+        topic_type: topicType || "STANDARD",
+        media_url: photoUrl || null,
+        action_type: callToAction?.actionType || null,
+        action_url: callToAction?.url || null,
+      });
+    } catch {}
+
     return NextResponse.json({ success: true, post: result });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || "投稿に失敗しました" }, { status: 500 });
