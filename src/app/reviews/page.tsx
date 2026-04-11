@@ -38,6 +38,9 @@ export default function ReviewsPage() {
   const [unrepliedCount, setUnrepliedCount] = useState(0);
   const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
   const [topWords, setTopWords] = useState<{ word: string; count: number; type: "good" | "bad" }[]>([]);
+  const [templates, setTemplates] = useState<{ id: string; name: string; content: string; star_category: string; use_count: number }[]>([]);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [savingTemplate, setSavingTemplate] = useState(false);
 
   const isAllMode = shopFilterMode === "all";
 
@@ -111,6 +114,47 @@ export default function ReviewsPage() {
   useEffect(() => {
     fetchUnrepliedCount();
   }, [fetchUnrepliedCount]);
+
+  // テンプレート取得
+  const fetchTemplates = useCallback(async () => {
+    try {
+      const token = (await supabase.auth.getSession()).data.session?.access_token;
+      const res = await fetch("/api/report/reply-templates", {
+        headers: { "Authorization": `Bearer ${token}` },
+      });
+      if (res.ok) setTemplates(await res.json());
+    } catch {}
+  }, []);
+  useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
+
+  const saveAsTemplate = async (content: string, starRating: number) => {
+    setSavingTemplate(true);
+    try {
+      const category = starRating >= 4 ? "high" : starRating >= 3 ? "mid" : "low";
+      const name = `${category === "high" ? "高評価" : category === "mid" ? "中評価" : "低評価"}返信_${new Date().toLocaleDateString("ja-JP")}`;
+      const token = (await supabase.auth.getSession()).data.session?.access_token;
+      await fetch("/api/report/reply-templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ name, content, star_category: category }),
+      });
+      await fetchTemplates();
+      setSyncMsg("テンプレートに保存しました");
+    } catch { setSyncMsg("テンプレート保存に失敗しました"); }
+    setSavingTemplate(false);
+  };
+
+  const deleteTemplate = async (id: string) => {
+    try {
+      const token = (await supabase.auth.getSession()).data.session?.access_token;
+      await fetch("/api/report/reply-templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ action: "delete", id }),
+      });
+      await fetchTemplates();
+    } catch {}
+  };
 
   // 口コミキーワード抽出（全口コミを対象）
   useEffect(() => {
@@ -324,6 +368,44 @@ export default function ReviewsPage() {
         </div>
       </div>
 
+      {/* テンプレート管理パネル */}
+      {templates.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-100 mb-4">
+          <button onClick={() => setShowTemplates(!showTemplates)}
+            className="w-full flex items-center justify-between p-3 hover:bg-slate-50 transition">
+            <span className="text-sm font-semibold text-slate-500">返信テンプレート（{templates.length}件）</span>
+            <span className="text-xs text-slate-400">{showTemplates ? "▲ 閉じる" : "▼ 開く"}</span>
+          </button>
+          {showTemplates && (
+            <div className="border-t border-slate-100 divide-y divide-slate-50">
+              {templates.map((t) => (
+                <div key={t.id} className="px-4 py-3 flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xs font-semibold text-slate-700">{t.name}</span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-semibold ${
+                        t.star_category === "high" ? "bg-emerald-50 text-emerald-600" :
+                        t.star_category === "mid" ? "bg-amber-50 text-amber-600" :
+                        t.star_category === "low" ? "bg-red-50 text-red-600" :
+                        "bg-slate-50 text-slate-500"
+                      }`}>{t.star_category === "high" ? "高評価" : t.star_category === "mid" ? "中評価" : t.star_category === "low" ? "低評価" : "共通"}</span>
+                      <span className="text-[9px] text-slate-400">使用{t.use_count}回</span>
+                    </div>
+                    <p className="text-xs text-slate-600 line-clamp-2">{t.content}</p>
+                  </div>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <button onClick={() => navigator.clipboard.writeText(t.content)}
+                      className="text-[10px] px-2 py-1 rounded bg-slate-50 text-slate-500 hover:bg-slate-100">コピー</button>
+                    <button onClick={() => deleteTemplate(t.id)}
+                      className="text-[10px] px-2 py-1 rounded bg-red-50 text-red-500 hover:bg-red-100">削除</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 口コミキーワード・ワードクラウド */}
       {topWords.length > 0 && (
         <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100 mb-4">
@@ -414,7 +496,7 @@ export default function ReviewsPage() {
                     <p className="text-sm text-blue-700">{review.reply_comment}</p>
                   </div>
                 )}
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <button
                     onClick={() => handleAiReply(review)}
                     disabled={aiLoading && aiReplyId === review.id}
@@ -424,6 +506,26 @@ export default function ReviewsPage() {
                   >
                     {aiLoading && aiReplyId === review.id ? "AI生成中..." : aiReplyId === review.id ? "閉じる" : "AI返信提案"}
                   </button>
+                  {!review.reply_comment && templates.length > 0 && (
+                    <div className="relative group">
+                      <button className="px-3 py-1 rounded-lg text-[11px] font-semibold bg-blue-50 text-blue-600 hover:bg-blue-100 transition-all">
+                        テンプレから返信
+                      </button>
+                      <div className="absolute left-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 w-[320px] max-h-[300px] overflow-y-auto hidden group-hover:block">
+                        {templates.map((t) => (
+                          <button key={t.id}
+                            onClick={() => { setAiReplyId(review.id); setAiReply(t.content); }}
+                            className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-slate-50 transition">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-medium text-slate-700">{t.name}</span>
+                              <span className="text-[9px] text-slate-400">使用{t.use_count}回</span>
+                            </div>
+                            <p className="text-[10px] text-slate-500 mt-0.5 line-clamp-2">{t.content}</p>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 {aiReplyId === review.id && aiReply && (
                   <div className="bg-purple-50 rounded-lg p-3 border border-purple-100 mt-2">
@@ -435,6 +537,13 @@ export default function ReviewsPage() {
                           className="text-[10px] text-purple-500 hover:text-purple-700 px-2 py-0.5 rounded bg-white border border-purple-200"
                         >
                           コピー
+                        </button>
+                        <button
+                          onClick={() => saveAsTemplate(aiReply, starToNum(review.star_rating))}
+                          disabled={savingTemplate}
+                          className="text-[10px] text-amber-600 hover:text-amber-700 px-2 py-0.5 rounded bg-amber-50 border border-amber-200"
+                        >
+                          {savingTemplate ? "保存中..." : "テンプレ保存"}
                         </button>
                         {review.shop_id && !review.reply_comment && (
                           <button

@@ -24,7 +24,7 @@ interface PerformanceLog {
 }
 
 export default function Dashboard() {
-  const { shops, selectedShop, selectedShopId, apiConnected } = useShop();
+  const { shops, selectedShop, selectedShopId, apiConnected, unrepliedCount } = useShop();
   const storeName = selectedShop?.name || "未選択";
   const shopCount = shops.length;
   const [perf, setPerf] = useState<PerformanceLog[]>([]);
@@ -135,6 +135,12 @@ export default function Dashboard() {
         <KpiCard label="経路検索" value={latest ? v(latest.direction_requests) : 0} change={pct(v(latest?.direction_requests), v(prev?.direction_requests))} icon="📍" />
         <KpiCard label="Webサイトクリック" value={latest ? v(latest.website_clicks) : 0} change={pct(v(latest?.website_clicks), v(prev?.website_clicks))} icon="🌐" />
         <KpiCard label="口コミ数" value={latest ? v(latest.total_reviews) : 0} change={0} icon="⭐" />
+        {unrepliedCount > 0 && (
+          <div className="bg-red-50 rounded-xl p-4 shadow-sm border border-red-200">
+            <p className="text-[11px] font-medium text-red-500 mb-1">未返信口コミ</p>
+            <p className="text-2xl font-bold text-red-600">{unrepliedCount.toLocaleString()}<span className="text-xs font-normal text-red-400 ml-1">件</span></p>
+          </div>
+        )}
       </div>
 
       {/* パフォーマンス推移 */}

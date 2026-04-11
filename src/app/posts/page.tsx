@@ -52,11 +52,61 @@ export default function PostsPage() {
   const [creating, setCreating] = useState(false);
   const [msg, setMsg] = useState("");
   const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
-  const [viewMode, setViewMode] = useState<"list" | "calendar" | "shops">("list");
+  const [viewMode, setViewMode] = useState<"list" | "calendar" | "shops" | "plan">("list");
   const [confirmMap, setConfirmMap] = useState<Record<string, ConfirmStatus>>({});
   const [shopPostCounts, setShopPostCounts] = useState<{ name: string; count: number; lastPost: string }[]>([]);
+  const [planMonth, setPlanMonth] = useState(new Date().toISOString().slice(0, 7)); // "2026-04"
+  const [planItems, setPlanItems] = useState<{ id?: string; date: string; post_type: string; note: string }[]>([]);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planEditDay, setPlanEditDay] = useState<number | null>(null);
+  const [planEditType, setPlanEditType] = useState("STANDARD");
+  const [planEditNote, setPlanEditNote] = useState("");
 
   const isAllMode = shopFilterMode === "all";
+
+  // 投稿計画取得
+  const fetchPlan = useCallback(async () => {
+    if (!selectedShopId || isAllMode) return;
+    setPlanLoading(true);
+    try {
+      const token = (await supabase.auth.getSession()).data.session?.access_token;
+      const res = await fetch(`/api/report/post-schedule?shopId=${selectedShopId}&month=${planMonth}`, {
+        headers: { "Authorization": `Bearer ${token}` },
+      });
+      if (res.ok) setPlanItems(await res.json());
+    } catch {}
+    setPlanLoading(false);
+  }, [selectedShopId, planMonth, isAllMode]);
+
+  useEffect(() => { fetchPlan(); }, [fetchPlan]);
+
+  const savePlanItem = async (day: number, postType: string, note: string) => {
+    const date = `${planMonth}-${String(day).padStart(2, "0")}`;
+    try {
+      const token = (await supabase.auth.getSession()).data.session?.access_token;
+      await fetch("/api/report/post-schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ shopId: selectedShopId, date, postType, note }),
+      });
+      await fetchPlan();
+      setPlanEditDay(null);
+    } catch (e: any) {
+      setMsg(`計画保存失敗: ${e?.message}`);
+    }
+  };
+
+  const deletePlanItem = async (id: string) => {
+    try {
+      const token = (await supabase.auth.getSession()).data.session?.access_token;
+      await fetch("/api/report/post-schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ action: "delete", id }),
+      });
+      await fetchPlan();
+    } catch {}
+  };
 
   const fetchData = useCallback(async () => {
     if (!isAllMode && !selectedShopId) return;
@@ -457,6 +507,7 @@ export default function PostsPage() {
                 <button onClick={() => setViewMode("list")} className={`px-4 py-1.5 text-xs font-semibold ${viewMode === "list" ? "bg-[#003D6B] text-white" : "bg-white text-slate-500"}`}>リスト</button>
                 <button onClick={() => setViewMode("calendar")} className={`px-4 py-1.5 text-xs font-semibold ${viewMode === "calendar" ? "bg-[#003D6B] text-white" : "bg-white text-slate-500"}`}>カレンダー</button>
                 <button onClick={() => setViewMode("shops")} className={`px-4 py-1.5 text-xs font-semibold ${viewMode === "shops" ? "bg-[#003D6B] text-white" : "bg-white text-slate-500"}`}>全店舗状況</button>
+                {!isAllMode && <button onClick={() => setViewMode("plan")} className={`px-4 py-1.5 text-xs font-semibold ${viewMode === "plan" ? "bg-[#003D6B] text-white" : "bg-white text-slate-500"}`}>月間計画</button>}
               </div>
               {viewMode === "list" && (
                 <div className="flex border border-slate-200 rounded-lg overflow-hidden">
@@ -507,6 +558,126 @@ export default function PostsPage() {
 
           {loading ? (
             <div className="bg-white rounded-xl p-12 shadow-sm border border-slate-100 text-center"><p className="text-slate-400 text-sm">読み込み中...</p></div>
+          ) : viewMode === "plan" ? (
+            /* 月間投稿計画 */
+            <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-slate-500">月間投稿計画</h3>
+                <input type="month" value={planMonth} onChange={(e) => setPlanMonth(e.target.value)}
+                  className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
+              </div>
+              {planLoading ? (
+                <p className="text-center text-slate-400 text-sm py-8">読み込み中...</p>
+              ) : (() => {
+                const year = parseInt(planMonth.split("-")[0]);
+                const month = parseInt(planMonth.split("-")[1]);
+                const days = new Date(year, month, 0).getDate();
+                const firstWeekday = new Date(year, month - 1, 1).getDay();
+                const planByDay: Record<number, typeof planItems[0]> = {};
+                planItems.forEach((p) => {
+                  const d = new Date(p.date).getDate();
+                  planByDay[d] = p;
+                });
+                // 実績も表示
+                const postsByDayPlan: Record<number, number> = {};
+                localPosts.forEach((p) => {
+                  if (!p.createTime) return;
+                  const d = new Date(p.createTime);
+                  if (d.getFullYear() === year && d.getMonth() === month - 1) {
+                    postsByDayPlan[d.getDate()] = (postsByDayPlan[d.getDate()] || 0) + 1;
+                  }
+                });
+                return (
+                  <>
+                    <div className="grid grid-cols-7 gap-0 text-center text-[10px] text-slate-400 mb-1">
+                      {["日","月","火","水","木","金","土"].map((d) => <div key={d} className="py-1">{d}</div>)}
+                    </div>
+                    <div className="grid grid-cols-7 gap-1">
+                      {Array.from({ length: firstWeekday }).map((_, i) => <div key={`e${i}`} />)}
+                      {Array.from({ length: days }).map((_, i) => {
+                        const day = i + 1;
+                        const plan = planByDay[day];
+                        const actualCount = postsByDayPlan[day] || 0;
+                        const isPast = new Date(year, month - 1, day) < new Date(new Date().toDateString());
+                        const style = plan ? TOPIC_STYLES[plan.post_type] || TOPIC_STYLES.STANDARD : null;
+                        return (
+                          <div key={day}
+                            onClick={() => {
+                              if (planEditDay === day) { setPlanEditDay(null); return; }
+                              setPlanEditDay(day);
+                              setPlanEditType(plan?.post_type || "STANDARD");
+                              setPlanEditNote(plan?.note || "");
+                            }}
+                            className={`border rounded-lg p-1.5 min-h-[70px] cursor-pointer transition hover:border-[#003D6B] ${
+                              planEditDay === day ? "border-[#003D6B] bg-blue-50" : "border-slate-100"
+                            } ${isPast ? "opacity-60" : ""}`}>
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-xs text-slate-600 font-medium">{day}</span>
+                              {actualCount > 0 && <span className="text-[8px] bg-emerald-100 text-emerald-700 px-1 rounded font-bold">{actualCount}件済</span>}
+                            </div>
+                            {plan && style && (
+                              <div className={`${style.bg} ${style.text} rounded px-1 py-0.5 text-[9px] font-semibold text-center`}>
+                                {style.label}
+                              </div>
+                            )}
+                            {plan?.note && <p className="text-[8px] text-slate-400 mt-0.5 truncate">{plan.note}</p>}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* 編集パネル */}
+                    {planEditDay && (
+                      <div className="mt-4 bg-slate-50 rounded-lg p-4 border border-slate-200">
+                        <h4 className="text-xs font-semibold text-slate-600 mb-3">{planMonth}-{String(planEditDay).padStart(2, "0")} の投稿計画</h4>
+                        <div className="grid grid-cols-2 gap-3 mb-3">
+                          <div>
+                            <label className="text-[10px] text-slate-500 block mb-1">投稿種類</label>
+                            <select value={planEditType} onChange={(e) => setPlanEditType(e.target.value)}
+                              className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs">
+                              <option value="STANDARD">通常投稿</option>
+                              <option value="EVENT">イベント</option>
+                              <option value="OFFER">特典</option>
+                              <option value="ALERT">お知らせ</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-slate-500 block mb-1">メモ</label>
+                            <input type="text" value={planEditNote} onChange={(e) => setPlanEditNote(e.target.value)}
+                              placeholder="例: 新商品紹介" className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => savePlanItem(planEditDay, planEditType, planEditNote)}
+                            className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-[#003D6B] hover:bg-[#002a4a]" style={{ color: "#fff" }}>
+                            保存
+                          </button>
+                          {planByDay[planEditDay]?.id && (
+                            <button onClick={() => { if (planByDay[planEditDay]?.id) deletePlanItem(planByDay[planEditDay].id!); }}
+                              className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-red-50 text-red-600 hover:bg-red-100">
+                              削除
+                            </button>
+                          )}
+                          <button onClick={() => setPlanEditDay(null)}
+                            className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600">
+                            キャンセル
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 統計 */}
+                    <div className="flex items-center gap-4 mt-4 pt-3 border-t border-slate-100">
+                      <span className="text-xs text-slate-500">計画: <span className="font-bold text-[#003D6B]">{planItems.length}</span>件</span>
+                      <span className="text-xs text-slate-500">実績: <span className="font-bold text-emerald-600">{Object.values(postsByDayPlan).reduce((a, b) => a + b, 0)}</span>件</span>
+                      <span className="text-xs text-slate-500">達成率: <span className={`font-bold ${planItems.length > 0 && Object.keys(postsByDayPlan).length / planItems.length >= 0.8 ? "text-emerald-600" : "text-amber-600"}`}>
+                        {planItems.length > 0 ? Math.round((Object.keys(postsByDayPlan).length / planItems.length) * 100) : 0}%
+                      </span></span>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
           ) : viewMode === "shops" ? (
             /* 全店舗投稿状況 */
             <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">

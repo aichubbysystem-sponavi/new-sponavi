@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import api from "@/lib/api";
+import { supabase } from "@/lib/supabase";
 import type { Shop } from "@/lib/api-types";
 
 interface ShopContextType {
@@ -14,6 +15,8 @@ interface ShopContextType {
   refreshShops: () => Promise<void>;
   shopFilterMode: "all" | "single";
   setShopFilterMode: (mode: "all" | "single") => void;
+  unrepliedCount: number;
+  refreshUnreplied: () => Promise<void>;
 }
 
 const ShopContext = createContext<ShopContextType>({
@@ -26,6 +29,8 @@ const ShopContext = createContext<ShopContextType>({
   refreshShops: async () => {},
   shopFilterMode: "single",
   setShopFilterMode: () => {},
+  unrepliedCount: 0,
+  refreshUnreplied: async () => {},
 });
 
 export function useShop() {
@@ -38,6 +43,17 @@ export default function ShopProvider({ children }: { children: React.ReactNode }
   const [loading, setLoading] = useState(true);
   const [apiConnected, setApiConnected] = useState(false);
   const [shopFilterMode, setShopFilterMode] = useState<"all" | "single">("single");
+  const [unrepliedCount, setUnrepliedCount] = useState(0);
+
+  const fetchUnreplied = useCallback(async () => {
+    try {
+      const { count } = await supabase
+        .from("reviews")
+        .select("id", { count: "exact", head: true })
+        .is("reply_comment", null);
+      setUnrepliedCount(count || 0);
+    } catch {}
+  }, []);
 
   const fetchShops = useCallback(async () => {
     try {
@@ -55,6 +71,7 @@ export default function ShopProvider({ children }: { children: React.ReactNode }
   }, [selectedShopId]);
 
   useEffect(() => { fetchShops(); }, [fetchShops]);
+  useEffect(() => { fetchUnreplied(); }, [fetchUnreplied]);
 
   const selectedShop = shops.find((s) => s.id === selectedShopId) || null;
 
@@ -69,6 +86,8 @@ export default function ShopProvider({ children }: { children: React.ReactNode }
       refreshShops: fetchShops,
       shopFilterMode,
       setShopFilterMode,
+      unrepliedCount,
+      refreshUnreplied: fetchUnreplied,
     }}>
       {children}
     </ShopContext.Provider>

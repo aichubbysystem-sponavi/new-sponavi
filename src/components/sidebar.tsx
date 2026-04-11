@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { useState, useEffect } from "react";
 import { useRole } from "@/components/role-provider";
+import { useShop } from "@/components/shop-provider";
 import { canShowInSidebar } from "@/lib/roles";
 
 const navSections = [
@@ -124,6 +125,7 @@ function AccordionSection({
 export default function Sidebar() {
   const pathname = usePathname();
   const { role, roleLabel } = useRole();
+  const { unrepliedCount } = useShop();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   // ページ遷移時にモバイルメニューを自動で閉じる
@@ -131,7 +133,7 @@ export default function Sidebar() {
     setMobileOpen(false);
   }, [pathname]);
 
-  // ロールに応じてセクションをフィルタリング
+  // ロールに応じてセクションをフィルタリング + バッジ付与
   const filteredSections = navSections
     .map((section) => {
       if (section.children) {
@@ -140,7 +142,13 @@ export default function Sidebar() {
         return { ...section, children: filtered };
       }
       if (section.items) {
-        const filtered = section.items.filter((item) => canShowInSidebar(role, item.href));
+        const filtered = section.items.filter((item) => canShowInSidebar(role, item.href))
+          .map((item) => {
+            if (item.href === "/reviews" && unrepliedCount > 0) {
+              return { ...item, badge: unrepliedCount };
+            }
+            return item;
+          });
         if (filtered.length === 0) return null;
         return { ...section, items: filtered };
       }
