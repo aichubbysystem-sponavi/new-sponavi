@@ -44,6 +44,10 @@ export default function MediaPage() {
   const [sortKey, setSortKey] = useState<SortKey>("create_time");
   const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
   const [selectedImg, setSelectedImg] = useState<MediaRow | null>(null);
+  const [bulkUrls, setBulkUrls] = useState("");
+  const [bulkUploading, setBulkUploading] = useState(false);
+  const [bulkResult, setBulkResult] = useState<string | null>(null);
+  const [showBulk, setShowBulk] = useState(false);
 
   const fetchMedia = useCallback(async () => {
     if (!selectedShopId) return;
@@ -136,14 +140,61 @@ export default function MediaPage() {
             </div>
           </div>
 
-          {/* 同期ボタン */}
-          <div className="flex items-center justify-end mb-5">
+          {/* アクションバー */}
+          <div className="flex items-center justify-end gap-2 mb-5">
+            <button onClick={() => setShowBulk(!showBulk)}
+              className="px-4 py-2 rounded-lg text-sm font-semibold bg-purple-600 hover:bg-purple-700"
+              style={{ color: "#fff" }}>
+              {showBulk ? "閉じる" : "写真一括投稿"}
+            </button>
             <button onClick={handleSync} disabled={syncing}
-              className={`px-5 py-2.5 rounded-lg text-sm font-semibold ${syncing ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold ${syncing ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
               style={{ color: syncing ? undefined : "#fff" }}>
               {syncing ? "同期中..." : "写真を同期"}
             </button>
           </div>
+
+          {/* 写真一括投稿パネル */}
+          {showBulk && (
+            <div className="bg-purple-50 rounded-xl p-5 shadow-sm border border-purple-200 mb-5">
+              <h3 className="text-sm font-semibold text-purple-700 mb-3">写真一括投稿</h3>
+              <p className="text-[10px] text-purple-500 mb-2">写真のURLを1行ずつ入力してください（最大20枚）</p>
+              <textarea value={bulkUrls} onChange={(e) => setBulkUrls(e.target.value)}
+                placeholder={"https://example.com/photo1.jpg\nhttps://example.com/photo2.jpg\nhttps://example.com/photo3.jpg"}
+                className="w-full border border-purple-200 rounded-lg px-4 py-3 text-sm min-h-[100px] resize-y focus:outline-none focus:ring-2 focus:ring-purple-300" />
+              <div className="flex items-center justify-between mt-2">
+                <p className="text-[10px] text-purple-400">{bulkUrls.split("\n").filter((u) => u.trim()).length} / 20枚</p>
+                <button onClick={async () => {
+                  const urls = bulkUrls.split("\n").map((u) => u.trim()).filter(Boolean).slice(0, 20);
+                  if (urls.length === 0) return;
+                  setBulkUploading(true); setBulkResult(null);
+                  let success = 0; let errors = 0;
+                  for (const url of urls) {
+                    try {
+                      await api.post("/api/report/create-post", {
+                        shopId: selectedShopId,
+                        summary: "",
+                        topicType: "STANDARD",
+                        photoUrl: url,
+                        photoOnly: true,
+                      }, { timeout: 30000 });
+                      success++;
+                    } catch { errors++; }
+                  }
+                  setBulkResult(`${success}枚アップロード成功${errors > 0 ? `、${errors}枚エラー` : ""}`);
+                  setBulkUploading(false);
+                  if (success > 0) { handleSync(); }
+                }} disabled={bulkUploading || bulkUrls.split("\n").filter((u) => u.trim()).length === 0}
+                  className={`px-5 py-2 rounded-lg text-xs font-semibold ${bulkUploading ? "bg-slate-200 text-slate-400" : "bg-purple-600 hover:bg-purple-700"}`}
+                  style={{ color: bulkUploading ? undefined : "#fff" }}>
+                  {bulkUploading ? "アップロード中..." : "一括アップロード"}
+                </button>
+              </div>
+              {bulkResult && (
+                <p className={`mt-2 text-xs font-semibold ${bulkResult.includes("エラー") ? "text-amber-600" : "text-emerald-600"}`}>{bulkResult}</p>
+              )}
+            </div>
+          )}
 
           {/* カテゴリ分布 */}
           {Object.keys(categoryStats).length > 0 && (

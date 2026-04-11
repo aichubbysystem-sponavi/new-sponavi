@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useShop } from "@/components/shop-provider";
+import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
 
 interface CheckItem {
@@ -16,6 +17,11 @@ export default function SetupPage() {
   const [loading, setLoading] = useState(false);
   const [gbpData, setGbpData] = useState<any>(null);
   const [score, setScore] = useState(0);
+  const [descResult, setDescResult] = useState("");
+  const [descLoading, setDescLoading] = useState(false);
+  const [descKeywords, setDescKeywords] = useState("");
+  const [catResult, setCatResult] = useState("");
+  const [catLoading, setCatLoading] = useState(false);
 
   const runCheck = useCallback(async () => {
     if (!selectedShopId) return;
@@ -210,6 +216,98 @@ export default function SetupPage() {
                   </span>
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* AI初期整備ツール */}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-6">
+            {/* 説明文生成 */}
+            <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+              <h3 className="text-sm font-semibold text-slate-500 mb-3">AI説明文生成</h3>
+              <p className="text-[10px] text-slate-400 mb-3">MEO・AIO対策に最適なGBP説明文（750〜1000文字）を自動生成</p>
+              <input type="text" value={descKeywords} onChange={(e) => setDescKeywords(e.target.value)}
+                placeholder="対策キーワード（例: テイクアウト, ランチ）"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs mb-2" />
+              <button onClick={async () => {
+                setDescLoading(true); setDescResult("");
+                try {
+                  const token = (await supabase.auth.getSession()).data.session?.access_token;
+                  const res = await fetch("/api/report/generate-description", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+                    body: JSON.stringify({
+                      mode: "description",
+                      shopName: selectedShop?.name || "",
+                      category: gbpData?.categories?.primaryCategory?.displayName || "",
+                      keywords: descKeywords,
+                      currentDescription: gbpData?.profile?.description || "",
+                      address: `${selectedShop?.state || ""}${selectedShop?.city || ""}`,
+                    }),
+                  });
+                  const data = await res.json();
+                  setDescResult(data.result || "生成に失敗しました");
+                } catch { setDescResult("エラーが発生しました"); }
+                setDescLoading(false);
+              }} disabled={descLoading}
+                className={`px-4 py-2 rounded-lg text-xs font-semibold w-full ${descLoading ? "bg-slate-200 text-slate-400" : "bg-purple-600 hover:bg-purple-700"}`}
+                style={{ color: descLoading ? undefined : "#fff" }}>
+                {descLoading ? "生成中..." : "説明文を3候補生成"}
+              </button>
+              {descResult && (
+                <div className="mt-3 bg-purple-50 rounded-lg p-3 border border-purple-200 max-h-[300px] overflow-y-auto">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[10px] text-purple-600 font-semibold">生成結果</p>
+                    <button onClick={() => navigator.clipboard.writeText(descResult)}
+                      className="text-[10px] text-purple-500 px-2 py-0.5 rounded bg-white border border-purple-200">全文コピー</button>
+                  </div>
+                  <p className="text-xs text-slate-700 whitespace-pre-wrap">{descResult}</p>
+                </div>
+              )}
+            </div>
+
+            {/* カテゴリ提案 */}
+            <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+              <h3 className="text-sm font-semibold text-slate-500 mb-3">AIカテゴリ提案</h3>
+              <p className="text-[10px] text-slate-400 mb-3">MEO対策に最適なメイン+追加カテゴリを自動提案</p>
+              {gbpData?.categories?.primaryCategory && (
+                <p className="text-xs text-slate-600 mb-2">現在のメインカテゴリ: <span className="font-semibold text-[#003D6B]">{gbpData.categories.primaryCategory.displayName}</span></p>
+              )}
+              {gbpData?.categories?.additionalCategories?.length > 0 && (
+                <p className="text-xs text-slate-500 mb-3">追加カテゴリ: {gbpData.categories.additionalCategories.map((c: any) => c.displayName).join(", ")}</p>
+              )}
+              <button onClick={async () => {
+                setCatLoading(true); setCatResult("");
+                try {
+                  const token = (await supabase.auth.getSession()).data.session?.access_token;
+                  const res = await fetch("/api/report/generate-description", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+                    body: JSON.stringify({
+                      mode: "category",
+                      shopName: selectedShop?.name || "",
+                      category: gbpData?.categories?.primaryCategory?.displayName || "",
+                      address: `${selectedShop?.state || ""}${selectedShop?.city || ""}`,
+                    }),
+                  });
+                  const data = await res.json();
+                  setCatResult(data.result || "生成に失敗しました");
+                } catch { setCatResult("エラーが発生しました"); }
+                setCatLoading(false);
+              }} disabled={catLoading}
+                className={`px-4 py-2 rounded-lg text-xs font-semibold w-full ${catLoading ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
+                style={{ color: catLoading ? undefined : "#fff" }}>
+                {catLoading ? "分析中..." : "最適カテゴリを提案"}
+              </button>
+              {catResult && (
+                <div className="mt-3 bg-blue-50 rounded-lg p-3 border border-blue-200">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[10px] text-blue-600 font-semibold">カテゴリ提案</p>
+                    <button onClick={() => navigator.clipboard.writeText(catResult)}
+                      className="text-[10px] text-blue-500 px-2 py-0.5 rounded bg-white border border-blue-200">コピー</button>
+                  </div>
+                  <p className="text-xs text-slate-700 whitespace-pre-wrap">{catResult}</p>
+                </div>
+              )}
             </div>
           </div>
         </>

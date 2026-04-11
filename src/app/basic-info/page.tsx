@@ -17,6 +17,8 @@ export default function BasicInfoPage() {
   const [error, setError] = useState("");
   const [changeAlerts, setChangeAlerts] = useState<ChangeAlert[]>([]);
   const [alertDismissed, setAlertDismissed] = useState(false);
+  const [services, setServices] = useState<any[]>([]);
+  const [serviceLoading, setServiceLoading] = useState(false);
 
   const fetchLocation = useCallback(async () => {
     if (!selectedShopId) return;
@@ -65,6 +67,31 @@ export default function BasicInfoPage() {
   }, [selectedShopId]);
 
   useEffect(() => { fetchLocation(); }, [fetchLocation]);
+
+  // サービス/メニュー取得
+  useEffect(() => {
+    if (!selectedShopId) return;
+    setServiceLoading(true);
+    api.get(`/api/shop/${selectedShopId}/location`).then((res) => {
+      const loc = res.data;
+      // GBP serviceItemsからサービス一覧を取得
+      const items: any[] = [];
+      if (loc?.serviceItems) {
+        loc.serviceItems.forEach((si: any) => {
+          items.push({
+            name: si.structuredServiceItem?.displayName || si.freeFormServiceItem?.label || "不明",
+            description: si.structuredServiceItem?.description || si.freeFormServiceItem?.description || "",
+            price: si.price ? `¥${si.price.units || 0}` : "",
+          });
+        });
+      }
+      // メニューリンク
+      if (loc?.metadata?.mapsUri) {
+        items.push({ name: "Google Maps", description: loc.metadata.mapsUri, price: "" });
+      }
+      setServices(items);
+    }).catch(() => setServices([])).finally(() => setServiceLoading(false));
+  }, [selectedShopId]);
 
   return (
     <div className="animate-fade-in">
@@ -171,6 +198,40 @@ export default function BasicInfoPage() {
               </div>
             ) : (
               <p className="text-slate-400 text-sm text-center py-6">GBPロケーション情報が取得できません</p>
+            )}
+          </div>
+
+          {/* メニュー・サービス一覧 */}
+          <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100 xl:col-span-2 mt-6">
+            <h3 className="text-sm font-semibold text-slate-500 mb-4">メニュー・商品・サービス</h3>
+            {serviceLoading ? (
+              <p className="text-slate-400 text-sm text-center py-6">読み込み中...</p>
+            ) : services.length === 0 ? (
+              <div className="text-center py-6">
+                <p className="text-slate-400 text-sm">GBPにサービス情報が登録されていません</p>
+                <p className="text-[10px] text-slate-300 mt-1">Googleビジネスプロフィールの管理画面からメニュー・商品・サービスを登録してください</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-200">
+                      <th className="text-left py-2 px-2 text-slate-500 font-medium">名称</th>
+                      <th className="text-left py-2 px-2 text-slate-500 font-medium">説明</th>
+                      <th className="text-right py-2 px-2 text-slate-500 font-medium">価格</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {services.map((s, i) => (
+                      <tr key={i} className="border-b border-slate-50 hover:bg-slate-50">
+                        <td className="py-2 px-2 text-slate-700 font-medium">{s.name}</td>
+                        <td className="py-2 px-2 text-slate-500 max-w-[300px] truncate">{s.description}</td>
+                        <td className="py-2 px-2 text-right text-slate-700">{s.price || "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         </div>
