@@ -68,52 +68,45 @@ async function getDropboxAccessToken(): Promise<string | null> {
 /**
  * Dropboxフォルダ内を日付で検索し、一致するファイルの一時DLリンクを取得
  */
-async function searchDropboxPhoto(folderUrl: string, dateCompact: string, shopName: string): Promise<string> {
-  console.log(`[dropbox-search] date=${dateCompact}, shop=${shopName}`);
+async function searchDropboxPhotoWithDebug(folderUrl: string, dateCompact: string, shopName: string): Promise<{ url: string; debug: string }> {
   const dbxToken = await getDropboxAccessToken();
-  if (!dbxToken) { console.log("[dropbox-search] no token"); return ""; }
+  if (!dbxToken) return { url: "", debug: "Dropboxトークン取得失敗（DROPBOX_APP_KEY/SECRET/REFRESH_TOKEN確認）" };
 
   try {
-    // パス制限なしで全Dropbox内を日付ファイル名で検索
     const searchRes = await fetch("https://api.dropboxapi.com/2/files/search_v2", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
       body: JSON.stringify({
         query: dateCompact,
-        options: {
-          max_results: 20,
-          file_extensions: ["jpg", "jpeg", "png", "gif", "webp"],
-        },
+        options: { max_results: 20 },
       }),
     });
 
     if (!searchRes.ok) {
       const err = await searchRes.text().catch(() => "");
-      console.log(`[dropbox-search] search error: ${searchRes.status} ${err.slice(0, 150)}`);
-      return "";
+      return { url: "", debug: `Dropbox検索API ${searchRes.status}: ${err.slice(0, 100)}` };
     }
 
     const searchData = await searchRes.json();
     const allResults = searchData.matches || [];
-    console.log(`[dropbox-search] total matches: ${allResults.length}`);
-    allResults.forEach((m: any, i: number) => {
-      console.log(`[dropbox-search]   ${i}: ${m.metadata?.metadata?.path_display}`);
-    });
 
-    if (allResults.length === 0) return "";
+    if (allResults.length === 0) {
+      return { url: "", debug: `Dropbox内に「${dateCompact}」を含むファイルが0件（検索範囲: 全体）` };
+    }
 
-    // 店舗名に関連するファイルを優先（パスに店舗名の一部が含まれる）
+    // 全結果のパスを収集（デバッグ用）
+    const paths = allResults.map((m: any) => m.metadata?.metadata?.path_display || "?").slice(0, 5);
+
+    // 店舗名の一部がパスに含まれるファイルを優先
     const shopParts = shopName.split(/[\s　]+/).filter((p) => p.length >= 2);
     let best = allResults.find((m: any) => {
       const path = (m.metadata?.metadata?.path_display || "").toLowerCase();
       return shopParts.some((part) => path.includes(part.toLowerCase()));
     });
-
     if (!best) best = allResults[0];
 
     const filePath = best.metadata?.metadata?.path_display || best.metadata?.metadata?.path_lower;
-    console.log(`[dropbox-search] selected: ${filePath}`);
-    if (!filePath) return "";
+    if (!filePath) return { url: "", debug: `${allResults.length}件ヒットしたがパス取得失敗。paths: ${paths.join(", ")}` };
 
     // 一時ダウンロードリンク取得
     const linkRes = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
@@ -124,15 +117,13 @@ async function searchDropboxPhoto(folderUrl: string, dateCompact: string, shopNa
 
     if (!linkRes.ok) {
       const err = await linkRes.text().catch(() => "");
-      console.log(`[dropbox-search] temp link error: ${linkRes.status} ${err.slice(0, 100)}`);
-      return "";
+      return { url: "", debug: `ファイル発見(${filePath})だがDLリンク取得失敗: ${linkRes.status} ${err.slice(0, 80)}` };
     }
+
     const linkData = await linkRes.json();
-    console.log(`[dropbox-search] temp link OK: ${linkData.link?.slice(0, 50)}`);
-    return linkData.link || "";
+    return { url: linkData.link || "", debug: linkData.link ? `OK: ${filePath}` : "リンクが空" };
   } catch (e: any) {
-    console.log(`[dropbox-search] exception: ${e?.message}`);
-    return "";
+    return { url: "", debug: `例外: ${e?.message}` };
   }
 }
 
@@ -234,21 +225,25 @@ export async function POST(request: NextRequest) {
 
         // F列のDropboxフォルダURLから日付で写真を検索
         let photoUrl = "";
+        let photoDebug = "";
         if (photoCell) {
-          // Dropboxフォルダの場合: API経由で日付検索
           if (photoCell.includes("dropbox.com")) {
-            photoUrl = await searchDropboxPhoto(photoCell.trim(), dateCompact, shopName);
+            const result = await searchDropboxPhotoWithDebug(photoCell.trim(), dateCompact, shopName);
+            photoUrl = result.url;
+            photoDebug = result.debug;
           }
-          // 直接URLの場合: 従来のロジック
           if (!photoUrl) {
             const urls = photoCell.match(/https?:\/\/[^\s,"]+/g) || [];
             const dated = urls.find((u) => u.includes(dateCompact));
             photoUrl = dated || "";
             if (photoUrl) photoUrl = convertDropboxUrl(photoUrl);
           }
+          if (!photoUrl && !photoDebug) photoDebug = "URLから写真を抽出できません";
+        } else {
+          photoDebug = "F列が空";
         }
 
-        allMatches.push({ shopName, summary: postText, photoUrl, tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: photoUrl ? "写真取得成功" : (photoCell ? "Dropbox検索で写真が見つかりません" : "F列が空") });
+        allMatches.push({ shopName, summary: postText, photoUrl, tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: photoUrl ? `写真取得成功` : photoDebug });
       }
     } catch (e) {
       console.error(`[auto-post] Tab "${tab}" error:`, e);
