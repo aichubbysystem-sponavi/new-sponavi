@@ -75,8 +75,10 @@ export default function LoginPage() {
 
     setLoading(true);
 
+    // ユーザー名を内部メール形式に変換
+    const authEmail = email.includes("@") ? email : `${email}@sponavi.internal`;
     const { data, error: authError } = await supabase.auth.signInWithPassword({
-      email,
+      email: authEmail,
       password,
     });
 
@@ -86,7 +88,7 @@ export default function LoginPage() {
         setLockoutSeconds(300);
         setError("ログイン試行回数の上限（5回）に達しました。5分後に再試行してください。");
       } else {
-        setError(`メールアドレスまたはパスワードが正しくありません（残り${result.remainingAttempts}回）`);
+        setError(`ユーザー名またはパスワードが正しくありません（残り${result.remainingAttempts}回）`);
       }
       setLoading(false);
       return;
@@ -221,15 +223,15 @@ export default function LoginPage() {
         {mode === "login" && (
           <>
             <div className="mb-4">
-              <label className="text-xs font-medium text-slate-500 block mb-1">メールアドレス</label>
+              <label className="text-xs font-medium text-slate-500 block mb-1">ユーザー名</label>
               <input
-                type="email"
+                type="text"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="example@company.com"
+                placeholder="ユーザー名を入力"
                 className="w-full border border-slate-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#003D6B]/30 focus:border-[#003D6B]"
                 required
-                autoComplete="email"
+                autoComplete="username"
               />
             </div>
 
