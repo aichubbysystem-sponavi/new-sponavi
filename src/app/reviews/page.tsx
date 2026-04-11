@@ -37,6 +37,7 @@ export default function ReviewsPage() {
   const [replyFilter, setReplyFilter] = useState<ReplyFilter>("all");
   const [unrepliedCount, setUnrepliedCount] = useState(0);
   const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
+  const [topWords, setTopWords] = useState<{ word: string; count: number; type: "good" | "bad" }[]>([]);
 
   const isAllMode = shopFilterMode === "all";
 
@@ -110,6 +111,36 @@ export default function ReviewsPage() {
   useEffect(() => {
     fetchUnrepliedCount();
   }, [fetchUnrepliedCount]);
+
+  // 口コミキーワード抽出
+  useEffect(() => {
+    if (reviews.length === 0) { setTopWords([]); return; }
+    const goodWords = new Map<string, number>();
+    const badWords = new Map<string, number>();
+    const stopWords = new Set(["の","は","が","を","に","で","と","も","や","など","です","ます","した","ました","ない","ある","いる","この","その","こと","もの","から","まで","より","ので","けど","だけ","ても","って","する","なる","れる","られる","てる","いい","よい","とても","すごく","かなり","ちょっと","少し","まあ","けっこう","本当に","とても","非常に"]);
+    const minLen = 2;
+
+    reviews.forEach((r) => {
+      if (!r.comment) return;
+      const text = r.comment.replace(/\(Original\)[\s\S]*/i, "").replace(/\(Translated by Google\)/i, "").trim();
+      const stars = starToNum(r.star_rating);
+      const isGood = stars >= 4;
+
+      // 簡易形態素解析: 2-5文字のカタカナ/漢字/ひらがな連続を抽出
+      const words = text.match(/[\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF]{2,6}/g) || [];
+      words.forEach((w) => {
+        if (stopWords.has(w) || w.length < minLen) return;
+        const map = isGood ? goodWords : badWords;
+        map.set(w, (map.get(w) || 0) + 1);
+      });
+    });
+
+    const result: { word: string; count: number; type: "good" | "bad" }[] = [];
+    goodWords.forEach((count, word) => { if (count >= 2) result.push({ word, count, type: "good" }); });
+    badWords.forEach((count, word) => { if (count >= 2) result.push({ word, count, type: "bad" }); });
+    result.sort((a, b) => b.count - a.count);
+    setTopWords(result.slice(0, 30));
+  }, [reviews]);
 
   // フィルタ変更時にページをリセット（pageが1以外の場合のみ）
   useEffect(() => {
@@ -287,6 +318,25 @@ export default function ReviewsPage() {
           </div>
         </div>
       </div>
+
+      {/* 口コミキーワード */}
+      {topWords.length > 0 && (
+        <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100 mb-4">
+          <h3 className="text-sm font-semibold text-slate-500 mb-3">口コミ頻出ワード</h3>
+          <div className="flex flex-wrap gap-1.5">
+            {topWords.map((w, i) => (
+              <span key={i}
+                className={`inline-block px-2.5 py-1 rounded-full font-medium ${
+                  w.type === "good" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
+                }`}
+                style={{ fontSize: Math.max(10, Math.min(16, 10 + w.count * 1.5)) }}>
+                {w.word} <span className="opacity-50">{w.count}</span>
+              </span>
+            ))}
+          </div>
+          <p className="text-[9px] text-slate-400 mt-2">緑=高評価口コミ由来 / 赤=低評価口コミ由来（2回以上出現のみ表示）</p>
+        </div>
+      )}
 
       {!apiConnected ? (
         <div className="bg-white rounded-xl p-12 shadow-sm border border-slate-100 text-center">
