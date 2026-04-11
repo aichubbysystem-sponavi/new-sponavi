@@ -70,7 +70,7 @@ export default function PostsPage() {
         const gbpPosts: LocalPost[] = gbpRes.data?.localPosts || [];
 
         const { data: logs } = await supabase.from("post_logs")
-          .select("summary, topic_type, media_url, action_type, action_url, created_at")
+          .select("summary, topic_type, media_url, action_type, action_url, created_at, search_url, gbp_post_name")
           .eq("shop_id", selectedShopId).order("created_at", { ascending: false });
 
         const logPosts: LocalPost[] = (logs || []).map((log) => ({
