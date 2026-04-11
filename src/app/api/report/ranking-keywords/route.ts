@@ -41,20 +41,14 @@ async function getOAuthToken(): Promise<string | null> {
     });
     if (!res.ok) return data.access_token;
     const tokenData = await res.json();
-    await fetch(`${SUPABASE_URL}/rest/v1/tokens?account_id=not.is.null`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY,
-        Authorization: `Bearer ${SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY}`,
-        "Content-Profile": "system",
-        Prefer: "return=minimal",
-      },
-      body: JSON.stringify({
+    // system_oauth_tokensテーブルを更新
+    await supabase
+      .from("system_oauth_tokens")
+      .update({
         access_token: tokenData.access_token,
         expiry: new Date(Date.now() + (tokenData.expires_in || 3600) * 1000).toISOString(),
-      }),
-    });
+      })
+      .not("account_id", "is", null);
     return tokenData.access_token;
   } catch {
     return data.access_token;
