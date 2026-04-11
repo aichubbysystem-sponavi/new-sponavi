@@ -37,18 +37,105 @@ async function getOAuthToken(): Promise<string | null> {
   } catch { return data.access_token; }
 }
 
+const DROPBOX_APP_KEY = process.env.DROPBOX_APP_KEY || "";
+const DROPBOX_APP_SECRET = process.env.DROPBOX_APP_SECRET || "";
+const DROPBOX_REFRESH_TOKEN = process.env.DROPBOX_REFRESH_TOKEN || "";
+
+let cachedDropboxToken: { token: string; expires: number } | null = null;
+
+async function getDropboxAccessToken(): Promise<string | null> {
+  if (cachedDropboxToken && cachedDropboxToken.expires > Date.now()) return cachedDropboxToken.token;
+  if (!DROPBOX_APP_KEY || !DROPBOX_REFRESH_TOKEN) return null;
+
+  try {
+    const res = await fetch("https://api.dropboxapi.com/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: DROPBOX_REFRESH_TOKEN,
+        client_id: DROPBOX_APP_KEY,
+        client_secret: DROPBOX_APP_SECRET,
+      }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    cachedDropboxToken = { token: data.access_token, expires: Date.now() + (data.expires_in - 60) * 1000 };
+    return data.access_token;
+  } catch { return null; }
+}
+
 /**
- * Dropbox共有URLをGBP APIが読める直接ダウンロードURLに変換
- * www.dropbox.com → dl.dropboxusercontent.com
+ * Dropboxフォルダ内を日付で検索し、一致するファイルの一時DLリンクを取得
  */
+async function searchDropboxPhoto(folderUrl: string, dateCompact: string, shopName: string): Promise<string> {
+  const dbxToken = await getDropboxAccessToken();
+  if (!dbxToken) return "";
+
+  // フォルダURLからパスを推定（/MEO対策　定期更新用写真/{店舗名}）
+  // もしくはshared linkのメタデータから取得
+  let searchPath = "";
+
+  // URLからフォルダ名を抽出してパスを構築
+  try {
+    // まずshared linkからパスを取得
+    const metaRes = await fetch("https://api.dropboxapi.com/2/sharing/get_shared_link_metadata", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
+      body: JSON.stringify({ url: folderUrl.split("?")[0] + "?dl=0" }),
+    });
+    if (metaRes.ok) {
+      const meta = await metaRes.json();
+      searchPath = meta.path_lower || meta.path_display || "";
+    }
+  } catch {}
+
+  // パスが取れなかった場合、店舗名から推定
+  if (!searchPath) {
+    searchPath = `/meo対策　定期更新用写真/${shopName}`;
+  }
+
+  // Dropbox検索API
+  try {
+    const searchRes = await fetch("https://api.dropboxapi.com/2/files/search_v2", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
+      body: JSON.stringify({
+        query: dateCompact,
+        options: {
+          path: searchPath,
+          max_results: 5,
+          file_extensions: ["jpg", "jpeg", "png", "gif", "webp"],
+        },
+      }),
+    });
+
+    if (!searchRes.ok) return "";
+    const searchData = await searchRes.json();
+    const matches = searchData.matches || [];
+
+    if (matches.length === 0) return "";
+
+    // 最初にマッチしたファイルの一時リンクを取得
+    const filePath = matches[0].metadata?.metadata?.path_display || matches[0].metadata?.metadata?.path_lower;
+    if (!filePath) return "";
+
+    const linkRes = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
+      body: JSON.stringify({ path: filePath }),
+    });
+
+    if (!linkRes.ok) return "";
+    const linkData = await linkRes.json();
+    return linkData.link || "";
+  } catch { return ""; }
+}
+
 function convertDropboxUrl(url: string): string {
   if (!url || !url.includes("dropbox.com")) return url;
-  // www.dropbox.com/scl/fi/xxx → dl.dropboxusercontent.com/scl/fi/xxx
   let direct = url.replace("www.dropbox.com", "dl.dropboxusercontent.com");
-  // dl=0やst=xxxパラメータを除去
-  direct = direct.replace(/[&?]dl=\d/g, "").replace(/[&?]st=[^&]*/g, "");
-  // 末尾の?や&を整理
-  direct = direct.replace(/[?&]$/, "");
+  direct = direct.replace(/[&?]dl=\d/g, "").replace(/[&?]st=[^&]*/g, "").replace(/[?&]$/, "");
   return direct;
 }
 
@@ -141,16 +228,20 @@ export async function POST(request: NextRequest) {
 
         if (!dateMatch) continue;
 
-        // F列から写真URLを抽出（日付形式で検索）
+        // F列のDropboxフォルダURLから日付で写真を検索
         let photoUrl = "";
         if (photoCell) {
-          // URLを抽出
-          const urls = photoCell.match(/https?:\/\/[^\s,"]+/g) || [];
-          // 日付を含むURLを優先
-          const dated = urls.find((u) => u.includes(dateCompact));
-          photoUrl = dated || urls[0] || photoCell.trim();
-          // Dropbox URLを直接ダウンロードURLに変換
-          photoUrl = convertDropboxUrl(photoUrl);
+          // Dropboxフォルダの場合: API経由で日付検索
+          if (photoCell.includes("dropbox.com")) {
+            photoUrl = await searchDropboxPhoto(photoCell.trim(), dateCompact, shopName);
+          }
+          // 直接URLの場合: 従来のロジック
+          if (!photoUrl) {
+            const urls = photoCell.match(/https?:\/\/[^\s,"]+/g) || [];
+            const dated = urls.find((u) => u.includes(dateCompact));
+            photoUrl = dated || "";
+            if (photoUrl) photoUrl = convertDropboxUrl(photoUrl);
+          }
         }
 
         allMatches.push({ shopName, summary: postText, photoUrl, tab, rawPhotoCell: photoCell, rawDateCell: dateCell });
@@ -202,7 +293,10 @@ export async function POST(request: NextRequest) {
     const trimmedSummary = match.summary.slice(0, 1500);
     const postBody: any = { summary: trimmedSummary, topicType: "STANDARD", languageCode: "ja" };
     if (match.photoUrl) {
-      const directUrl = convertDropboxUrl(match.photoUrl);
+      // Dropbox一時リンクはそのまま使用、それ以外はURL変換
+      const directUrl = match.photoUrl.includes("dropboxusercontent.com") || match.photoUrl.includes("dl.dropbox")
+        ? match.photoUrl
+        : convertDropboxUrl(match.photoUrl);
       postBody.media = [{ mediaFormat: "PHOTO", sourceUrl: directUrl }];
     }
 
