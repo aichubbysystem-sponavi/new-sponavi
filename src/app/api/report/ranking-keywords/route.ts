@@ -3,79 +3,65 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 const SPREADSHEET_ID = "1JpehMxL2I-fgef1sckNaY8RIUDIknvmT2OqhHj0my1k";
-const GCP_API_KEY = process.env.GCP_API_KEY || "";
 
 /**
  * GET /api/report/ranking-keywords?shopName=xxx
- * スプレッドシートから店舗のキーワードを取得
+ * 公開スプレッドシートから店舗のキーワードを取得
+ * ※ Google Sheets API v4 は一切使わず、公開gviz URLのみ使用（認証不要）
  */
 export async function GET(request: NextRequest) {
   const shopName = request.nextUrl.searchParams.get("shopName");
 
-  if (!GCP_API_KEY) {
-    return NextResponse.json({ error: "GCP_API_KEYが設定されていません" }, { status: 500 });
+  if (!shopName) {
+    return NextResponse.json({ error: "shopNameが必要です" }, { status: 400 });
   }
 
-  try {
-    // スプレッドシートのタブ一覧を取得（API Key）
-    const metaRes = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}?fields=sheets.properties.title&key=${GCP_API_KEY}`
-    );
-    if (!metaRes.ok) {
-      const errText = await metaRes.text().catch(() => "");
-      return NextResponse.json({ error: `Sheets API error: ${metaRes.status} ${errText.slice(0, 200)}` }, { status: 500 });
+  // 店舗名でそのままタブを取得してみる（完全一致 → 部分変形の順）
+  const variants = generateNameVariants(shopName);
+
+  for (const tabName of variants) {
+    const result = await fetchKeywordsFromGviz(tabName);
+    if (result.success) {
+      return NextResponse.json({
+        keywords: result.keywords,
+        shopName: tabName,
+        found: true,
+        matchedTab: tabName,
+      });
     }
-    const meta = await metaRes.json();
-    const allTabs: string[] = meta.sheets.map((s: any) => s.properties.title);
-
-    const startIdx = allTabs.indexOf("Mr.ROAST CHICKEN");
-    if (startIdx === -1) {
-      return NextResponse.json({ error: "Mr.ROAST CHICKENタブが見つかりません", tabs: allTabs.slice(0, 10) }, { status: 404 });
-    }
-
-    const endMarker = allTabs.findIndex((t) => t.includes("これより左に新規店舗は追加"));
-    const targetTabs = endMarker > startIdx ? allTabs.slice(startIdx, endMarker) : allTabs.slice(startIdx);
-
-    if (shopName) {
-      const normalize = (s: string) => s.replace(/[\s　\.\-・]/g, "").toLowerCase();
-      const normalized = normalize(shopName);
-      const tab = targetTabs.find((t) => t === shopName)
-        || targetTabs.find((t) => t.includes(shopName) || shopName.includes(t))
-        || targetTabs.find((t) => normalize(t) === normalized);
-
-      if (!tab) {
-        const similar = targetTabs.filter((t) => {
-          const nt = normalize(t);
-          return nt.includes(normalized.slice(0, 5)) || normalized.includes(nt.slice(0, 5));
-        }).slice(0, 5);
-        return NextResponse.json({ keywords: [], shopName, found: false, availableTabs: similar, totalTabs: targetTabs.length });
-      }
-
-      const result = await getKeywordsFromTab(tab);
-      return NextResponse.json({ keywords: result.keywords, shopName: tab, found: true, debug: result.debug, matchedTab: tab });
-    }
-
-    const results: { shopName: string; keywords: string[] }[] = [];
-    for (const tab of targetTabs) {
-      const result = await getKeywordsFromTab(tab);
-      results.push({ shopName: tab, keywords: result.keywords });
-    }
-
-    return NextResponse.json({ shops: results, totalTabs: targetTabs.length });
-  } catch (err: any) {
-    return NextResponse.json({ error: err?.message || "不明なエラー" }, { status: 500 });
   }
+
+  return NextResponse.json({
+    keywords: [],
+    shopName,
+    found: false,
+    triedTabs: variants,
+  });
 }
 
 /**
- * 公開スプレッドシートからセル値を取得（認証不要のgviz URL使用）
+ * 店舗名のバリエーションを生成（タブ名との不一致を吸収）
  */
-async function getKeywordsFromTab(tabName: string): Promise<{ keywords: string[]; debug?: string }> {
-  try {
-    // Google Visualization API（公開シートなら認証不要）
-    const gvizUrl = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tabName)}&range=R1:AD1`;
+function generateNameVariants(name: string): string[] {
+  const variants = new Set<string>();
+  variants.add(name);                                    // そのまま
+  variants.add(name.replace(/\s+/g, " ").trim());       // 余分なスペース除去
+  variants.add(name.replace(/\./g, "．"));                // 半角→全角ドット
+  variants.add(name.replace(/．/g, "."));                 // 全角→半角ドット
+  variants.add(name.replace(/\s/g, ""));                 // スペースなし
+  variants.add(name.replace(/\s/g, "　"));                // 半角→全角スペース
+  return Array.from(variants);
+}
 
-    const res = await fetch(gvizUrl, {
+/**
+ * Google Visualization API（gviz）で公開シートからCSVデータを取得
+ * 認証不要 - スプレッドシートが「リンクを知っている全員」に共有されていれば動作
+ */
+async function fetchKeywordsFromGviz(tabName: string): Promise<{ success: boolean; keywords: string[] }> {
+  try {
+    const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tabName)}&range=R1:AD1`;
+
+    const res = await fetch(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
       },
@@ -83,24 +69,26 @@ async function getKeywordsFromTab(tabName: string): Promise<{ keywords: string[]
     });
 
     if (!res.ok) {
-      // フォールバック: API Key方式
-      const apiRes = await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(`'${tabName}'!R1:AD1`)}?key=${GCP_API_KEY}`
-      );
-      if (!apiRes.ok) {
-        const errText = await apiRes.text().catch(() => "");
-        return { keywords: [], debug: `gviz ${res.status}, API ${apiRes.status}: ${errText.slice(0, 100)}` };
-      }
-      const apiData = await apiRes.json();
-      return { keywords: extractKeywords(apiData.values?.[0] || []) };
+      return { success: false, keywords: [] };
     }
 
-    const csvText = await res.text();
-    // CSV形式: "value1","value2","value3",...
-    const cells = parseCSVRow(csvText.trim());
-    return { keywords: extractKeywords(cells) };
-  } catch (err: any) {
-    return { keywords: [], debug: `Error: ${err?.message}` };
+    const text = await res.text();
+
+    // gvizがエラーページ（HTML）を返す場合がある
+    if (text.includes("<!DOCTYPE") || text.includes("<html") || text.includes("google.visualization.Query.setResponse")) {
+      // JSON形式のエラーレスポンスの場合
+      if (text.includes("Invalid sheet")) {
+        return { success: false, keywords: [] };
+      }
+      return { success: false, keywords: [] };
+    }
+
+    const cells = parseCSVRow(text.trim());
+    const keywords = extractKeywords(cells);
+
+    return { success: true, keywords };
+  } catch {
+    return { success: false, keywords: [] };
   }
 }
 
@@ -121,9 +109,9 @@ function parseCSVRow(line: string): string[] {
       if (i < line.length && line[i] === ",") i++;
     } else {
       let val = "";
-      while (i < line.length && line[i] !== ",") { val += line[i]; i++; }
+      while (i < line.length && line[i] !== "," && line[i] !== "\n" && line[i] !== "\r") { val += line[i]; i++; }
       cells.push(val);
-      if (i < line.length) i++;
+      if (i < line.length && line[i] === ",") i++;
     }
   }
   return cells;
