@@ -33,6 +33,7 @@ export default function Dashboard() {
   const [topPhotos, setTopPhotos] = useState<any[]>([]);
   const [rankingSummary, setRankingSummary] = useState<any[]>([]);
   const [postCount, setPostCount] = useState(0);
+  const [perfDateSort, setPerfDateSort] = useState<"desc" | "asc">("asc");
 
   const fetchPerformance = useCallback(async () => {
     if (!selectedShopId) return;
@@ -139,7 +140,13 @@ export default function Dashboard() {
       {/* パフォーマンス推移 */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
         <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
-          <h3 className="text-sm font-semibold text-slate-500 mb-4">月次パフォーマンス推移</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold text-slate-500">月次パフォーマンス推移</h3>
+            <button onClick={() => setPerfDateSort(perfDateSort === "asc" ? "desc" : "asc")}
+              className="px-3 py-1 rounded-lg text-[11px] font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 transition">
+              {perfDateSort === "asc" ? "古い順 ↑" : "新しい順 ↓"}
+            </button>
+          </div>
           {loading ? (
             <div className="flex items-center justify-center h-[200px] text-slate-400 text-sm">読み込み中...</div>
           ) : perf.length === 0 ? (
@@ -160,7 +167,11 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {perf.slice(-6).map((p, i) => {
+                  {[...perf].sort((a, b) => {
+                    const ta = new Date(a.from).getTime();
+                    const tb = new Date(b.from).getTime();
+                    return perfDateSort === "asc" ? ta - tb : tb - ta;
+                  }).slice(0, 6).map((p, i) => {
                     const d = new Date(p.from);
                     return (
                       <tr key={i} className="border-b border-slate-50 hover:bg-slate-50">

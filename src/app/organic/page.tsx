@@ -27,6 +27,7 @@ export default function OrganicPage() {
   const [posts, setPosts] = useState<LocalPost[]>([]);
   const [loading, setLoading] = useState(false);
   const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
+  const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
 
   const fetchPosts = useCallback(async () => {
     if (!selectedShopId) return;
@@ -141,19 +142,21 @@ export default function OrganicPage() {
 
           {/* 表示切替 */}
           <div className="flex items-center justify-between mb-4">
-            <div className="flex border border-slate-200 rounded-lg overflow-hidden">
-              <button
-                onClick={() => setViewMode("list")}
-                className={`px-4 py-1.5 text-xs font-semibold ${viewMode === "list" ? "bg-[#003D6B] text-white" : "bg-white text-slate-500"}`}
-              >
-                リスト
+            <div className="flex items-center gap-2">
+              <button onClick={() => setDateSort(dateSort === "desc" ? "asc" : "desc")}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 transition">
+                {dateSort === "desc" ? "新しい順 ↓" : "古い順 ↑"}
               </button>
-              <button
-                onClick={() => setViewMode("calendar")}
-                className={`px-4 py-1.5 text-xs font-semibold ${viewMode === "calendar" ? "bg-[#003D6B] text-white" : "bg-white text-slate-500"}`}
-              >
-                カレンダー
-              </button>
+              <div className="flex border border-slate-200 rounded-lg overflow-hidden">
+                <button onClick={() => setViewMode("list")}
+                  className={`px-4 py-1.5 text-xs font-semibold ${viewMode === "list" ? "bg-[#003D6B] text-white" : "bg-white text-slate-500"}`}>
+                  リスト
+                </button>
+                <button onClick={() => setViewMode("calendar")}
+                  className={`px-4 py-1.5 text-xs font-semibold ${viewMode === "calendar" ? "bg-[#003D6B] text-white" : "bg-white text-slate-500"}`}>
+                  カレンダー
+                </button>
+              </div>
             </div>
 
             {Object.keys(monthlyStats).length > 1 && (
@@ -217,7 +220,11 @@ export default function OrganicPage() {
                   <p className="text-slate-400 text-sm mb-2">投稿がありません</p>
                   <Link href="/posts" className="text-sm text-blue-600 hover:underline">新規投稿を作成 →</Link>
                 </div>
-              ) : posts.map((post, i) => {
+              ) : [...posts].sort((a, b) => {
+                const ta = a.createTime ? new Date(a.createTime).getTime() : 0;
+                const tb = b.createTime ? new Date(b.createTime).getTime() : 0;
+                return dateSort === "desc" ? tb - ta : ta - tb;
+              }).map((post, i) => {
                 const style = TOPIC_STYLES[post.topicType || "STANDARD"] || TOPIC_STYLES.STANDARD;
                 return (
                   <div key={i} className="bg-white rounded-xl p-5 shadow-sm border border-slate-100">

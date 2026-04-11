@@ -55,6 +55,7 @@ export default function RankingPage() {
   const [error, setError] = useState("");
   const [searchKeywords, setSearchKeywords] = useState<{ keyword: string; count: number }[]>([]);
   const [kwLoading, setKwLoading] = useState(false);
+  const [historyDateSort, setHistoryDateSort] = useState<"desc" | "asc">("desc");
 
   // 店舗ごとの計測地点をlocalStorageから読み込み/保存
   useEffect(() => {
@@ -507,7 +508,13 @@ export default function RankingPage() {
 
           {/* 計測履歴 */}
           <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
-            <h3 className="text-sm font-semibold text-slate-500 mb-4">全計測履歴</h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-slate-500">全計測履歴</h3>
+              <button onClick={() => setHistoryDateSort(historyDateSort === "desc" ? "asc" : "desc")}
+                className="px-3 py-1 rounded-lg text-[11px] font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 transition">
+                {historyDateSort === "desc" ? "新しい順 ↓" : "古い順 ↑"}
+              </button>
+            </div>
             {history.length === 0 ? (
               <p className="text-slate-400 text-sm text-center py-6">計測履歴がありません</p>
             ) : (
@@ -521,7 +528,11 @@ export default function RankingPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {history.slice(0, 50).map((log) => {
+                  {[...history].sort((a, b) => {
+                    const ta = new Date(a.searched_at).getTime();
+                    const tb = new Date(b.searched_at).getTime();
+                    return historyDateSort === "desc" ? tb - ta : ta - tb;
+                  }).slice(0, 50).map((log) => {
                     const kws = (() => { try { return JSON.parse(log.search_words).join(", "); } catch { return log.search_words; } })();
                     return (
                       <tr key={log.id} className="border-b border-slate-50 hover:bg-slate-50">

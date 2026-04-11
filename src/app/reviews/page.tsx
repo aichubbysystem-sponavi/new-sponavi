@@ -35,6 +35,7 @@ export default function ReviewsPage() {
   const [aiLoading, setAiLoading] = useState(false);
   const [replyFilter, setReplyFilter] = useState<ReplyFilter>("all");
   const [unrepliedCount, setUnrepliedCount] = useState(0);
+  const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
 
   const isAllMode = shopFilterMode === "all";
 
@@ -48,7 +49,7 @@ export default function ReviewsPage() {
       let query = supabase
         .from("reviews")
         .select("*", { count: "exact" })
-        .order("create_time", { ascending: false })
+        .order("create_time", { ascending: dateSort === "asc" })
         .range(from, to);
 
       // 店舗フィルタ
@@ -75,7 +76,7 @@ export default function ReviewsPage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedShopId, page, isAllMode, replyFilter]);
+  }, [selectedShopId, page, isAllMode, replyFilter, dateSort]);
 
   // 未返信件数を取得
   const fetchUnrepliedCount = useCallback(async () => {
@@ -94,7 +95,7 @@ export default function ReviewsPage() {
 
   useEffect(() => { fetchReviews(); }, [fetchReviews]);
   useEffect(() => { fetchUnrepliedCount(); }, [fetchUnrepliedCount]);
-  useEffect(() => { setPage(1); }, [selectedShopId, replyFilter, shopFilterMode]);
+  useEffect(() => { setPage(1); }, [selectedShopId, replyFilter, shopFilterMode, dateSort]);
 
   const handleSync = async () => {
     setSyncing(true);
@@ -235,25 +236,27 @@ export default function ReviewsPage() {
           <span>{displayLabel}</span>
           {lastSynced && <span>最終同期: {new Date(lastSynced).toLocaleString("ja-JP")}</span>}
         </div>
-        <div className="flex border border-slate-200 rounded-lg overflow-hidden">
+        <div className="flex items-center gap-2">
           <button
-            onClick={() => setReplyFilter("all")}
-            className={`px-3 py-1.5 text-xs font-semibold transition ${replyFilter === "all" ? "bg-[#003D6B] text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}
+            onClick={() => setDateSort(dateSort === "desc" ? "asc" : "desc")}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 transition"
           >
-            すべて
+            {dateSort === "desc" ? "新しい順 ↓" : "古い順 ↑"}
           </button>
-          <button
-            onClick={() => setReplyFilter("unreplied")}
-            className={`px-3 py-1.5 text-xs font-semibold transition ${replyFilter === "unreplied" ? "bg-red-600 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}
-          >
-            未返信{unrepliedCount > 0 && ` (${unrepliedCount})`}
-          </button>
-          <button
-            onClick={() => setReplyFilter("replied")}
-            className={`px-3 py-1.5 text-xs font-semibold transition ${replyFilter === "replied" ? "bg-emerald-600 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}
-          >
-            返信済み
-          </button>
+          <div className="flex border border-slate-200 rounded-lg overflow-hidden">
+            <button onClick={() => setReplyFilter("all")}
+              className={`px-3 py-1.5 text-xs font-semibold transition ${replyFilter === "all" ? "bg-[#003D6B] text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}>
+              すべて
+            </button>
+            <button onClick={() => setReplyFilter("unreplied")}
+              className={`px-3 py-1.5 text-xs font-semibold transition ${replyFilter === "unreplied" ? "bg-red-600 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}>
+              未返信{unrepliedCount > 0 && ` (${unrepliedCount})`}
+            </button>
+            <button onClick={() => setReplyFilter("replied")}
+              className={`px-3 py-1.5 text-xs font-semibold transition ${replyFilter === "replied" ? "bg-emerald-600 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}>
+              返信済み
+            </button>
+          </div>
         </div>
       </div>
 

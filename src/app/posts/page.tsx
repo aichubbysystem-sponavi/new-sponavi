@@ -20,6 +20,7 @@ export default function PostsPage() {
   const [newPost, setNewPost] = useState({ summary: "", topicType: "STANDARD", actionType: "", actionUrl: "" });
   const [creating, setCreating] = useState(false);
   const [msg, setMsg] = useState("");
+  const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
 
   const fetchData = useCallback(async () => {
     if (!selectedShopId) return;
@@ -158,6 +159,10 @@ export default function PostsPage() {
           <div className="bg-white rounded-xl shadow-sm border border-slate-100">
             <div className="p-4 border-b border-slate-100 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-slate-500">GBP投稿一覧（{localPosts.length}件）</h3>
+              <button onClick={() => setDateSort(dateSort === "desc" ? "asc" : "desc")}
+                className="px-3 py-1 rounded-lg text-[11px] font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 transition">
+                {dateSort === "desc" ? "新しい順 ↓" : "古い順 ↑"}
+              </button>
             </div>
             {loading ? (
               <div className="p-12 text-center"><p className="text-slate-400 text-sm">読み込み中...</p></div>
@@ -165,7 +170,11 @@ export default function PostsPage() {
               <div className="p-12 text-center"><p className="text-slate-400 text-sm">GBP投稿がありません。「+ 新規投稿」から作成してください。</p></div>
             ) : (
               <div className="divide-y divide-slate-50">
-                {localPosts.map((post, i) => (
+                {[...localPosts].sort((a, b) => {
+                  const ta = a.createTime ? new Date(a.createTime).getTime() : 0;
+                  const tb = b.createTime ? new Date(b.createTime).getTime() : 0;
+                  return dateSort === "desc" ? tb - ta : ta - tb;
+                }).map((post, i) => (
                   <div key={i} className="p-4">
                     <div className="flex items-center justify-between mb-1">
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${

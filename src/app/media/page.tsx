@@ -42,6 +42,7 @@ export default function MediaPage() {
   const [syncMsg, setSyncMsg] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("create_time");
+  const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
   const [selectedImg, setSelectedImg] = useState<MediaRow | null>(null);
 
   const fetchMedia = useCallback(async () => {
@@ -52,7 +53,7 @@ export default function MediaPage() {
         .from("media")
         .select("*")
         .eq("shop_id", selectedShopId)
-        .order(sortKey, { ascending: false })
+        .order(sortKey, { ascending: dateSort === "asc" })
         .limit(200);
 
       if (categoryFilter) {
@@ -66,7 +67,7 @@ export default function MediaPage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedShopId, sortKey, categoryFilter]);
+  }, [selectedShopId, sortKey, categoryFilter, dateSort]);
 
   useEffect(() => { fetchMedia(); }, [fetchMedia]);
 
@@ -179,19 +180,21 @@ export default function MediaPage() {
                   <option key={c.value} value={c.value}>{c.label}</option>
                 ))}
               </select>
-              <div className="flex border border-slate-200 rounded-lg overflow-hidden">
-                <button
-                  onClick={() => setSortKey("create_time")}
-                  className={`px-3 py-1.5 text-xs font-semibold ${sortKey === "create_time" ? "bg-[#003D6B] text-white" : "bg-white text-slate-500"}`}
-                >
-                  新しい順
+              <div className="flex items-center gap-2">
+                <button onClick={() => setDateSort(dateSort === "desc" ? "asc" : "desc")}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 transition">
+                  {dateSort === "desc" ? "新しい順 ↓" : "古い順 ↑"}
                 </button>
-                <button
-                  onClick={() => setSortKey("view_count")}
-                  className={`px-3 py-1.5 text-xs font-semibold ${sortKey === "view_count" ? "bg-[#003D6B] text-white" : "bg-white text-slate-500"}`}
-                >
-                  閲覧数順
-                </button>
+                <div className="flex border border-slate-200 rounded-lg overflow-hidden">
+                  <button onClick={() => setSortKey("create_time")}
+                    className={`px-3 py-1.5 text-xs font-semibold ${sortKey === "create_time" ? "bg-[#003D6B] text-white" : "bg-white text-slate-500"}`}>
+                    日付順
+                  </button>
+                  <button onClick={() => setSortKey("view_count")}
+                    className={`px-3 py-1.5 text-xs font-semibold ${sortKey === "view_count" ? "bg-[#003D6B] text-white" : "bg-white text-slate-500"}`}>
+                    閲覧数順
+                  </button>
+                </div>
               </div>
             </div>
             <p className="text-xs text-slate-400">{media.length}件表示</p>
