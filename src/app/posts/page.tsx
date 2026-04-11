@@ -375,7 +375,14 @@ export default function PostsPage() {
                 const key = postKey(post, i);
                 const status = confirmMap[key] || "unconfirmed";
                 const ss = STATUS_STYLES[status];
-                const photoUrl = post.media?.[0]?.googleUrl || post.media?.[0]?.sourceUrl;
+                let photoUrl = post.media?.[0]?.googleUrl || post.media?.[0]?.sourceUrl || "";
+                // Dropbox URL修正
+                if (photoUrl.includes("dropbox.com")) {
+                  photoUrl = photoUrl.replace("dl=0", "raw=1");
+                  if (!photoUrl.includes("raw=1") && !photoUrl.includes("dl=1")) {
+                    photoUrl += (photoUrl.includes("?") ? "&" : "?") + "raw=1";
+                  }
+                }
                 return (
                   <div key={i} className={`bg-white rounded-xl shadow-sm border overflow-hidden ${status === "needs_fix" ? "border-red-200" : status === "confirmed" ? "border-emerald-200" : "border-slate-100"}`}>
                     <div className="flex">
@@ -416,8 +423,9 @@ export default function PostsPage() {
                             リセット
                           </button>
                           <div className="flex items-center gap-1.5 ml-auto">
-                            {post.searchUrl && (
-                              <a href={post.searchUrl} target="_blank" rel="noopener noreferrer"
+                            {(post.searchUrl || selectedShop?.gbp_location_name) && (
+                              <a href={post.searchUrl || `https://business.google.com/locations/${(selectedShop as any)?.gbp_location_name?.split("/").pop()}/posts`}
+                                target="_blank" rel="noopener noreferrer"
                                 className="px-2 py-1 rounded text-[10px] font-semibold bg-blue-50 text-blue-600 hover:bg-blue-100">
                                 GBPで確認 →
                               </a>
