@@ -39,7 +39,8 @@ export default function PostsPage() {
   const [localPosts, setLocalPosts] = useState<LocalPost[]>([]);
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
-  const [newPost, setNewPost] = useState({ summary: "", topicType: "STANDARD", actionType: "", actionUrl: "", photoUrl: "" });
+  const [newPost, setNewPost] = useState({ summary: "", topicType: "STANDARD", actionType: "", actionUrl: "", photoUrl: "", scheduledAt: "" });
+  const [scheduledPosts, setScheduledPosts] = useState<any[]>([]);
   const [creating, setCreating] = useState(false);
   const [msg, setMsg] = useState("");
   const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
@@ -97,6 +98,15 @@ export default function PostsPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  // 予約投稿を取得
+  useEffect(() => {
+    if (!selectedShopId && !isAllMode) return;
+    const params = selectedShopId && !isAllMode ? `?shopId=${selectedShopId}` : "";
+    api.get(`/api/report/scheduled-posts${params}`)
+      .then((res) => setScheduledPosts(Array.isArray(res.data) ? res.data : []))
+      .catch(() => setScheduledPosts([]));
+  }, [selectedShopId, isAllMode]);
+
   // 全店舗の投稿状況
   useEffect(() => {
     if (!apiConnected) return;
@@ -123,14 +133,26 @@ export default function PostsPage() {
     if (!selectedShopId || !newPost.summary.trim()) { setMsg("本文を入力してください"); return; }
     setCreating(true); setMsg("");
     try {
-      const postData: any = { shopId: selectedShopId, summary: newPost.summary, topicType: newPost.topicType };
-      if (newPost.actionType && newPost.actionUrl) postData.callToAction = { actionType: newPost.actionType, url: newPost.actionUrl };
-      if (newPost.photoUrl.trim()) postData.photoUrl = newPost.photoUrl.trim();
-      await api.post("/api/report/create-post", postData, { timeout: 30000 });
-      setMsg("投稿を作成しました！");
-      logAudit("GBP投稿作成", `${selectedShop?.name} — ${newPost.summary.slice(0, 50)}${newPost.photoUrl ? "（写真付き）" : ""}`);
+      if (newPost.scheduledAt) {
+        await api.post("/api/report/scheduled-posts", {
+          shopId: selectedShopId, summary: newPost.summary, topicType: newPost.topicType,
+          photoUrl: newPost.photoUrl.trim() || null, actionType: newPost.actionType || null,
+          actionUrl: newPost.actionUrl || null, scheduledAt: new Date(newPost.scheduledAt).toISOString(),
+        }, { timeout: 15000 });
+        setMsg(`投稿を${new Date(newPost.scheduledAt).toLocaleString("ja-JP")}に予約しました！`);
+        logAudit("GBP投稿予約", `${selectedShop?.name} — ${newPost.summary.slice(0, 50)} → ${new Date(newPost.scheduledAt).toLocaleString("ja-JP")}`);
+        const sRes = await api.get(`/api/report/scheduled-posts?shopId=${selectedShopId}`);
+        setScheduledPosts(Array.isArray(sRes.data) ? sRes.data : []);
+      } else {
+        const postData: any = { shopId: selectedShopId, summary: newPost.summary, topicType: newPost.topicType };
+        if (newPost.actionType && newPost.actionUrl) postData.callToAction = { actionType: newPost.actionType, url: newPost.actionUrl };
+        if (newPost.photoUrl.trim()) postData.photoUrl = newPost.photoUrl.trim();
+        await api.post("/api/report/create-post", postData, { timeout: 30000 });
+        setMsg("投稿を作成しました！");
+        logAudit("GBP投稿作成", `${selectedShop?.name} — ${newPost.summary.slice(0, 50)}${newPost.photoUrl ? "（写真付き）" : ""}`);
+      }
       setShowCreate(false);
-      setNewPost({ summary: "", topicType: "STANDARD", actionType: "", actionUrl: "", photoUrl: "" });
+      setNewPost({ summary: "", topicType: "STANDARD", actionType: "", actionUrl: "", photoUrl: "", scheduledAt: "" });
       await fetchData();
     } catch (e: any) {
       setMsg(`投稿に失敗しました: ${e?.response?.data?.error || e?.message || "不明なエラー"}`);
@@ -282,11 +304,20 @@ export default function PostsPage() {
                       placeholder="https://..." className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
                   </div>
                 </div>
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1">投稿予約（任意）</label>
+                  <input type="datetime-local" value={newPost.scheduledAt}
+                    onChange={(e) => setNewPost({ ...newPost, scheduledAt: e.target.value })}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                    min={new Date().toISOString().slice(0, 16)} />
+                  <p className="text-[10px] text-slate-400 mt-1">{newPost.scheduledAt ? "予約モード: 指定日時にGBPへ自動投稿されます" : "空欄の場合は即時投稿"}</p>
+                </div>
                 <div className="flex justify-end gap-2 pt-2">
                   <button onClick={() => setShowCreate(false)} className="px-4 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">キャンセル</button>
                   <button onClick={handleCreate} disabled={creating || !newPost.summary.trim()}
-                    className="px-6 py-2 rounded-lg text-sm font-semibold bg-[#003D6B] hover:bg-[#002a4a] disabled:opacity-50" style={{ color: "#fff" }}>
-                    {creating ? "投稿中..." : "GBPに投稿"}
+                    className={`px-6 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 ${newPost.scheduledAt ? "bg-purple-600 hover:bg-purple-700" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
+                    style={{ color: "#fff" }}>
+                    {creating ? "処理中..." : newPost.scheduledAt ? "予約する" : "GBPに投稿"}
                   </button>
                 </div>
               </div>
@@ -310,6 +341,43 @@ export default function PostsPage() {
             </div>
             <p className="text-xs text-slate-400">{localPosts.length}件</p>
           </div>
+
+          {/* 予約投稿一覧 */}
+          {scheduledPosts.filter((p) => p.status === "pending").length > 0 && (
+            <div className="bg-purple-50 rounded-xl shadow-sm border border-purple-200 p-4 mb-4">
+              <h3 className="text-sm font-semibold text-purple-700 mb-3">予約投稿（{scheduledPosts.filter((p) => p.status === "pending").length}件）</h3>
+              <div className="space-y-2">
+                {scheduledPosts.filter((p) => p.status === "pending").map((sp) => (
+                  <div key={sp.id} className="flex items-center justify-between bg-white rounded-lg p-3 border border-purple-100">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-slate-700 truncate">{sp.summary}</p>
+                      <p className="text-xs text-purple-600 mt-0.5">
+                        {new Date(sp.scheduled_at).toLocaleString("ja-JP")} に投稿予定
+                        {sp.shop_name && !isAllMode ? "" : ` — ${sp.shop_name}`}
+                      </p>
+                    </div>
+                    <button onClick={async () => {
+                      if (!confirm("この予約を取り消しますか？")) return;
+                      await api.delete("/api/report/scheduled-posts", { data: { id: sp.id } });
+                      setScheduledPosts(scheduledPosts.filter((p) => p.id !== sp.id));
+                      setMsg("予約を取り消しました");
+                    }} className="text-[10px] text-red-500 hover:text-red-700 font-semibold ml-3 flex-shrink-0">取消</button>
+                  </div>
+                ))}
+              </div>
+              <button onClick={async () => {
+                try {
+                  const res = await api.put("/api/report/scheduled-posts", {}, { timeout: 120000 });
+                  setMsg(`${res.data.executed}件の予約投稿を実行しました${res.data.errors > 0 ? `（エラー${res.data.errors}件）` : ""}`);
+                  const sRes = await api.get(`/api/report/scheduled-posts${selectedShopId ? `?shopId=${selectedShopId}` : ""}`);
+                  setScheduledPosts(Array.isArray(sRes.data) ? sRes.data : []);
+                  await fetchData();
+                } catch (e: any) { setMsg(`実行失敗: ${e?.message}`); }
+              }} className="mt-3 px-4 py-1.5 rounded-lg text-xs font-semibold bg-purple-600 hover:bg-purple-700" style={{ color: "#fff" }}>
+                予約投稿を今すぐ実行
+              </button>
+            </div>
+          )}
 
           {loading ? (
             <div className="bg-white rounded-xl p-12 shadow-sm border border-slate-100 text-center"><p className="text-slate-400 text-sm">読み込み中...</p></div>
