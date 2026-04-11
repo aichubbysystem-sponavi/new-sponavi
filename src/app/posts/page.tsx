@@ -322,11 +322,15 @@ export default function PostsPage() {
                       <>
                         <p className="font-semibold mb-2">プレビュー: {autoPostResult.matches}件マッチ</p>
                         {autoPostResult.data?.map((d: any, i: number) => (
-                          <div key={i} className="flex items-center gap-3 py-1 border-t border-blue-100">
-                            <span className="text-xs font-medium">{d.shopName}</span>
-                            <span className="text-xs text-blue-500 truncate flex-1">{d.summary.slice(0, 40)}...</span>
-                            {d.photoUrl && <span className="text-[10px] text-blue-400">写真あり</span>}
-                            <span className="text-[10px] text-blue-400">{d.tab}</span>
+                          <div key={i} className="py-2 border-t border-blue-100">
+                            <div className="flex items-center gap-3">
+                              <span className="text-xs font-medium">{d.shopName}</span>
+                              <span className="text-xs text-blue-500 truncate flex-1">{d.summary.slice(0, 40)}...</span>
+                              {d.photoUrl ? <span className="text-[10px] text-emerald-500 font-semibold">写真あり</span> : <span className="text-[10px] text-red-400">写真なし</span>}
+                              <span className="text-[10px] text-blue-400">{d.tab}</span>
+                            </div>
+                            {d.rawPhotoCell && <p className="text-[9px] text-slate-400 mt-0.5 truncate">F列: {d.rawPhotoCell.slice(0, 100)}</p>}
+                            {d.photoUrl && <p className="text-[9px] text-emerald-500 mt-0.5 truncate">抽出URL: {d.photoUrl.slice(0, 80)}</p>}
                           </div>
                         ))}
                       </>

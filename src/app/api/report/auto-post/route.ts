@@ -138,7 +138,7 @@ export async function POST(request: NextRequest) {
           if (photoUrl.includes("dropbox.com")) photoUrl = photoUrl.replace("dl=0", "raw=1");
         }
 
-        allMatches.push({ shopName, summary: postText, photoUrl, tab });
+        allMatches.push({ shopName, summary: postText, photoUrl, tab, rawPhotoCell: photoCell, rawDateCell: dateCell });
       }
     } catch (e) {
       console.error(`[auto-post] Tab "${tab}" error:`, e);
