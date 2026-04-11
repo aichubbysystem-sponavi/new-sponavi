@@ -41,6 +41,14 @@ export default function PostsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [newPost, setNewPost] = useState({ summary: "", topicType: "STANDARD", actionType: "", actionUrl: "", photoUrl: "", scheduledAt: "" });
   const [scheduledPosts, setScheduledPosts] = useState<any[]>([]);
+  const [autoPostSheet, setAutoPostSheet] = useState(() => {
+    if (typeof window !== "undefined") return localStorage.getItem("auto-post-sheet") || "1bF-gXP05a3yoi1ZRnBTH6bnKCZRfStOBEucMKYY2eNA";
+    return "1bF-gXP05a3yoi1ZRnBTH6bnKCZRfStOBEucMKYY2eNA";
+  });
+  const [autoPostDate, setAutoPostDate] = useState(new Date().toISOString().slice(0, 10));
+  const [autoPosting, setAutoPosting] = useState(false);
+  const [autoPostResult, setAutoPostResult] = useState<any>(null);
+  const [showAutoPost, setShowAutoPost] = useState(false);
   const [creating, setCreating] = useState(false);
   const [msg, setMsg] = useState("");
   const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
@@ -251,6 +259,92 @@ export default function PostsPage() {
                 })}
               </div>
             </div>
+          </div>
+
+          {/* シートから自動投稿 */}
+          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4 mb-5">
+            <button onClick={() => setShowAutoPost(!showAutoPost)}
+              className="flex items-center justify-between w-full">
+              <h3 className="text-sm font-semibold text-slate-500">シートから自動投稿</h3>
+              <span className="text-xs text-slate-400">{showAutoPost ? "▲ 閉じる" : "▼ 開く"}</span>
+            </button>
+            {showAutoPost && (
+              <div className="mt-4 space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-500 block mb-1">スプレッドシートID</label>
+                    <input type="text" value={autoPostSheet}
+                      onChange={(e) => { setAutoPostSheet(e.target.value); localStorage.setItem("auto-post-sheet", e.target.value); }}
+                      placeholder="1bF-gXP05a3yoi..."
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 block mb-1">対象日付</label>
+                    <input type="date" value={autoPostDate}
+                      onChange={(e) => setAutoPostDate(e.target.value)}
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <div className="flex items-end gap-2">
+                    <button onClick={async () => {
+                      setAutoPosting(true); setAutoPostResult(null);
+                      try {
+                        const res = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true }, { timeout: 60000 });
+                        setAutoPostResult({ ...res.data, mode: "preview" });
+                      } catch (e: any) { setAutoPostResult({ error: e?.response?.data?.error || e?.message }); }
+                      finally { setAutoPosting(false); }
+                    }} disabled={autoPosting}
+                      className="px-4 py-2 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200">
+                      {autoPosting ? "確認中..." : "プレビュー"}
+                    </button>
+                    <button onClick={async () => {
+                      if (!confirm(`${autoPostDate}の投稿を実行しますか？`)) return;
+                      setAutoPosting(true); setAutoPostResult(null);
+                      try {
+                        const res = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate }, { timeout: 300000 });
+                        setAutoPostResult({ ...res.data, mode: "executed" });
+                        logAudit("シート自動投稿", `${autoPostDate} — ${res.data.posted}件投稿`);
+                        await fetchData();
+                      } catch (e: any) { setAutoPostResult({ error: e?.response?.data?.error || e?.message }); }
+                      finally { setAutoPosting(false); }
+                    }} disabled={autoPosting}
+                      className="px-4 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700" style={{ color: "#fff" }}>
+                      {autoPosting ? "投稿中..." : "自動投稿を実行"}
+                    </button>
+                  </div>
+                </div>
+                <p className="text-[10px] text-slate-400">タブ「投稿用シート」「報告必須店舗 投稿用シート」「WHITE 系列 投稿用シート」のB列=店舗名、C列=投稿本文、E列=日付、F列=写真URL</p>
+
+                {autoPostResult && (
+                  <div className={`rounded-lg p-3 text-sm ${autoPostResult.error ? "bg-red-50 text-red-700 border border-red-200" : autoPostResult.mode === "preview" ? "bg-blue-50 text-blue-700 border border-blue-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}>
+                    {autoPostResult.error ? (
+                      <p>エラー: {autoPostResult.error}</p>
+                    ) : autoPostResult.mode === "preview" ? (
+                      <>
+                        <p className="font-semibold mb-2">プレビュー: {autoPostResult.matches}件マッチ</p>
+                        {autoPostResult.data?.map((d: any, i: number) => (
+                          <div key={i} className="flex items-center gap-3 py-1 border-t border-blue-100">
+                            <span className="text-xs font-medium">{d.shopName}</span>
+                            <span className="text-xs text-blue-500 truncate flex-1">{d.summary.slice(0, 40)}...</span>
+                            {d.photoUrl && <span className="text-[10px] text-blue-400">写真あり</span>}
+                            <span className="text-[10px] text-blue-400">{d.tab}</span>
+                          </div>
+                        ))}
+                      </>
+                    ) : (
+                      <>
+                        <p className="font-semibold mb-2">実行結果: {autoPostResult.posted}件投稿 / {autoPostResult.errors}件エラー</p>
+                        {autoPostResult.results?.map((r: any, i: number) => (
+                          <div key={i} className="flex items-center gap-3 py-1 border-t border-emerald-100">
+                            <span className="text-xs font-medium">{r.shopName}</span>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${r.status.includes("成功") ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>{r.status}</span>
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* アクションバー */}
