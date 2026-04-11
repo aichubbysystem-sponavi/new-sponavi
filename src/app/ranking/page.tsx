@@ -365,93 +365,118 @@ export default function RankingPage() {
             </div>
           )}
 
-          {/* 順位推移サマリー */}
+          {/* 順位サマリーテーブル（キーワード×地点、最新のみ） */}
           {history.length > 0 && (() => {
-            // キーワードごとにグループ化して最新と前回を比較
-            const groups = new Map<string, RankLog[]>();
-            history.forEach((log) => {
-              const kw = (() => { try { return JSON.parse(log.search_words).join(", "); } catch { return log.search_words; } })();
-              if (!groups.has(kw)) groups.set(kw, []);
-              groups.get(kw)!.push(log);
-            });
+            const parseKw = (s: string) => { try { return JSON.parse(s).join(", "); } catch { return s; } };
 
-            const summaries = Array.from(groups.entries()).map(([kw, logs]) => {
-              const sorted = [...logs].sort((a, b) => new Date(b.searched_at).getTime() - new Date(a.searched_at).getTime());
-              const latest = sorted[0];
-              const prev = sorted.length >= 2 ? sorted[1] : null;
-              const change = prev && latest.rank > 0 && prev.rank > 0 ? prev.rank - latest.rank : null;
-              return { keyword: kw, latest, prev, change, history: sorted.slice(0, 10) };
-            });
+            // キーワード+地点でグループ化し、最新と前回を抽出
+            const groups = new Map<string, { kw: string; point: string; latest: RankLog; prev: RankLog | null }>();
+            const sorted = [...history].sort((a, b) => new Date(b.searched_at).getTime() - new Date(a.searched_at).getTime());
+            for (const log of sorted) {
+              const kw = parseKw(log.search_words);
+              const point = (log as any).point_label || "default";
+              const key = `${kw}__${point}`;
+              if (!groups.has(key)) {
+                groups.set(key, { kw, point, latest: log, prev: null });
+              } else if (!groups.get(key)!.prev) {
+                groups.get(key)!.prev = log;
+              }
+            }
+
+            const summaries = Array.from(groups.values());
 
             return (
-              <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-6">
-                <h3 className="text-sm font-semibold text-slate-500 mb-4">キーワード順位サマリー</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                  {summaries.map((s, i) => (
-                    <div key={i} className="border border-slate-100 rounded-xl p-4">
-                      <p className="text-sm font-medium text-slate-700 mb-2">{s.keyword}</p>
-                      <div className="flex items-end gap-3 mb-3">
-                        <span className={`text-3xl font-bold ${s.latest.rank > 0 ? (s.latest.rank <= 3 ? "text-emerald-600" : s.latest.rank <= 10 ? "text-blue-600" : s.latest.rank <= 20 ? "text-amber-600" : "text-orange-600") : "text-slate-400"}`}>
-                          {s.latest.rank > 0 ? `${s.latest.rank}位` : "圏外"}
-                        </span>
-                        {s.change !== null && (
-                          <span className={`text-sm font-semibold mb-1 ${s.change > 0 ? "text-emerald-600" : s.change < 0 ? "text-red-600" : "text-slate-400"}`}>
-                            {s.change > 0 ? `↑${s.change}` : s.change < 0 ? `↓${Math.abs(s.change)}` : "→"}
-                          </span>
-                        )}
-                      </div>
-                      {/* ミニ推移バー */}
-                      <div className="flex gap-1 items-end h-10">
-                        {s.history.slice().reverse().map((h, j) => {
-                          const val = h.rank > 0 ? Math.max(5, 100 - h.rank) : 5;
-                          const color = h.rank > 0 ? (h.rank <= 3 ? "bg-emerald-400" : h.rank <= 10 ? "bg-blue-400" : h.rank <= 20 ? "bg-amber-400" : "bg-orange-400") : "bg-slate-200";
-                          return (
-                            <div key={j} className="flex-1 flex flex-col items-center gap-0.5" title={`${new Date(h.searched_at).toLocaleDateString("ja-JP")}: ${h.rank > 0 ? h.rank + "位" : "圏外"}`}>
-                              <div className={`w-full rounded-sm ${color}`} style={{ height: `${val}%` }} />
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <p className="text-[10px] text-slate-400 mt-1">
-                        最終計測: {new Date(s.latest.searched_at).toLocaleString("ja-JP")}
-                        {s.prev && ` | 前回: ${s.prev.rank > 0 ? s.prev.rank + "位" : "圏外"}`}
-                      </p>
-                    </div>
-                  ))}
+              <div className="bg-white rounded-xl shadow-sm border border-slate-100 mb-6">
+                <div className="p-4 border-b border-slate-100">
+                  <h3 className="text-sm font-semibold text-slate-500">キーワード順位サマリー（最新）</h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-100">
+                        <th className="text-left p-3 text-slate-500 font-medium">キーワード</th>
+                        <th className="text-center p-3 text-slate-500 font-medium">地点</th>
+                        <th className="text-center p-3 text-slate-500 font-medium">最新順位</th>
+                        <th className="text-center p-3 text-slate-500 font-medium">前回</th>
+                        <th className="text-center p-3 text-slate-500 font-medium">変動</th>
+                        <th className="text-right p-3 text-slate-500 font-medium">計測日</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {summaries.map((s, i) => {
+                        const change = s.prev && s.latest.rank > 0 && s.prev.rank > 0 ? s.prev.rank - s.latest.rank : null;
+                        return (
+                          <tr key={i} className="border-b border-slate-50 hover:bg-slate-50">
+                            <td className="p-3 font-medium text-slate-700">{s.kw}</td>
+                            <td className="p-3 text-center text-xs text-slate-500">{s.point}</td>
+                            <td className="p-3 text-center">
+                              <span className={`text-lg font-bold ${s.latest.rank > 0 ? (s.latest.rank <= 3 ? "text-emerald-600" : s.latest.rank <= 10 ? "text-blue-600" : s.latest.rank <= 20 ? "text-amber-600" : "text-orange-600") : "text-slate-400"}`}>
+                                {s.latest.rank > 0 ? `${s.latest.rank}位` : "圏外"}
+                              </span>
+                            </td>
+                            <td className="p-3 text-center text-xs text-slate-400">
+                              {s.prev ? (s.prev.rank > 0 ? `${s.prev.rank}位` : "圏外") : "-"}
+                            </td>
+                            <td className="p-3 text-center">
+                              {change !== null ? (
+                                <span className={`text-xs font-bold ${change > 0 ? "text-emerald-600" : change < 0 ? "text-red-600" : "text-slate-400"}`}>
+                                  {change > 0 ? `↑${change}` : change < 0 ? `↓${Math.abs(change)}` : "→"}
+                                </span>
+                              ) : <span className="text-slate-300">-</span>}
+                            </td>
+                            <td className="p-3 text-right text-xs text-slate-400">{new Date(s.latest.searched_at).toLocaleDateString("ja-JP")}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             );
           })()}
 
-          {/* 順位推移チャート */}
+          {/* 順位推移チャート（ランクインしたキーワードのみ） */}
           {history.length > 0 && (() => {
-            // キーワードごとにグループ化
+            const parseKw = (s: string) => { try { return JSON.parse(s).join(", "); } catch { return s; } };
+
+            // キーワードごとにグループ化（ランクインしたものだけ）
             const kwGroups = new Map<string, { date: string; rank: number }[]>();
             history.forEach((log) => {
-              const kw = (() => { try { return JSON.parse(log.search_words).join(", "); } catch { return log.search_words; } })();
+              if (log.rank === 0) return; // 圏外はチャートに含めない
+              const kw = parseKw(log.search_words);
               if (!kwGroups.has(kw)) kwGroups.set(kw, []);
               kwGroups.get(kw)!.push({
-                date: new Date(log.searched_at).toLocaleDateString("ja-JP", { month: "short", day: "numeric" }),
+                date: new Date(log.searched_at).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" }),
                 rank: log.rank,
               });
             });
 
-            // 日付ラベルを統合（全キーワード共通、古い順）
-            const allDates = new Set<string>();
-            kwGroups.forEach((logs) => logs.forEach((l) => allDates.add(l.date)));
-            const dateLabels = Array.from(allDates).reverse().slice(-20);
+            if (kwGroups.size === 0) return null;
+
+            // 日付ラベル（古い順、重複排除）
+            const allDates: string[] = [];
+            const seen = new Set<string>();
+            [...history].sort((a, b) => new Date(a.searched_at).getTime() - new Date(b.searched_at).getTime()).forEach((log) => {
+              const d = new Date(log.searched_at).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" });
+              if (!seen.has(d)) { seen.add(d); allDates.push(d); }
+            });
+            const dateLabels = allDates.slice(-10);
 
             const COLORS = ["#003D6B", "#e94560", "#27ae60", "#f39c12", "#8e44ad", "#e67e22", "#2980b9", "#c0392b"];
             const datasets = Array.from(kwGroups.entries()).map(([kw, logs], i) => {
-              const dataMap = new Map<string, number>();
-              logs.forEach((l) => { if (l.rank > 0) dataMap.set(l.date, l.rank); });
+              // 同一日付に複数データがある場合はベスト（最小rank）を使用
+              const bestByDate = new Map<string, number>();
+              logs.forEach((l) => {
+                const existing = bestByDate.get(l.date);
+                if (!existing || l.rank < existing) bestByDate.set(l.date, l.rank);
+              });
               return {
                 label: kw,
-                data: dateLabels.map((d) => dataMap.get(d) ?? null),
+                data: dateLabels.map((d) => bestByDate.get(d) ?? null),
                 borderColor: COLORS[i % COLORS.length],
                 backgroundColor: COLORS[i % COLORS.length] + "20",
                 tension: 0.3,
-                pointRadius: 4,
+                pointRadius: 5,
                 borderWidth: 2,
                 spanGaps: true,
               };
@@ -459,35 +484,34 @@ export default function RankingPage() {
 
             return (
               <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-6">
-                <h3 className="text-sm font-semibold text-slate-500 mb-4">順位推移チャート（直近20回）</h3>
-                <div style={{ height: 300 }}>
+                <h3 className="text-sm font-semibold text-slate-500 mb-4">順位推移チャート</h3>
+                <div style={{ height: 320 }}>
                   <Line
                     data={{ labels: dateLabels, datasets }}
                     options={{
                       responsive: true,
                       maintainAspectRatio: false,
                       plugins: {
-                        legend: { position: "top", labels: { font: { size: 11 }, usePointStyle: true } },
+                        legend: { position: "bottom", labels: { font: { size: 11 }, usePointStyle: true, padding: 15 } },
                         tooltip: {
                           callbacks: {
-                            label: (ctx: any) => `${ctx.dataset.label}: ${ctx.parsed.y > 0 ? ctx.parsed.y + "位" : "圏外"}`,
+                            label: (ctx: any) => `${ctx.dataset.label}: ${ctx.parsed.y}位`,
                           },
                         },
                       },
                       scales: {
-                        x: { grid: { display: false } },
+                        x: { grid: { display: false }, ticks: { font: { size: 11 } } },
                         y: {
                           reverse: true,
                           min: 1,
-                          title: { display: true, text: "順位", font: { size: 11 } },
                           grid: { color: "#f0f0f0" },
-                          ticks: { callback: (v: any) => v + "位", stepSize: 10 },
+                          ticks: { callback: (v: any) => v + "位", stepSize: 5, font: { size: 11 } },
                         },
                       },
                     }}
                   />
                 </div>
-                <p className="text-[10px] text-slate-400 mt-2">※ 上に行くほど順位が高い。圏外（100位以上）はチャートに含まれません。</p>
+                <p className="text-[10px] text-slate-400 mt-2">※ 圏外のキーワードはチャートに含まれません。上に行くほど順位が高い。</p>
               </div>
             );
           })()}
