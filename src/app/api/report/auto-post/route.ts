@@ -183,17 +183,29 @@ export async function POST(request: NextRequest) {
       ? shop.gbp_location_name
       : `accounts/111148362910776147900/${shop.gbp_location_name}`;
 
-    const postBody: any = { summary: match.summary, topicType: "STANDARD", languageCode: "ja" };
+    // 本文を1500文字に制限
+    const trimmedSummary = match.summary.slice(0, 1500);
+    const postBody: any = { summary: trimmedSummary, topicType: "STANDARD", languageCode: "ja" };
     if (match.photoUrl) {
       postBody.media = [{ mediaFormat: "PHOTO", sourceUrl: match.photoUrl }];
     }
 
     try {
-      const res = await fetch(`${GBP_API_BASE}/${locationName}/localPosts`, {
+      let res = await fetch(`${GBP_API_BASE}/${locationName}/localPosts`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
         body: JSON.stringify(postBody),
       });
+
+      // 写真付きで失敗したら写真なしでリトライ
+      if (!res.ok && match.photoUrl) {
+        const retryBody = { summary: trimmedSummary, topicType: "STANDARD", languageCode: "ja" };
+        res = await fetch(`${GBP_API_BASE}/${locationName}/localPosts`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+          body: JSON.stringify(retryBody),
+        });
+      }
 
       if (res.ok) {
         const result = await res.json();
