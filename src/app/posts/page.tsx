@@ -59,6 +59,7 @@ export default function PostsPage() {
         setLocalPosts((logs || []).map((log) => ({
           summary: log.summary, topicType: log.topic_type, createTime: log.created_at,
           callToAction: log.action_type ? { actionType: log.action_type, url: log.action_url } : undefined,
+          media: log.media_url ? [{ sourceUrl: log.media_url, mediaFormat: "PHOTO" }] : undefined,
           _fromLog: true, _shopName: log.shop_name,
         })));
       } else {
@@ -73,6 +74,7 @@ export default function PostsPage() {
         const logPosts: LocalPost[] = (logs || []).map((log) => ({
           summary: log.summary, topicType: log.topic_type, createTime: log.created_at,
           callToAction: log.action_type ? { actionType: log.action_type, url: log.action_url } : undefined,
+          media: log.media_url ? [{ sourceUrl: log.media_url, mediaFormat: "PHOTO" }] : undefined,
           _fromLog: true,
         }));
 
@@ -413,12 +415,20 @@ export default function PostsPage() {
                             className="px-2 py-1 rounded text-[10px] font-semibold bg-slate-50 text-slate-400 hover:bg-slate-100">
                             リセット
                           </button>
-                          {post.name && (
-                            <button onClick={() => handleDelete(post.name!)}
-                              className="px-2 py-1 rounded text-[10px] font-semibold bg-red-50 text-red-500 hover:bg-red-100 ml-auto">
-                              削除
-                            </button>
-                          )}
+                          <div className="flex items-center gap-1.5 ml-auto">
+                            {post.searchUrl && (
+                              <a href={post.searchUrl} target="_blank" rel="noopener noreferrer"
+                                className="px-2 py-1 rounded text-[10px] font-semibold bg-blue-50 text-blue-600 hover:bg-blue-100">
+                                GBPで確認 →
+                              </a>
+                            )}
+                            {post.name && (
+                              <button onClick={() => handleDelete(post.name!)}
+                                className="px-2 py-1 rounded text-[10px] font-semibold bg-red-50 text-red-500 hover:bg-red-100">
+                                削除
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
