@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
 
   // 対象タブを読み込み
   const tabs = ["投稿用シート", "報告必須店舗 投稿用シート", "WHITE 系列 投稿用シート"];
-  const allMatches: { shopName: string; summary: string; photoUrl: string; tab: string }[] = [];
+  const allMatches: { shopName: string; summary: string; photoUrl: string; tab: string; rawPhotoCell: string; rawDateCell: string }[] = [];
 
   for (const tab of tabs) {
     try {
