@@ -330,7 +330,8 @@ export default function PostsPage() {
                               <span className="text-[10px] text-blue-400">{d.tab}</span>
                             </div>
                             {d.rawPhotoCell && <p className="text-[9px] text-slate-400 mt-0.5 truncate">F列: {d.rawPhotoCell.slice(0, 100)}</p>}
-                            {d.photoUrl && <p className="text-[9px] text-emerald-500 mt-0.5 truncate">抽出URL: {d.photoUrl.slice(0, 80)}</p>}
+                            {d.photoDebug && <p className={`text-[9px] mt-0.5 ${d.photoUrl ? "text-emerald-500" : "text-red-400"}`}>{d.photoDebug}</p>}
+                            {d.photoUrl && <p className="text-[9px] text-emerald-500 mt-0.5 truncate">写真URL: {d.photoUrl.slice(0, 80)}</p>}
                           </div>
                         ))}
                       </>

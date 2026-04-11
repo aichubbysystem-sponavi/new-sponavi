@@ -69,6 +69,7 @@ async function getDropboxAccessToken(): Promise<string | null> {
  * Dropboxフォルダ内を日付で検索し、一致するファイルの一時DLリンクを取得
  */
 async function searchDropboxPhoto(folderUrl: string, dateCompact: string, shopName: string): Promise<string> {
+  console.log(`[dropbox-search] folder=${folderUrl.slice(0, 60)}, date=${dateCompact}, shop=${shopName}`);
   const dbxToken = await getDropboxAccessToken();
   if (!dbxToken) return "";
 
@@ -87,8 +88,14 @@ async function searchDropboxPhoto(folderUrl: string, dateCompact: string, shopNa
     if (metaRes.ok) {
       const meta = await metaRes.json();
       searchPath = meta.path_lower || meta.path_display || "";
+      console.log(`[dropbox-search] shared link path: ${searchPath}`);
+    } else {
+      const errText = await metaRes.text().catch(() => "");
+      console.log(`[dropbox-search] shared link error: ${metaRes.status} ${errText.slice(0, 100)}`);
     }
-  } catch {}
+  } catch (e: any) {
+    console.log(`[dropbox-search] shared link exception: ${e?.message}`);
+  }
 
   // パスが取れなかった場合、店舗名から推定
   if (!searchPath) {
@@ -110,9 +117,14 @@ async function searchDropboxPhoto(folderUrl: string, dateCompact: string, shopNa
       }),
     });
 
-    if (!searchRes.ok) return "";
+    if (!searchRes.ok) {
+      const errText = await searchRes.text().catch(() => "");
+      console.log(`[dropbox-search] search error: ${searchRes.status} ${errText.slice(0, 100)}`);
+      return "";
+    }
     const searchData = await searchRes.json();
     const matches = searchData.matches || [];
+    console.log(`[dropbox-search] found ${matches.length} matches for "${dateCompact}" in ${searchPath}`);
 
     if (matches.length === 0) return "";
 
@@ -195,7 +207,7 @@ export async function POST(request: NextRequest) {
 
   // 対象タブを読み込み
   const tabs = ["投稿用シート", "報告必須店舗 投稿用シート", "WHITE 系列 投稿用シート"];
-  const allMatches: { shopName: string; summary: string; photoUrl: string; tab: string; rawPhotoCell: string; rawDateCell: string }[] = [];
+  const allMatches: { shopName: string; summary: string; photoUrl: string; tab: string; rawPhotoCell: string; rawDateCell: string; photoDebug: string }[] = [];
 
   for (const tab of tabs) {
     try {
@@ -244,7 +256,7 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        allMatches.push({ shopName, summary: postText, photoUrl, tab, rawPhotoCell: photoCell, rawDateCell: dateCell });
+        allMatches.push({ shopName, summary: postText, photoUrl, tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: photoUrl ? "写真取得成功" : (photoCell ? "Dropbox検索で写真が見つかりません" : "F列が空") });
       }
     } catch (e) {
       console.error(`[auto-post] Tab "${tab}" error:`, e);
