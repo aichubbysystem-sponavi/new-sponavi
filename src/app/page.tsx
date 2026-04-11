@@ -135,13 +135,20 @@ export default function Dashboard() {
         <KpiCard label="経路検索" value={latest ? v(latest.direction_requests) : 0} change={pct(v(latest?.direction_requests), v(prev?.direction_requests))} icon="📍" />
         <KpiCard label="Webサイトクリック" value={latest ? v(latest.website_clicks) : 0} change={pct(v(latest?.website_clicks), v(prev?.website_clicks))} icon="🌐" />
         <KpiCard label="口コミ数" value={latest ? v(latest.total_reviews) : 0} change={0} icon="⭐" />
-        {unrepliedCount > 0 && (
-          <div className="bg-red-50 rounded-xl p-4 shadow-sm border border-red-200">
-            <p className="text-[11px] font-medium text-red-500 mb-1">未返信口コミ</p>
-            <p className="text-2xl font-bold text-red-600">{unrepliedCount.toLocaleString()}<span className="text-xs font-normal text-red-400 ml-1">件</span></p>
-          </div>
-        )}
       </div>
+
+      {/* 未返信口コミアラート */}
+      {unrepliedCount > 0 && (
+        <div className="bg-red-50 rounded-xl p-4 shadow-sm border border-red-200 mb-6 flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-red-600">未返信の口コミが {unrepliedCount.toLocaleString()} 件あります</p>
+            <p className="text-[10px] text-red-400 mt-0.5">口コミ管理ページから返信できます</p>
+          </div>
+          <a href="/reviews" className="px-4 py-2 rounded-lg text-xs font-semibold bg-red-600 hover:bg-red-700 transition" style={{ color: "#fff" }}>
+            口コミ管理へ
+          </a>
+        </div>
+      )}
 
       {/* パフォーマンス推移 */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">

@@ -227,6 +227,11 @@ export default function Sidebar() {
                         )}
                       />
                       <span>{item.label}</span>
+                      {(item as any).badge && (
+                        <span className="ml-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                          {(item as any).badge > 999 ? "999+" : (item as any).badge}
+                        </span>
+                      )}
                     </div>
                   </Link>
                 );
