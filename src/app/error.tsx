@@ -10,8 +10,7 @@ export default function Error({
   reset: () => void;
 }) {
   useEffect(() => {
-    // 本番ではエラーログサービスに送信する
-    // console.error(error);
+    console.error("[app error]", error);
   }, [error]);
 
   return (
@@ -36,8 +35,11 @@ export default function Error({
         <h2 className="text-xl font-semibold text-slate-700 mb-2">
           エラーが発生しました
         </h2>
-        <p className="text-sm text-slate-500 mb-6">
+        <p className="text-sm text-slate-500 mb-4">
           問題が発生しました。もう一度お試しください。
+        </p>
+        <p className="text-xs text-red-400 mb-6 max-w-md mx-auto break-all">
+          {error?.message || "不明なエラー"}
         </p>
         <button
           onClick={reset}
