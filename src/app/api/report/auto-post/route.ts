@@ -77,13 +77,19 @@ async function searchDropboxPhoto(folderUrl: string, dateCompact: string, shopNa
   // もしくはshared linkのメタデータから取得
   let searchPath = "";
 
-  // URLからフォルダ名を抽出してパスを構築
+  // URLからフォルダパスを取得
   try {
-    // まずshared linkからパスを取得
+    // rlkeyを含むURLをそのまま渡す（dl=0を付加）
+    let sharedUrl = folderUrl.trim();
+    if (!sharedUrl.includes("dl=")) {
+      sharedUrl += (sharedUrl.includes("?") ? "&" : "?") + "dl=0";
+    }
+    console.log(`[dropbox-search] calling shared_link_metadata with: ${sharedUrl.slice(0, 80)}`);
+
     const metaRes = await fetch("https://api.dropboxapi.com/2/sharing/get_shared_link_metadata", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
-      body: JSON.stringify({ url: folderUrl.split("?")[0] + "?dl=0" }),
+      body: JSON.stringify({ url: sharedUrl }),
     });
     if (metaRes.ok) {
       const meta = await metaRes.json();
