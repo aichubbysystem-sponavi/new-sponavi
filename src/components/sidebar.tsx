@@ -21,7 +21,7 @@ const navSections = [
       { href: "/reviews", label: "口コミ管理" },
       { href: "/review-analysis", label: "口コミ分析(AI)" },
       { href: "https://report.new-spotlight-navigator.com", label: "レポートページ ↗" },
-      { href: "/posts", label: "投稿管理" },
+      { href: "/posts", label: "投稿管理・分析" },
       { href: "/aio", label: "AIO対策" },
     ],
   },
@@ -47,7 +47,6 @@ const navSections = [
     title: "多媒体連携",
     children: [
       { href: "/media", label: "写真管理" },
-      { href: "/organic", label: "オーガニック投稿" },
       { href: "/ota", label: "OTA連携" },
     ],
   },
