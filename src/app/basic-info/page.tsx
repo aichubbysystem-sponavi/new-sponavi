@@ -43,7 +43,8 @@ export default function BasicInfoPage() {
           check("店舗名", prev.title, data.title);
           check("電話番号", prev.phone, data.phoneNumbers?.primaryPhone);
           check("Webサイト", prev.website, data.websiteUri);
-          check("メインカテゴリ", prev.category, data.categories?.primaryCategory?.displayName);
+          const catName = data.categories?.primaryCategory?.displayName;
+          check("メインカテゴリ", prev.category, typeof catName === "object" ? catName?.text || "" : String(catName || ""));
           const prevAddr = prev.address || "";
           const curAddr = (data.storefrontAddress?.addressLines || []).join(" ");
           check("住所", prevAddr, curAddr);
@@ -57,7 +58,7 @@ export default function BasicInfoPage() {
           title: data.title || "",
           phone: data.phoneNumbers?.primaryPhone || "",
           website: data.websiteUri || "",
-          category: data.categories?.primaryCategory?.displayName || "",
+          category: typeof data.categories?.primaryCategory?.displayName === "object" ? data.categories.primaryCategory.displayName?.text || "" : String(data.categories?.primaryCategory?.displayName || ""),
           address: (data.storefrontAddress?.addressLines || []).join(" "),
           savedAt: new Date().toISOString(),
         }));
@@ -74,20 +75,19 @@ export default function BasicInfoPage() {
     setServiceLoading(true);
     api.get(`/api/shop/${selectedShopId}/location`).then((res) => {
       const loc = res.data;
-      // GBP serviceItemsからサービス一覧を取得
       const items: any[] = [];
       if (loc?.serviceItems) {
         loc.serviceItems.forEach((si: any) => {
-          items.push({
-            name: si.structuredServiceItem?.displayName || si.freeFormServiceItem?.label || "不明",
-            description: si.structuredServiceItem?.description || si.freeFormServiceItem?.description || "",
-            price: si.price ? `¥${si.price.units || 0}` : "",
-          });
+          const nameRaw = si.structuredServiceItem?.displayName || si.freeFormServiceItem?.label || "";
+          const descRaw = si.structuredServiceItem?.description || si.freeFormServiceItem?.description || "";
+          // オブジェクトの場合は文字列に変換
+          const name = typeof nameRaw === "object" ? (nameRaw?.text || nameRaw?.displayName || JSON.stringify(nameRaw)) : String(nameRaw || "不明");
+          const desc = typeof descRaw === "object" ? (descRaw?.text || JSON.stringify(descRaw)) : String(descRaw || "");
+          items.push({ name, description: desc, price: si.price ? `¥${si.price.units || 0}` : "" });
         });
       }
-      // メニューリンク
       if (loc?.metadata?.mapsUri) {
-        items.push({ name: "Google Maps", description: loc.metadata.mapsUri, price: "" });
+        items.push({ name: "Google Maps", description: String(loc.metadata.mapsUri), price: "" });
       }
       setServices(items);
     }).catch(() => setServices([])).finally(() => setServiceLoading(false));

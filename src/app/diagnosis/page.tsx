@@ -53,7 +53,7 @@ export default function DiagnosisPage() {
         results.push({
           label: "口コミ数",
           status: reviewCount >= 50 ? "good" : reviewCount >= 10 ? "warning" : "danger",
-          detail: `${reviewCount}件（評価 ${avgRating}）`,
+          detail: `${reviewCount}件（評価 ${Number(avgRating).toFixed(1)}）`,
         });
       } catch {
         results.push({ label: "口コミ", status: "warning", detail: "口コミデータを取得できませんでした" });
