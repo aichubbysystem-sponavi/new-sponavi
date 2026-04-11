@@ -69,85 +69,71 @@ async function getDropboxAccessToken(): Promise<string | null> {
  * Dropboxフォルダ内を日付で検索し、一致するファイルの一時DLリンクを取得
  */
 async function searchDropboxPhoto(folderUrl: string, dateCompact: string, shopName: string): Promise<string> {
-  console.log(`[dropbox-search] folder=${folderUrl.slice(0, 60)}, date=${dateCompact}, shop=${shopName}`);
+  console.log(`[dropbox-search] date=${dateCompact}, shop=${shopName}`);
   const dbxToken = await getDropboxAccessToken();
-  if (!dbxToken) return "";
+  if (!dbxToken) { console.log("[dropbox-search] no token"); return ""; }
 
-  // フォルダURLからパスを推定（/MEO対策　定期更新用写真/{店舗名}）
-  // もしくはshared linkのメタデータから取得
-  let searchPath = "";
-
-  // URLからフォルダパスを取得
   try {
-    // rlkeyを含むURLをそのまま渡す（dl=0を付加）
-    let sharedUrl = folderUrl.trim();
-    if (!sharedUrl.includes("dl=")) {
-      sharedUrl += (sharedUrl.includes("?") ? "&" : "?") + "dl=0";
-    }
-    console.log(`[dropbox-search] calling shared_link_metadata with: ${sharedUrl.slice(0, 80)}`);
-
-    const metaRes = await fetch("https://api.dropboxapi.com/2/sharing/get_shared_link_metadata", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
-      body: JSON.stringify({ url: sharedUrl }),
-    });
-    if (metaRes.ok) {
-      const meta = await metaRes.json();
-      searchPath = meta.path_lower || meta.path_display || "";
-      console.log(`[dropbox-search] shared link path: ${searchPath}`);
-    } else {
-      const errText = await metaRes.text().catch(() => "");
-      console.log(`[dropbox-search] shared link error: ${metaRes.status} ${errText.slice(0, 100)}`);
-    }
-  } catch (e: any) {
-    console.log(`[dropbox-search] shared link exception: ${e?.message}`);
-  }
-
-  // パスが取れなかった場合、店舗名から推定
-  if (!searchPath) {
-    searchPath = `/meo対策　定期更新用写真/${shopName}`;
-  }
-
-  // Dropbox検索API
-  try {
+    // パス制限なしで全Dropbox内を日付ファイル名で検索
     const searchRes = await fetch("https://api.dropboxapi.com/2/files/search_v2", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
       body: JSON.stringify({
         query: dateCompact,
         options: {
-          path: searchPath,
-          max_results: 5,
+          max_results: 20,
           file_extensions: ["jpg", "jpeg", "png", "gif", "webp"],
         },
       }),
     });
 
     if (!searchRes.ok) {
-      const errText = await searchRes.text().catch(() => "");
-      console.log(`[dropbox-search] search error: ${searchRes.status} ${errText.slice(0, 100)}`);
+      const err = await searchRes.text().catch(() => "");
+      console.log(`[dropbox-search] search error: ${searchRes.status} ${err.slice(0, 150)}`);
       return "";
     }
+
     const searchData = await searchRes.json();
-    const matches = searchData.matches || [];
-    console.log(`[dropbox-search] found ${matches.length} matches for "${dateCompact}" in ${searchPath}`);
+    const allResults = searchData.matches || [];
+    console.log(`[dropbox-search] total matches: ${allResults.length}`);
+    allResults.forEach((m: any, i: number) => {
+      console.log(`[dropbox-search]   ${i}: ${m.metadata?.metadata?.path_display}`);
+    });
 
-    if (matches.length === 0) return "";
+    if (allResults.length === 0) return "";
 
-    // 最初にマッチしたファイルの一時リンクを取得
-    const filePath = matches[0].metadata?.metadata?.path_display || matches[0].metadata?.metadata?.path_lower;
+    // 店舗名に関連するファイルを優先（パスに店舗名の一部が含まれる）
+    const shopParts = shopName.split(/[\s　]+/).filter((p) => p.length >= 2);
+    let best = allResults.find((m: any) => {
+      const path = (m.metadata?.metadata?.path_display || "").toLowerCase();
+      return shopParts.some((part) => path.includes(part.toLowerCase()));
+    });
+
+    if (!best) best = allResults[0];
+
+    const filePath = best.metadata?.metadata?.path_display || best.metadata?.metadata?.path_lower;
+    console.log(`[dropbox-search] selected: ${filePath}`);
     if (!filePath) return "";
 
+    // 一時ダウンロードリンク取得
     const linkRes = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
       body: JSON.stringify({ path: filePath }),
     });
 
-    if (!linkRes.ok) return "";
+    if (!linkRes.ok) {
+      const err = await linkRes.text().catch(() => "");
+      console.log(`[dropbox-search] temp link error: ${linkRes.status} ${err.slice(0, 100)}`);
+      return "";
+    }
     const linkData = await linkRes.json();
+    console.log(`[dropbox-search] temp link OK: ${linkData.link?.slice(0, 50)}`);
     return linkData.link || "";
-  } catch { return ""; }
+  } catch (e: any) {
+    console.log(`[dropbox-search] exception: ${e?.message}`);
+    return "";
+  }
 }
 
 function convertDropboxUrl(url: string): string {
