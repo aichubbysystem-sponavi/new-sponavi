@@ -37,17 +37,9 @@ const navSections = [
     ],
   },
   {
-    title: "広告管理",
-    children: [
-      { href: "/pmax", label: "P-MAX広告" },
-      { href: "/ads", label: "広告管理" },
-    ],
-  },
-  {
     title: "多媒体連携",
     children: [
       { href: "/media", label: "写真管理" },
-      { href: "/ota", label: "OTA連携" },
     ],
   },
   {
@@ -59,7 +51,6 @@ const navSections = [
   {
     title: "システム管理",
     children: [
-      { href: "/admin", label: "システム管理" },
       { href: "/user-management", label: "ユーザー・権限管理" },
       { href: "/customer-master", label: "顧客マスタ" },
     ],
