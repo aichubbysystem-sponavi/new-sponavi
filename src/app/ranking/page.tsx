@@ -41,6 +41,21 @@ interface RankLog {
 
 const DEFAULT_POINTS: MeasurePoint[] = [];
 
+/** search_wordsをstring/array/jsonb問わず統一文字列に変換 */
+function normalizeKw(s: any): string {
+  if (Array.isArray(s)) return s.join(", ").trim();
+  if (typeof s === "string") {
+    try {
+      const parsed = JSON.parse(s);
+      if (Array.isArray(parsed)) return parsed.join(", ").trim();
+      return String(parsed).trim();
+    } catch {
+      return s.trim();
+    }
+  }
+  return String(s).trim();
+}
+
 export default function RankingPage() {
   const { apiConnected, selectedShopId, selectedShop } = useShop();
   const [keywords, setKeywords] = useState("");
@@ -367,13 +382,13 @@ export default function RankingPage() {
 
           {/* 順位サマリーテーブル（キーワード×地点、最新のみ） */}
           {history.length > 0 && (() => {
-            const parseKw = (s: string) => { try { return JSON.parse(s).join(", "); } catch { return s; } };
+            const nkw = normalizeKw;
 
             // キーワード+地点でグループ化し、最新と前回を抽出
             const groups = new Map<string, { kw: string; point: string; latest: RankLog; prev: RankLog | null }>();
             const sorted = [...history].sort((a, b) => new Date(b.searched_at).getTime() - new Date(a.searched_at).getTime());
             for (const log of sorted) {
-              const kw = parseKw(log.search_words);
+              const kw = nkw(log.search_words);
               const point = (log as any).point_label || "default";
               const key = `${kw}__${point}`;
               if (!groups.has(key)) {
@@ -437,13 +452,13 @@ export default function RankingPage() {
 
           {/* 順位推移チャート（折れ線グラフ） */}
           {history.length > 0 && (() => {
-            const parseKw = (s: string) => { try { return JSON.parse(s).join(", "); } catch { return s; } };
+            const nkw = normalizeKw;
 
             // キーワード名でユニークに統合（地点違いは同一キーワードとして統合、ベスト順位を採用）
             const dateRankMap = new Map<string, Map<string, number>>(); // kw → { date → bestRank }
             history.forEach((log) => {
               if (log.rank === 0) return;
-              const kw = parseKw(log.search_words);
+              const kw = nkw(log.search_words);
               const date = new Date(log.searched_at).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" });
               if (!dateRankMap.has(kw)) dateRankMap.set(kw, new Map());
               const existing = dateRankMap.get(kw)!.get(date);
@@ -566,7 +581,7 @@ export default function RankingPage() {
                     const tb = new Date(b.searched_at).getTime();
                     return historyDateSort === "desc" ? tb - ta : ta - tb;
                   }).slice(0, 50).map((log) => {
-                    const kws = (() => { try { return JSON.parse(log.search_words).join(", "); } catch { return log.search_words; } })();
+                    const kws = normalizeKw(log.search_words);
                     return (
                       <tr key={log.id} className="border-b border-slate-50 hover:bg-slate-50">
                         <td className="py-2 px-3 text-slate-700">{kws}</td>
