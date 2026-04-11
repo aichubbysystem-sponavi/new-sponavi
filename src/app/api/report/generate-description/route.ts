@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
   if (!ANTHROPIC_API_KEY) return NextResponse.json({ error: "ANTHROPIC_API_KEYが設定されていません" }, { status: 500 });
 
   const body = await request.json();
-  const { mode, shopName, category, keywords, currentDescription, address } = body;
+  const { mode, shopName, category, keywords, currentDescription, address, hearing } = body;
 
   let prompt = "";
 
@@ -26,6 +26,13 @@ export async function POST(request: NextRequest) {
 ${address ? `【所在地】${address}` : ""}
 ${keywords ? `【対策キーワード】${keywords}` : ""}
 ${currentDescription ? `【現在の説明文】${currentDescription}` : ""}
+${hearing ? `【ヒアリング情報】
+${hearing.tone ? `トンマナ: ${hearing.tone}` : ""}
+${hearing.atmosphere ? `雰囲気: ${hearing.atmosphere}` : ""}
+${hearing.target ? `ターゲット: ${hearing.target}` : ""}
+${hearing.strength ? `強み: ${hearing.strength}` : ""}
+${hearing.menu_highlight ? `看板メニュー: ${hearing.menu_highlight}` : ""}
+${hearing.seasonal ? `季節情報: ${hearing.seasonal}` : ""}`.trim() : ""}
 
 【条件】
 - 各750〜1000文字（Googleの推奨文字数）

@@ -66,6 +66,11 @@ export default function PostsPage() {
   const [aiKeywords, setAiKeywords] = useState("");
   const [proofResult, setProofResult] = useState<string | null>(null);
   const [proofing, setProofing] = useState(false);
+  const [showBulkGen, setShowBulkGen] = useState(false);
+  const [bulkGenStart, setBulkGenStart] = useState(new Date().toISOString().slice(0, 10));
+  const [bulkGenCount, setBulkGenCount] = useState(4);
+  const [bulkGenning, setBulkGenning] = useState(false);
+  const [bulkGenResult, setBulkGenResult] = useState<any>(null);
 
   const isAllMode = shopFilterMode === "all";
 
@@ -434,6 +439,76 @@ export default function PostsPage() {
             )}
           </div>
 
+          {/* 一括AI記事生成 */}
+          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4 mb-5">
+            <button onClick={() => setShowBulkGen(!showBulkGen)}
+              className="flex items-center justify-between w-full">
+              <h3 className="text-sm font-semibold text-slate-500">AI一括記事生成（全店舗）</h3>
+              <span className="text-xs text-slate-400">{showBulkGen ? "▲ 閉じる" : "▼ 開く"}</span>
+            </button>
+            {showBulkGen && (
+              <div className="mt-4 space-y-3">
+                <p className="text-[10px] text-slate-400">選択中の店舗 or 全店舗に対してAIが投稿文を生成し、予約投稿に追加します</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-500 block mb-1">開始日</label>
+                    <input type="date" value={bulkGenStart} onChange={(e) => setBulkGenStart(e.target.value)}
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 block mb-1">1店舗あたりの記事数</label>
+                    <select value={bulkGenCount} onChange={(e) => setBulkGenCount(parseInt(e.target.value))}
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+                      <option value={2}>2件</option><option value={4}>4件（推奨）</option>
+                      <option value={6}>6件</option><option value={8}>8件</option>
+                    </select>
+                  </div>
+                  <div className="flex items-end">
+                    <button onClick={async () => {
+                      const targetIds = isAllMode ? shops.map(s => s.id) : selectedShopId ? [selectedShopId] : [];
+                      if (targetIds.length === 0) { setMsg("店舗を選択してください"); return; }
+                      if (!confirm(`${targetIds.length}店舗 × ${bulkGenCount}件 = 最大${targetIds.length * bulkGenCount}件の記事を生成して予約投稿に追加しますか？`)) return;
+                      setBulkGenning(true); setBulkGenResult(null);
+                      try {
+                        const token = (await supabase.auth.getSession()).data.session?.access_token;
+                        const res = await fetch("/api/report/bulk-generate", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+                          body: JSON.stringify({ shopIds: targetIds, startDate: bulkGenStart, postsPerShop: bulkGenCount }),
+                        });
+                        setBulkGenResult(await res.json());
+                      } catch (e: any) { setBulkGenResult({ error: e.message }); }
+                      setBulkGenning(false);
+                    }} disabled={bulkGenning}
+                      className={`px-5 py-2 rounded-lg text-xs font-semibold w-full ${bulkGenning ? "bg-slate-200 text-slate-400" : "bg-purple-600 hover:bg-purple-700"}`}
+                      style={{ color: bulkGenning ? undefined : "#fff" }}>
+                      {bulkGenning ? "生成中..." : `${isAllMode ? "全店舗" : "この店舗"}で一括生成`}
+                    </button>
+                  </div>
+                </div>
+                {bulkGenResult && (
+                  <div className={`rounded-lg p-3 text-sm ${bulkGenResult.error ? "bg-red-50 text-red-700 border border-red-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}>
+                    {bulkGenResult.error ? (
+                      <p>エラー: {bulkGenResult.error}</p>
+                    ) : (
+                      <>
+                        <p className="font-semibold mb-2">{bulkGenResult.totalShops}店舗、{bulkGenResult.totalGenerated}件の記事を予約投稿に追加</p>
+                        {bulkGenResult.results?.map((r: any, i: number) => (
+                          <div key={i} className="flex items-center gap-3 py-1 border-t border-emerald-100">
+                            <span className="text-xs">{r.shopName}</span>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${r.generated > 0 ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>
+                              {r.generated > 0 ? `${r.generated}件生成` : r.error || "0件"}
+                            </span>
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* アクションバー */}
           {!isAllMode && (
             <div className="flex items-center justify-end mb-5">
@@ -484,6 +559,31 @@ export default function PostsPage() {
                           className="text-[10px] px-2 py-1 rounded bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100 font-semibold">
                           {proofing ? "校正中..." : "AI校正"}
                         </button>
+                      )}
+                      {/* 翻訳 */}
+                      {newPost.summary.trim().length > 10 && (
+                        <select onChange={async (e) => {
+                          const lang = e.target.value;
+                          if (!lang) return;
+                          e.target.value = "";
+                          setProofing(true); setProofResult(null);
+                          try {
+                            const token = (await supabase.auth.getSession()).data.session?.access_token;
+                            const res = await fetch("/api/report/generate-post", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+                              body: JSON.stringify({ shopName: "", topicType: "TRANSLATE", keywords: newPost.summary, targetLang: lang }),
+                            });
+                            const data = await res.json();
+                            setProofResult(data.posts?.[0] || "翻訳に失敗しました");
+                          } catch { setProofResult("翻訳に失敗しました"); }
+                          setProofing(false);
+                        }} className="text-[10px] px-1 py-1 rounded bg-blue-50 text-blue-600 border border-blue-200 font-semibold">
+                          <option value="">翻訳...</option>
+                          <option value="英語">英語</option>
+                          <option value="韓国語">韓国語</option>
+                          <option value="簡体字中国語">中国語</option>
+                        </select>
                       )}
                       {/* AI生成 */}
                       <button onClick={async () => {

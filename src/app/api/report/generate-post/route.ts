@@ -34,6 +34,37 @@ export async function POST(request: NextRequest) {
     ALERT: "お知らせ投稿（営業時間変更・臨時休業等）",
   };
 
+  // 翻訳モード
+  if (topicType === "TRANSLATE") {
+    const targetLang = body.targetLang || "英語";
+    const translatePrompt = `以下の日本語テキストを${targetLang}に翻訳してください。
+
+【原文】
+${keywords}
+
+【条件】
+- 自然な${targetLang}に翻訳
+- 意味や意図は変えない
+- 翻訳後のテキストのみを出力（説明不要）`;
+
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 1500, messages: [{ role: "user", content: translatePrompt }] }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (!res.ok) return NextResponse.json({ error: `Claude API error: ${res.status}` }, { status: 500 });
+      const data = await res.json();
+      return NextResponse.json({ posts: [data.content?.[0]?.text?.trim() || ""] });
+    } catch (err: any) {
+      return NextResponse.json({ error: err?.message }, { status: 500 });
+    }
+  }
+
   // 校正モード
   if (topicType === "PROOF") {
     const proofPrompt = `以下の投稿文章の誤字脱字・文法ミス・不自然な表現を修正してください。

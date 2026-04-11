@@ -22,6 +22,13 @@ export default function SetupPage() {
   const [descKeywords, setDescKeywords] = useState("");
   const [catResult, setCatResult] = useState("");
   const [catLoading, setCatLoading] = useState(false);
+  const [showHearing, setShowHearing] = useState(false);
+  const [hearingSaving, setHearingSaving] = useState(false);
+  const [hearingMsg, setHearingMsg] = useState("");
+  const [hearing, setHearing] = useState({
+    tone: "", atmosphere: "", target: "", strength: "", menu_highlight: "",
+    area: "", business_hours_note: "", seasonal: "", sns: "", other: "",
+  });
 
   const runCheck = useCallback(async () => {
     if (!selectedShopId) return;
@@ -150,6 +157,23 @@ export default function SetupPage() {
 
   useEffect(() => { runCheck(); }, [runCheck]);
 
+  // ヒアリングシート取得
+  useEffect(() => {
+    if (!selectedShopId) return;
+    (async () => {
+      try {
+        const token = (await supabase.auth.getSession()).data.session?.access_token;
+        const res = await fetch(`/api/report/hearing?shopId=${selectedShopId}`, {
+          headers: { "Authorization": `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.data) setHearing({ ...hearing, ...data.data });
+        }
+      } catch {}
+    })();
+  }, [selectedShopId]);
+
   const statusIcon = (s: string) => s === "ok" ? "✓" : s === "warning" ? "△" : "✕";
   const statusColor = (s: string) => s === "ok" ? "text-emerald-600" : s === "warning" ? "text-amber-600" : "text-red-600";
   const statusBg = (s: string) => s === "ok" ? "bg-emerald-50" : s === "warning" ? "bg-amber-50" : "bg-red-50";
@@ -242,6 +266,7 @@ export default function SetupPage() {
                       keywords: descKeywords,
                       currentDescription: gbpData?.profile?.description || "",
                       address: `${selectedShop?.state || ""}${selectedShop?.city || ""}`,
+                      hearing: Object.values(hearing).some(v => v) ? hearing : undefined,
                     }),
                   });
                   const data = await res.json();
@@ -309,6 +334,63 @@ export default function SetupPage() {
                 </div>
               )}
             </div>
+          </div>
+          {/* ヒアリングシート */}
+          <div className="bg-white rounded-xl shadow-sm border border-slate-100 mt-6">
+            <button onClick={() => setShowHearing(!showHearing)}
+              className="w-full flex items-center justify-between p-5 hover:bg-slate-50 transition">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-500">ヒアリングシート</h3>
+                <p className="text-[10px] text-slate-400 mt-0.5">店舗の特徴・トンマナを記録 → 投稿文・説明文生成に自動反映</p>
+              </div>
+              <span className="text-xs text-slate-400">{showHearing ? "▲ 閉じる" : "▼ 開く"}</span>
+            </button>
+            {showHearing && (
+              <div className="p-5 pt-0 border-t border-slate-100">
+                {hearingMsg && <p className={`text-xs mb-3 ${hearingMsg.includes("失敗") ? "text-red-600" : "text-emerald-600"}`}>{hearingMsg}</p>}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {[
+                    { key: "tone", label: "トンマナ", placeholder: "例: カジュアル, 高級感, アットホーム, スタイリッシュ" },
+                    { key: "atmosphere", label: "店内の雰囲気", placeholder: "例: 落ち着いた空間, 活気のある, 隠れ家的" },
+                    { key: "target", label: "ターゲット層", placeholder: "例: 20-30代女性, ファミリー, ビジネスマン" },
+                    { key: "strength", label: "強み・差別化ポイント", placeholder: "例: 産地直送の食材, 完全個室, 駅直結" },
+                    { key: "menu_highlight", label: "看板メニュー・人気商品", placeholder: "例: 黒毛和牛ステーキ, 季節限定パフェ" },
+                    { key: "area", label: "商圏・対象エリア", placeholder: "例: 渋谷駅周辺, 新宿区全域" },
+                    { key: "business_hours_note", label: "営業時間の特記事項", placeholder: "例: 深夜営業あり, ランチのみ土日" },
+                    { key: "seasonal", label: "季節・イベント情報", placeholder: "例: 夏はビアガーデン, 12月は忘年会プラン" },
+                    { key: "sns", label: "SNS・Web情報", placeholder: "例: Instagram @xxx, HP: https://..." },
+                    { key: "other", label: "その他備考", placeholder: "例: ペット同伴可, テイクアウト対応" },
+                  ].map(({ key, label, placeholder }) => (
+                    <div key={key}>
+                      <label className="text-xs text-slate-500 block mb-1">{label}</label>
+                      <input type="text" value={(hearing as any)[key] || ""}
+                        onChange={(e) => setHearing({ ...hearing, [key]: e.target.value })}
+                        placeholder={placeholder}
+                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs" />
+                    </div>
+                  ))}
+                </div>
+                <div className="flex items-center justify-end mt-4">
+                  <button onClick={async () => {
+                    setHearingSaving(true); setHearingMsg("");
+                    try {
+                      const token = (await supabase.auth.getSession()).data.session?.access_token;
+                      await fetch("/api/report/hearing", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+                        body: JSON.stringify({ shopId: selectedShopId, data: hearing }),
+                      });
+                      setHearingMsg("保存しました");
+                    } catch { setHearingMsg("保存に失敗しました"); }
+                    setHearingSaving(false);
+                  }} disabled={hearingSaving}
+                    className={`px-5 py-2 rounded-lg text-xs font-semibold ${hearingSaving ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
+                    style={{ color: hearingSaving ? undefined : "#fff" }}>
+                    {hearingSaving ? "保存中..." : "ヒアリングシートを保存"}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
