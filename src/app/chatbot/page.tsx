@@ -144,10 +144,10 @@ export default function ChatbotPage() {
                     {/* メッセージ */}
                     <div className={`rounded-2xl px-4 py-3 ${
                       msg.role === "user"
-                        ? "bg-[#003D6B] text-white"
+                        ? "bg-[#003D6B]"
                         : "bg-slate-100 text-slate-800"
-                    }`}>
-                      <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                    }`} style={msg.role === "user" ? { color: "#fff" } : undefined}>
+                      <p className="text-sm whitespace-pre-wrap leading-relaxed" style={msg.role === "user" ? { color: "#fff" } : undefined}>{msg.content}</p>
                     </div>
                   </div>
                   <p className={`text-[10px] text-slate-400 mt-1 ${msg.role === "user" ? "text-right mr-10" : "ml-10"}`}>
