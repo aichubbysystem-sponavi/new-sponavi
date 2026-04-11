@@ -222,7 +222,12 @@ export default function RankingPage() {
                       if (res.data.found && res.data.keywords.length > 0) {
                         setKeywords(res.data.keywords.join("\n"));
                       } else {
-                        setError("シートにキーワードが見つかりませんでした");
+                        const tabs = res.data.availableTabs;
+                        setError(
+                          tabs && tabs.length > 0
+                            ? `シートに「${selectedShop.name}」が見つかりません。類似タブ: ${tabs.join(", ")}`
+                            : `シートにキーワードが見つかりませんでした（検索名: ${selectedShop.name}）`
+                        );
                       }
                     } catch (e: any) {
                       setError(e?.response?.data?.error || "シート取得に失敗しました");

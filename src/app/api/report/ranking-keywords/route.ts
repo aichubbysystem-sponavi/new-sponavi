@@ -97,9 +97,20 @@ export async function GET(request: NextRequest) {
 
     // 特定店舗のみ取得する場合
     if (shopName) {
-      const tab = targetTabs.find((t) => t === shopName);
+      // 完全一致 → 部分一致 → 正規化一致 の順で検索
+      const normalize = (s: string) => s.replace(/[\s　\.\-・]/g, "").toLowerCase();
+      const normalized = normalize(shopName);
+      let tab = targetTabs.find((t) => t === shopName)
+        || targetTabs.find((t) => t.includes(shopName) || shopName.includes(t))
+        || targetTabs.find((t) => normalize(t) === normalized);
+
       if (!tab) {
-        return NextResponse.json({ keywords: [], shopName, found: false });
+        // 候補タブ名を返す（デバッグ用）
+        const similar = targetTabs.filter((t) => {
+          const nt = normalize(t);
+          return nt.includes(normalized.slice(0, 5)) || normalized.includes(nt.slice(0, 5));
+        }).slice(0, 5);
+        return NextResponse.json({ keywords: [], shopName, found: false, availableTabs: similar, totalTabs: targetTabs.length });
       }
 
       const keywords = await getKeywordsFromTab(accessToken, tab);
