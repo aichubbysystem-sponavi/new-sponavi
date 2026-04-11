@@ -62,7 +62,6 @@ const navSections = [
       { href: "/admin", label: "システム管理" },
       { href: "/user-management", label: "ユーザー・権限管理" },
       { href: "/customer-master", label: "顧客マスタ" },
-      { href: "/ai-integration", label: "AI社長・AI課長" },
     ],
   },
 ];
