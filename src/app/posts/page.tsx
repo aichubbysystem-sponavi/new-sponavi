@@ -46,14 +46,27 @@ export default function PostsPage() {
     if (!selectedShopId || !newPost.summary.trim()) { setMsg("本文を入力してください"); return; }
     setCreating(true); setMsg("");
     try {
-      const body: any = { summary: newPost.summary, topicType: newPost.topicType };
+      const postData: any = {
+        shopId: selectedShopId,
+        summary: newPost.summary,
+        topicType: newPost.topicType,
+      };
       if (newPost.actionType && newPost.actionUrl) {
-        body.callToAction = { actionType: newPost.actionType, url: newPost.actionUrl };
+        postData.callToAction = { actionType: newPost.actionType, url: newPost.actionUrl };
       }
       if (newPost.photoUrl.trim()) {
-        body.media = [{ mediaFormat: "PHOTO", sourceUrl: newPost.photoUrl.trim() }];
+        postData.photoUrl = newPost.photoUrl.trim();
       }
-      await api.post(`/api/shop/${selectedShopId}/local_post`, body, { timeout: 30000 });
+      // 写真付き→Next.js API（GBP直接）、写真なし→Go API
+      if (postData.photoUrl) {
+        await api.post("/api/report/create-post", postData, { timeout: 30000 });
+      } else {
+        const goBody: any = { summary: newPost.summary, topicType: newPost.topicType };
+        if (newPost.actionType && newPost.actionUrl) {
+          goBody.callToAction = { actionType: newPost.actionType, url: newPost.actionUrl };
+        }
+        await api.post(`/api/shop/${selectedShopId}/local_post`, goBody, { timeout: 30000 });
+      }
 
       // 投稿ログをSupabaseに保存
       try {
