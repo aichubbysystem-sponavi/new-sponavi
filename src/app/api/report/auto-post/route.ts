@@ -207,7 +207,7 @@ export async function POST(request: NextRequest) {
         posted++;
       } else {
         const err = await res.text().catch(() => "");
-        results.push({ shopName: match.shopName, status: `エラー(${res.status})`, summary: match.summary.slice(0, 30) });
+        results.push({ shopName: match.shopName, status: `エラー(${res.status})`, detail: err.slice(0, 200), summary: match.summary.slice(0, 30), photoUrl: match.photoUrl });
         errors++;
       }
     } catch (e: any) {

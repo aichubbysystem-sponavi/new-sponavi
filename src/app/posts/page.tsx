@@ -338,9 +338,12 @@ export default function PostsPage() {
                       <>
                         <p className="font-semibold mb-2">実行結果: {autoPostResult.posted}件投稿 / {autoPostResult.errors}件エラー</p>
                         {autoPostResult.results?.map((r: any, i: number) => (
-                          <div key={i} className="flex items-center gap-3 py-1 border-t border-emerald-100">
-                            <span className="text-xs font-medium">{r.shopName}</span>
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${r.status.includes("成功") ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>{r.status}</span>
+                          <div key={i} className="py-1.5 border-t border-emerald-100">
+                            <div className="flex items-center gap-3">
+                              <span className="text-xs font-medium">{r.shopName}</span>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded ${r.status.includes("成功") ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>{r.status}</span>
+                            </div>
+                            {r.detail && <p className="text-[9px] text-red-400 mt-0.5 break-all">{r.detail}</p>}
                           </div>
                         ))}
                       </>
