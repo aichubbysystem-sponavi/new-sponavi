@@ -40,7 +40,12 @@ export default function ReviewsPage() {
   const isAllMode = shopFilterMode === "all";
 
   const fetchReviews = useCallback(async () => {
-    if (!isAllMode && !selectedShopId) return;
+    if (!isAllMode && !selectedShopId) {
+      setReviews([]);
+      setTotalCount(0);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const from = (page - 1) * PER_PAGE;
@@ -52,30 +57,34 @@ export default function ReviewsPage() {
         .order("create_time", { ascending: dateSort === "asc" })
         .range(from, to);
 
-      // 店舗フィルタ
       if (!isAllMode && selectedShopId) {
         query = query.eq("shop_id", selectedShopId);
       }
 
-      // 返信フィルタ
       if (replyFilter === "unreplied") {
         query = query.is("reply_comment", null);
       } else if (replyFilter === "replied") {
         query = query.not("reply_comment", "is", null);
       }
 
-      const { data, count } = await query;
-      setReviews(data || []);
-      setTotalCount(count || 0);
-
-      if (data && data.length > 0) {
-        setLastSynced(data[0].synced_at);
+      const { data, count, error } = await query;
+      if (error) {
+        console.error("[reviews] fetch error:", error);
+        setReviews([]);
+        setTotalCount(0);
+      } else {
+        setReviews(data || []);
+        setTotalCount(count || 0);
+        if (data && data.length > 0) {
+          setLastSynced(data[0].synced_at);
+        }
       }
-    } catch {
+    } catch (err) {
+      console.error("[reviews] unexpected error:", err);
       setReviews([]);
-    } finally {
-      setLoading(false);
+      setTotalCount(0);
     }
+    setLoading(false);
   }, [selectedShopId, page, isAllMode, replyFilter, dateSort]);
 
   // 未返信件数を取得
@@ -93,9 +102,18 @@ export default function ReviewsPage() {
     setUnrepliedCount(count || 0);
   }, [selectedShopId, isAllMode]);
 
-  useEffect(() => { fetchReviews(); }, [fetchReviews]);
-  useEffect(() => { fetchUnrepliedCount(); }, [fetchUnrepliedCount]);
-  useEffect(() => { setPage(1); }, [selectedShopId, replyFilter, shopFilterMode, dateSort]);
+  useEffect(() => {
+    fetchReviews();
+  }, [fetchReviews]);
+
+  useEffect(() => {
+    fetchUnrepliedCount();
+  }, [fetchUnrepliedCount]);
+
+  // フィルタ変更時にページをリセット（pageが1以外の場合のみ）
+  useEffect(() => {
+    setPage((prev) => prev !== 1 ? 1 : prev);
+  }, [selectedShopId, replyFilter, shopFilterMode, dateSort]);
 
   const handleSync = async () => {
     setSyncing(true);
