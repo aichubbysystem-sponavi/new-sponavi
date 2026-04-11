@@ -272,6 +272,98 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* コンバージョンファネル + ROI */}
+      {latest && (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-6">
+          {/* ファネル分析 */}
+          <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+            <h3 className="text-sm font-semibold text-slate-500 mb-4">コンバージョンファネル</h3>
+            {(() => {
+              const steps = [
+                { label: "検索表示", value: searchTotal, color: "bg-blue-400" },
+                { label: "マップ表示", value: mapTotal, color: "bg-emerald-400" },
+                { label: "Webクリック", value: v(latest.website_clicks), color: "bg-amber-400" },
+                { label: "電話タップ", value: v(latest.call_clicks), color: "bg-purple-400" },
+                { label: "経路検索", value: v(latest.direction_requests), color: "bg-red-400" },
+              ];
+              const maxVal = Math.max(...steps.map((s) => s.value), 1);
+              return (
+                <div className="space-y-3">
+                  {steps.map((step, i) => {
+                    const prevStep = i > 0 ? steps[i - 1].value : 0;
+                    const rate = prevStep > 0 ? ((step.value / prevStep) * 100).toFixed(1) : "";
+                    return (
+                      <div key={i}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs text-slate-600">{step.label}</span>
+                          <div className="flex items-center gap-2">
+                            {rate && <span className="text-[10px] text-slate-400">転換率 {rate}%</span>}
+                            <span className="text-sm font-bold text-slate-800">{step.value.toLocaleString()}</span>
+                          </div>
+                        </div>
+                        <div className="w-full h-6 bg-slate-100 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${step.color}`}
+                            style={{ width: `${Math.max((step.value / maxVal) * 100, 2)}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* ROI算出 */}
+          <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+            <h3 className="text-sm font-semibold text-slate-500 mb-4">推定ROI（売上貢献）</h3>
+            {(() => {
+              const shop = selectedShop as any;
+              const callRate = shop?.call_click_rate || 0.3;
+              const routeRate = shop?.direction_route_rate || 0.5;
+              const webRate = shop?.website_click_rate || 0.1;
+              const avgSpend = shop?.average_spending || 3000;
+              const groupSize = shop?.customers_per_group || 1.5;
+
+              const callVisits = Math.round(v(latest.call_clicks) * callRate);
+              const routeVisits = Math.round(v(latest.direction_requests) * routeRate);
+              const webVisits = Math.round(v(latest.website_clicks) * webRate);
+              const totalVisits = callVisits + routeVisits + webVisits;
+              const revenue = Math.round(totalVisits * avgSpend * groupSize);
+
+              return (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="bg-purple-50 rounded-lg p-3 text-center">
+                      <p className="text-[10px] text-purple-500">電話経由</p>
+                      <p className="text-lg font-bold text-purple-600">{callVisits}<span className="text-[10px] font-normal">人</span></p>
+                    </div>
+                    <div className="bg-red-50 rounded-lg p-3 text-center">
+                      <p className="text-[10px] text-red-500">経路経由</p>
+                      <p className="text-lg font-bold text-red-600">{routeVisits}<span className="text-[10px] font-normal">人</span></p>
+                    </div>
+                    <div className="bg-amber-50 rounded-lg p-3 text-center">
+                      <p className="text-[10px] text-amber-500">Web経由</p>
+                      <p className="text-lg font-bold text-amber-600">{webVisits}<span className="text-[10px] font-normal">人</span></p>
+                    </div>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg p-4">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-sm text-slate-600">推定来店数</span>
+                      <span className="text-xl font-bold text-[#003D6B]">{totalVisits.toLocaleString()}<span className="text-xs font-normal text-slate-400">人/月</span></span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-slate-600">推定売上貢献</span>
+                      <span className="text-xl font-bold text-emerald-600">¥{revenue.toLocaleString()}<span className="text-xs font-normal text-slate-400">/月</span></span>
+                    </div>
+                  </div>
+                  <p className="text-[9px] text-slate-400">※ 来店率: 電話{(callRate*100).toFixed(0)}% / 経路{(routeRate*100).toFixed(0)}% / Web{(webRate*100).toFixed(0)}%、客単価¥{avgSpend.toLocaleString()}×{groupSize}人で算出。顧客マスタで変更可能。</p>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
       {/* 要注意口コミアラート */}
       {badAlerts.length > 0 && (
         <div className="bg-white rounded-xl p-6 shadow-sm border border-red-200 mt-6">

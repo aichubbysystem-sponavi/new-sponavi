@@ -139,6 +139,18 @@ export default function PostsPage() {
 
   const handleCreate = async () => {
     if (!selectedShopId || !newPost.summary.trim()) { setMsg("本文を入力してください"); return; }
+
+    // 重複チェック（過去投稿と30文字以上一致）
+    const trimmed = newPost.summary.trim();
+    const duplicate = localPosts.find((p) => {
+      if (!p.summary) return false;
+      return p.summary.includes(trimmed.slice(0, 30)) || trimmed.includes(p.summary.slice(0, 30));
+    });
+    if (duplicate) {
+      const proceed = confirm(`⚠ 類似の投稿が既に存在します:\n「${duplicate.summary?.slice(0, 50)}...」\n\nそれでも投稿しますか？`);
+      if (!proceed) return;
+    }
+
     setCreating(true); setMsg("");
     try {
       if (newPost.scheduledAt) {
