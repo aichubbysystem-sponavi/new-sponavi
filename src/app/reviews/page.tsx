@@ -112,35 +112,40 @@ export default function ReviewsPage() {
     fetchUnrepliedCount();
   }, [fetchUnrepliedCount]);
 
-  // 口コミキーワード抽出
+  // 口コミキーワード抽出（全口コミを対象）
   useEffect(() => {
-    if (reviews.length === 0) { setTopWords([]); return; }
-    const goodWords = new Map<string, number>();
-    const badWords = new Map<string, number>();
-    const stopWords = new Set(["の","は","が","を","に","で","と","も","や","など","です","ます","した","ました","ない","ある","いる","この","その","こと","もの","から","まで","より","ので","けど","だけ","ても","って","する","なる","れる","られる","てる","いい","よい","とても","すごく","かなり","ちょっと","少し","まあ","けっこう","本当に","とても","非常に"]);
-    const minLen = 2;
+    const extractKeywords = async () => {
+      const shopFilter = !isAllMode && selectedShopId ? selectedShopId : null;
+      let query = supabase.from("reviews").select("comment, star_rating").not("comment", "is", null);
+      if (shopFilter) query = query.eq("shop_id", shopFilter);
+      const { data: allComments } = await query.limit(500);
+      if (!allComments || allComments.length === 0) { setTopWords([]); return; }
 
-    reviews.forEach((r) => {
-      if (!r.comment) return;
-      const text = r.comment.replace(/\(Original\)[\s\S]*/i, "").replace(/\(Translated by Google\)/i, "").trim();
-      const stars = starToNum(r.star_rating);
-      const isGood = stars >= 4;
+      const goodWords = new Map<string, number>();
+      const badWords = new Map<string, number>();
+      const stopWords = new Set(["の","は","が","を","に","で","と","も","や","など","です","ます","した","ました","ない","ある","いる","この","その","こと","もの","から","まで","より","ので","けど","だけ","ても","って","する","なる","れる","られる","てる","いい","よい","とても","すごく","かなり","ちょっと","少し","まあ","けっこう","本当に","とても","非常に","ところ","ている","れた","ました","られた","くれ","てくれ","ていた","なかっ","くださ","ありがとう","ござい","あり","ほう","ほど","みた","よう","ただ","どう","ぐらい","くらい","それ","あと","そう","たく","さん","ちゃん"]);
 
-      // 簡易形態素解析: 2-5文字のカタカナ/漢字/ひらがな連続を抽出
-      const words = text.match(/[\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF]{2,6}/g) || [];
-      words.forEach((w) => {
-        if (stopWords.has(w) || w.length < minLen) return;
-        const map = isGood ? goodWords : badWords;
-        map.set(w, (map.get(w) || 0) + 1);
+      allComments.forEach((r) => {
+        if (!r.comment) return;
+        const text = r.comment.replace(/\(Original\)[\s\S]*/i, "").replace(/\(Translated by Google\)/i, "").trim();
+        const stars = starToNum(r.star_rating);
+        const isGood = stars >= 4;
+        const words: string[] = text.match(/[\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF]{2,6}/g) || [];
+        words.forEach((w: string) => {
+          if (stopWords.has(w) || w.length < 2) return;
+          const map = isGood ? goodWords : badWords;
+          map.set(w, (map.get(w) || 0) + 1);
+        });
       });
-    });
 
-    const result: { word: string; count: number; type: "good" | "bad" }[] = [];
-    goodWords.forEach((count, word) => { if (count >= 2) result.push({ word, count, type: "good" }); });
-    badWords.forEach((count, word) => { if (count >= 2) result.push({ word, count, type: "bad" }); });
-    result.sort((a, b) => b.count - a.count);
-    setTopWords(result.slice(0, 30));
-  }, [reviews]);
+      const result: { word: string; count: number; type: "good" | "bad" }[] = [];
+      goodWords.forEach((count, word) => { if (count >= 3) result.push({ word, count, type: "good" }); });
+      badWords.forEach((count, word) => { if (count >= 2) result.push({ word, count, type: "bad" }); });
+      result.sort((a, b) => b.count - a.count);
+      setTopWords(result.slice(0, 40));
+    };
+    extractKeywords();
+  }, [selectedShopId, isAllMode]);
 
   // フィルタ変更時にページをリセット（pageが1以外の場合のみ）
   useEffect(() => {
@@ -319,22 +324,37 @@ export default function ReviewsPage() {
         </div>
       </div>
 
-      {/* 口コミキーワード */}
+      {/* 口コミキーワード・ワードクラウド */}
       {topWords.length > 0 && (
-        <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100 mb-4">
-          <h3 className="text-sm font-semibold text-slate-500 mb-3">口コミ頻出ワード</h3>
-          <div className="flex flex-wrap gap-1.5">
-            {topWords.map((w, i) => (
-              <span key={i}
-                className={`inline-block px-2.5 py-1 rounded-full font-medium ${
-                  w.type === "good" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
-                }`}
-                style={{ fontSize: Math.max(10, Math.min(16, 10 + w.count * 1.5)) }}>
-                {w.word} <span className="opacity-50">{w.count}</span>
-              </span>
-            ))}
+        <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100 mb-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-slate-500">口コミキーワード分析</h3>
+            <div className="flex items-center gap-3 text-[10px]">
+              <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400"></span> ポジティブ({topWords.filter(w => w.type === "good").length})</span>
+              <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-full bg-red-400"></span> ネガティブ({topWords.filter(w => w.type === "bad").length})</span>
+            </div>
           </div>
-          <p className="text-[9px] text-slate-400 mt-2">緑=高評価口コミ由来 / 赤=低評価口コミ由来（2回以上出現のみ表示）</p>
+          <div className="flex flex-wrap items-center justify-center gap-2 py-4 min-h-[100px]">
+            {topWords.map((w, i) => {
+              const maxCount = topWords[0]?.count || 1;
+              const size = Math.max(11, Math.min(28, 11 + (w.count / maxCount) * 17));
+              const opacity = Math.max(0.5, Math.min(1, 0.5 + (w.count / maxCount) * 0.5));
+              return (
+                <span key={i}
+                  className={`inline-block px-2 py-0.5 rounded-full font-bold cursor-default transition-transform hover:scale-110 ${
+                    w.type === "good" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-red-50 text-red-700 border border-red-200"
+                  }`}
+                  style={{ fontSize: size, opacity }}
+                  title={`${w.word}: ${w.count}回（${w.type === "good" ? "ポジティブ" : "ネガティブ"}）`}>
+                  {w.word}
+                </span>
+              );
+            })}
+          </div>
+          <div className="flex items-center justify-between mt-2">
+            <p className="text-[9px] text-slate-400">高評価(★4-5)口コミ由来=緑 / 低評価(★1-3)口コミ由来=赤（最大500件を分析）</p>
+            <p className="text-[9px] text-slate-400">文字サイズ=出現頻度</p>
+          </div>
         </div>
       )}
 

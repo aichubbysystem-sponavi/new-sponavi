@@ -140,14 +140,26 @@ export default function PostsPage() {
   const handleCreate = async () => {
     if (!selectedShopId || !newPost.summary.trim()) { setMsg("本文を入力してください"); return; }
 
-    // 重複チェック（過去投稿と30文字以上一致）
+    // 重複チェック（文章：過去投稿と30文字以上一致 / 写真：同一URL）
     const trimmed = newPost.summary.trim();
-    const duplicate = localPosts.find((p) => {
+    const warnings: string[] = [];
+    const textDup = localPosts.find((p) => {
       if (!p.summary) return false;
-      return p.summary.includes(trimmed.slice(0, 30)) || trimmed.includes(p.summary.slice(0, 30));
+      const a = p.summary.replace(/\s+/g, "");
+      const b = trimmed.replace(/\s+/g, "");
+      if (a.length < 20 || b.length < 20) return a === b;
+      return a.includes(b.slice(0, 30)) || b.includes(a.slice(0, 30));
     });
-    if (duplicate) {
-      const proceed = confirm(`⚠ 類似の投稿が既に存在します:\n「${duplicate.summary?.slice(0, 50)}...」\n\nそれでも投稿しますか？`);
+    if (textDup) warnings.push(`類似の文章が既に投稿済み:\n「${textDup.summary?.slice(0, 50)}...」`);
+    if (newPost.photoUrl.trim()) {
+      const photoNorm = newPost.photoUrl.trim().replace(/[?#].*$/, "");
+      const photoDup = localPosts.find((p) =>
+        p.media?.some((m) => (m.sourceUrl || m.googleUrl || "").replace(/[?#].*$/, "") === photoNorm)
+      );
+      if (photoDup) warnings.push(`同じ写真が既に使用されています:\n「${photoDup.summary?.slice(0, 40) || "投稿"}」`);
+    }
+    if (warnings.length > 0) {
+      const proceed = confirm(`⚠ 重複の可能性があります:\n\n${warnings.join("\n\n")}\n\nそれでも投稿しますか？`);
       if (!proceed) return;
     }
 

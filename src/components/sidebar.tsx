@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRole } from "@/components/role-provider";
 import { canShowInSidebar } from "@/lib/roles";
 
@@ -125,6 +125,11 @@ export default function Sidebar() {
   const pathname = usePathname();
   const { role, roleLabel } = useRole();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // ページ遷移時にモバイルメニューを自動で閉じる
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
 
   // ロールに応じてセクションをフィルタリング
   const filteredSections = navSections

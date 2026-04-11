@@ -251,3 +251,63 @@ table tr:hover {
 .text-slate-800 {
   color: #1e293b !important;
 }
+
+/* ===== Mobile Responsive ===== */
+@media (max-width: 1023px) {
+  /* テーブルの横スクロール */
+  .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* ヘッダーの店舗検索を縮小 */
+  header input[type="text"] {
+    max-width: 140px;
+  }
+
+  /* KPIカードを2列に */
+  .grid-cols-2.lg\:grid-cols-3.xl\:grid-cols-6,
+  .grid-cols-2.md\:grid-cols-5 {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  /* メインエリアのパディング調整 */
+  main {
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+  }
+}
+
+@media (max-width: 639px) {
+  /* ヘッダーの間隔を詰める */
+  header {
+    padding-left: 0.5rem !important;
+    padding-right: 0.5rem !important;
+  }
+
+  /* ボタンテキストを小さく */
+  header button {
+    font-size: 11px;
+    padding: 4px 8px;
+  }
+
+  /* カード内のテキストサイズ調整 */
+  .text-2xl {
+    font-size: 1.25rem !important;
+  }
+
+  .text-4xl {
+    font-size: 2rem !important;
+  }
+
+  /* グリッドを1列に */
+  .grid.grid-cols-2.md\:grid-cols-3,
+  .grid.grid-cols-2.md\:grid-cols-4 {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+
+/* Print styles for PDF */
+@media print {
+  header, aside, .floating-tasks { display: none !important; }
+  main { margin-left: 0 !important; padding: 0 !important; width: 100% !important; }
+}

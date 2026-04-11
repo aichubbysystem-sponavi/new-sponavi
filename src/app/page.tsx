@@ -330,6 +330,14 @@ export default function Dashboard() {
               const totalVisits = callVisits + routeVisits + webVisits;
               const revenue = Math.round(totalVisits * avgSpend * groupSize);
 
+              // 前月比較
+              const prevCallVisits = prev ? Math.round(v(prev.call_clicks) * callRate) : 0;
+              const prevRouteVisits = prev ? Math.round(v(prev.direction_requests) * routeRate) : 0;
+              const prevWebVisits = prev ? Math.round(v(prev.website_clicks) * webRate) : 0;
+              const prevTotalVisits = prevCallVisits + prevRouteVisits + prevWebVisits;
+              const prevRevenue = Math.round(prevTotalVisits * avgSpend * groupSize);
+              const revDiff = prevRevenue > 0 ? Math.round(((revenue - prevRevenue) / prevRevenue) * 100) : 0;
+
               return (
                 <div className="space-y-4">
                   <div className="grid grid-cols-3 gap-3">
@@ -349,11 +357,29 @@ export default function Dashboard() {
                   <div className="bg-slate-50 rounded-lg p-4">
                     <div className="flex justify-between items-center mb-2">
                       <span className="text-sm text-slate-600">推定来店数</span>
-                      <span className="text-xl font-bold text-[#003D6B]">{totalVisits.toLocaleString()}<span className="text-xs font-normal text-slate-400">人/月</span></span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl font-bold text-[#003D6B]">{totalVisits.toLocaleString()}<span className="text-xs font-normal text-slate-400">人/月</span></span>
+                        {prevTotalVisits > 0 && (
+                          <span className={`text-[10px] font-semibold ${totalVisits >= prevTotalVisits ? "text-emerald-600" : "text-red-600"}`}>
+                            {totalVisits >= prevTotalVisits ? "↑" : "↓"}{Math.abs(totalVisits - prevTotalVisits)}人
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-sm text-slate-600">推定売上貢献</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl font-bold text-emerald-600">¥{revenue.toLocaleString()}<span className="text-xs font-normal text-slate-400">/月</span></span>
+                        {revDiff !== 0 && (
+                          <span className={`text-[10px] font-semibold ${revDiff >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                            {revDiff >= 0 ? "+" : ""}{revDiff}%
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-sm text-slate-600">推定売上貢献</span>
-                      <span className="text-xl font-bold text-emerald-600">¥{revenue.toLocaleString()}<span className="text-xs font-normal text-slate-400">/月</span></span>
+                      <span className="text-sm text-slate-600">年間推定売上</span>
+                      <span className="text-lg font-bold text-[#003D6B]">¥{(revenue * 12).toLocaleString()}<span className="text-xs font-normal text-slate-400">/年</span></span>
                     </div>
                   </div>
                   <p className="text-[9px] text-slate-400">※ 来店率: 電話{(callRate*100).toFixed(0)}% / 経路{(routeRate*100).toFixed(0)}% / Web{(webRate*100).toFixed(0)}%、客単価¥{avgSpend.toLocaleString()}×{groupSize}人で算出。顧客マスタで変更可能。</p>
