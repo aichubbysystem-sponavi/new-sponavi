@@ -99,21 +99,9 @@ export default function MediaPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800">写真管理</h1>
-          <p className="text-sm text-slate-500 mt-1">GBP写真の一覧・カテゴリ管理</p>
-        </div>
-        {apiConnected && selectedShopId && (
-          <button
-            onClick={handleSync}
-            disabled={syncing}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold ${syncing ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
-            style={{ color: syncing ? undefined : "#fff" }}
-          >
-            {syncing ? "同期中..." : "写真を同期"}
-          </button>
-        )}
+      <div className="mb-4">
+        <h1 className="text-2xl font-bold text-slate-800">写真管理</h1>
+        <p className="text-sm text-slate-500 mt-1">GBP写真の一覧・カテゴリ管理</p>
       </div>
 
       {syncMsg && (
@@ -146,6 +134,15 @@ export default function MediaPage() {
               <p className="text-[11px] font-medium text-slate-400 mb-1">平均閲覧数</p>
               <p className="text-2xl font-bold text-amber-600">{media.length > 0 ? Math.round(totalViews / media.length).toLocaleString() : 0}<span className="text-xs font-normal text-slate-400 ml-1">回/枚</span></p>
             </div>
+          </div>
+
+          {/* 同期ボタン */}
+          <div className="flex items-center justify-end mb-5">
+            <button onClick={handleSync} disabled={syncing}
+              className={`px-5 py-2.5 rounded-lg text-sm font-semibold ${syncing ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
+              style={{ color: syncing ? undefined : "#fff" }}>
+              {syncing ? "同期中..." : "写真を同期"}
+            </button>
           </div>
 
           {/* カテゴリ分布 */}

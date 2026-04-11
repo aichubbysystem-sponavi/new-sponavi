@@ -137,18 +137,9 @@ export default function LeadPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800">リード管理</h1>
-          <p className="text-sm text-slate-500 mt-1">店舗調査・リードスコアリング・CSVエクスポート</p>
-        </div>
-        {shops.length > 0 && (
-          <button onClick={handleExportCSV}
-            className="px-4 py-2 rounded-lg text-sm font-semibold bg-emerald-600 hover:bg-emerald-700"
-            style={{ color: "#fff" }}>
-            CSVエクスポート（{filtered.length}件）
-          </button>
-        )}
+      <div className="mb-4">
+        <h1 className="text-2xl font-bold text-slate-800">リード管理</h1>
+        <p className="text-sm text-slate-500 mt-1">店舗調査・リードスコアリング・CSVエクスポート</p>
       </div>
 
       {!apiConnected ? (
@@ -189,6 +180,17 @@ export default function LeadPage() {
               </div>
             </div>
           </div>
+
+          {/* CSVエクスポート */}
+          {shops.length > 0 && (
+            <div className="flex items-center justify-end mb-5">
+              <button onClick={handleExportCSV}
+                className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-emerald-600 hover:bg-emerald-700"
+                style={{ color: "#fff" }}>
+                CSVエクスポート（{filtered.length}件）
+              </button>
+            </div>
+          )}
 
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-3 mb-4">
             <div className="flex flex-wrap gap-2 items-center">

@@ -95,18 +95,9 @@ export default function PostsPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800">投稿管理</h1>
-          <p className="text-sm text-slate-500 mt-1">GBP投稿の作成・分析・カレンダー</p>
-        </div>
-        {apiConnected && selectedShopId && (
-          <button onClick={() => setShowCreate(!showCreate)}
-            className="px-4 py-2 rounded-lg text-sm font-semibold bg-[#003D6B] hover:bg-[#002a4a]"
-            style={{ color: "#fff" }}>
-            {showCreate ? "閉じる" : "+ 新規投稿"}
-          </button>
-        )}
+      <div className="mb-4">
+        <h1 className="text-2xl font-bold text-slate-800">投稿管理</h1>
+        <p className="text-sm text-slate-500 mt-1">GBP投稿の作成・分析・カレンダー</p>
       </div>
 
       {msg && (
@@ -145,6 +136,15 @@ export default function PostsPage() {
                 })}
               </div>
             </div>
+          </div>
+
+          {/* アクションバー */}
+          <div className="flex items-center justify-end mb-5">
+            <button onClick={() => setShowCreate(!showCreate)}
+              className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-[#003D6B] hover:bg-[#002a4a]"
+              style={{ color: "#fff" }}>
+              {showCreate ? "閉じる" : "+ 新規投稿"}
+            </button>
           </div>
 
           {/* 新規投稿フォーム */}
