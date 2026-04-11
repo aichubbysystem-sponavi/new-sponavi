@@ -212,10 +212,8 @@ export default function UserManagementPage() {
                   </td>
                   <td className="p-3 text-right text-slate-400">{new Date(user.created_at).toLocaleDateString("ja-JP")}</td>
                   <td className="p-3">
-                    {user.role !== "president" && (
-                      <button onClick={() => handleDelete(user)}
-                        className="text-[10px] text-red-500 hover:text-red-700 font-semibold">削除</button>
-                    )}
+                    <button onClick={() => handleDelete(user)}
+                      className="text-[10px] text-red-500 hover:text-red-700 font-semibold">削除</button>
                   </td>
                 </tr>
               ))}
