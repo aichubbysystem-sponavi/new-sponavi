@@ -105,21 +105,6 @@ export default function Header() {
           )}
         </div>
 
-        {/* ロール切替 */}
-        <select
-          aria-label="ロールを切替"
-          className="bg-white border border-amber-300 rounded-md px-2 py-1.5 text-xs text-[#324567] focus:outline-none focus:ring-2 focus:ring-amber-300"
-          value={role}
-          onChange={(e) => {
-            setRoleOverride(e.target.value as Role);
-            router.push("/");
-          }}
-        >
-          {ROLES.map((r) => (
-            <option key={r} value={r}>{ROLE_LABELS[r]}</option>
-          ))}
-        </select>
-
         <button
           onClick={handleLogout}
           aria-label="ログアウト"
