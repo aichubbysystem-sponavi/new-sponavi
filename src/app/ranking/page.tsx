@@ -435,75 +435,71 @@ export default function RankingPage() {
             );
           })()}
 
-          {/* 順位推移チャート（ランクインしたキーワードのみ） */}
+          {/* 順位推移チャート（折れ線グラフ） */}
           {history.length > 0 && (() => {
             const parseKw = (s: string) => { try { return JSON.parse(s).join(", "); } catch { return s; } };
 
-            // キーワードごとにグループ化（ランクインしたものだけ）
-            const kwGroups = new Map<string, { date: string; rank: number }[]>();
+            // キーワード名でユニークに統合（地点違いは同一キーワードとして統合、ベスト順位を採用）
+            const dateRankMap = new Map<string, Map<string, number>>(); // kw → { date → bestRank }
             history.forEach((log) => {
-              if (log.rank === 0) return; // 圏外はチャートに含めない
+              if (log.rank === 0) return;
               const kw = parseKw(log.search_words);
-              if (!kwGroups.has(kw)) kwGroups.set(kw, []);
-              kwGroups.get(kw)!.push({
-                date: new Date(log.searched_at).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" }),
-                rank: log.rank,
-              });
+              const date = new Date(log.searched_at).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" });
+              if (!dateRankMap.has(kw)) dateRankMap.set(kw, new Map());
+              const existing = dateRankMap.get(kw)!.get(date);
+              if (!existing || log.rank < existing) dateRankMap.get(kw)!.set(date, log.rank);
             });
 
-            if (kwGroups.size === 0) return null;
+            if (dateRankMap.size === 0) return null;
 
             // 日付ラベル（古い順、重複排除）
-            const allDates: string[] = [];
-            const seen = new Set<string>();
+            const dateSet = new Set<string>();
             [...history].sort((a, b) => new Date(a.searched_at).getTime() - new Date(b.searched_at).getTime()).forEach((log) => {
-              const d = new Date(log.searched_at).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" });
-              if (!seen.has(d)) { seen.add(d); allDates.push(d); }
+              dateSet.add(new Date(log.searched_at).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" }));
             });
-            const dateLabels = allDates.slice(-10);
+            const dateLabels = Array.from(dateSet).slice(-10);
 
-            const COLORS = ["#003D6B", "#e94560", "#27ae60", "#f39c12", "#8e44ad", "#e67e22", "#2980b9", "#c0392b"];
-            const datasets = Array.from(kwGroups.entries()).map(([kw, logs], i) => {
-              // 同一日付に複数データがある場合はベスト（最小rank）を使用
-              const bestByDate = new Map<string, number>();
-              logs.forEach((l) => {
-                const existing = bestByDate.get(l.date);
-                if (!existing || l.rank < existing) bestByDate.set(l.date, l.rank);
-              });
-              return {
-                label: kw,
-                data: dateLabels.map((d) => bestByDate.get(d) ?? null),
-                borderColor: COLORS[i % COLORS.length],
-                backgroundColor: COLORS[i % COLORS.length] + "20",
-                tension: 0.3,
-                pointRadius: 5,
-                borderWidth: 2,
-                spanGaps: true,
-              };
-            });
+            const COLORS = ["#003D6B", "#e94560", "#27ae60", "#f39c12", "#8e44ad", "#e67e22", "#2980b9", "#c0392b", "#16a085", "#d35400"];
+            const datasets = Array.from(dateRankMap.entries()).map(([kw, ranks], i) => ({
+              label: kw,
+              data: dateLabels.map((d) => ranks.get(d) ?? null),
+              borderColor: COLORS[i % COLORS.length],
+              backgroundColor: COLORS[i % COLORS.length],
+              tension: 0.3,
+              pointRadius: 6,
+              pointHoverRadius: 8,
+              borderWidth: 3,
+              spanGaps: true,
+              fill: false,
+            }));
 
             return (
               <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-6">
                 <h3 className="text-sm font-semibold text-slate-500 mb-4">順位推移チャート</h3>
-                <div style={{ height: 320 }}>
+                <div style={{ height: 350 }}>
                   <Line
                     data={{ labels: dateLabels, datasets }}
                     options={{
                       responsive: true,
                       maintainAspectRatio: false,
+                      interaction: { mode: "index", intersect: false },
                       plugins: {
-                        legend: { position: "bottom", labels: { font: { size: 11 }, usePointStyle: true, padding: 15 } },
+                        legend: { position: "bottom", labels: { font: { size: 11 }, usePointStyle: true, padding: 16, pointStyle: "circle" } },
                         tooltip: {
+                          backgroundColor: "rgba(0,0,0,0.8)",
+                          titleFont: { size: 12 },
+                          bodyFont: { size: 12 },
                           callbacks: {
-                            label: (ctx: any) => `${ctx.dataset.label}: ${ctx.parsed.y}位`,
+                            label: (ctx: any) => ` ${ctx.dataset.label}: ${ctx.parsed.y}位`,
                           },
                         },
                       },
                       scales: {
-                        x: { grid: { display: false }, ticks: { font: { size: 11 } } },
+                        x: { grid: { display: false }, ticks: { font: { size: 12 } } },
                         y: {
                           reverse: true,
                           min: 1,
+                          suggestedMax: 50,
                           grid: { color: "#f0f0f0" },
                           ticks: { callback: (v: any) => v + "位", stepSize: 5, font: { size: 11 } },
                         },
@@ -511,7 +507,7 @@ export default function RankingPage() {
                     }}
                   />
                 </div>
-                <p className="text-[10px] text-slate-400 mt-2">※ 圏外のキーワードはチャートに含まれません。上に行くほど順位が高い。</p>
+                <p className="text-[10px] text-slate-400 mt-2">※ 圏外は除外。複数地点の場合はベスト順位を表示。</p>
               </div>
             );
           })()}
