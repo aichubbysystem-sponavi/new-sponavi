@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useShop } from "@/components/shop-provider";
 import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
+import { logAudit } from "@/lib/audit-log";
 
 interface LocalPost {
   name?: string;
@@ -127,6 +128,7 @@ export default function PostsPage() {
       if (newPost.photoUrl.trim()) postData.photoUrl = newPost.photoUrl.trim();
       await api.post("/api/report/create-post", postData, { timeout: 30000 });
       setMsg("投稿を作成しました！");
+      logAudit("GBP投稿作成", `${selectedShop?.name} — ${newPost.summary.slice(0, 50)}${newPost.photoUrl ? "（写真付き）" : ""}`);
       setShowCreate(false);
       setNewPost({ summary: "", topicType: "STANDARD", actionType: "", actionUrl: "", photoUrl: "" });
       await fetchData();
@@ -140,6 +142,7 @@ export default function PostsPage() {
     try {
       await api.post("/api/report/delete-post", { postName }, { timeout: 15000 });
       setMsg("投稿を削除しました");
+      logAudit("GBP投稿削除", `投稿を削除`);
       await fetchData();
     } catch (e: any) {
       setMsg(`削除失敗: ${e?.response?.data?.error || e?.message}`);

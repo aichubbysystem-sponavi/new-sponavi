@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useShop } from "@/components/shop-provider";
 import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
+import { logAudit } from "@/lib/audit-log";
 
 interface ReviewRow {
   id: string;
@@ -122,6 +123,7 @@ export default function ReviewsPage() {
       const shopIds = selectedShopId ? [selectedShopId] : [];
       const res = await api.post("/api/report/sync-reviews", { shopIds }, { timeout: 300000 });
       setSyncMsg(`${res.data.totalSynced}件の口コミを同期しました（${res.data.shops}店舗）`);
+      logAudit("口コミ同期", `${res.data.totalSynced}件同期（${res.data.shops}店舗）`);
       await fetchReviews();
       await fetchUnrepliedCount();
     } catch (e: any) {
@@ -374,6 +376,7 @@ export default function ReviewsPage() {
                                   comment: aiReply,
                                 }, { timeout: 30000 });
                                 setSyncMsg("GBPに返信を投稿しました！");
+                                logAudit("口コミ返信", `${review.shop_name} — ${review.reviewer_name}への返信「${aiReply.slice(0, 50)}...」`);
                                 await fetchReviews();
                                 await fetchUnrepliedCount();
                                 setAiReplyId(null);
