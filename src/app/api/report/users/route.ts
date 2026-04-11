@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `ユーザー作成失敗: ${authError.message}` }, { status: 500 });
   }
 
-  // user_profilesテーブルに保存
+  // user_profilesテーブルに保存（パスワードも管理者用に保持）
   await supabase.from("user_profiles").insert({
     id: authUser.user.id,
     auth_uid: authUser.user.id,
@@ -55,6 +55,7 @@ export async function POST(request: NextRequest) {
     username,
     email,
     role: role || "manager",
+    password_display: password,
   });
 
   // 操作ログ

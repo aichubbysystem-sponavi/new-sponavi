@@ -10,6 +10,7 @@ interface UserProfile {
   username: string;
   email: string;
   role: string;
+  password_display?: string;
   created_at: string;
 }
 
@@ -188,6 +189,7 @@ export default function UserManagementPage() {
               <tr className="bg-slate-50 border-b border-slate-100">
                 <th className="text-left p-3 text-slate-500 font-medium">名前</th>
                 <th className="text-left p-3 text-slate-500 font-medium">ユーザー名</th>
+                <th className="text-left p-3 text-slate-500 font-medium">パスワード</th>
                 <th className="text-center p-3 text-slate-500 font-medium">ロール</th>
                 <th className="text-right p-3 text-slate-500 font-medium">登録日</th>
                 <th className="w-16"></th>
@@ -198,6 +200,7 @@ export default function UserManagementPage() {
                 <tr key={user.id} className="border-b border-slate-50 hover:bg-slate-50">
                   <td className="p-3 font-medium text-slate-800">{user.name}</td>
                   <td className="p-3 text-slate-600">{user.username}</td>
+                  <td className="p-3 text-slate-500 font-mono text-[11px]">{user.password_display || "—"}</td>
                   <td className="p-3 text-center">
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
                       user.role === "president" ? "bg-amber-50 text-amber-600" :
