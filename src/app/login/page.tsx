@@ -75,12 +75,21 @@ export default function LoginPage() {
 
     setLoading(true);
 
-    // ユーザー名を内部メール形式に変換
-    const authEmail = email.includes("@") ? email : `${email}@sponavi.internal`;
-    const { data, error: authError } = await supabase.auth.signInWithPassword({
+    // ユーザー名を内部メール形式に変換（作成時と同じサニタイズ処理）
+    const sanitized = email.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const authEmail = `${sanitized}@sponavi.internal`;
+
+    // まずサニタイズ版で試行、失敗したら元のメールアドレスで試行（既存ユーザー対応）
+    let { data, error: authError } = await supabase.auth.signInWithPassword({
       email: authEmail,
       password,
     });
+
+    if (authError && email.includes("@")) {
+      const retry = await supabase.auth.signInWithPassword({ email, password });
+      data = retry.data;
+      authError = retry.error;
+    }
 
     if (authError) {
       const result = recordLoginAttempt();
