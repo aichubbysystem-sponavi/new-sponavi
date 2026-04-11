@@ -113,15 +113,15 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ keywords: [], shopName, found: false, availableTabs: similar, totalTabs: targetTabs.length });
       }
 
-      const keywords = await getKeywordsFromTab(accessToken, tab);
-      return NextResponse.json({ keywords, shopName: tab, found: true });
+      const result = await getKeywordsFromTab(accessToken, tab);
+      return NextResponse.json({ keywords: result.keywords, shopName: tab, found: true, debug: result.debug, matchedTab: tab });
     }
 
     // 全店舗のキーワードを取得
     const results: { shopName: string; keywords: string[] }[] = [];
     for (const tab of targetTabs) {
-      const keywords = await getKeywordsFromTab(accessToken, tab);
-      results.push({ shopName: tab, keywords });
+      const result = await getKeywordsFromTab(accessToken, tab);
+      results.push({ shopName: tab, keywords: result.keywords });
     }
 
     return NextResponse.json({ shops: results, totalTabs: targetTabs.length });
@@ -130,14 +130,17 @@ export async function GET(request: NextRequest) {
   }
 }
 
-async function getKeywordsFromTab(accessToken: string, tabName: string): Promise<string[]> {
+async function getKeywordsFromTab(accessToken: string, tabName: string): Promise<{ keywords: string[]; debug?: string }> {
   try {
     const range = encodeURIComponent(`'${tabName}'!R1:AD1`);
     const res = await fetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${range}`,
       { headers: { Authorization: `Bearer ${accessToken}` } }
     );
-    if (!res.ok) return [];
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      return { keywords: [], debug: `Sheets API ${res.status}: ${errText.slice(0, 100)}` };
+    }
     const data = await res.json();
     const row = data.values?.[0] || [];
 
@@ -154,8 +157,8 @@ async function getKeywordsFromTab(accessToken: string, tabName: string): Promise
       if (row[i] && !row[i].includes("前月比")) keywords.push(row[i]);
     }
 
-    return keywords.filter(Boolean);
-  } catch {
-    return [];
+    return { keywords: keywords.filter(Boolean) };
+  } catch (err: any) {
+    return { keywords: [], debug: `Error: ${err?.message}` };
   }
 }

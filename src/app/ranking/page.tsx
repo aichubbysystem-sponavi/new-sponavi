@@ -223,11 +223,19 @@ export default function RankingPage() {
                         setKeywords(res.data.keywords.join("\n"));
                       } else {
                         const tabs = res.data.availableTabs;
-                        setError(
-                          tabs && tabs.length > 0
-                            ? `シートに「${selectedShop.name}」が見つかりません。類似タブ: ${tabs.join(", ")}`
-                            : `シートにキーワードが見つかりませんでした（検索名: ${selectedShop.name}）`
-                        );
+                        const debug = res.data.debug;
+                        const matched = res.data.matchedTab;
+                        let msg = "";
+                        if (matched) {
+                          msg = `タブ「${matched}」にキーワードがありません。`;
+                          if (debug) msg += ` (${debug})`;
+                        } else if (tabs && tabs.length > 0) {
+                          msg = `シートに「${selectedShop.name}」が見つかりません。類似タブ: ${tabs.join(", ")}`;
+                        } else {
+                          msg = `シートにキーワードが見つかりませんでした（検索名: ${selectedShop.name}）`;
+                          if (debug) msg += ` [${debug}]`;
+                        }
+                        setError(msg);
                       }
                     } catch (e: any) {
                       setError(e?.response?.data?.error || "シート取得に失敗しました");
