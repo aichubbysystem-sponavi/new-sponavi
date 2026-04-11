@@ -71,6 +71,7 @@ export default function RankingPage() {
   const [searchKeywords, setSearchKeywords] = useState<{ keyword: string; count: number }[]>([]);
   const [kwLoading, setKwLoading] = useState(false);
   const [historyDateSort, setHistoryDateSort] = useState<"desc" | "asc">("desc");
+  const [kwHistory, setKwHistory] = useState<{ period: string; keywords: { keyword: string; count: number }[] }[]>([]);
 
   // 店舗ごとの計測地点をlocalStorageから読み込み/保存
   useEffect(() => {
@@ -106,13 +107,28 @@ export default function RankingPage() {
 
   useEffect(() => { fetchHistory(); }, [fetchHistory]);
 
+  // 保存済み検索語句履歴を読み込み
+  useEffect(() => {
+    if (!selectedShopId) return;
+    api.get(`/api/report/search-keywords?shopId=${selectedShopId}`)
+      .then((res) => {
+        setKwHistory(res.data.months || []);
+        // 最新月のデータがあればsearchKeywordsにセット
+        const months = res.data.months || [];
+        if (months.length > 0) {
+          setSearchKeywords(months[months.length - 1].keywords);
+        }
+      })
+      .catch(() => setKwHistory([]));
+  }, [selectedShopId]);
+
   const fetchSearchKeywords = useCallback(async () => {
     if (!selectedShopId) return;
     setKwLoading(true);
     try {
       const now = new Date();
       const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      const end = new Date(now.getFullYear(), now.getMonth(), 0);
       const res = await api.post("/api/shop/performance/search_keyword", {
         shops: [selectedShopId],
         start: start.toISOString(),
@@ -120,10 +136,24 @@ export default function RankingPage() {
       }, { timeout: 30000 });
       const data = Array.isArray(res.data) ? res.data : [];
       if (data.length > 0 && data[0].values) {
-        setSearchKeywords(data[0].values.map((v: any) => ({
+        const kws = data[0].values.map((v: any) => ({
           keyword: v.searchKeyword || v.SearchKeyword || "",
           count: v.insightsValue?.value || v.InsightsValue?.Value || 0,
-        })).filter((k: any) => k.keyword).sort((a: any, b: any) => b.count - a.count));
+        })).filter((k: any) => k.keyword).sort((a: any, b: any) => b.count - a.count);
+        setSearchKeywords(kws);
+
+        // DBに保存
+        try {
+          await api.post("/api/report/search-keywords", {
+            shopId: selectedShopId,
+            keywords: kws,
+            periodStart: start.toISOString(),
+            periodEnd: end.toISOString(),
+          }, { timeout: 15000 });
+          // 履歴を再取得
+          const histRes = await api.get(`/api/report/search-keywords?shopId=${selectedShopId}`);
+          setKwHistory(histRes.data.months || []);
+        } catch {}
       }
     } catch { setSearchKeywords([]); }
     finally { setKwLoading(false); }
@@ -534,23 +564,73 @@ export default function RankingPage() {
               <button onClick={fetchSearchKeywords} disabled={kwLoading}
                 className={`px-3 py-1 rounded-lg text-[11px] font-semibold ${kwLoading ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
                 style={{ color: kwLoading ? undefined : "#fff" }}>
-                {kwLoading ? "取得中..." : "検索語句を取得"}
+                {kwLoading ? "取得中..." : "最新データを取得"}
               </button>
             </div>
-            {searchKeywords.length === 0 ? (
-              <p className="text-slate-400 text-sm text-center py-4">「検索語句を取得」ボタンでGBPの検索語句データを表示します</p>
-            ) : (
-              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2">
-                {searchKeywords.slice(0, 20).map((kw, i) => (
-                  <div key={i} className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-xs font-bold text-slate-300 w-5">{i + 1}</span>
-                      <span className="text-xs text-slate-700 truncate">{kw.keyword}</span>
-                    </div>
-                    <span className="text-xs font-semibold text-[#003D6B] flex-shrink-0 ml-2">{kw.count}</span>
+
+            {/* 月別推移チャート（TOP5キーワード） */}
+            {kwHistory.length >= 2 && (() => {
+              // 全月のTOP5キーワードを抽出
+              const topKws = new Set<string>();
+              kwHistory.forEach((m) => m.keywords.slice(0, 5).forEach((k) => topKws.add(k.keyword)));
+              const labels = kwHistory.map((m) => m.period.replace(/^\d{4}-/, "").replace(/^0/, "") + "月");
+              const COLORS = ["#003D6B", "#e94560", "#27ae60", "#f39c12", "#8e44ad", "#e67e22", "#2980b9", "#c0392b"];
+              const datasets = Array.from(topKws).slice(0, 8).map((kw, i) => ({
+                label: kw,
+                data: kwHistory.map((m) => {
+                  const found = m.keywords.find((k) => k.keyword === kw);
+                  return found ? found.count : 0;
+                }),
+                borderColor: COLORS[i % COLORS.length],
+                backgroundColor: COLORS[i % COLORS.length],
+                tension: 0.3,
+                pointRadius: 5,
+                borderWidth: 2,
+                fill: false,
+              }));
+
+              return (
+                <div className="mb-6">
+                  <p className="text-xs text-slate-400 mb-2">TOP検索語句の月別推移</p>
+                  <div style={{ height: 250 }}>
+                    <Line
+                      data={{ labels, datasets }}
+                      options={{
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                          legend: { position: "bottom", labels: { font: { size: 10 }, usePointStyle: true, padding: 12 } },
+                          tooltip: { callbacks: { label: (ctx: any) => ` ${ctx.dataset.label}: ${ctx.parsed.y}回` } },
+                        },
+                        scales: {
+                          x: { grid: { display: false } },
+                          y: { beginAtZero: true, grid: { color: "#f0f0f0" }, ticks: { callback: (v: any) => v.toLocaleString() } },
+                        },
+                      }}
+                    />
                   </div>
-                ))}
-              </div>
+                </div>
+              );
+            })()}
+
+            {/* 最新の検索語句TOP20 */}
+            {searchKeywords.length === 0 ? (
+              <p className="text-slate-400 text-sm text-center py-4">「最新データを取得」でGBPの検索語句を取得・保存します</p>
+            ) : (
+              <>
+                <p className="text-xs text-slate-400 mb-2">最新の検索語句 TOP20</p>
+                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2">
+                  {searchKeywords.slice(0, 20).map((kw, i) => (
+                    <div key={i} className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-xs font-bold text-slate-300 w-5">{i + 1}</span>
+                        <span className="text-xs text-slate-700 truncate">{kw.keyword}</span>
+                      </div>
+                      <span className="text-xs font-semibold text-[#003D6B] flex-shrink-0 ml-2">{kw.count}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
             )}
           </div>
 
