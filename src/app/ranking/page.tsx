@@ -640,11 +640,55 @@ export default function RankingPage() {
               );
             })()}
 
-            {/* 最新の検索語句TOP20 */}
+            {/* 最新の検索語句TOP20 + 前月比較 */}
             {searchKeywords.length === 0 ? (
               <p className="text-slate-400 text-sm text-center py-4">「最新データを取得」でGBPの検索語句を取得・保存します</p>
             ) : (
               <>
+                {/* 前月比較テーブル */}
+                {kwHistory.length >= 2 && (() => {
+                  const latest = kwHistory[kwHistory.length - 1];
+                  const prev = kwHistory[kwHistory.length - 2];
+                  const prevMap = new Map(prev.keywords.map((k) => [k.keyword, k.count]));
+                  const combined = latest.keywords.slice(0, 20).map((kw) => ({
+                    keyword: kw.keyword,
+                    current: kw.count,
+                    previous: prevMap.get(kw.keyword) || 0,
+                    diff: kw.count - (prevMap.get(kw.keyword) || 0),
+                  }));
+                  return (
+                    <div className="mb-4">
+                      <p className="text-xs text-slate-400 mb-2">検索語句 前月比較（{prev.period} → {latest.period}）</p>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="border-b border-slate-200">
+                              <th className="text-left py-1.5 px-2 text-slate-500 font-medium">#</th>
+                              <th className="text-left py-1.5 px-2 text-slate-500 font-medium">検索語句</th>
+                              <th className="text-right py-1.5 px-2 text-slate-500 font-medium">当月</th>
+                              <th className="text-right py-1.5 px-2 text-slate-500 font-medium">前月</th>
+                              <th className="text-right py-1.5 px-2 text-slate-500 font-medium">増減</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {combined.map((kw, i) => (
+                              <tr key={i} className="border-b border-slate-50">
+                                <td className="py-1.5 px-2 text-slate-400">{i + 1}</td>
+                                <td className="py-1.5 px-2 text-slate-700 font-medium">{kw.keyword}</td>
+                                <td className="py-1.5 px-2 text-right font-semibold text-[#003D6B]">{kw.current.toLocaleString()}</td>
+                                <td className="py-1.5 px-2 text-right text-slate-500">{kw.previous.toLocaleString()}</td>
+                                <td className={`py-1.5 px-2 text-right font-semibold ${kw.diff > 0 ? "text-emerald-600" : kw.diff < 0 ? "text-red-600" : "text-slate-400"}`}>
+                                  {kw.diff > 0 ? `+${kw.diff.toLocaleString()}` : kw.diff < 0 ? kw.diff.toLocaleString() : "±0"}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 <p className="text-xs text-slate-400 mb-2">最新の検索語句 TOP20</p>
                 <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2">
                   {searchKeywords.slice(0, 20).map((kw, i) => (

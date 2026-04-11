@@ -5,6 +5,7 @@ import { useShop } from "@/components/shop-provider";
 import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
 import { logAudit } from "@/lib/audit-log";
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 
 interface ReviewRow {
   id: string;
@@ -33,11 +34,14 @@ export default function ReviewsPage() {
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const [aiReplyId, setAiReplyId] = useState<string | null>(null);
   const [aiReply, setAiReply] = useState("");
+  const [aiReplies, setAiReplies] = useState<string[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
   const [replyFilter, setReplyFilter] = useState<ReplyFilter>("all");
   const [unrepliedCount, setUnrepliedCount] = useState(0);
   const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
   const [topWords, setTopWords] = useState<{ word: string; count: number; type: "good" | "bad" }[]>([]);
+  const [monthlyStats, setMonthlyStats] = useState<{ month: string; count: number; avgRating: number; cumulative: number }[]>([]);
+  const [showCharts, setShowCharts] = useState(false);
   const [templates, setTemplates] = useState<{ id: string; name: string; content: string; star_category: string; use_count: number }[]>([]);
   const [showTemplates, setShowTemplates] = useState(false);
   const [savingTemplate, setSavingTemplate] = useState(false);
@@ -114,6 +118,45 @@ export default function ReviewsPage() {
   useEffect(() => {
     fetchUnrepliedCount();
   }, [fetchUnrepliedCount]);
+
+  // 月別口コミ統計取得
+  useEffect(() => {
+    const fetchMonthlyStats = async () => {
+      const shopFilter = !isAllMode && selectedShopId ? selectedShopId : null;
+      let query = supabase.from("reviews").select("create_time, star_rating");
+      if (shopFilter) query = query.eq("shop_id", shopFilter);
+      const { data } = await query.order("create_time", { ascending: true }).limit(5000);
+      if (!data || data.length === 0) { setMonthlyStats([]); return; }
+
+      const ratingMap: Record<string, number> = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5, ONE_STAR: 1, TWO_STARS: 2, THREE_STARS: 3, FOUR_STARS: 4, FIVE_STARS: 5 };
+      const byMonth = new Map<string, { count: number; totalRating: number }>();
+
+      data.forEach((r) => {
+        if (!r.create_time) return;
+        const month = r.create_time.slice(0, 7); // "2026-04"
+        if (!byMonth.has(month)) byMonth.set(month, { count: 0, totalRating: 0 });
+        const m = byMonth.get(month)!;
+        m.count++;
+        const rating = ratingMap[(r.star_rating || "").toUpperCase().replace(/_STARS?/, "")] || 0;
+        m.totalRating += rating;
+      });
+
+      let cumulative = 0;
+      const stats = Array.from(byMonth.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([month, d]) => {
+          cumulative += d.count;
+          return {
+            month: month.slice(2), // "26-04"
+            count: d.count,
+            avgRating: Math.round((d.totalRating / d.count) * 100) / 100,
+            cumulative,
+          };
+        });
+      setMonthlyStats(stats.slice(-12)); // 直近12ヶ月
+    };
+    fetchMonthlyStats();
+  }, [selectedShopId, isAllMode]);
 
   // テンプレート取得
   const fetchTemplates = useCallback(async () => {
@@ -271,20 +314,25 @@ export default function ReviewsPage() {
   };
 
   const handleAiReply = async (review: ReviewRow) => {
-    if (aiReplyId === review.id) { setAiReplyId(null); setAiReply(""); return; }
+    if (aiReplyId === review.id) { setAiReplyId(null); setAiReply(""); setAiReplies([]); return; }
     setAiReplyId(review.id);
     setAiLoading(true);
     setAiReply("");
+    setAiReplies([]);
     try {
       const res = await api.post("/api/report/reply-suggest", {
         comment: review.comment || "",
         starRating: starToNum(review.star_rating),
         shopName: selectedShop?.name || review.shop_name || "",
         reviewerName: review.reviewer_name,
-      }, { timeout: 25000 });
-      setAiReply(res.data.reply || "返信を生成できませんでした");
+        count: 5,
+      }, { timeout: 30000 });
+      const replies: string[] = res.data.replies || [res.data.reply || "返信を生成できませんでした"];
+      setAiReplies(replies);
+      setAiReply(replies[0] || "");
     } catch (e: any) {
       setAiReply(`エラー: ${e?.response?.data?.error || e?.message || "返信生成に失敗しました"}`);
+      setAiReplies([]);
     } finally {
       setAiLoading(false);
     }
@@ -367,6 +415,53 @@ export default function ReviewsPage() {
           </div>
         </div>
       </div>
+
+      {/* 口コミ推移グラフ */}
+      {monthlyStats.length > 1 && (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-100 mb-4">
+          <button onClick={() => setShowCharts(!showCharts)}
+            className="w-full flex items-center justify-between p-4 hover:bg-slate-50 transition">
+            <span className="text-sm font-semibold text-slate-500">口コミ推移グラフ（{monthlyStats.length}ヶ月）</span>
+            <span className="text-xs text-slate-400">{showCharts ? "▲ 閉じる" : "▼ 開く"}</span>
+          </button>
+          {showCharts && (
+            <div className="px-4 pb-5 border-t border-slate-100">
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-4">
+                {/* 評価推移（折れ線） */}
+                <div>
+                  <h4 className="text-xs font-semibold text-slate-500 mb-3">月別平均評価推移</h4>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <LineChart data={monthlyStats}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                      <XAxis dataKey="month" tick={{ fontSize: 10 }} />
+                      <YAxis domain={[1, 5]} tick={{ fontSize: 10 }} />
+                      <Tooltip formatter={(v: any) => [`★ ${Number(v).toFixed(2)}`, "平均評価"]} />
+                      <ReferenceLine y={3.5} stroke="#ef4444" strokeDasharray="5 5" label={{ value: "3.5", position: "right", fontSize: 10, fill: "#ef4444" }} />
+                      <Line type="monotone" dataKey="avgRating" stroke="#003D6B" strokeWidth={2} dot={{ r: 3 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                  <p className="text-[9px] text-slate-400 mt-1">赤点線 = 上位表示に必要な3.5ライン</p>
+                </div>
+
+                {/* 増加量推移（棒グラフ） */}
+                <div>
+                  <h4 className="text-xs font-semibold text-slate-500 mb-3">月別口コミ増加数</h4>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <BarChart data={monthlyStats}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                      <XAxis dataKey="month" tick={{ fontSize: 10 }} />
+                      <YAxis tick={{ fontSize: 10 }} />
+                      <Tooltip formatter={(v: any) => [`${v}件`, "増加数"]} />
+                      <Bar dataKey="count" fill="#003D6B" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                  <p className="text-[9px] text-slate-400 mt-1">累計: {monthlyStats[monthlyStats.length - 1]?.cumulative.toLocaleString()}件</p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* テンプレート管理パネル */}
       {templates.length > 0 && (
@@ -527,51 +622,52 @@ export default function ReviewsPage() {
                     </div>
                   )}
                 </div>
-                {aiReplyId === review.id && aiReply && (
+                {aiReplyId === review.id && (aiReplies.length > 0 || aiReply) && (
                   <div className="bg-purple-50 rounded-lg p-3 border border-purple-100 mt-2">
-                    <div className="flex items-center justify-between mb-1">
-                      <p className="text-xs text-purple-500 font-semibold">AI返信案</p>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={() => { navigator.clipboard.writeText(aiReply); }}
-                          className="text-[10px] text-purple-500 hover:text-purple-700 px-2 py-0.5 rounded bg-white border border-purple-200"
-                        >
-                          コピー
-                        </button>
-                        <button
-                          onClick={() => saveAsTemplate(aiReply, starToNum(review.star_rating))}
-                          disabled={savingTemplate}
-                          className="text-[10px] text-amber-600 hover:text-amber-700 px-2 py-0.5 rounded bg-amber-50 border border-amber-200"
-                        >
-                          {savingTemplate ? "保存中..." : "テンプレ保存"}
-                        </button>
-                        {review.shop_id && !review.reply_comment && (
-                          <button
-                            onClick={async () => {
-                              try {
-                                await api.post("/api/report/reply-review", {
-                                  shopId: review.shop_id,
-                                  reviewId: review.review_id,
-                                  comment: aiReply,
-                                }, { timeout: 30000 });
-                                setSyncMsg("GBPに返信を投稿しました！");
-                                logAudit("口コミ返信", `${review.shop_name} — ${review.reviewer_name}への返信「${aiReply.slice(0, 50)}...」`);
-                                await fetchReviews();
-                                await fetchUnrepliedCount();
-                                setAiReplyId(null);
-                                setAiReply("");
-                              } catch (e: any) {
-                                setSyncMsg(`返信投稿に失敗: ${e?.response?.data?.message || e?.message || "不明なエラー"}`);
-                              }
-                            }}
-                            className="text-[10px] text-white px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-700 font-semibold"
-                          >
-                            GBPに返信
-                          </button>
-                        )}
-                      </div>
+                    <p className="text-xs text-purple-500 font-semibold mb-2">AI返信候補（{aiReplies.length}件）— クリックで選択</p>
+                    <div className="space-y-2">
+                      {(aiReplies.length > 0 ? aiReplies : [aiReply]).map((reply, idx) => (
+                        <div key={idx}
+                          onClick={() => setAiReply(reply)}
+                          className={`rounded-lg p-2.5 cursor-pointer transition border ${
+                            aiReply === reply ? "bg-white border-purple-400 shadow-sm" : "bg-purple-50/50 border-purple-100 hover:bg-white"
+                          }`}>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className={`text-[10px] font-bold ${aiReply === reply ? "text-purple-700" : "text-purple-400"}`}>
+                              候補 {idx + 1} {aiReply === reply ? "✓" : ""}
+                            </span>
+                            {aiReply === reply && (
+                              <div className="flex items-center gap-1.5">
+                                <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(reply); }}
+                                  className="text-[10px] text-purple-500 hover:text-purple-700 px-2 py-0.5 rounded bg-white border border-purple-200">コピー</button>
+                                <button onClick={(e) => { e.stopPropagation(); saveAsTemplate(reply, starToNum(review.star_rating)); }}
+                                  disabled={savingTemplate}
+                                  className="text-[10px] text-amber-600 hover:text-amber-700 px-2 py-0.5 rounded bg-amber-50 border border-amber-200">
+                                  {savingTemplate ? "保存中..." : "テンプレ保存"}</button>
+                                {review.shop_id && !review.reply_comment && (
+                                  <button onClick={async (e) => {
+                                    e.stopPropagation();
+                                    try {
+                                      await api.post("/api/report/reply-review", {
+                                        shopId: review.shop_id, reviewId: review.review_id, comment: reply,
+                                      }, { timeout: 30000 });
+                                      setSyncMsg("GBPに返信を投稿しました！");
+                                      logAudit("口コミ返信", `${review.shop_name} — ${review.reviewer_name}への返信「${reply.slice(0, 50)}...」`);
+                                      await fetchReviews(); await fetchUnrepliedCount();
+                                      setAiReplyId(null); setAiReply(""); setAiReplies([]);
+                                    } catch (e: any) {
+                                      setSyncMsg(`返信投稿に失敗: ${e?.response?.data?.message || e?.message || "不明なエラー"}`);
+                                    }
+                                  }} className="text-[10px] text-white px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-700 font-semibold">
+                                    GBPに返信</button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          <p className="text-sm text-purple-800">{reply}</p>
+                        </div>
+                      ))}
                     </div>
-                    <p className="text-sm text-purple-800">{aiReply}</p>
                   </div>
                 )}
               </div>

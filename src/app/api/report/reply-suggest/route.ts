@@ -37,7 +37,31 @@ export async function POST(request: NextRequest) {
     ? "感謝しつつ、改善への意欲を示す丁寧なトーン"
     : "真摯にお詫びし、具体的な改善策を示す誠実なトーン";
 
-  const prompt = `あなたは「${shopName}」の店舗オーナーです。以下のGoogleの口コミに対する返信文を1つ生成してください。
+  const count = body.count || 1; // 候補数（1 or 5）
+
+  const prompt = count >= 5
+    ? `あなたは「${shopName}」の店舗オーナーです。以下のGoogleの口コミに対する返信文を5パターン生成してください。
+
+【口コミ】
+評価: ★${starRating}
+${reviewerName ? `投稿者: ${reviewerName}` : ""}
+内容: ${comment || "（テキストなし、評価のみ）"}
+
+【トーン】${tone}
+
+【条件】
+- 各100〜150文字で簡潔に
+- 敬語を使用
+- 店名や個人情報は含めない
+- 自然な日本語で
+- 5パターンはそれぞれ表現や切り口を変えること
+- 以下の形式で出力（番号と返信文のみ、説明不要）:
+1. (返信文)
+2. (返信文)
+3. (返信文)
+4. (返信文)
+5. (返信文)`
+    : `あなたは「${shopName}」の店舗オーナーです。以下のGoogleの口コミに対する返信文を1つ生成してください。
 
 【口コミ】
 評価: ★${starRating}
@@ -79,9 +103,20 @@ ${reviewerName ? `投稿者: ${reviewerName}` : ""}
     }
 
     const data = await res.json();
-    const reply = data.content?.[0]?.text?.trim() || "";
+    const text = data.content?.[0]?.text?.trim() || "";
 
-    return NextResponse.json({ reply });
+    if (count >= 5) {
+      // 5候補をパース
+      const replies: string[] = [];
+      const lines = text.split("\n");
+      for (const line of lines) {
+        const match = line.match(/^\d+[\.\)]\s*(.+)/);
+        if (match) replies.push(match[1].trim());
+      }
+      return NextResponse.json({ reply: replies[0] || text, replies: replies.length > 0 ? replies : [text] });
+    }
+
+    return NextResponse.json({ reply: text });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || "返信生成に失敗しました" }, { status: 500 });
   }
