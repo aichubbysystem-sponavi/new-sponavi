@@ -66,65 +66,64 @@ async function getDropboxAccessToken(): Promise<string | null> {
 }
 
 /**
- * Dropboxフォルダ内を日付で検索し、一致するファイルの一時DLリンクを取得
+ * Dropboxフォルダ内を日付で検索し、一致する全ファイルの一時DLリンクを取得（複数写真対応）
  */
-async function searchDropboxPhotoWithDebug(folderUrl: string, dateCompact: string, shopName: string): Promise<{ url: string; debug: string }> {
+async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: string, shopName: string): Promise<{ urls: string[]; debug: string }> {
   const dbxToken = await getDropboxAccessToken();
-  if (!dbxToken) return { url: "", debug: "Dropboxトークン取得失敗（DROPBOX_APP_KEY/SECRET/REFRESH_TOKEN確認）" };
+  if (!dbxToken) return { urls: [], debug: "Dropboxトークン取得失敗" };
 
   try {
     const searchRes = await fetch("https://api.dropboxapi.com/2/files/search_v2", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
-      body: JSON.stringify({
-        query: dateCompact,
-        options: { max_results: 20 },
-      }),
+      body: JSON.stringify({ query: dateCompact, options: { max_results: 50 } }),
     });
 
-    if (!searchRes.ok) {
-      const err = await searchRes.text().catch(() => "");
-      return { url: "", debug: `Dropbox検索API ${searchRes.status}: ${err.slice(0, 100)}` };
-    }
+    if (!searchRes.ok) return { urls: [], debug: `Dropbox検索API ${searchRes.status}` };
 
     const searchData = await searchRes.json();
     const allResults = searchData.matches || [];
+    if (allResults.length === 0) return { urls: [], debug: `「${dateCompact}」を含むファイルが0件` };
 
-    if (allResults.length === 0) {
-      return { url: "", debug: `Dropbox内に「${dateCompact}」を含むファイルが0件（検索範囲: 全体）` };
-    }
-
-    // 全結果のパスを収集（デバッグ用）
-    const paths = allResults.map((m: any) => m.metadata?.metadata?.path_display || "?").slice(0, 5);
-
-    // 店舗名の一部がパスに含まれるファイルを優先
+    // 店舗名の一部がパスに含まれるファイルをフィルタ
     const shopParts = shopName.split(/[\s　]+/).filter((p) => p.length >= 2);
-    let best = allResults.find((m: any) => {
+    const shopMatches = allResults.filter((m: any) => {
       const path = (m.metadata?.metadata?.path_display || "").toLowerCase();
       return shopParts.some((part) => path.includes(part.toLowerCase()));
     });
-    if (!best) best = allResults[0];
+    const targets = shopMatches.length > 0 ? shopMatches : [allResults[0]];
 
-    const filePath = best.metadata?.metadata?.path_display || best.metadata?.metadata?.path_lower;
-    if (!filePath) return { url: "", debug: `${allResults.length}件ヒットしたがパス取得失敗。paths: ${paths.join(", ")}` };
+    // 全マッチファイルのDLリンクを取得
+    const urls: string[] = [];
+    for (const match of targets.slice(0, 10)) {
+      const filePath = match.metadata?.metadata?.path_display || match.metadata?.metadata?.path_lower;
+      if (!filePath) continue;
+      // 画像ファイルのみ
+      if (!/\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(filePath)) continue;
 
-    // 一時ダウンロードリンク取得
-    const linkRes = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
-      body: JSON.stringify({ path: filePath }),
-    });
-
-    if (!linkRes.ok) {
-      const err = await linkRes.text().catch(() => "");
-      return { url: "", debug: `ファイル発見(${filePath})だがDLリンク取得失敗: ${linkRes.status} ${err.slice(0, 80)}` };
+      try {
+        const linkRes = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
+          body: JSON.stringify({ path: filePath }),
+        });
+        if (linkRes.ok) {
+          const linkData = await linkRes.json();
+          if (linkData.link) urls.push(linkData.link);
+        }
+      } catch {}
     }
 
-    const linkData = await linkRes.json();
-    return { url: linkData.link || "", debug: linkData.link ? `OK: ${filePath}` : "リンクが空" };
+    return { urls, debug: urls.length > 0 ? `${urls.length}枚取得` : "DLリンク取得失敗" };
   } catch (e: any) {
-    return { url: "", debug: `例外: ${e?.message}` };
+    return { urls: [], debug: `例外: ${e?.message}` };
   }
+}
+
+// 後方互換: 1枚だけ返す旧インターフェース
+async function searchDropboxPhotoWithDebug(folderUrl: string, dateCompact: string, shopName: string): Promise<{ url: string; debug: string }> {
+  const result = await searchDropboxPhotosMultiple(folderUrl, dateCompact, shopName);
+  return { url: result.urls[0] || "", debug: result.debug };
 }
 
 function convertDropboxUrl(url: string): string {
@@ -223,27 +222,36 @@ export async function POST(request: NextRequest) {
 
         if (!dateMatch) continue;
 
-        // F列のDropboxフォルダURLから日付で写真を検索
-        let photoUrl = "";
+        // F列のDropboxフォルダURLから日付で写真を検索（複数写真対応）
+        let photoUrls: string[] = [];
         let photoDebug = "";
         if (photoCell) {
           if (photoCell.includes("dropbox.com")) {
-            const result = await searchDropboxPhotoWithDebug(photoCell.trim(), dateCompact, shopName);
-            photoUrl = result.url;
+            const result = await searchDropboxPhotosMultiple(photoCell.trim(), dateCompact, shopName);
+            photoUrls = result.urls;
             photoDebug = result.debug;
           }
-          if (!photoUrl) {
+          if (photoUrls.length === 0) {
             const urls = photoCell.match(/https?:\/\/[^\s,"]+/g) || [];
-            const dated = urls.find((u) => u.includes(dateCompact));
-            photoUrl = dated || "";
-            if (photoUrl) photoUrl = convertDropboxUrl(photoUrl);
+            const dated = urls.filter((u) => u.includes(dateCompact));
+            photoUrls = dated.length > 0 ? dated.map(convertDropboxUrl) : [];
           }
-          if (!photoUrl && !photoDebug) photoDebug = "URLから写真を抽出できません";
+          if (photoUrls.length === 0 && !photoDebug) photoDebug = "URLから写真を抽出できません";
         } else {
           photoDebug = "F列が空";
         }
 
-        allMatches.push({ shopName, summary: postText, photoUrl, tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: photoUrl ? `写真取得成功` : photoDebug });
+        // 複数写真がある場合: 1件目は投稿文+写真、2件目以降は写真のみ投稿
+        if (photoUrls.length <= 1) {
+          allMatches.push({ shopName, summary: postText, photoUrl: photoUrls[0] || "", tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: photoUrls.length > 0 ? `写真${photoUrls.length}枚取得` : photoDebug });
+        } else {
+          // 1件目: 投稿文+最初の写真
+          allMatches.push({ shopName, summary: postText, photoUrl: photoUrls[0], tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: `写真${photoUrls.length}枚取得（1/${photoUrls.length}）` });
+          // 2件目以降: 写真のみ投稿（投稿文なしの写真投稿）
+          for (let pi = 1; pi < photoUrls.length; pi++) {
+            allMatches.push({ shopName, summary: "", photoUrl: photoUrls[pi], tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: `写真${pi + 1}/${photoUrls.length}` });
+          }
+        }
       }
     } catch (e) {
       console.error(`[auto-post] Tab "${tab}" error:`, e);
@@ -288,14 +296,36 @@ export async function POST(request: NextRequest) {
       ? shop.gbp_location_name
       : `accounts/111148362910776147900/${shop.gbp_location_name}`;
 
+    // 写真のみ投稿（追加写真）の場合はGBP Media APIで直接アップロード
+    if (!match.summary && match.photoUrl) {
+      try {
+        const directUrl = match.photoUrl.includes("dropboxusercontent.com") || match.photoUrl.includes("dl.dropbox")
+          ? match.photoUrl : convertDropboxUrl(match.photoUrl);
+        const mediaRes = await fetch(`${GBP_API_BASE}/${locationName}/media`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+          body: JSON.stringify({ mediaFormat: "PHOTO", sourceUrl: directUrl, locationAssociation: { category: "ADDITIONAL" } }),
+        });
+        if (mediaRes.ok) {
+          results.push({ shopName: match.shopName, status: "写真投稿成功", summary: `写真: ${match.photoDebug}` });
+          posted++;
+        } else {
+          results.push({ shopName: match.shopName, status: `写真エラー(${mediaRes.status})`, summary: match.photoDebug });
+          errors++;
+        }
+      } catch (e: any) {
+        results.push({ shopName: match.shopName, status: `写真エラー: ${e?.message}`, summary: match.photoDebug });
+        errors++;
+      }
+      continue;
+    }
+
     // 本文を1500文字に制限
     const trimmedSummary = match.summary.slice(0, 1500);
     const postBody: any = { summary: trimmedSummary, topicType: "STANDARD", languageCode: "ja" };
     if (match.photoUrl) {
-      // Dropbox一時リンクはそのまま使用、それ以外はURL変換
       const directUrl = match.photoUrl.includes("dropboxusercontent.com") || match.photoUrl.includes("dl.dropbox")
-        ? match.photoUrl
-        : convertDropboxUrl(match.photoUrl);
+        ? match.photoUrl : convertDropboxUrl(match.photoUrl);
       postBody.media = [{ mediaFormat: "PHOTO", sourceUrl: directUrl }];
     }
 

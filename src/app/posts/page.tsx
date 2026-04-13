@@ -535,19 +535,45 @@ export default function PostsPage() {
             )}
           </div>
 
-          {/* アクションバー */}
-          {!isAllMode && (
-            <div className="flex items-center justify-end mb-5">
-              <button onClick={() => setShowCreate(!showCreate)}
-                className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-[#003D6B] hover:bg-[#002a4a]"
-                style={{ color: "#fff" }}>
-                {showCreate ? "閉じる" : "+ 新規投稿"}
-              </button>
-            </div>
-          )}
+          {/* 投稿種類選択（旧システム準拠） */}
+          <div className="mb-5">
+            {!showCreate ? (
+              <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
+                <p className="text-sm font-semibold text-slate-500 mb-3">投稿種類を選択してください</p>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {[
+                    { type: "STANDARD", label: "最新情報を追加", icon: "📝", desc: "通常の投稿", color: "border-blue-200 hover:bg-blue-50" },
+                    { type: "OFFER", label: "特典を追加", icon: "🎁", desc: "クーポン・割引", color: "border-amber-200 hover:bg-amber-50" },
+                    { type: "EVENT", label: "イベントを追加", icon: "🎉", desc: "イベント告知", color: "border-purple-200 hover:bg-purple-50" },
+                    { type: "PHOTO", label: "写真", icon: "📷", desc: "写真のみ投稿", color: "border-emerald-200 hover:bg-emerald-50" },
+                  ].map((item) => (
+                    <button key={item.type} onClick={() => {
+                      setNewPost({ ...newPost, topicType: item.type === "PHOTO" ? "STANDARD" : item.type, mediaType: item.type === "PHOTO" ? "PHOTO" : newPost.mediaType });
+                      setShowCreate(true);
+                    }}
+                      className={`p-4 rounded-xl border-2 ${item.color} text-left transition-all hover:shadow-md`}>
+                      <span className="text-2xl">{item.icon}</span>
+                      <p className="text-sm font-semibold text-slate-800 mt-2">{item.label}</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">{item.desc}</p>
+                    </button>
+                  ))}
+                </div>
+                {isAllMode && (
+                  <p className="text-[10px] text-blue-600 mt-2">全店舗モード: 選択後、投稿先の店舗を選べます</p>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center justify-end">
+                <button onClick={() => setShowCreate(false)}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200">
+                  ← 種類選択に戻る
+                </button>
+              </div>
+            )}
+          </div>
 
           {/* 新規投稿フォーム */}
-          {showCreate && !isAllMode && (
+          {showCreate && (
             <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-6">
               <h3 className="text-sm font-semibold text-slate-500 mb-4">新規GBP投稿</h3>
               <div className="space-y-3">
