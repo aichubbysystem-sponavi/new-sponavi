@@ -180,8 +180,6 @@ export default function BasicInfoPage() {
         <div className="bg-red-50 rounded-xl p-5 shadow-sm border border-red-200 mb-5">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-red-600">GBP情報の変更を検知しました（{changeAlerts.length}件）</h3>
-            <button onClick={() => setAlertDismissed(true)}
-              className="text-[10px] text-red-400 hover:text-red-600 font-semibold">確認済み</button>
           </div>
           <div className="space-y-2">
             {changeAlerts.map((alert, i) => (
@@ -195,7 +193,38 @@ export default function BasicInfoPage() {
               </div>
             ))}
           </div>
-          <p className="text-[9px] text-red-400 mt-2">※ Googleや第三者による情報変更の可能性があります。正しい情報か確認してください。</p>
+          <div className="flex items-center gap-2 mt-3">
+            <button onClick={async () => {
+              const storageKey = `gbp-snapshot-${selectedShopId}`;
+              const saved = localStorage.getItem(storageKey);
+              if (!saved || !selectedShopId) return;
+              const prev = JSON.parse(saved);
+              if (!confirm("GBP情報を前回保存時の状態に復旧しますか？")) return;
+              setSaveMsg("");
+              setSaving(true);
+              try {
+                const patchData: any = {};
+                if (prev.title) patchData.title = prev.title;
+                if (prev.phone) patchData.phoneNumbers = { primaryPhone: prev.phone };
+                if (prev.website) patchData.websiteUri = prev.website;
+                await api.patch(`/api/shop/${selectedShopId}/location`, patchData);
+                setSaveMsg("GBP情報を復旧しました");
+                setChangeAlerts([]);
+                await fetchLocation();
+              } catch (e: any) {
+                setSaveMsg(`復旧失敗: ${e?.response?.data?.message || e?.message || "エラー"}`);
+              }
+              setSaving(false);
+            }} disabled={saving}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50">
+              {saving ? "復旧中..." : "元に戻す（自動復旧）"}
+            </button>
+            <button onClick={() => setAlertDismissed(true)}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200">
+              この変更を承認
+            </button>
+          </div>
+          <p className="text-[9px] text-red-400 mt-2">※ Googleや第三者による情報変更の可能性があります。</p>
         </div>
       )}
 
@@ -339,6 +368,7 @@ export default function BasicInfoPage() {
             {menuMsg && <div className={`p-2 rounded-lg mb-3 text-xs ${menuMsg.includes("失敗") ? "bg-red-50 text-red-600" : "bg-emerald-50 text-emerald-600"}`}>{menuMsg}</div>}
             {editingMenu && (
               <div className="bg-slate-50 rounded-lg p-4 mb-4 border border-slate-200">
+                <p className="text-[10px] text-slate-500 mb-2 font-semibold">単品追加</p>
                 <div className="grid grid-cols-3 gap-3">
                   <div>
                     <label className="text-[10px] text-slate-500 block mb-1">名称</label>
@@ -361,6 +391,60 @@ export default function BasicInfoPage() {
                       </button>
                     </div>
                   </div>
+                </div>
+                <div className="mt-4 pt-3 border-t border-slate-200">
+                  <p className="text-[10px] text-slate-500 mb-2 font-semibold">一括追加（CSV形式: 名称,説明,価格）</p>
+                  <textarea
+                    id="bulk-menu-csv"
+                    rows={4}
+                    placeholder={"特製ランチ,日替わりメイン+サラダ+スープ,1200\nハンバーグ定食,手ごねハンバーグ200g,980\nドリンクバー,,300"}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono"
+                  />
+                  <button onClick={async () => {
+                    const el = document.getElementById("bulk-menu-csv") as HTMLTextAreaElement;
+                    if (!el?.value.trim() || !selectedShopId) return;
+                    setMenuSaving(true);
+                    setMenuMsg("");
+                    const lines = el.value.trim().split("\n").filter(Boolean);
+                    let added = 0;
+                    for (const line of lines) {
+                      const [name, desc, price] = line.split(",").map(s => s.trim());
+                      if (!name) continue;
+                      try {
+                        const menuItem: any = {
+                          freeFormServiceItem: {
+                            label: { displayName: name, languageCode: "ja" },
+                            ...(desc ? { description: { text: desc, languageCode: "ja" } } : {}),
+                          },
+                          ...(price ? { price: { currencyCode: "JPY", units: parseInt(price) || 0 } } : {}),
+                        };
+                        await api.patch(`/api/shop/${selectedShopId}/location/food_menu`, { menuItems: [menuItem] });
+                        added++;
+                      } catch {}
+                    }
+                    setMenuMsg(`${added}/${lines.length}件のメニューを追加しました`);
+                    el.value = "";
+                    setMenuSaving(false);
+                    // リロード
+                    try {
+                      const res = await api.get(`/api/shop/${selectedShopId}/location`);
+                      const loc = res.data;
+                      const items: any[] = [];
+                      if (loc?.serviceItems) {
+                        loc.serviceItems.forEach((si: any) => {
+                          const nr = si.structuredServiceItem?.displayName || si.freeFormServiceItem?.label || "";
+                          const n = typeof nr === "object" ? (nr?.text || nr?.displayName || JSON.stringify(nr)) : String(nr || "不明");
+                          const dr = si.structuredServiceItem?.description || si.freeFormServiceItem?.description || "";
+                          const d = typeof dr === "object" ? (dr?.text || JSON.stringify(dr)) : String(dr || "");
+                          items.push({ name: n, description: d, price: si.price ? `¥${si.price.units || 0}` : "" });
+                        });
+                      }
+                      setServices(items);
+                    } catch {}
+                  }} disabled={menuSaving}
+                    className="mt-2 px-4 py-2 rounded-lg text-xs font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-50">
+                    {menuSaving ? "追加中..." : "CSV一括追加"}
+                  </button>
                 </div>
               </div>
             )}

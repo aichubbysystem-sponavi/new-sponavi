@@ -35,6 +35,7 @@ export default function Dashboard() {
   const [postCount, setPostCount] = useState(0);
   const [perfDateSort, setPerfDateSort] = useState<"desc" | "asc">("asc");
   const [churnData, setChurnData] = useState<{ summary?: { high: number; warning: number; stable: number }; scores?: any[] } | null>(null);
+  const [googleUpdates, setGoogleUpdates] = useState<{ title: string; link: string; published: string }[]>([]);
 
   const fetchPerformance = useCallback(async () => {
     if (!selectedShopId) return;
@@ -50,6 +51,12 @@ export default function Dashboard() {
   }, [selectedShopId]);
 
   useEffect(() => { fetchPerformance(); }, [fetchPerformance]);
+
+  // Googleアップデート通知取得
+  useEffect(() => {
+    fetch("/api/report/google-updates").then(r => r.ok ? r.json() : { updates: [] })
+      .then(d => setGoogleUpdates(d.updates || [])).catch(() => {});
+  }, []);
 
   // 解約予兆スコア取得
   useEffect(() => {
@@ -511,6 +518,22 @@ export default function Dashboard() {
               <span className="text-[10px] text-slate-400">{s.factors.join(" / ")}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Googleアップデート通知 */}
+      {googleUpdates.length > 0 && (
+        <div className="bg-white rounded-xl p-5 shadow-sm border border-blue-200 mt-6">
+          <h3 className="text-sm font-semibold text-blue-700 mb-3">Google検索アップデート情報</h3>
+          <div className="space-y-2">
+            {googleUpdates.slice(0, 3).map((u, i) => (
+              <a key={i} href={u.link} target="_blank" rel="noopener noreferrer"
+                className="block bg-blue-50 rounded-lg p-3 hover:bg-blue-100 transition">
+                <p className="text-xs font-medium text-blue-800">{u.title}</p>
+                {u.published && <p className="text-[10px] text-blue-500 mt-0.5">{new Date(u.published).toLocaleDateString("ja-JP")}</p>}
+              </a>
+            ))}
+          </div>
         </div>
       )}
 

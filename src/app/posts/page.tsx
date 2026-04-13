@@ -34,12 +34,32 @@ const STATUS_STYLES: Record<ConfirmStatus, { label: string; bg: string; text: st
   needs_fix: { label: "要修正", bg: "bg-red-50", text: "text-red-600" },
 };
 
+// GBP投稿エラー原因特定
+function diagnosePostError(error: any): { cause: string; fix: string } {
+  const status = error?.response?.status;
+  const msg = (error?.response?.data?.error || error?.response?.data?.message || error?.message || "").toLowerCase();
+
+  if (status === 400) {
+    if (msg.includes("photo") || msg.includes("media") || msg.includes("image")) return { cause: "写真URLが無効または読み込めません", fix: "写真URLが直接アクセス可能なURL（https://で始まる画像直リンク）か確認してください。Dropboxの場合はdl=1に変更してください。" };
+    if (msg.includes("summary") || msg.includes("text")) return { cause: "投稿文が無効です", fix: "投稿文が空でないか、1500文字以内か確認してください。" };
+    if (msg.includes("topic") || msg.includes("type")) return { cause: "投稿タイプが無効です", fix: "投稿タイプ（通常/イベント/特典/お知らせ）を再選択してください。" };
+    return { cause: "リクエストが不正です", fix: "投稿内容を確認し、必須項目（投稿文）が入力されているか確認してください。" };
+  }
+  if (status === 401 || status === 403) return { cause: "GBP認証の期限切れまたは権限不足", fix: "システム管理画面からGBP OAuth再認証を実行してください。" };
+  if (status === 404) return { cause: "GBPロケーションが見つかりません", fix: "店舗がGBPに正しく接続されているか確認してください。店舗一覧からGBP再インポートを試してください。" };
+  if (status === 429) return { cause: "Google APIのレート制限", fix: "しばらく待ってから再試行してください（通常1-2分で解除）。" };
+  if (status >= 500) return { cause: "Google側のサーバーエラー", fix: "Googleのシステム障害の可能性があります。数分後に再試行してください。" };
+  if (msg.includes("timeout") || msg.includes("econnaborted")) return { cause: "タイムアウト（写真のアップロードに時間がかかりすぎ）", fix: "写真サイズを小さくするか、写真なしで投稿してみてください。" };
+  if (msg.includes("network") || msg.includes("econnrefused")) return { cause: "ネットワーク接続エラー", fix: "インターネット接続を確認してください。Go APIサーバーが稼働中か確認してください。" };
+  return { cause: "不明なエラー", fix: "エラー詳細を確認し、管理者に連絡してください。" };
+}
+
 export default function PostsPage() {
   const { selectedShopId, selectedShop, apiConnected, shops, shopFilterMode } = useShop();
   const [localPosts, setLocalPosts] = useState<LocalPost[]>([]);
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
-  const [newPost, setNewPost] = useState({ summary: "", topicType: "STANDARD", actionType: "", actionUrl: "", photoUrl: "", scheduledAt: "" });
+  const [newPost, setNewPost] = useState({ summary: "", topicType: "STANDARD", actionType: "", actionUrl: "", photoUrl: "", scheduledAt: "", mediaType: "PHOTO" as "PHOTO" | "VIDEO" });
   const [scheduledPosts, setScheduledPosts] = useState<any[]>([]);
   const [autoPostSheet, setAutoPostSheet] = useState(() => {
     if (typeof window !== "undefined") return localStorage.getItem("auto-post-sheet") || "1bF-gXP05a3yoi1ZRnBTH6bnKCZRfStOBEucMKYY2eNA";
@@ -240,16 +260,20 @@ export default function PostsPage() {
       } else {
         const postData: any = { shopId: selectedShopId, summary: newPost.summary, topicType: newPost.topicType };
         if (newPost.actionType && newPost.actionUrl) postData.callToAction = { actionType: newPost.actionType, url: newPost.actionUrl };
-        if (newPost.photoUrl.trim()) postData.photoUrl = newPost.photoUrl.trim();
+        if (newPost.photoUrl.trim()) {
+          postData.photoUrl = newPost.photoUrl.trim();
+          postData.mediaType = newPost.mediaType || "PHOTO";
+        }
         await api.post("/api/report/create-post", postData, { timeout: 30000 });
         setMsg("投稿を作成しました！");
         logAudit("GBP投稿作成", `${selectedShop?.name} — ${newPost.summary.slice(0, 50)}${newPost.photoUrl ? "（写真付き）" : ""}`);
       }
       setShowCreate(false);
-      setNewPost({ summary: "", topicType: "STANDARD", actionType: "", actionUrl: "", photoUrl: "", scheduledAt: "" });
+      setNewPost({ summary: "", topicType: "STANDARD", actionType: "", actionUrl: "", photoUrl: "", scheduledAt: "", mediaType: "PHOTO" });
       await fetchData();
     } catch (e: any) {
-      setMsg(`投稿に失敗しました: ${e?.response?.data?.error || e?.message || "不明なエラー"}`);
+      const diag = diagnosePostError(e);
+      setMsg(`投稿に失敗しました\n原因: ${diag.cause}\n対処法: ${diag.fix}\n\n詳細: ${e?.response?.data?.error || e?.message || "不明"}`);
     } finally { setCreating(false); }
   };
 
@@ -644,10 +668,20 @@ export default function PostsPage() {
                   )}
                 </div>
                 <div>
-                  <label className="text-xs text-slate-500 block mb-1">写真URL（任意）</label>
+                  <div className="flex items-center gap-2 mb-1">
+                    <label className="text-xs text-slate-500">メディアURL（任意）</label>
+                    <div className="flex border border-slate-200 rounded overflow-hidden">
+                      <button type="button" onClick={() => setNewPost({ ...newPost, mediaType: "PHOTO" })}
+                        className={`px-2 py-0.5 text-[10px] font-semibold ${newPost.mediaType === "PHOTO" ? "bg-[#003D6B] text-white" : "bg-white text-slate-500"}`}>写真</button>
+                      <button type="button" onClick={() => setNewPost({ ...newPost, mediaType: "VIDEO" })}
+                        className={`px-2 py-0.5 text-[10px] font-semibold ${newPost.mediaType === "VIDEO" ? "bg-purple-600 text-white" : "bg-white text-slate-500"}`}>動画</button>
+                    </div>
+                  </div>
                   <input type="text" value={newPost.photoUrl} onChange={(e) => setNewPost({ ...newPost, photoUrl: e.target.value })}
-                    placeholder="https://example.com/photo.jpg" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-                  {newPost.photoUrl && <img src={newPost.photoUrl} alt="" className="h-20 rounded-lg object-cover mt-2 border" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />}
+                    placeholder={newPost.mediaType === "VIDEO" ? "https://example.com/video.mp4" : "https://example.com/photo.jpg"}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+                  {newPost.photoUrl && newPost.mediaType === "PHOTO" && <img src={newPost.photoUrl} alt="" className="h-20 rounded-lg object-cover mt-2 border" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />}
+                  {newPost.photoUrl && newPost.mediaType === "VIDEO" && <p className="text-[10px] text-purple-600 mt-1">動画URL設定済み</p>}
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
