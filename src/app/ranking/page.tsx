@@ -67,6 +67,8 @@ export default function RankingPage() {
   const [progress, setProgress] = useState("");
   const [results, setResults] = useState<RankResult[]>([]);
   const [history, setHistory] = useState<RankLog[]>([]);
+  const [rankAlerts, setRankAlerts] = useState<{ keyword: string; latest: number; prev: number; change: number; type: string }[]>([]);
+  const [optimalTime, setOptimalTime] = useState<{ recommendation: string; bestSlots: any[] } | null>(null);
   const [error, setError] = useState("");
   const [searchKeywords, setSearchKeywords] = useState<{ keyword: string; count: number }[]>([]);
   const [kwLoading, setKwLoading] = useState(false);
@@ -108,6 +110,25 @@ export default function RankingPage() {
   }, [selectedShopId]);
 
   useEffect(() => { fetchHistory(); }, [fetchHistory]);
+
+  // 順位変動アラート+最適投稿時間帯取得
+  useEffect(() => {
+    if (!selectedShopId) return;
+    const token = async () => {
+      const { supabase } = await import("@/lib/supabase");
+      return (await supabase.auth.getSession()).data.session?.access_token;
+    };
+    token().then(async (t) => {
+      try {
+        const [alertRes, timeRes] = await Promise.all([
+          fetch(`/api/report/rank-alert?shopId=${selectedShopId}`),
+          fetch(`/api/report/optimal-time?shopId=${selectedShopId}`),
+        ]);
+        if (alertRes.ok) { const d = await alertRes.json(); setRankAlerts(d.alerts || []); }
+        if (timeRes.ok) { const d = await timeRes.json(); setOptimalTime(d); }
+      } catch {}
+    });
+  }, [selectedShopId]);
 
   // 保存済み検索語句履歴を読み込み
   useEffect(() => {
@@ -255,6 +276,41 @@ export default function RankingPage() {
         </div>
       ) : (
         <>
+          {/* 順位変動アラート */}
+          {rankAlerts.length > 0 && (
+            <div className="bg-amber-50 rounded-xl p-4 shadow-sm border border-amber-200 mb-5">
+              <h3 className="text-sm font-semibold text-amber-700 mb-2">順位変動アラート（{rankAlerts.length}件）</h3>
+              <div className="space-y-1.5">
+                {rankAlerts.slice(0, 5).map((a, i) => (
+                  <div key={i} className="flex items-center gap-2 text-xs">
+                    <span className={`font-bold ${a.type === "up" ? "text-emerald-600" : "text-red-600"}`}>
+                      {a.type === "up" ? "↑" : "↓"}{Math.abs(a.change)}位
+                    </span>
+                    <span className="text-slate-700 font-medium">{a.keyword}</span>
+                    <span className="text-slate-400">{a.prev}位 → {a.latest}位</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 最適投稿時間帯 */}
+          {optimalTime && optimalTime.recommendation && (
+            <div className="bg-blue-50 rounded-xl p-4 shadow-sm border border-blue-200 mb-5">
+              <h3 className="text-sm font-semibold text-blue-700 mb-1">最適投稿時間帯</h3>
+              <p className="text-xs text-blue-600">{optimalTime.recommendation}</p>
+              {optimalTime.bestSlots && optimalTime.bestSlots.length > 0 && (
+                <div className="flex gap-2 mt-2">
+                  {optimalTime.bestSlots.slice(0, 3).map((s: any, i: number) => (
+                    <span key={i} className="text-[10px] bg-white px-2 py-1 rounded border border-blue-200 text-blue-700">
+                      {s.recommended}（{s.count}件）
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
             {/* キーワード入力 */}
             <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
