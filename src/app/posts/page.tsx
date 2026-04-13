@@ -473,7 +473,7 @@ export default function PostsPage() {
           {showCreate && (
           <>
           {/* シートから自動投稿 */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4 mb-5">
+          <div className="bg-blue-50 rounded-xl shadow-sm border border-blue-200 p-4 mb-5">
             <button onClick={() => setShowAutoPost(!showAutoPost)}
               className="flex items-center justify-between w-full">
               <h3 className="text-sm font-semibold text-slate-500">シートから自動投稿</h3>
@@ -567,7 +567,7 @@ export default function PostsPage() {
           </div>
 
           {/* 一括AI記事生成 */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4 mb-5">
+          <div className="bg-amber-50 rounded-xl shadow-sm border border-amber-200 p-4 mb-5">
             <button onClick={() => setShowBulkGen(!showBulkGen)}
               className="flex items-center justify-between w-full">
               <h3 className="text-sm font-semibold text-slate-500">AI一括記事生成（全店舗）</h3>
