@@ -332,7 +332,7 @@ export default function PostsPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 mt-2 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">投稿管理・分析</h1>
           <p className="text-sm text-slate-500 mt-1">GBP投稿の作成・確認・分析・カレンダー</p>
