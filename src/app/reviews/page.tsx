@@ -233,14 +233,23 @@ export default function ReviewsPage() {
       const goodWords = new Map<string, number>();
       const badWords = new Map<string, number>();
 
-      // ひらがなのみの断片を排除するフィルタ
-      const isHiraganaOnly = (w: string) => /^[\u3040-\u309F]+$/.test(w);
-      const hasKanji = (w: string) => /[\u4E00-\u9FFF]/.test(w);
-      const hasKatakana = (w: string) => /[\u30A0-\u30FF]/.test(w);
+      // 店舗名から断片を除外用に分割
+      const shopNameParts = new Set<string>();
+      const sn = selectedShop?.name || "";
+      // 店舗名のカタカナ・漢字部分を2文字以上で抽出して除外リストに
+      (sn.match(/[\u30A0-\u30FF]{2,}/g) || []).forEach((p) => shopNameParts.add(p));
+      (sn.match(/[\u4E00-\u9FFF]{2,}/g) || []).forEach((p) => shopNameParts.add(p));
 
-      // 無意味な断片パターン（末尾が助動詞・助詞的）
-      const junkSuffix = /(?:します|しました|ました|ません|ですが|ですし|ですね|ですよ|ですか|ますが|ますし|ますね|ますよ|ますか|と思い|と思う|が良い|た方が|した方|方が良|思いま|いと思|になり|になっ|をして|にして|くださ|ござい|ありが|いただ|されて|させて|しまし|してい|しており|してく|してくれ|してもら|できまし|できます|ています|ていただ|ておりま|れました|きました|みました|てました|していま|していた)$/;
-      const junkPrefix = /^(?:ありがとう|ございます|いただき|させていた|してもらい|と思います|した方が良|いと思いま)/;
+      // 無意味な末尾パターン
+      const junkEnding = /(?:します|しました|ました|ません|ですが|ですし|ですね|ですよ|ですか|ますが|ますね|ますよ|ますか|と思い|と思う|思いま|いです|かった|良いで|しいの|もあり|てもら|ていた|くださ|ござい|いただ|されて|させて|してい|してく|になり|になっ|にして|をして|できま|ておりま|れまし|きまし|みまし|てまし|ていま)$/;
+      // 無意味な語そのもの
+      const stopSet = new Set([
+        "思います","良いです","美味しい","美味しく","美味しか","嬉しい","楽しい",
+        "良かった","美味しかった","オススメ","おすすめ","最高です",
+        "何食べても","何本でも","串カツも","串カツは",
+        "良いと思","食べても","しかった","いいです","多いです","高いです","安いです",
+        "行きたい","食べたい","飲みたい",
+      ]);
 
       allComments.forEach((r) => {
         if (!r.comment) return;
@@ -248,26 +257,26 @@ export default function ReviewsPage() {
         const stars = starToNum(r.star_rating);
         const isGood = stars >= 4;
 
-        // カタカナ語（2文字以上）を優先抽出
-        const katakanaWords: string[] = text.match(/[\u30A0-\u30FF]{2,10}/g) || [];
-        // 漢字を含む語（2-6文字）
-        const kanjiWords: string[] = text.match(/[\u4E00-\u9FFF][\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF]{1,5}/g) || [];
-        // 「また行きたい」等のフレーズは漢字+ひらがな混合で拾う
-        const mixedWords: string[] = text.match(/[\u4E00-\u9FFF\u30A0-\u30FF][\u3040-\u309F\u4E00-\u9FFF\u30A0-\u30FF]{2,5}/g) || [];
+        // カタカナ語（3文字以上 — 2文字は「カツ」等で意味不明になりやすい）
+        const katakanaWords: string[] = text.match(/[\u30A0-\u30FF]{3,10}/g) || [];
+        // 漢字2文字以上の語
+        const kanjiWords: string[] = text.match(/[\u4E00-\u9FFF]{2,6}/g) || [];
+        // 漢字+カタカナの複合語（例: 「接客態度」「駐車場」）
+        const compoundWords: string[] = text.match(/[\u4E00-\u9FFF\u30A0-\u30FF]{3,8}/g) || [];
 
-        const allWords = [...katakanaWords, ...kanjiWords, ...mixedWords];
+        const allWords = [...katakanaWords, ...kanjiWords, ...compoundWords];
         const seen = new Set<string>();
 
         allWords.forEach((w: string) => {
           if (seen.has(w)) return;
           seen.add(w);
-          if (w.length < 2) return;
-          // ひらがなのみは全て除外
-          if (isHiraganaOnly(w)) return;
+          if (w.length < 3) return;
+          // ひらがなを含むものは除外（漢字・カタカナのみ通す）
+          if (/[\u3040-\u309F]/.test(w)) return;
           // 無意味パターン除外
-          if (junkSuffix.test(w) || junkPrefix.test(w)) return;
-          // 漢字1文字+ひらがなだけ（例: 「行きた」）は除外
-          if (w.length <= 3 && !hasKatakana(w) && (w.match(/[\u4E00-\u9FFF]/g) || []).length <= 1) return;
+          if (junkEnding.test(w) || stopSet.has(w)) return;
+          // 店舗名の断片は除外
+          if (shopNameParts.has(w)) return;
 
           const map = isGood ? goodWords : badWords;
           map.set(w, (map.get(w) || 0) + 1);
