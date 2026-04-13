@@ -499,7 +499,7 @@ export default function PostsPage() {
                     <button onClick={async () => {
                       setAutoPosting(true); setAutoPostResult(null);
                       try {
-                        const res = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: newPost.topicType }, { timeout: 60000 });
+                        const res = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType }, { timeout: 60000 });
                         setAutoPostResult({ ...res.data, mode: "preview" });
                       } catch (e: any) { setAutoPostResult({ error: e?.response?.data?.error || e?.message }); }
                       finally { setAutoPosting(false); }
@@ -511,7 +511,7 @@ export default function PostsPage() {
                       if (!confirm(`${autoPostDate}の投稿を実行しますか？`)) return;
                       setAutoPosting(true); setAutoPostResult(null);
                       try {
-                        const res = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, topicType: newPost.topicType }, { timeout: 300000 });
+                        const res = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, topicType: postSelectedType || newPost.topicType }, { timeout: 300000 });
                         setAutoPostResult({ ...res.data, mode: "executed" });
                         logAudit("シート自動投稿", `${autoPostDate} — ${res.data.posted}件投稿`);
                         await fetchData();
