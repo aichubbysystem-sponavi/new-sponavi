@@ -19,6 +19,16 @@ export default function BasicInfoPage() {
   const [alertDismissed, setAlertDismissed] = useState(false);
   const [services, setServices] = useState<any[]>([]);
   const [serviceLoading, setServiceLoading] = useState(false);
+  // メニュー編集
+  const [editingMenu, setEditingMenu] = useState(false);
+  const [newMenu, setNewMenu] = useState({ name: "", description: "", price: "" });
+  const [menuSaving, setMenuSaving] = useState(false);
+  const [menuMsg, setMenuMsg] = useState("");
+  // GBP編集機能
+  const [editing, setEditing] = useState(false);
+  const [editForm, setEditForm] = useState({ title: "", phone: "", website: "", description: "" });
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState("");
 
   const fetchLocation = useCallback(async () => {
     if (!selectedShopId) return;
@@ -68,6 +78,73 @@ export default function BasicInfoPage() {
   }, [selectedShopId]);
 
   useEffect(() => { fetchLocation(); }, [fetchLocation]);
+
+  const saveMenu = async () => {
+    if (!selectedShopId || !newMenu.name.trim()) return;
+    setMenuSaving(true);
+    setMenuMsg("");
+    try {
+      const menuItem: any = {
+        freeFormServiceItem: {
+          label: { displayName: newMenu.name.trim(), languageCode: "ja" },
+          ...(newMenu.description.trim() ? { description: { text: newMenu.description.trim(), languageCode: "ja" } } : {}),
+        },
+        ...(newMenu.price ? { price: { currencyCode: "JPY", units: parseInt(newMenu.price) || 0 } } : {}),
+      };
+      await api.patch(`/api/shop/${selectedShopId}/location/food_menu`, { menuItems: [menuItem] });
+      setMenuMsg("メニューを追加しました");
+      setNewMenu({ name: "", description: "", price: "" });
+      setEditingMenu(false);
+      // リロード
+      const res = await api.get(`/api/shop/${selectedShopId}/location`);
+      const loc = res.data;
+      const items: any[] = [];
+      if (loc?.serviceItems) {
+        loc.serviceItems.forEach((si: any) => {
+          const nameRaw = si.structuredServiceItem?.displayName || si.freeFormServiceItem?.label || "";
+          const name = typeof nameRaw === "object" ? (nameRaw?.text || nameRaw?.displayName || JSON.stringify(nameRaw)) : String(nameRaw || "不明");
+          const descRaw = si.structuredServiceItem?.description || si.freeFormServiceItem?.description || "";
+          const desc = typeof descRaw === "object" ? (descRaw?.text || JSON.stringify(descRaw)) : String(descRaw || "");
+          items.push({ name, description: desc, price: si.price ? `¥${si.price.units || 0}` : "" });
+        });
+      }
+      setServices(items);
+    } catch (e: any) {
+      setMenuMsg(`メニュー追加失敗: ${e?.response?.data?.message || e?.message || "エラー"}`);
+    }
+    setMenuSaving(false);
+  };
+
+  const startEdit = () => {
+    setEditForm({
+      title: location?.title || "",
+      phone: location?.phoneNumbers?.primaryPhone || "",
+      website: location?.websiteUri || "",
+      description: location?.profile?.description || "",
+    });
+    setEditing(true);
+    setSaveMsg("");
+  };
+
+  const handleSave = async () => {
+    if (!selectedShopId) return;
+    setSaving(true);
+    setSaveMsg("");
+    try {
+      const patchData: any = {};
+      if (editForm.title) patchData.title = editForm.title;
+      if (editForm.phone) patchData.phoneNumbers = { primaryPhone: editForm.phone };
+      if (editForm.website) patchData.websiteUri = editForm.website;
+      if (editForm.description) patchData.profile = { description: editForm.description };
+      await api.patch(`/api/shop/${selectedShopId}/location`, patchData);
+      setSaveMsg("GBP情報を更新しました");
+      setEditing(false);
+      await fetchLocation();
+    } catch (e: any) {
+      setSaveMsg(`更新失敗: ${e?.response?.data?.message || e?.message || "不明なエラー"}`);
+    }
+    setSaving(false);
+  };
 
   // サービス/メニュー取得
   useEffect(() => {
@@ -159,7 +236,18 @@ export default function BasicInfoPage() {
 
           {/* GBPロケーション情報 */}
           <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
-            <h3 className="text-sm font-semibold text-slate-500 mb-4">GBPロケーション情報</h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-slate-500">GBPロケーション情報</h3>
+              {location && !editing && (
+                <button onClick={startEdit}
+                  className="px-3 py-1 rounded-lg text-xs font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a] transition">
+                  編集
+                </button>
+              )}
+            </div>
+            {saveMsg && (
+              <div className={`p-2 rounded-lg mb-3 text-xs ${saveMsg.includes("失敗") ? "bg-red-50 text-red-600" : "bg-emerald-50 text-emerald-600"}`}>{saveMsg}</div>
+            )}
             {location ? (
               <div className="space-y-3">
                 <div className="flex justify-between py-2 border-b border-slate-50">
@@ -199,11 +287,83 @@ export default function BasicInfoPage() {
             ) : (
               <p className="text-slate-400 text-sm text-center py-6">GBPロケーション情報が取得できません</p>
             )}
+            {/* GBP編集フォーム */}
+            {editing && (
+              <div className="mt-4 pt-4 border-t border-slate-200">
+                <h4 className="text-xs font-semibold text-[#003D6B] mb-3">GBP情報を編集</h4>
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-[10px] text-slate-500 block mb-1">店舗名</label>
+                    <input type="text" value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-500 block mb-1">電話番号</label>
+                    <input type="text" value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-500 block mb-1">Webサイト</label>
+                    <input type="text" value={editForm.website} onChange={(e) => setEditForm({ ...editForm, website: e.target.value })}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-500 block mb-1">説明文</label>
+                    <textarea value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                      rows={4} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20" />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={handleSave} disabled={saving}
+                      className="px-4 py-2 rounded-lg text-xs font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-50">
+                      {saving ? "保存中..." : "GBPに保存"}
+                    </button>
+                    <button onClick={() => setEditing(false)}
+                      className="px-4 py-2 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200">
+                      キャンセル
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* メニュー・サービス一覧 */}
           <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100 xl:col-span-2 mt-6">
-            <h3 className="text-sm font-semibold text-slate-500 mb-4">メニュー・商品・サービス</h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-slate-500">メニュー・商品・サービス</h3>
+              <button onClick={() => setEditingMenu(!editingMenu)}
+                className="px-3 py-1 rounded-lg text-xs font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a]">
+                {editingMenu ? "閉じる" : "+ メニュー追加"}
+              </button>
+            </div>
+            {menuMsg && <div className={`p-2 rounded-lg mb-3 text-xs ${menuMsg.includes("失敗") ? "bg-red-50 text-red-600" : "bg-emerald-50 text-emerald-600"}`}>{menuMsg}</div>}
+            {editingMenu && (
+              <div className="bg-slate-50 rounded-lg p-4 mb-4 border border-slate-200">
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-[10px] text-slate-500 block mb-1">名称</label>
+                    <input type="text" value={newMenu.name} onChange={(e) => setNewMenu({ ...newMenu, name: e.target.value })}
+                      placeholder="例: 特製ランチ" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-500 block mb-1">説明</label>
+                    <input type="text" value={newMenu.description} onChange={(e) => setNewMenu({ ...newMenu, description: e.target.value })}
+                      placeholder="例: 日替わりのメイン+サラダ+スープ" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-500 block mb-1">価格（円）</label>
+                    <div className="flex gap-2">
+                      <input type="number" value={newMenu.price} onChange={(e) => setNewMenu({ ...newMenu, price: e.target.value })}
+                        placeholder="1000" className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+                      <button onClick={saveMenu} disabled={menuSaving || !newMenu.name.trim()}
+                        className="px-4 py-2 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">
+                        {menuSaving ? "追加中..." : "追加"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
             {serviceLoading ? (
               <p className="text-slate-400 text-sm text-center py-6">読み込み中...</p>
             ) : services.length === 0 ? (

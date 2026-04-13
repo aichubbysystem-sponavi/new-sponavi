@@ -47,6 +47,10 @@ export default function ReviewsPage() {
   const [templates, setTemplates] = useState<{ id: string; name: string; content: string; star_category: string; use_count: number }[]>([]);
   const [showTemplates, setShowTemplates] = useState(false);
   const [savingTemplate, setSavingTemplate] = useState(false);
+  // 自動返信設定
+  const [showAutoReply, setShowAutoReply] = useState(false);
+  const [autoReplySettings, setAutoReplySettings] = useState<any[]>([]);
+  const [autoReplySaving, setAutoReplySaving] = useState(false);
 
   const isAllMode = shopFilterMode === "all";
 
@@ -184,6 +188,34 @@ export default function ReviewsPage() {
     } catch {}
   }, []);
   useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
+
+  // 自動返信設定取得
+  const fetchAutoReplySettings = useCallback(async () => {
+    if (!selectedShopId) return;
+    try {
+      const res = await api.get(`/api/shop/${selectedShopId}/review/reply_setting`);
+      setAutoReplySettings(res.data?.settings || res.data || []);
+    } catch { setAutoReplySettings([]); }
+  }, [selectedShopId]);
+  useEffect(() => { fetchAutoReplySettings(); }, [fetchAutoReplySettings]);
+
+  const saveAutoReplySetting = async (starMin: number, starMax: number, templateContent: string, enabled: boolean) => {
+    if (!selectedShopId) return;
+    setAutoReplySaving(true);
+    try {
+      await api.post(`/api/shop/${selectedShopId}/review/reply_setting`, {
+        star_min: starMin,
+        star_max: starMax,
+        template: templateContent,
+        enabled,
+      });
+      setSyncMsg("自動返信設定を保存しました");
+      await fetchAutoReplySettings();
+    } catch (e: any) {
+      setSyncMsg(`設定保存失敗: ${e?.response?.data?.message || e?.message || "エラー"}`);
+    }
+    setAutoReplySaving(false);
+  };
 
   const saveAsTemplate = async (content: string, starRating: number) => {
     setSavingTemplate(true);
@@ -566,6 +598,65 @@ export default function ReviewsPage() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 口コミ自動返信設定 */}
+      {selectedShopId && !isAllMode && (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-100 mb-4">
+          <button onClick={() => setShowAutoReply(!showAutoReply)}
+            className="w-full flex items-center justify-between p-4 hover:bg-slate-50 transition">
+            <span className="text-sm font-semibold text-slate-500">口コミ自動返信設定（Go APIバッチ連携）</span>
+            <span className="text-xs text-slate-400">{showAutoReply ? "▲ 閉じる" : "▼ 開く"}</span>
+          </button>
+          {showAutoReply && (
+            <div className="px-4 pb-4 border-t border-slate-100">
+              <p className="text-xs text-slate-400 mt-3 mb-3">★評価別に自動返信ルールを設定します。バッチジョブが定期実行し、条件に合う口コミに自動返信します。</p>
+              <div className="space-y-3">
+                {[
+                  { label: "★5 高評価", min: 5, max: 5, template: "ありがとうございます！素敵なレビューをいただき、スタッフ一同大変嬉しく思います。またのご来店をお待ちしております。" },
+                  { label: "★4 好評価", min: 4, max: 4, template: "ご来店いただきありがとうございます。お客様にご満足いただけて何よりです。今後もより良いサービスを目指してまいります。" },
+                  { label: "★3 普通", min: 3, max: 3, template: "ご来店いただきありがとうございます。貴重なご意見を参考に、サービスの改善に努めてまいります。" },
+                  { label: "★1-2 低評価", min: 1, max: 2, template: "ご来店いただきありがとうございます。ご期待に添えず大変申し訳ございません。頂戴したご意見を真摯に受け止め、改善に取り組んでまいります。" },
+                ].map((rule) => {
+                  const existing = autoReplySettings.find((s: any) => s.star_min === rule.min && s.star_max === rule.max);
+                  return (
+                    <div key={rule.label} className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-semibold text-slate-700">{rule.label}</span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded font-semibold ${existing?.enabled ? "bg-emerald-50 text-emerald-600" : "bg-slate-100 text-slate-400"}`}>
+                          {existing?.enabled ? "有効" : "無効"}
+                        </span>
+                      </div>
+                      <textarea
+                        defaultValue={existing?.template || rule.template}
+                        id={`auto-reply-${rule.min}-${rule.max}`}
+                        rows={2}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs mb-2"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            const el = document.getElementById(`auto-reply-${rule.min}-${rule.max}`) as HTMLTextAreaElement;
+                            saveAutoReplySetting(rule.min, rule.max, el?.value || rule.template, true);
+                          }}
+                          disabled={autoReplySaving}
+                          className="px-3 py-1 rounded text-[10px] font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">
+                          有効にして保存
+                        </button>
+                        <button
+                          onClick={() => saveAutoReplySetting(rule.min, rule.max, "", false)}
+                          disabled={autoReplySaving}
+                          className="px-3 py-1 rounded text-[10px] font-semibold bg-slate-200 text-slate-600 hover:bg-slate-300 disabled:opacity-50">
+                          無効にする
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>

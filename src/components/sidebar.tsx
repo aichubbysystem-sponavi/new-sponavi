@@ -54,6 +54,7 @@ const navSections = [
     children: [
       { href: "/user-management", label: "ユーザー・権限管理" },
       { href: "/customer-master", label: "顧客マスタ" },
+      { href: "/group-management", label: "グループ管理" },
     ],
   },
 ];

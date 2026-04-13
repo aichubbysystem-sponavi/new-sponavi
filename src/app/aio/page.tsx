@@ -19,6 +19,12 @@ export default function AioPage() {
   const [generating, setGenerating] = useState(false);
   const [suggestions, setSuggestions] = useState<{ q: string; a: string }[]>([]);
   const [msg, setMsg] = useState("");
+  const [answeringId, setAnsweringId] = useState<string | null>(null);
+  const [answerText, setAnswerText] = useState("");
+  const [posting, setPosting] = useState(false);
+  const [showAddQA, setShowAddQA] = useState(false);
+  const [newQ, setNewQ] = useState("");
+  const [newA, setNewA] = useState("");
 
   const fetchQuestions = useCallback(async () => {
     if (!selectedShopId) return;
@@ -76,6 +82,54 @@ A2: (回答)
   };
 
   const unanswered = questions.filter((q) => !q.topAnswers || q.topAnswers.length === 0).length;
+
+  // Q&Aに回答を投稿
+  const postAnswer = async (questionName: string) => {
+    if (!selectedShopId || !answerText.trim()) return;
+    setPosting(true);
+    try {
+      await api.post(`/api/shop/${selectedShopId}/question/answer`, { name: questionName, text: answerText.trim() });
+      setMsg("回答を投稿しました");
+      setAnsweringId(null);
+      setAnswerText("");
+      await fetchQuestions();
+    } catch (e: any) {
+      setMsg(`回答投稿失敗: ${e?.response?.data?.message || e?.message || "エラー"}`);
+    }
+    setPosting(false);
+  };
+
+  // Q&Aを新規作成
+  const createQA = async () => {
+    if (!selectedShopId || !newQ.trim()) return;
+    setPosting(true);
+    try {
+      await api.post(`/api/shop/${selectedShopId}/question`, { text: newQ.trim() });
+      if (newA.trim()) {
+        await fetchQuestions(); // 作成後にリロードしてnameを取得する必要あり
+      }
+      setMsg("Q&Aを作成しました");
+      setShowAddQA(false);
+      setNewQ("");
+      setNewA("");
+      await fetchQuestions();
+    } catch (e: any) {
+      setMsg(`Q&A作成失敗: ${e?.response?.data?.message || e?.message || "エラー"}`);
+    }
+    setPosting(false);
+  };
+
+  // Q&Aを削除
+  const deleteQA = async (questionName: string) => {
+    if (!selectedShopId || !confirm("このQ&Aを削除しますか？")) return;
+    try {
+      await api.post(`/api/shop/${selectedShopId}/question/delete`, { name: questionName });
+      setMsg("Q&Aを削除しました");
+      await fetchQuestions();
+    } catch (e: any) {
+      setMsg(`削除失敗: ${e?.response?.data?.message || e?.message || "エラー"}`);
+    }
+  };
 
   return (
     <div className="animate-fade-in">
@@ -144,10 +198,41 @@ A2: (回答)
             )}
           </div>
 
+          {/* Q&A新規追加 */}
+          {showAddQA && (
+            <div className="bg-white rounded-xl p-5 shadow-sm border border-blue-200 mb-5">
+              <h4 className="text-sm font-semibold text-[#003D6B] mb-3">新規Q&Aを追加</h4>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[10px] text-slate-500 block mb-1">質問</label>
+                  <input type="text" value={newQ} onChange={(e) => setNewQ(e.target.value)} placeholder="例: 駐車場はありますか？"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-500 block mb-1">回答（任意）</label>
+                  <textarea value={newA} onChange={(e) => setNewA(e.target.value)} placeholder="例: はい、店舗前に5台分の駐車場をご用意しております。"
+                    rows={2} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20" />
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={createQA} disabled={posting || !newQ.trim()}
+                    className="px-4 py-2 rounded-lg text-xs font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-50">
+                    {posting ? "追加中..." : "GBPに追加"}
+                  </button>
+                  <button onClick={() => setShowAddQA(false)}
+                    className="px-4 py-2 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200">キャンセル</button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* 既存Q&A一覧 */}
           <div className="bg-white rounded-xl shadow-sm border border-slate-100">
-            <div className="p-4 border-b border-slate-100">
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-slate-500">GBP Q&A一覧（{questions.length}件）</h3>
+              <button onClick={() => setShowAddQA(!showAddQA)}
+                className="px-3 py-1 rounded-lg text-xs font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a]">
+                + Q&A追加
+              </button>
             </div>
             {loading ? (
               <div className="p-12 text-center"><p className="text-slate-400 text-sm">読み込み中...</p></div>
@@ -178,7 +263,33 @@ A2: (回答)
                             ))}
                           </div>
                         ) : (
-                          <p className="text-xs text-red-500 mt-2">⚠ 未回答</p>
+                          <div className="mt-2">
+                            <p className="text-xs text-red-500 mb-2">⚠ 未回答</p>
+                            {answeringId === q.name ? (
+                              <div className="bg-blue-50 rounded-lg p-3 border border-blue-100">
+                                <textarea value={answerText} onChange={(e) => setAnswerText(e.target.value)}
+                                  placeholder="回答を入力..." rows={2}
+                                  className="w-full px-3 py-2 border border-blue-200 rounded-lg text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+                                <div className="flex gap-2">
+                                  <button onClick={() => postAnswer(q.name || "")} disabled={posting || !answerText.trim()}
+                                    className="px-3 py-1 rounded text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+                                    {posting ? "投稿中..." : "回答を投稿"}
+                                  </button>
+                                  <button onClick={() => { setAnsweringId(null); setAnswerText(""); }}
+                                    className="px-3 py-1 rounded text-xs font-semibold bg-slate-100 text-slate-600">キャンセル</button>
+                                </div>
+                              </div>
+                            ) : (
+                              <button onClick={() => setAnsweringId(q.name || null)}
+                                className="px-3 py-1 rounded text-xs font-semibold bg-blue-50 text-blue-600 hover:bg-blue-100">
+                                回答する
+                              </button>
+                            )}
+                          </div>
+                        )}
+                        {q.name && (
+                          <button onClick={() => deleteQA(q.name!)}
+                            className="mt-2 text-[10px] text-red-400 hover:text-red-600">削除</button>
                         )}
                       </div>
                     </div>
