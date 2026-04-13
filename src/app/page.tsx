@@ -36,6 +36,7 @@ export default function Dashboard() {
   const [perfDateSort, setPerfDateSort] = useState<"desc" | "asc">("asc");
   const [churnData, setChurnData] = useState<{ summary?: { high: number; warning: number; stable: number }; scores?: any[] } | null>(null);
   const [googleUpdates, setGoogleUpdates] = useState<{ title: string; link: string; published: string }[]>([]);
+  const [lineAlerts, setLineAlerts] = useState<any[]>([]);
 
   const fetchPerformance = useCallback(async () => {
     if (!selectedShopId) return;
@@ -51,6 +52,17 @@ export default function Dashboard() {
   }, [selectedShopId]);
 
   useEffect(() => { fetchPerformance(); }, [fetchPerformance]);
+
+  // LINEアラート取得
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await supabase.from("line_alerts").select("*").eq("resolved", false)
+          .order("created_at", { ascending: false }).limit(5);
+        setLineAlerts(data || []);
+      } catch {}
+    })();
+  }, []);
 
   // Googleアップデート通知取得
   useEffect(() => {
@@ -518,6 +530,33 @@ export default function Dashboard() {
               <span className="text-[10px] text-slate-400">{s.factors.join(" / ")}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* LINE ROM監視アラート */}
+      {lineAlerts.length > 0 && (
+        <div className="bg-white rounded-xl p-5 shadow-sm border border-orange-200 mt-6">
+          <h3 className="text-sm font-semibold text-orange-700 mb-3">LINE監視アラート（{lineAlerts.length}件）</h3>
+          <div className="space-y-2">
+            {lineAlerts.map((alert: any) => (
+              <div key={alert.id} className="flex items-start justify-between bg-orange-50 rounded-lg p-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${alert.alert_type === "urgent" ? "bg-red-100 text-red-600" : "bg-amber-100 text-amber-600"}`}>
+                      {alert.alert_type === "urgent" ? "緊急" : "変更依頼"}
+                    </span>
+                    <span className="text-[10px] text-orange-600 font-semibold">{alert.keyword}</span>
+                    <span className="text-[10px] text-slate-400">{new Date(alert.created_at).toLocaleString("ja-JP")}</span>
+                  </div>
+                  <p className="text-xs text-slate-700 truncate">{alert.message}</p>
+                </div>
+                <button onClick={async () => {
+                  await supabase.from("line_alerts").update({ resolved: true }).eq("id", alert.id);
+                  setLineAlerts(lineAlerts.filter(a => a.id !== alert.id));
+                }} className="text-[10px] text-slate-400 hover:text-emerald-600 ml-2 flex-shrink-0">対応済み</button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
