@@ -66,46 +66,68 @@ async function getDropboxAccessToken(): Promise<string | null> {
 }
 
 /**
- * Dropboxフォルダ内を日付で検索し、一致する全ファイルの一時DLリンクを取得（複数写真対応）
+ * Dropbox共有リンクからフォルダ内のファイルをリストし、日付マッチする全写真のDLリンクを取得
  */
 async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: string, shopName: string): Promise<{ urls: string[]; debug: string }> {
   const dbxToken = await getDropboxAccessToken();
   if (!dbxToken) return { urls: [], debug: "Dropboxトークン取得失敗" };
 
   try {
-    const searchRes = await fetch("https://api.dropboxapi.com/2/files/search_v2", {
+    // 方法1: 共有リンクからフォルダ内ファイルをリスト（list_folder via shared_link）
+    const cleanUrl = folderUrl.split("?")[0].replace(/\/+$/, "");
+    const listRes = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
-      body: JSON.stringify({ query: dateCompact, options: { max_results: 50 } }),
+      body: JSON.stringify({
+        path: "",
+        shared_link: { url: cleanUrl },
+        limit: 100,
+      }),
     });
 
-    if (!searchRes.ok) return { urls: [], debug: `Dropbox検索API ${searchRes.status}` };
+    let files: { name: string; path: string }[] = [];
 
-    const searchData = await searchRes.json();
-    const allResults = searchData.matches || [];
-    if (allResults.length === 0) return { urls: [], debug: `「${dateCompact}」を含むファイルが0件` };
+    if (listRes.ok) {
+      const listData = await listRes.json();
+      files = (listData.entries || [])
+        .filter((e: any) => e[".tag"] === "file")
+        .map((e: any) => ({ name: e.name || "", path: e.path_display || e.path_lower || "" }));
+    } else {
+      // list_folder失敗時はSearch APIにフォールバック
+      const searchRes = await fetch("https://api.dropboxapi.com/2/files/search_v2", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
+        body: JSON.stringify({ query: dateCompact, options: { max_results: 50 } }),
+      });
+      if (!searchRes.ok) return { urls: [], debug: `Dropbox API失敗 list:${listRes.status} search:${searchRes.status}` };
+      const searchData = await searchRes.json();
+      files = (searchData.matches || []).map((m: any) => ({
+        name: m.metadata?.metadata?.name || "",
+        path: m.metadata?.metadata?.path_display || m.metadata?.metadata?.path_lower || "",
+      }));
+    }
 
-    // 店舗名の一部がパスに含まれるファイルをフィルタ
-    const shopParts = shopName.split(/[\s　]+/).filter((p) => p.length >= 2);
-    const shopMatches = allResults.filter((m: any) => {
-      const path = (m.metadata?.metadata?.path_display || "").toLowerCase();
-      return shopParts.some((part) => path.includes(part.toLowerCase()));
+    if (files.length === 0) return { urls: [], debug: "フォルダ内にファイルが0件" };
+
+    // 日付を含む画像ファイルをフィルタ
+    const dateMatches = files.filter(f => {
+      if (!/\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(f.name)) return false;
+      return f.name.includes(dateCompact);
     });
-    const targets = shopMatches.length > 0 ? shopMatches : [allResults[0]];
+
+    if (dateMatches.length === 0) {
+      return { urls: [], debug: `フォルダ内${files.length}件中「${dateCompact}」マッチ0件。ファイル例: ${files.slice(0, 3).map(f => f.name).join(", ")}` };
+    }
 
     // 全マッチファイルのDLリンクを取得
     const urls: string[] = [];
-    for (const match of targets.slice(0, 10)) {
-      const filePath = match.metadata?.metadata?.path_display || match.metadata?.metadata?.path_lower;
-      if (!filePath) continue;
-      // 画像ファイルのみ
-      if (!/\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(filePath)) continue;
-
+    for (const file of dateMatches.slice(0, 10)) {
       try {
+        // 共有リンク経由のファイルはget_shared_link_fileではなくget_temporary_linkを使用
         const linkRes = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
-          body: JSON.stringify({ path: filePath }),
+          body: JSON.stringify({ path: file.path }),
         });
         if (linkRes.ok) {
           const linkData = await linkRes.json();
@@ -114,7 +136,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
       } catch {}
     }
 
-    return { urls, debug: urls.length > 0 ? `${urls.length}枚取得` : "DLリンク取得失敗" };
+    return { urls, debug: urls.length > 0 ? `${urls.length}枚取得（${dateMatches.length}件マッチ）` : `${dateMatches.length}件マッチしたがDLリンク取得失敗` };
   } catch (e: any) {
     return { urls: [], debug: `例外: ${e?.message}` };
   }
