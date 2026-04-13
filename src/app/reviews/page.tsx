@@ -232,47 +232,53 @@ export default function ReviewsPage() {
 
       const goodWords = new Map<string, number>();
       const badWords = new Map<string, number>();
-      const stopWords = new Set([
-        // 助詞・助動詞・接続詞
-        "の","は","が","を","に","で","と","も","や","など","です","ます","した","ました","ない","ある","いる",
-        "この","その","こと","もの","から","まで","より","ので","けど","だけ","ても","って","する","なる",
-        "れる","られる","てる","いい","よい","ところ","ている","れた","られた","くれ","てくれ","ていた",
-        "なかっ","くださ","ほう","ほど","みた","よう","ただ","どう","ぐらい","くらい","それ","あと","そう",
-        "たく","さん","ちゃん","ません","ました","ながら","ぐらい","だった","でした","ですが","ますが",
-        // 副詞・挨拶の断片
-        "とても","すごく","かなり","ちょっと","少し","まあ","けっこう","本当に","非常に",
-        "ありがとう","ございま","ござい","ありがとうご","ざいました","ざいます","たいです","たいと",
-        "いただ","いただき","させて","しまし","してい","しており","されて","なって","になり",
-        "おり","かった","けまし","ました","でして","ていた","てくだ","くださり","くださいま",
-        // 一般的すぎる語
-        "あり","思い","感じ","行き","来て","見て","入り","出て","言っ","聞い","知り","使っ",
-        "良かっ","悪かっ","嬉しい","楽しい","美味しい","おいし","うれし","たのし",
-        "助かり","助かりま","助かりました","よかっ","みました","きました","れました","てました",
-        "していた","になっ","してく","してくれ","しました","できまし","ていただ","していま","してもら",
-      ]);
+
+      // ひらがなのみの断片を排除するフィルタ
+      const isHiraganaOnly = (w: string) => /^[\u3040-\u309F]+$/.test(w);
+      const hasKanji = (w: string) => /[\u4E00-\u9FFF]/.test(w);
+      const hasKatakana = (w: string) => /[\u30A0-\u30FF]/.test(w);
+
+      // 無意味な断片パターン（末尾が助動詞・助詞的）
+      const junkSuffix = /(?:します|しました|ました|ません|ですが|ですし|ですね|ですよ|ですか|ますが|ますし|ますね|ますよ|ますか|と思い|と思う|が良い|た方が|した方|方が良|思いま|いと思|になり|になっ|をして|にして|くださ|ござい|ありが|いただ|されて|させて|しまし|してい|しており|してく|してくれ|してもら|できまし|できます|ています|ていただ|ておりま|れました|きました|みました|てました|していま|していた)$/;
+      const junkPrefix = /^(?:ありがとう|ございます|いただき|させていた|してもらい|と思います|した方が良|いと思いま)/;
 
       allComments.forEach((r) => {
         if (!r.comment) return;
         const text = r.comment.replace(/\(Original\)[\s\S]*/i, "").replace(/\(Translated by Google\)/i, "").trim();
         const stars = starToNum(r.star_rating);
         const isGood = stars >= 4;
-        const words: string[] = text.match(/[\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF]{2,6}/g) || [];
-        words.forEach((w: string) => {
-          if (stopWords.has(w) || w.length < 2) return;
-          // ひらがなのみ3文字以下は除外（意味が薄い断片が多い）
-          if (/^[\u3040-\u309F]+$/.test(w) && w.length <= 3) return;
-          // 末尾が「した」「して」「され」「まし」で終わる断片を除外
-          if (/(?:した|して|され|まし|ます|です|ない|ある|いる|ける|れる|める|てる|った|った)$/.test(w) && !/[\u4E00-\u9FFF\u30A0-\u30FF]/.test(w)) return;
+
+        // カタカナ語（2文字以上）を優先抽出
+        const katakanaWords: string[] = text.match(/[\u30A0-\u30FF]{2,10}/g) || [];
+        // 漢字を含む語（2-6文字）
+        const kanjiWords: string[] = text.match(/[\u4E00-\u9FFF][\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF]{1,5}/g) || [];
+        // 「また行きたい」等のフレーズは漢字+ひらがな混合で拾う
+        const mixedWords: string[] = text.match(/[\u4E00-\u9FFF\u30A0-\u30FF][\u3040-\u309F\u4E00-\u9FFF\u30A0-\u30FF]{2,5}/g) || [];
+
+        const allWords = [...katakanaWords, ...kanjiWords, ...mixedWords];
+        const seen = new Set<string>();
+
+        allWords.forEach((w: string) => {
+          if (seen.has(w)) return;
+          seen.add(w);
+          if (w.length < 2) return;
+          // ひらがなのみは全て除外
+          if (isHiraganaOnly(w)) return;
+          // 無意味パターン除外
+          if (junkSuffix.test(w) || junkPrefix.test(w)) return;
+          // 漢字1文字+ひらがなだけ（例: 「行きた」）は除外
+          if (w.length <= 3 && !hasKatakana(w) && (w.match(/[\u4E00-\u9FFF]/g) || []).length <= 1) return;
+
           const map = isGood ? goodWords : badWords;
           map.set(w, (map.get(w) || 0) + 1);
         });
       });
 
       const result: { word: string; count: number; type: "good" | "bad" }[] = [];
-      goodWords.forEach((count, word) => { if (count >= 3) result.push({ word, count, type: "good" }); });
+      goodWords.forEach((count, word) => { if (count >= 2) result.push({ word, count, type: "good" }); });
       badWords.forEach((count, word) => { if (count >= 2) result.push({ word, count, type: "bad" }); });
       result.sort((a, b) => b.count - a.count);
-      setTopWords(result.slice(0, 40));
+      setTopWords(result.slice(0, 30));
     };
     extractKeywords();
   }, [selectedShopId, isAllMode, selectedMonth]);
