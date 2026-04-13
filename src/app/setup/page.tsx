@@ -22,6 +22,8 @@ export default function SetupPage() {
   const [descKeywords, setDescKeywords] = useState("");
   const [catResult, setCatResult] = useState("");
   const [catLoading, setCatLoading] = useState(false);
+  const [structuredData, setStructuredData] = useState<string>("");
+  const [sdLoading, setSdLoading] = useState(false);
   const [showHearing, setShowHearing] = useState(false);
   const [hearingSaving, setHearingSaving] = useState(false);
   const [hearingMsg, setHearingMsg] = useState("");
@@ -29,6 +31,19 @@ export default function SetupPage() {
     tone: "", atmosphere: "", target: "", strength: "", menu_highlight: "",
     area: "", business_hours_note: "", seasonal: "", sns: "", other: "",
   });
+
+  const fetchStructuredData = async () => {
+    if (!selectedShopId) return;
+    setSdLoading(true);
+    try {
+      const res = await fetch(`/api/report/structured-data?shopId=${selectedShopId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setStructuredData(data.script || "");
+      }
+    } catch {}
+    setSdLoading(false);
+  };
 
   const runCheck = useCallback(async () => {
     if (!selectedShopId) return;
@@ -389,6 +404,31 @@ export default function SetupPage() {
                     {hearingSaving ? "保存中..." : "ヒアリングシートを保存"}
                   </button>
                 </div>
+              </div>
+            )}
+          </div>
+
+          {/* 構造化データ生成 */}
+          <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100 mt-5">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-500">構造化データ（Schema.org JSON-LD）</h3>
+                <p className="text-[10px] text-slate-400 mt-0.5">AIO/LLMO対策: AI検索エンジンに認識されやすい構造化データを自動生成</p>
+              </div>
+              <button onClick={fetchStructuredData} disabled={sdLoading}
+                className="px-4 py-2 rounded-lg text-xs font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-50">
+                {sdLoading ? "生成中..." : "生成"}
+              </button>
+            </div>
+            {structuredData && (
+              <div className="mt-3">
+                <pre className="bg-slate-50 rounded-lg p-4 text-xs text-slate-700 overflow-x-auto border border-slate-200 max-h-[300px] overflow-y-auto">
+                  {structuredData}
+                </pre>
+                <button onClick={() => navigator.clipboard.writeText(structuredData)}
+                  className="mt-2 px-3 py-1 rounded text-[10px] font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200">
+                  コピー
+                </button>
               </div>
             )}
           </div>

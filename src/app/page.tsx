@@ -34,6 +34,7 @@ export default function Dashboard() {
   const [rankingSummary, setRankingSummary] = useState<any[]>([]);
   const [postCount, setPostCount] = useState(0);
   const [perfDateSort, setPerfDateSort] = useState<"desc" | "asc">("asc");
+  const [churnData, setChurnData] = useState<{ summary?: { high: number; warning: number; stable: number }; scores?: any[] } | null>(null);
 
   const fetchPerformance = useCallback(async () => {
     if (!selectedShopId) return;
@@ -49,6 +50,18 @@ export default function Dashboard() {
   }, [selectedShopId]);
 
   useEffect(() => { fetchPerformance(); }, [fetchPerformance]);
+
+  // 解約予兆スコア取得
+  useEffect(() => {
+    if (!apiConnected) return;
+    (async () => {
+      try {
+        const token = (await supabase.auth.getSession()).data.session?.access_token;
+        const res = await fetch("/api/report/churn-score", { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok) setChurnData(await res.json());
+      } catch {}
+    })();
+  }, [apiConnected]);
 
   // 悪い口コミアラート取得（選択中の店舗でフィルタ、なければ全店舗）
   useEffect(() => {
@@ -468,6 +481,36 @@ export default function Dashboard() {
               </div>
             );
           })()}
+        </div>
+      )}
+
+      {/* 解約予兆スコア */}
+      {churnData && churnData.summary && (churnData.summary.high > 0 || churnData.summary.warning > 0) && (
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-amber-200 mt-6">
+          <h3 className="text-sm font-semibold text-amber-700 mb-3">解約予兆スコア</h3>
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            <div className="bg-red-50 rounded-lg p-3 text-center">
+              <p className="text-2xl font-bold text-red-600">{churnData.summary.high}</p>
+              <p className="text-[10px] text-red-500">高リスク</p>
+            </div>
+            <div className="bg-amber-50 rounded-lg p-3 text-center">
+              <p className="text-2xl font-bold text-amber-600">{churnData.summary.warning}</p>
+              <p className="text-[10px] text-amber-500">要注意</p>
+            </div>
+            <div className="bg-emerald-50 rounded-lg p-3 text-center">
+              <p className="text-2xl font-bold text-emerald-600">{churnData.summary.stable}</p>
+              <p className="text-[10px] text-emerald-500">安定</p>
+            </div>
+          </div>
+          {churnData.scores && churnData.scores.filter(s => s.risk !== "安定").slice(0, 5).map((s, i) => (
+            <div key={i} className="flex items-center justify-between py-2 border-b border-slate-50">
+              <div className="flex items-center gap-2">
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${s.risk === "高リスク" ? "bg-red-100 text-red-600" : "bg-amber-100 text-amber-600"}`}>{s.score}点</span>
+                <span className="text-xs text-slate-700">{s.shopName}</span>
+              </div>
+              <span className="text-[10px] text-slate-400">{s.factors.join(" / ")}</span>
+            </div>
+          ))}
         </div>
       )}
 
