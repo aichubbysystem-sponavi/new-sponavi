@@ -59,6 +59,11 @@ export default function PostsPage() {
   const [localPosts, setLocalPosts] = useState<LocalPost[]>([]);
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  // 3ステップフロー
+  const [postStep, setPostStep] = useState<0 | 1 | 2>(0); // 0=非表示, 1=店舗選択, 2=種類選択
+  const [postTargetMode, setPostTargetMode] = useState<"all" | "selected" | "current">("current");
+  const [postTargetShopIds, setPostTargetShopIds] = useState<string[]>([]);
+  const [postSelectedType, setPostSelectedType] = useState("");
   const [newPost, setNewPost] = useState({ summary: "", topicType: "STANDARD", actionType: "", actionUrl: "", photoUrl: "", scheduledAt: "", mediaType: "PHOTO" as "PHOTO" | "VIDEO" });
   const [scheduledPosts, setScheduledPosts] = useState<any[]>([]);
   const [autoPostSheet, setAutoPostSheet] = useState(() => {
@@ -371,6 +376,9 @@ export default function PostsPage() {
             </div>
           </div>
 
+          {/* Step 3: シート自動投稿/AI一括生成/新規投稿フォーム */}
+          {showCreate && (
+          <>
           {/* シートから自動投稿 */}
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4 mb-5">
             <button onClick={() => setShowAutoPost(!showAutoPost)}
@@ -535,11 +543,81 @@ export default function PostsPage() {
             )}
           </div>
 
-          {/* 投稿種類選択（旧システム準拠） */}
+          {/* 3ステップ投稿フロー */}
           <div className="mb-5">
-            {!showCreate ? (
-              <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-                <p className="text-sm font-semibold text-slate-500 mb-3">投稿種類を選択してください</p>
+            {postStep === 0 && (
+              <button onClick={() => setPostStep(1)}
+                className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-[#003D6B] hover:bg-[#002a4a]"
+                style={{ color: "#fff" }}>
+                + 新規投稿
+              </button>
+            )}
+
+            {/* Step 1: 投稿先店舗の選択 */}
+            {postStep === 1 && (
+              <div className="bg-white rounded-xl p-5 shadow-sm border border-blue-200">
+                <div className="flex items-center justify-between mb-4">
+                  <p className="text-sm font-semibold text-[#003D6B]">Step 1: 投稿先を選択</p>
+                  <button onClick={() => { setPostStep(0); setShowCreate(false); }}
+                    className="text-xs text-slate-400 hover:text-slate-600">キャンセル</button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <button onClick={() => { setPostTargetMode("current"); setPostTargetShopIds(selectedShopId ? [selectedShopId] : []); setPostStep(2); }}
+                    disabled={!selectedShopId}
+                    className="p-4 rounded-xl border-2 border-slate-200 hover:bg-slate-50 text-left transition-all hover:shadow-md disabled:opacity-40">
+                    <span className="text-2xl">🏪</span>
+                    <p className="text-sm font-semibold text-slate-800 mt-2">選択中の店舗</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">{selectedShop?.name || "未選択"}</p>
+                  </button>
+                  <button onClick={() => { setPostTargetMode("all"); setPostTargetShopIds(shops.map(s => s.id)); setPostStep(2); }}
+                    className="p-4 rounded-xl border-2 border-emerald-200 hover:bg-emerald-50 text-left transition-all hover:shadow-md">
+                    <span className="text-2xl">🌐</span>
+                    <p className="text-sm font-semibold text-slate-800 mt-2">全店舗（{shops.length}店舗）</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">全店舗にまとめて投稿</p>
+                  </button>
+                  <button onClick={() => { setPostTargetMode("selected"); setPostStep(2); }}
+                    className="p-4 rounded-xl border-2 border-purple-200 hover:bg-purple-50 text-left transition-all hover:shadow-md">
+                    <span className="text-2xl">✅</span>
+                    <p className="text-sm font-semibold text-slate-800 mt-2">店舗を選んで投稿</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">チェックボックスで複数選択</p>
+                  </button>
+                </div>
+
+                {/* 複数選択モードの店舗リスト */}
+                {postTargetMode === "selected" && postStep === 1 && (
+                  <div className="mt-4 border-t border-slate-200 pt-3 max-h-[200px] overflow-y-auto">
+                    {shops.map(s => (
+                      <label key={s.id} className="flex items-center gap-2 py-1 px-2 hover:bg-slate-50 rounded cursor-pointer">
+                        <input type="checkbox" checked={postTargetShopIds.includes(s.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) setPostTargetShopIds([...postTargetShopIds, s.id]);
+                            else setPostTargetShopIds(postTargetShopIds.filter(id => id !== s.id));
+                          }} className="w-3.5 h-3.5" />
+                        <span className="text-xs text-slate-700">{s.name}</span>
+                      </label>
+                    ))}
+                    <button onClick={() => setPostStep(2)} disabled={postTargetShopIds.length === 0}
+                      className="mt-2 px-4 py-2 rounded-lg text-xs font-semibold bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50">
+                      {postTargetShopIds.length}店舗を選択して次へ
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Step 2: 投稿種類の選択 */}
+            {postStep === 2 && !showCreate && (
+              <div className="bg-white rounded-xl p-5 shadow-sm border border-blue-200">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <p className="text-sm font-semibold text-[#003D6B]">Step 2: 投稿種類を選択</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      対象: {postTargetMode === "all" ? `全${shops.length}店舗` : postTargetMode === "selected" ? `${postTargetShopIds.length}店舗` : selectedShop?.name || ""}
+                    </p>
+                  </div>
+                  <button onClick={() => { setPostStep(1); setPostSelectedType(""); }}
+                    className="text-xs text-slate-400 hover:text-slate-600">← 店舗選択に戻る</button>
+                </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {[
                     { type: "STANDARD", label: "最新情報を追加", icon: "📝", desc: "通常の投稿", color: "border-blue-200 hover:bg-blue-50" },
@@ -548,6 +626,7 @@ export default function PostsPage() {
                     { type: "PHOTO", label: "写真", icon: "📷", desc: "写真のみ投稿", color: "border-emerald-200 hover:bg-emerald-50" },
                   ].map((item) => (
                     <button key={item.type} onClick={() => {
+                      setPostSelectedType(item.type);
                       setNewPost({ ...newPost, topicType: item.type === "PHOTO" ? "STANDARD" : item.type, mediaType: item.type === "PHOTO" ? "PHOTO" : newPost.mediaType });
                       setShowCreate(true);
                     }}
@@ -558,22 +637,22 @@ export default function PostsPage() {
                     </button>
                   ))}
                 </div>
-                {isAllMode && (
-                  <p className="text-[10px] text-blue-600 mt-2">全店舗モード: 選択後、投稿先の店舗を選べます</p>
-                )}
               </div>
-            ) : (
-              <div className="flex items-center justify-end">
-                <button onClick={() => setShowCreate(false)}
-                  className="px-4 py-2 rounded-lg text-sm font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200">
-                  ← 種類選択に戻る
-                </button>
+            )}
+
+            {/* Step 3表示中: 戻るボタン */}
+            {showCreate && (
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs text-slate-400">
+                  対象: {postTargetMode === "all" ? `全${shops.length}店舗` : postTargetMode === "selected" ? `${postTargetShopIds.length}店舗` : selectedShop?.name || ""} / {TOPIC_STYLES[newPost.topicType]?.label || "通常投稿"}
+                </p>
+                <button onClick={() => { setShowCreate(false); setPostSelectedType(""); }}
+                  className="text-xs text-slate-400 hover:text-slate-600">← 種類選択に戻る</button>
               </div>
             )}
           </div>
 
           {/* 新規投稿フォーム */}
-          {showCreate && (
             <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-6">
               <h3 className="text-sm font-semibold text-slate-500 mb-4">新規GBP投稿</h3>
               <div className="space-y-3">
@@ -764,6 +843,7 @@ export default function PostsPage() {
                 </div>
               </div>
             </div>
+          </>
           )}
 
           {/* 表示切替 */}
