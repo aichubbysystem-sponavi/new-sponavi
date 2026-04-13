@@ -216,11 +216,13 @@ export async function POST(request: NextRequest) {
   if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
   const body = await request.json();
-  const { sheetId, targetDate, dryRun } = body as {
+  const { sheetId, targetDate, dryRun, topicType } = body as {
     sheetId: string;
     targetDate: string; // "2026-04-11"
     dryRun?: boolean;
+    topicType?: string; // "STANDARD" | "OFFER" | "EVENT" | "PHOTO"
   };
+  const isPhotoOnly = topicType === "PHOTO";
 
   if (!sheetId || !targetDate) {
     return NextResponse.json({ error: "sheetIdとtargetDateが必要です" }, { status: 400 });
@@ -286,13 +288,20 @@ export async function POST(request: NextRequest) {
           photoDebug = "F列が空";
         }
 
-        // 複数写真がある場合: 1件目は投稿文+写真、2件目以降は写真のみ投稿
-        if (photoUrls.length <= 1) {
+        // 写真タイプ: 全て写真のみMedia API投稿（投稿文なし）
+        if (isPhotoOnly) {
+          for (let pi = 0; pi < photoUrls.length; pi++) {
+            allMatches.push({ shopName, summary: "", photoUrl: photoUrls[pi], tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: `写真${pi + 1}/${photoUrls.length}` });
+          }
+          if (photoUrls.length === 0) {
+            allMatches.push({ shopName, summary: "", photoUrl: "", tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug });
+          }
+        } else if (photoUrls.length <= 1) {
+          // 通常投稿: 投稿文+写真1枚
           allMatches.push({ shopName, summary: postText, photoUrl: photoUrls[0] || "", tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: photoUrls.length > 0 ? `写真${photoUrls.length}枚取得` : photoDebug });
         } else {
-          // 1件目: 投稿文+最初の写真
+          // 通常投稿+複数写真: 1件目は投稿文+写真、2件目以降は写真のみ
           allMatches.push({ shopName, summary: postText, photoUrl: photoUrls[0], tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: `写真${photoUrls.length}枚取得（1/${photoUrls.length}）` });
-          // 2件目以降: 写真のみ投稿（投稿文なしの写真投稿）
           for (let pi = 1; pi < photoUrls.length; pi++) {
             allMatches.push({ shopName, summary: "", photoUrl: photoUrls[pi], tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: `写真${pi + 1}/${photoUrls.length}` });
           }
