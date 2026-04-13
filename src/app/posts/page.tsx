@@ -332,9 +332,18 @@ export default function PostsPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="mb-4">
-        <h1 className="text-2xl font-bold text-slate-800">投稿管理・分析</h1>
-        <p className="text-sm text-slate-500 mt-1">GBP投稿の作成・確認・分析・カレンダー</p>
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">投稿管理・分析</h1>
+          <p className="text-sm text-slate-500 mt-1">GBP投稿の作成・確認・分析・カレンダー</p>
+        </div>
+        {postStep === 0 && (
+          <button onClick={() => setPostStep(1)}
+            className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-[#003D6B] hover:bg-[#002a4a]"
+            style={{ color: "#fff" }}>
+            + 新規投稿
+          </button>
+        )}
       </div>
 
       {msg && (
@@ -545,14 +554,6 @@ export default function PostsPage() {
 
           {/* 3ステップ投稿フロー */}
           <div className="mb-5">
-            {postStep === 0 && (
-              <button onClick={() => setPostStep(1)}
-                className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-[#003D6B] hover:bg-[#002a4a]"
-                style={{ color: "#fff" }}>
-                + 新規投稿
-              </button>
-            )}
-
             {/* Step 1: 投稿先店舗の選択 */}
             {postStep === 1 && (
               <div className="bg-white rounded-xl p-5 shadow-sm border border-blue-200">
