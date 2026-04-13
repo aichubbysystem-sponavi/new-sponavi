@@ -739,12 +739,29 @@ export default function PostsPage() {
                         {sp.shop_name && !isAllMode ? "" : ` — ${sp.shop_name}`}
                       </p>
                     </div>
-                    <button onClick={async () => {
-                      if (!confirm("この予約を取り消しますか？")) return;
-                      await api.delete("/api/report/scheduled-posts", { data: { id: sp.id } });
-                      setScheduledPosts(scheduledPosts.filter((p) => p.id !== sp.id));
-                      setMsg("予約を取り消しました");
-                    }} className="text-[10px] text-red-500 hover:text-red-700 font-semibold ml-3 flex-shrink-0">取消</button>
+                    <div className="flex items-center gap-1.5 ml-3 flex-shrink-0">
+                      {sp.approval_status !== "approved" && (
+                        <button onClick={async () => {
+                          await supabase.from("scheduled_posts").update({ approval_status: "approved" }).eq("id", sp.id);
+                          setScheduledPosts(scheduledPosts.map(p => p.id === sp.id ? { ...p, approval_status: "approved" } : p));
+                          setMsg("承認しました");
+                        }} className="text-[10px] text-emerald-600 hover:text-emerald-800 font-semibold bg-emerald-50 px-2 py-0.5 rounded">承認</button>
+                      )}
+                      {sp.approval_status === "approved" && (
+                        <span className="text-[10px] text-emerald-600 font-semibold bg-emerald-50 px-2 py-0.5 rounded">承認済</span>
+                      )}
+                      <button onClick={async () => {
+                        await supabase.from("scheduled_posts").update({ approval_status: "rejected", status: "rejected" }).eq("id", sp.id);
+                        setScheduledPosts(scheduledPosts.filter(p => p.id !== sp.id));
+                        setMsg("差戻ししました");
+                      }} className="text-[10px] text-amber-600 hover:text-amber-800 font-semibold bg-amber-50 px-2 py-0.5 rounded">差戻し</button>
+                      <button onClick={async () => {
+                        if (!confirm("この予約を取り消しますか？")) return;
+                        await api.delete("/api/report/scheduled-posts", { data: { id: sp.id } });
+                        setScheduledPosts(scheduledPosts.filter((p) => p.id !== sp.id));
+                        setMsg("予約を取り消しました");
+                      }} className="text-[10px] text-red-500 hover:text-red-700 font-semibold">取消</button>
+                    </div>
                   </div>
                 ))}
               </div>
