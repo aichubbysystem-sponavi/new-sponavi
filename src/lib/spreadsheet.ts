@@ -619,6 +619,15 @@ export async function getShopsFromSpreadsheet(): Promise<ShopListItem[] | null> 
       prevTotalReviews = prev.count;
     }
 
+    // パフォーマンス前月比
+    const prev = rows.length >= 2 ? rows[rows.length - 2] : null;
+    const searchTotal = latest.searchMobile + latest.searchPC;
+    const prevSearchTotal = prev ? prev.searchMobile + prev.searchPC : 0;
+    const mapTotal = latest.mapMobile + latest.mapPC;
+    const prevMapTotal = prev ? prev.mapMobile + prev.mapPC : 0;
+    const actionTotal = latest.calls + latest.routes + latest.websites + latest.bookings + latest.foodMenus;
+    const prevActionTotal = prev ? prev.calls + prev.routes + prev.websites + prev.bookings + prev.foodMenus : 0;
+
     shops.push({
       id: shopName,
       name: shopName,
@@ -629,6 +638,12 @@ export async function getShopsFromSpreadsheet(): Promise<ShopListItem[] | null> 
       area,
       prevRating,
       prevTotalReviews,
+      searchTotal,
+      prevSearchTotal,
+      mapTotal,
+      prevMapTotal,
+      actionTotal,
+      prevActionTotal,
     });
   });
 

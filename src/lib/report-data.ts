@@ -64,4 +64,11 @@ export interface ShopListItem {
   prevRating?: number;
   prevTotalReviews?: number;
   analyzed?: boolean;
+  // 前月比パフォーマンスデータ
+  searchTotal?: number;
+  prevSearchTotal?: number;
+  mapTotal?: number;
+  prevMapTotal?: number;
+  actionTotal?: number;
+  prevActionTotal?: number;
 }

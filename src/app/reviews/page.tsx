@@ -39,6 +39,8 @@ export default function ReviewsPage() {
   const [replyFilter, setReplyFilter] = useState<ReplyFilter>("all");
   const [unrepliedCount, setUnrepliedCount] = useState(0);
   const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
+  const [selectedMonth, setSelectedMonth] = useState<string>("all"); // "all" or "2026-04"
+  const [availableMonths, setAvailableMonths] = useState<string[]>([]);
   const [topWords, setTopWords] = useState<{ word: string; count: number; type: "good" | "bad" }[]>([]);
   const [monthlyStats, setMonthlyStats] = useState<{ month: string; count: number; avgRating: number; cumulative: number }[]>([]);
   const [showCharts, setShowCharts] = useState(false);
@@ -76,6 +78,15 @@ export default function ReviewsPage() {
         query = query.not("reply_comment", "is", null);
       }
 
+      // 月別フィルタ
+      if (selectedMonth !== "all") {
+        const startDate = `${selectedMonth}-01T00:00:00`;
+        const [y, m] = selectedMonth.split("-").map(Number);
+        const nextMonth = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
+        const endDate = `${nextMonth}-01T00:00:00`;
+        query = query.gte("create_time", startDate).lt("create_time", endDate);
+      }
+
       const { data, count, error } = await query;
       if (error) {
         console.error("[reviews] fetch error:", error);
@@ -94,7 +105,7 @@ export default function ReviewsPage() {
       setTotalCount(0);
     }
     setLoading(false);
-  }, [selectedShopId, page, isAllMode, replyFilter, dateSort]);
+  }, [selectedShopId, page, isAllMode, replyFilter, dateSort, selectedMonth]);
 
   // 未返信件数を取得
   const fetchUnrepliedCount = useCallback(async () => {
@@ -119,14 +130,14 @@ export default function ReviewsPage() {
     fetchUnrepliedCount();
   }, [fetchUnrepliedCount]);
 
-  // 月別口コミ統計取得
+  // 月別口コミ統計取得 + 利用可能月一覧
   useEffect(() => {
     const fetchMonthlyStats = async () => {
       const shopFilter = !isAllMode && selectedShopId ? selectedShopId : null;
       let query = supabase.from("reviews").select("create_time, star_rating");
       if (shopFilter) query = query.eq("shop_id", shopFilter);
       const { data } = await query.order("create_time", { ascending: true }).limit(5000);
-      if (!data || data.length === 0) { setMonthlyStats([]); return; }
+      if (!data || data.length === 0) { setMonthlyStats([]); setAvailableMonths([]); return; }
 
       const ratingMap: Record<string, number> = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5, ONE_STAR: 1, TWO_STARS: 2, THREE_STARS: 3, FOUR_STARS: 4, FIVE_STARS: 5 };
       const byMonth = new Map<string, { count: number; totalRating: number }>();
@@ -140,6 +151,10 @@ export default function ReviewsPage() {
         const rating = ratingMap[(r.star_rating || "").toUpperCase().replace(/_STARS?/, "")] || 0;
         m.totalRating += rating;
       });
+
+      // 利用可能な月一覧（新しい順）
+      const months = Array.from(byMonth.keys()).sort((a, b) => b.localeCompare(a));
+      setAvailableMonths(months);
 
       let cumulative = 0;
       const stats = Array.from(byMonth.entries())
@@ -199,12 +214,19 @@ export default function ReviewsPage() {
     } catch {}
   };
 
-  // 口コミキーワード抽出（全口コミを対象）
+  // 口コミキーワード抽出（月フィルタ連動）
   useEffect(() => {
     const extractKeywords = async () => {
       const shopFilter = !isAllMode && selectedShopId ? selectedShopId : null;
       let query = supabase.from("reviews").select("comment, star_rating").not("comment", "is", null);
       if (shopFilter) query = query.eq("shop_id", shopFilter);
+      // 月別フィルタ
+      if (selectedMonth !== "all") {
+        const startDate = `${selectedMonth}-01T00:00:00`;
+        const [y, m] = selectedMonth.split("-").map(Number);
+        const nextMonth = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
+        query = query.gte("create_time", startDate).lt("create_time", `${nextMonth}-01T00:00:00`);
+      }
       const { data: allComments } = await query.limit(500);
       if (!allComments || allComments.length === 0) { setTopWords([]); return; }
 
@@ -253,12 +275,12 @@ export default function ReviewsPage() {
       setTopWords(result.slice(0, 40));
     };
     extractKeywords();
-  }, [selectedShopId, isAllMode]);
+  }, [selectedShopId, isAllMode, selectedMonth]);
 
   // フィルタ変更時にページをリセット（pageが1以外の場合のみ）
   useEffect(() => {
     setPage((prev) => prev !== 1 ? 1 : prev);
-  }, [selectedShopId, replyFilter, shopFilterMode, dateSort]);
+  }, [selectedShopId, replyFilter, shopFilterMode, dateSort, selectedMonth]);
 
   const handleSync = async () => {
     setSyncing(true);
@@ -361,9 +383,10 @@ export default function ReviewsPage() {
 
   const totalPages = Math.ceil(totalCount / PER_PAGE);
 
+  const monthLabel = selectedMonth !== "all" ? ` [${selectedMonth.replace("-", "年") + "月"}]` : "";
   const displayLabel = isAllMode
-    ? `全店舗 — ${totalCount}件`
-    : `${selectedShop?.name || "店舗未選択"} — ${totalCount}件`;
+    ? `全店舗${monthLabel} — ${totalCount}件`
+    : `${selectedShop?.name || "店舗未選択"}${monthLabel} — ${totalCount}件`;
 
   return (
     <div className="animate-fade-in">
@@ -407,6 +430,17 @@ export default function ReviewsPage() {
             {lastSynced && <span>最終同期: {new Date(lastSynced).toLocaleString("ja-JP")}</span>}
           </div>
           <div className="flex items-center gap-2">
+            {/* 月別フィルタ */}
+            <select
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              className="px-3 py-1.5 text-xs font-semibold border border-slate-200 rounded-lg bg-white text-slate-700 cursor-pointer"
+            >
+              <option value="all">全期間</option>
+              {availableMonths.map((m) => (
+                <option key={m} value={m}>{m.replace("-", "年") + "月"}</option>
+              ))}
+            </select>
             {/* 日付ソート */}
             <div className="flex border border-slate-200 rounded-lg overflow-hidden">
               <button onClick={() => setDateSort("desc")}
@@ -526,7 +560,7 @@ export default function ReviewsPage() {
       {topWords.length > 0 && (
         <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100 mb-4">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-slate-500">口コミキーワード分析</h3>
+            <h3 className="text-sm font-semibold text-slate-500">口コミキーワード分析{selectedMonth !== "all" ? `（${selectedMonth.replace("-", "年") + "月"}）` : ""}</h3>
             <div className="flex items-center gap-3 text-[10px]">
               <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400"></span> ポジティブ({topWords.filter(w => w.type === "good").length})</span>
               <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-full bg-red-400"></span> ネガティブ({topWords.filter(w => w.type === "bad").length})</span>

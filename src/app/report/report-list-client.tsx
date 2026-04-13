@@ -198,6 +198,10 @@ export default function ReportListClient({
   const totalReviews = shops.reduce((s, sh) => s + sh.totalReviews, 0);
   const alertCount = shops.filter(isAlertShop).length;
   const analyzedCount = shops.filter((s) => s.analyzed).length;
+  const totalSearch = shops.reduce((s, sh) => s + (sh.searchTotal || 0), 0);
+  const prevTotalSearch = shops.reduce((s, sh) => s + (sh.prevSearchTotal || 0), 0);
+  const totalMap = shops.reduce((s, sh) => s + (sh.mapTotal || 0), 0);
+  const prevTotalMap = shops.reduce((s, sh) => s + (sh.prevMapTotal || 0), 0);
   const sortArrow = (key: SortKey) => sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
 
   // 評価分布
@@ -260,7 +264,7 @@ export default function ReportListClient({
 
       <div className="max-w-[1440px] mx-auto px-6 py-6">
         {/* KPI + 評価分布 */}
-        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3 mb-5">
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 mb-5">
           <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
             <p className="text-[11px] font-medium text-slate-400 mb-1">管理店舗数</p>
             <p className="text-2xl font-bold text-[#003D6B]">{shops.length.toLocaleString()}<span className="text-xs font-normal text-slate-400 ml-1">店舗</span></p>
@@ -272,6 +276,16 @@ export default function ReportListClient({
           <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
             <p className="text-[11px] font-medium text-slate-400 mb-1">総口コミ</p>
             <p className="text-2xl font-bold text-emerald-600">{totalReviews.toLocaleString()}<span className="text-xs font-normal text-slate-400 ml-1">件</span></p>
+          </div>
+          <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
+            <p className="text-[11px] font-medium text-slate-400 mb-1">検索数合計</p>
+            <p className="text-2xl font-bold text-blue-600">{totalSearch.toLocaleString()}<span className="text-xs font-normal text-slate-400 ml-1">回</span></p>
+            {prevTotalSearch > 0 && <MomBadge cur={totalSearch} prev={prevTotalSearch} label="検索" />}
+          </div>
+          <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
+            <p className="text-[11px] font-medium text-slate-400 mb-1">マップ表示合計</p>
+            <p className="text-2xl font-bold text-teal-600">{totalMap.toLocaleString()}<span className="text-xs font-normal text-slate-400 ml-1">回</span></p>
+            {prevTotalMap > 0 && <MomBadge cur={totalMap} prev={prevTotalMap} label="マップ" />}
           </div>
           <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
             <p className="text-[11px] font-medium text-slate-400 mb-1">AI分析済み</p>
@@ -394,7 +408,9 @@ export default function ReportListClient({
                   <th className="text-left p-2 font-semibold text-slate-600 hidden xl:table-cell">住所</th>
                   <th className="p-2 font-semibold text-slate-600 text-center">評価</th>
                   <th className="p-2 font-semibold text-slate-600 text-center">口コミ</th>
-                  <th className="p-2 font-semibold text-slate-600 text-center hidden md:table-cell">前月比</th>
+                  <th className="p-2 font-semibold text-slate-600 text-center hidden md:table-cell">口コミ比</th>
+                  <th className="p-2 font-semibold text-slate-600 text-center hidden lg:table-cell">検索比</th>
+                  <th className="p-2 font-semibold text-slate-600 text-center hidden lg:table-cell">マップ比</th>
                   <th className="p-2 font-semibold text-slate-600 text-center">対象月</th>
                   <th className="p-2 font-semibold text-slate-600 text-center">AI</th>
                   <th className="w-8"></th>
@@ -419,6 +435,12 @@ export default function ReportListClient({
                     <td className="p-2 text-center text-slate-600 font-medium">{shop.totalReviews > 0 ? shop.totalReviews.toLocaleString() : "-"}</td>
                     <td className="p-2 text-center hidden md:table-cell">
                       {shop.prevTotalReviews ? <MomBadge cur={shop.totalReviews} prev={shop.prevTotalReviews} label="口コミ" /> : <span className="text-slate-300">-</span>}
+                    </td>
+                    <td className="p-2 text-center hidden lg:table-cell">
+                      {shop.prevSearchTotal ? <MomBadge cur={shop.searchTotal || 0} prev={shop.prevSearchTotal} label="検索" /> : <span className="text-slate-300">-</span>}
+                    </td>
+                    <td className="p-2 text-center hidden lg:table-cell">
+                      {shop.prevMapTotal ? <MomBadge cur={shop.mapTotal || 0} prev={shop.prevMapTotal} label="マップ" /> : <span className="text-slate-300">-</span>}
                     </td>
                     <td className="p-2 text-center text-slate-400">{shop.period}</td>
                     <td className="p-2 text-center">
@@ -501,6 +523,12 @@ function ShopCard({ shop, checked, onToggle, isFavorite, onToggleFav, isAlert }:
         )}
         {shop.prevTotalReviews !== undefined && shop.prevTotalReviews > 0 && (
           <MomBadge cur={shop.totalReviews} prev={shop.prevTotalReviews} label="口コミ" />
+        )}
+        {shop.prevSearchTotal !== undefined && shop.prevSearchTotal > 0 && (
+          <MomBadge cur={shop.searchTotal || 0} prev={shop.prevSearchTotal} label="検索" />
+        )}
+        {shop.prevMapTotal !== undefined && shop.prevMapTotal > 0 && (
+          <MomBadge cur={shop.mapTotal || 0} prev={shop.prevMapTotal} label="マップ" />
         )}
         {shop.analyzed && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-50 text-purple-500 border border-purple-100">AI済</span>}
         <span className="px-2 py-0.5 rounded-full text-[10px] text-slate-400 bg-slate-50 ml-auto">{shop.period}</span>
