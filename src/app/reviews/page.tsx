@@ -574,7 +574,11 @@ export default function ReviewsPage() {
             <span className="text-xs text-slate-400">{showTemplates ? "▲ 閉じる" : "▼ 開く"}</span>
           </button>
           {showTemplates && (
-            <div className="border-t border-slate-100 divide-y divide-slate-50">
+            <div className="border-t border-slate-100">
+              <div className="px-4 py-2 bg-slate-50 border-b border-slate-100">
+                <p className="text-[10px] text-slate-500">差し込み変数: <code className="bg-white px-1 rounded">{"{店舗名}"}</code> <code className="bg-white px-1 rounded">{"{お客様名}"}</code> <code className="bg-white px-1 rounded">{"{評価}"}</code> <code className="bg-white px-1 rounded">{"{日付}"}</code> が使えます</p>
+              </div>
+              <div className="divide-y divide-slate-50">
               {templates.map((t) => (
                 <div key={t.id} className="px-4 py-3 flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
@@ -598,6 +602,7 @@ export default function ReviewsPage() {
                   </div>
                 </div>
               ))}
+              </div>
             </div>
           )}
         </div>
@@ -770,7 +775,15 @@ export default function ReviewsPage() {
                       <div className="absolute left-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 w-[320px] max-h-[300px] overflow-y-auto hidden group-hover:block">
                         {templates.map((t) => (
                           <button key={t.id}
-                            onClick={() => { setAiReplyId(review.id); setAiReply(t.content); }}
+                            onClick={() => {
+                              // 差し込み変数展開
+                              const expanded = t.content
+                                .replace(/\{店舗名\}/g, selectedShop?.name || review.shop_name || "")
+                                .replace(/\{お客様名\}/g, review.reviewer_name || "お客様")
+                                .replace(/\{評価\}/g, `★${starToNum(review.star_rating)}`)
+                                .replace(/\{日付\}/g, new Date().toLocaleDateString("ja-JP"));
+                              setAiReplyId(review.id); setAiReply(expanded);
+                            }}
                             className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-slate-50 transition">
                             <div className="flex items-center justify-between">
                               <span className="text-xs font-medium text-slate-700">{t.name}</span>

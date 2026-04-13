@@ -34,6 +34,11 @@ export default function Dashboard() {
   const [rankingSummary, setRankingSummary] = useState<any[]>([]);
   const [postCount, setPostCount] = useState(0);
   const [perfDateSort, setPerfDateSort] = useState<"desc" | "asc">("asc");
+  // 売上予測設定
+  const [showForecastSetting, setShowForecastSetting] = useState(false);
+  const [forecastSetting, setForecastSetting] = useState({ unitPrice: "3000", visitRate: "5", phoneRate: "30", routeRate: "20" });
+  const [forecastSaving, setForecastSaving] = useState(false);
+  const [forecastMsg, setForecastMsg] = useState("");
   const [churnData, setChurnData] = useState<{ summary?: { high: number; warning: number; stable: number }; scores?: any[] } | null>(null);
   const [googleUpdates, setGoogleUpdates] = useState<{ title: string; link: string; published: string }[]>([]);
   const [lineAlerts, setLineAlerts] = useState<any[]>([]);
@@ -52,6 +57,36 @@ export default function Dashboard() {
   }, [selectedShopId]);
 
   useEffect(() => { fetchPerformance(); }, [fetchPerformance]);
+
+  // 売上予測設定の読み込み
+  useEffect(() => {
+    if (!selectedShopId) return;
+    const saved = localStorage.getItem(`forecast-${selectedShopId}`);
+    if (saved) {
+      try { setForecastSetting(JSON.parse(saved)); } catch {}
+    }
+  }, [selectedShopId]);
+
+  const saveForecastSetting = async () => {
+    if (!selectedShopId) return;
+    setForecastSaving(true);
+    try {
+      localStorage.setItem(`forecast-${selectedShopId}`, JSON.stringify(forecastSetting));
+      // Go APIにも保存を試みる
+      try {
+        await api.put(`/api/shop/${selectedShopId}/sales_forecast_setting`, {
+          unit_price: parseInt(forecastSetting.unitPrice) || 3000,
+          visit_rate: parseInt(forecastSetting.visitRate) || 5,
+          phone_cvr: parseInt(forecastSetting.phoneRate) || 30,
+          route_cvr: parseInt(forecastSetting.routeRate) || 20,
+        });
+      } catch {} // Go APIがなくてもlocalStorageで動作
+      setForecastMsg("設定を保存しました");
+    } catch {
+      setForecastMsg("保存に失敗しました");
+    }
+    setForecastSaving(false);
+  };
 
   // LINEアラート取得
   useEffect(() => {
@@ -363,10 +398,10 @@ export default function Dashboard() {
             <h3 className="text-sm font-semibold text-slate-500 mb-4">推定ROI（売上貢献）</h3>
             {(() => {
               const shop = selectedShop as any;
-              const callRate = shop?.call_click_rate || 0.3;
-              const routeRate = shop?.direction_route_rate || 0.5;
+              const callRate = (parseInt(forecastSetting.phoneRate) || 30) / 100;
+              const routeRate = (parseInt(forecastSetting.routeRate) || 20) / 100;
               const webRate = shop?.website_click_rate || 0.1;
-              const avgSpend = shop?.average_spending || 3000;
+              const avgSpend = parseInt(forecastSetting.unitPrice) || 3000;
               const groupSize = shop?.customers_per_group || 1.5;
 
               const callVisits = Math.round(v(latest.call_clicks) * callRate);
@@ -432,6 +467,53 @@ export default function Dashboard() {
               );
             })()}
           </div>
+        </div>
+      )}
+
+      {/* 売上予測データ設定 */}
+      {selectedShopId && (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-100 mt-6">
+          <button onClick={() => setShowForecastSetting(!showForecastSetting)}
+            className="w-full flex items-center justify-between p-4 hover:bg-slate-50 transition">
+            <span className="text-sm font-semibold text-slate-500">売上予測データ設定</span>
+            <span className="text-xs text-slate-400">{showForecastSetting ? "▲ 閉じる" : "▼ 開く"}</span>
+          </button>
+          {showForecastSetting && (
+            <div className="px-5 pb-5 border-t border-slate-100">
+              <p className="text-[10px] text-slate-400 mt-3 mb-3">ROI算出・売上予測で使用するパラメータを店舗ごとに設定します。</p>
+              {forecastMsg && <div className="p-2 rounded-lg mb-3 text-xs bg-emerald-50 text-emerald-600">{forecastMsg}</div>}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div>
+                  <label className="text-[10px] text-slate-500 block mb-1">客単価（円）</label>
+                  <input type="number" value={forecastSetting.unitPrice}
+                    onChange={(e) => setForecastSetting({ ...forecastSetting, unitPrice: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-500 block mb-1">来店率（%）</label>
+                  <input type="number" value={forecastSetting.visitRate}
+                    onChange={(e) => setForecastSetting({ ...forecastSetting, visitRate: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-500 block mb-1">電話CVR（%）</label>
+                  <input type="number" value={forecastSetting.phoneRate}
+                    onChange={(e) => setForecastSetting({ ...forecastSetting, phoneRate: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-500 block mb-1">経路CVR（%）</label>
+                  <input type="number" value={forecastSetting.routeRate}
+                    onChange={(e) => setForecastSetting({ ...forecastSetting, routeRate: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+                </div>
+              </div>
+              <button onClick={saveForecastSetting} disabled={forecastSaving}
+                className="mt-3 px-4 py-2 rounded-lg text-xs font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-50">
+                {forecastSaving ? "保存中..." : "設定を保存"}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
