@@ -151,7 +151,7 @@ export default function GbpAccountsPage() {
                 state: loc.storefrontAddress?.administrativeArea || "未設定",
                 city: loc.storefrontAddress?.locality || "未設定",
                 address: (loc.storefrontAddress?.addressLines || []).join(" ") || "未設定",
-                postal_code: loc.storefrontAddress?.postalCode || "000-0000",
+                postal_code: (loc.storefrontAddress?.postalCode || "0000000").replace(/-/g, "").slice(0, 7).padEnd(7, "0"),
               });
               totalImported++;
               existingNames.add(locName);
