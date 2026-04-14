@@ -174,16 +174,37 @@ export default function GbpAccountsPage() {
       }
 
       // 既存店舗名セットを構築（Supabaseから最新を取得）
+      // フルパス（accounts/XXX/locations/YYY）とロケーションID（locations/YYY）の両方を登録
       const existingNames = new Set<string>();
+      const existingShopNames = new Set<string>(); // 店舗名でもマッチ
+      const extractLocId = (name: string) => {
+        const m = name.match(/(locations\/[^/]+)$/);
+        return m ? m[1] : "";
+      };
       try {
         const { data: dbShops } = await supabase
           .from("shops")
-          .select("gbp_location_name")
+          .select("gbp_location_name, name, gbp_shop_name")
           .not("gbp_location_name", "is", null);
-        (dbShops || []).forEach(s => existingNames.add(s.gbp_location_name));
+        (dbShops || []).forEach(s => {
+          existingNames.add(s.gbp_location_name);
+          // locations/YYY 部分も登録（マッチ精度向上）
+          const locId = extractLocId(s.gbp_location_name);
+          if (locId) existingNames.add(locId);
+          if (s.name) existingShopNames.add(s.name);
+          if (s.gbp_shop_name) existingShopNames.add(s.gbp_shop_name);
+        });
       } catch {}
       // Context のshopsも追加
-      shops.forEach(s => { if (s.gbp_location_name) existingNames.add(s.gbp_location_name); });
+      shops.forEach(s => {
+        if (s.gbp_location_name) {
+          existingNames.add(s.gbp_location_name);
+          const locId = extractLocId(s.gbp_location_name);
+          if (locId) existingNames.add(locId);
+        }
+        if (s.name) existingShopNames.add(s.name);
+        if (s.gbp_shop_name) existingShopNames.add(s.gbp_shop_name);
+      });
 
       // 新規 vs 既存を事前判定
       const newLocations: { loc: any; accName: string; fullLocName: string }[] = [];
@@ -193,8 +214,16 @@ export default function GbpAccountsPage() {
         const locName = loc.name || "";
         const fullLocName = locName.startsWith("accounts/") ? locName
           : locName.startsWith("locations/") ? `${accName}/${locName}` : locName;
+        const locId = extractLocId(locName) || extractLocId(fullLocName);
+        const title = loc.title || "";
 
-        if (!locName || existingNames.has(locName) || existingNames.has(fullLocName)) {
+        // フルパス、ロケーションID、店舗名のいずれかでマッチすればスキップ
+        if (!locName
+          || existingNames.has(locName)
+          || existingNames.has(fullLocName)
+          || (locId && existingNames.has(locId))
+          || (title && existingShopNames.has(title))
+        ) {
           preSkipped++;
         } else {
           newLocations.push({ loc, accName, fullLocName });
@@ -238,19 +267,22 @@ export default function GbpAccountsPage() {
 
         const batch = newLocations.slice(i, i + BATCH_SIZE);
 
-        // バッチ内を並列実行
+        // バッチ内を並列実行（各リクエスト15秒タイムアウト）
         const results = await Promise.allSettled(
           batch.map(async ({ loc, fullLocName }) => {
-            const res = await api.post("/api/shop", {
-              name: loc.title || loc.name || "",
-              gbp_location_name: fullLocName,
-              gbp_shop_name: loc.title || "",
-              owner_id: defaultOwnerId,
-              state: loc.storefrontAddress?.administrativeArea || "未設定",
-              city: loc.storefrontAddress?.locality || "未設定",
-              address: (loc.storefrontAddress?.addressLines || []).join(" ") || "未設定",
-              postal_code: (loc.storefrontAddress?.postalCode || "0000000").replace(/-/g, "").slice(0, 7).padEnd(7, "0"),
-            });
+            const res = await Promise.race([
+              api.post("/api/shop", {
+                name: loc.title || loc.name || "",
+                gbp_location_name: fullLocName,
+                gbp_shop_name: loc.title || "",
+                owner_id: defaultOwnerId,
+                state: loc.storefrontAddress?.administrativeArea || "未設定",
+                city: loc.storefrontAddress?.locality || "未設定",
+                address: (loc.storefrontAddress?.addressLines || []).join(" ") || "未設定",
+                postal_code: (loc.storefrontAddress?.postalCode || "0000000").replace(/-/g, "").slice(0, 7).padEnd(7, "0"),
+              }, { timeout: 15000 }),
+              new Promise((_, reject) => setTimeout(() => reject(new Error("タイムアウト(15秒)")), 16000)),
+            ]);
             return { title: loc.title || fullLocName, res };
           })
         );
