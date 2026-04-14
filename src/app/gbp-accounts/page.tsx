@@ -109,9 +109,11 @@ export default function GbpAccountsPage() {
 
         setMsg(`インポート中: ${gbpAcc.accountName || gbpAcc.name}（${locations.length}店舗）...`);
 
-        // 20店舗ずつバッチ処理
-        for (let i = 0; i < locations.length; i += 20) {
-          const batch = locations.slice(i, i + 20);
+        // 5店舗ずつバッチ処理（レート制限対策: 60req/分）
+        for (let i = 0; i < locations.length; i += 5) {
+          if (i > 0) await new Promise(r => setTimeout(r, 6000)); // 6秒待機
+          setMsg(`インポート中: ${gbpAcc.accountName || gbpAcc.name}（${i}/${locations.length}店舗完了）`);
+          const batch = locations.slice(i, i + 5);
           for (const loc of batch) {
             const locName = loc.name || "";
             // locations/XXX形式を accounts/YYY/locations/XXX に変換
