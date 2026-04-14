@@ -38,13 +38,73 @@ export async function POST(request: NextRequest) {
   // KW設定取得（スプレッドシートのKW or ranking_search_settings）
   const results: { shopName: string; measured: number; keywords: string[] }[] = [];
 
+  // 都市名→座標マッピング
+  const CITY_COORDS: Record<string, { lat: number; lng: number }> = {
+    tokyo: { lat: 35.6812, lng: 139.7671 }, osaka: { lat: 34.7024, lng: 135.4959 },
+    fukuoka: { lat: 33.5902, lng: 130.4017 }, sapporo: { lat: 43.0687, lng: 141.3508 },
+    nagoya: { lat: 35.1709, lng: 136.8815 }, yokohama: { lat: 35.4437, lng: 139.6380 },
+    kobe: { lat: 34.6901, lng: 135.1956 }, kyoto: { lat: 34.9858, lng: 135.7588 },
+    sendai: { lat: 38.2602, lng: 140.8824 }, hiroshima: { lat: 34.3963, lng: 132.4594 },
+    naha: { lat: 26.2124, lng: 127.6792 },
+  };
+
   for (const shop of shops) {
-    // ranking_search_settingsからKW取得
-    const { data: settings } = await supabase
+    // 1. ranking_search_settingsからKW取得
+    let { data: settings } = await supabase
       .from("ranking_search_settings")
       .select("search_words, gbp_latitude, gbp_longitude")
       .eq("shop_id", shop.id)
       .limit(10);
+
+    // 2. DB設定なし → スプレッドシートからKW+地点を取得してDBに保存
+    if (!settings || settings.length === 0) {
+      try {
+        const SHEET_ID = "1JpehMxL2I-fgef1sckNaY8RIUDIknvmT2OqhHj0my1k";
+        const tabName = encodeURIComponent(shop.gbp_shop_name || shop.name);
+        const gvizUrl = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${tabName}&range=A1:AT1`;
+        const sheetRes = await fetch(gvizUrl, {
+          headers: { "User-Agent": "Mozilla/5.0" }, redirect: "follow",
+          signal: AbortSignal.timeout(8000),
+        });
+        if (sheetRes.ok) {
+          const csv = await sheetRes.text();
+          if (!csv.includes("<!DOCTYPE") && !csv.includes("<html")) {
+            const cells = csv.split(",").map(c => c.replace(/^"|"$/g, "").trim());
+            // KW列: R=17, S=18, T=19, U=20, V=21, W=22, AA=26, AB=27, AC=28, AD=29
+            const kwIndices = [17, 18, 19, 20, 21, 22, 26, 27, 28, 29];
+            const kws = kwIndices.map(i => cells[i] || "").filter(k => k && !k.includes("前月比"));
+            // AR=43 地点, AS=44 緯度, AT=45 経度
+            const arCell = (cells[43] || "").toLowerCase().trim();
+            let lat = 35.68, lng = 139.77; // デフォルト東京
+            if (arCell === "local") {
+              lat = parseFloat(cells[44] || "") || 35.68;
+              lng = parseFloat(cells[45] || "") || 139.77;
+            } else if (CITY_COORDS[arCell]) {
+              lat = CITY_COORDS[arCell].lat;
+              lng = CITY_COORDS[arCell].lng;
+            } else {
+              // カンマ区切りの場合、最初の都市を使用
+              const firstCity = arCell.split(",")[0]?.trim();
+              if (firstCity && CITY_COORDS[firstCity]) {
+                lat = CITY_COORDS[firstCity].lat;
+                lng = CITY_COORDS[firstCity].lng;
+              }
+            }
+
+            if (kws.length > 0) {
+              // DBに保存（次回以降はDB参照で高速化）
+              const newSettings: any[] = [];
+              for (const kw of kws) {
+                const entry = { shop_id: shop.id, search_words: JSON.stringify([kw]), gbp_latitude: lat, gbp_longitude: lng, is_display: true };
+                await supabase.from("ranking_search_settings").upsert(entry, { onConflict: "shop_id,search_words" }).then(() => {});
+                newSettings.push({ search_words: JSON.stringify([kw]), gbp_latitude: lat, gbp_longitude: lng });
+              }
+              settings = newSettings;
+            }
+          }
+        }
+      } catch {}
+    }
 
     if (!settings || settings.length === 0) {
       results.push({ shopName: shop.name, measured: 0, keywords: [] });
