@@ -36,6 +36,21 @@ async function getOAuthToken(): Promise<string | null> {
   } catch { return data.access_token; }
 }
 
+async function getDefaultOwnerId(): Promise<string> {
+  const supabase = getSupabase();
+  // 1. ownersテーブルから最初のオーナーを取得
+  try {
+    const { data } = await supabase.from("owners").select("id").limit(1).maybeSingle();
+    if (data?.id) return data.id;
+  } catch {}
+  // 2. 既存shopsからowner_idを推定
+  try {
+    const { data } = await supabase.from("shops").select("owner_id").not("owner_id", "is", null).limit(1).maybeSingle();
+    if (data?.owner_id) return data.owner_id;
+  } catch {}
+  return "";
+}
+
 /**
  * GET /api/cron/sync-shops
  * 毎日新店舗を自動検出: 全GBPアカウントのロケーションをスキャン→未登録店舗を自動追加
@@ -51,6 +66,13 @@ export async function GET(request: NextRequest) {
   const accessToken = await getOAuthToken();
   if (!accessToken) {
     return NextResponse.json({ error: "OAuthトークンなし" }, { status: 500 });
+  }
+
+  // owner_id を事前取得
+  const ownerId = await getDefaultOwnerId();
+  if (!ownerId) {
+    console.log("[cron/sync-shops] owner_id not found, skipping");
+    return NextResponse.json({ error: "owner_idが見つかりません", added: 0, skipped: 0 }, { status: 200 });
   }
 
   // 既存店舗のGBPロケーション名を取得
@@ -77,47 +99,68 @@ export async function GET(request: NextRequest) {
     accounts = (groups || []).map(g => g.gbp_account_name).filter(Boolean);
   }
 
+  // 重複排除
+  accounts = Array.from(new Set(accounts));
+
   let added = 0;
   let skipped = 0;
+  const errors: string[] = [];
 
   for (const accName of accounts.slice(0, 5)) {
     try {
-      // Account Management API でロケーション一覧
-      const listRes = await fetch(
-        `https://mybusinessbusinessinformation.googleapis.com/v1/${accName}/locations?readMask=name,title,storefrontAddress,phoneNumbers&pageSize=100`,
-        { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(15000) }
-      );
+      // Account Management API でロケーション一覧（ページネーション対応）
+      let nextPageToken = "";
+      do {
+        const url = new URL(`https://mybusinessbusinessinformation.googleapis.com/v1/${accName}/locations`);
+        url.searchParams.set("readMask", "name,title,storefrontAddress,phoneNumbers");
+        url.searchParams.set("pageSize", "100");
+        if (nextPageToken) url.searchParams.set("pageToken", nextPageToken);
 
-      if (!listRes.ok) continue;
-      const listData = await listRes.json();
-      const locations = listData.locations || [];
+        const listRes = await fetch(url.toString(), {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          signal: AbortSignal.timeout(15000),
+        });
 
-      for (const loc of locations) {
-        const locName = loc.name || "";
-        if (!locName || existingNames.has(locName)) { skipped++; continue; }
+        if (!listRes.ok) {
+          errors.push(`${accName}: HTTP ${listRes.status}`);
+          break;
+        }
 
-        // Go API経由で店舗作成
-        try {
-          await fetch(`${GO_API_URL}/api/shop`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-            body: JSON.stringify({
-              name: loc.title || locName,
-              gbp_location_name: locName,
-              gbp_shop_name: loc.title || "",
-              state: loc.storefrontAddress?.administrativeArea || "",
-              city: loc.storefrontAddress?.locality || "",
-              address: (loc.storefrontAddress?.addressLines || []).join(" "),
-              phone: loc.phoneNumbers?.primaryPhone || "",
-            }),
-          });
-          added++;
-          existingNames.add(locName);
-        } catch {}
-      }
-    } catch {}
+        const listData = await listRes.json();
+        const locations = listData.locations || [];
+        nextPageToken = listData.nextPageToken || "";
+
+        for (const loc of locations) {
+          const locName = loc.name || "";
+          if (!locName || existingNames.has(locName)) { skipped++; continue; }
+
+          try {
+            await fetch(`${GO_API_URL}/api/shop`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+              body: JSON.stringify({
+                name: loc.title || locName,
+                gbp_location_name: locName,
+                gbp_shop_name: loc.title || "",
+                owner_id: ownerId,
+                state: loc.storefrontAddress?.administrativeArea || "",
+                city: loc.storefrontAddress?.locality || "",
+                address: (loc.storefrontAddress?.addressLines || []).join(" "),
+                phone: loc.phoneNumbers?.primaryPhone || "",
+              }),
+            });
+            added++;
+            existingNames.add(locName);
+          } catch (e: any) {
+            errors.push(`${loc.title || locName}: ${e?.message || "POST失敗"}`);
+          }
+        }
+      } while (nextPageToken);
+    } catch (e: any) {
+      errors.push(`${accName}: ${e?.message || "取得失敗"}`);
+    }
   }
 
-  console.log(`[cron/sync-shops] added: ${added}, skipped: ${skipped}, accounts: ${accounts.length}`);
-  return NextResponse.json({ success: true, added, skipped, accounts: accounts.length });
+  console.log(`[cron/sync-shops] added: ${added}, skipped: ${skipped}, accounts: ${accounts.length}, errors: ${errors.length}`);
+  return NextResponse.json({ success: true, added, skipped, accounts: accounts.length, errors: errors.slice(0, 5) });
 }
