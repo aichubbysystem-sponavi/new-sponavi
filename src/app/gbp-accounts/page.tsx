@@ -126,11 +126,11 @@ export default function GbpAccountsPage() {
 
         setMsg(`インポート中: ${gbpAcc.accountName || gbpAcc.name}（${locations.length}店舗）...`);
 
-        // 5店舗ずつバッチ処理（レート制限対策: 60req/分）
-        for (let i = 0; i < locations.length; i += 5) {
-          if (i > 0) await new Promise(r => setTimeout(r, 6000)); // 6秒待機
+        // 10店舗ずつバッチ処理（レート制限対策）
+        for (let i = 0; i < locations.length; i += 10) {
           setMsg(`インポート中: ${gbpAcc.accountName || gbpAcc.name}（${i}/${locations.length}店舗完了）`);
-          const batch = locations.slice(i, i + 5);
+          const batch = locations.slice(i, i + 10);
+          let newInBatch = 0;
           for (const loc of batch) {
             const locName = loc.name || "";
             // locations/XXX形式を accounts/YYY/locations/XXX に変換
@@ -156,8 +156,11 @@ export default function GbpAccountsPage() {
               totalImported++;
               existingNames.add(locName);
               existingNames.add(fullLocName);
+              newInBatch++;
             } catch { totalErrors++; }
           }
+          // 新規登録があった場合のみ2秒待機（レート制限対策）
+          if (newInBatch > 0) await new Promise(r => setTimeout(r, 2000));
         }
       }
 
