@@ -95,7 +95,7 @@ export default function GbpAccountsPage() {
     setImportResult(null);
     try {
       // GBPアカウント一覧（locationsネスト済み）を取得
-      const accRes = await api.get("/api/gbp/account");
+      const accRes = await api.get("/api/gbp/account", { timeout: 120000 });
       const gbpAccounts = accRes.data || [];
 
       let totalImported = 0;
