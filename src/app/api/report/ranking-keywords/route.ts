@@ -221,22 +221,16 @@ const NON_KW_HEADERS = new Set([
   "前月比　検索", "前月比　マップ", "前月比　アクション",
 ]);
 
+// 全列ヘッダー行からKW列を抽出（R=17, S=18, T=19, U=20, V=21, W=22, AA=26, AB=27, AC=28, AD=29）
+const KW_INDICES = [17, 18, 19, 20, 21, 22, 26, 27, 28, 29];
+
 function extractKeywords(row: string[]): string[] {
   const keywords: string[] = [];
-  // R1~W1 (index 17~22 in full row, or 0~5 if range=R1:AD1)
-  // 判定: row[0]が日本語の業務用ヘッダーならKWデータなし
-  const firstCell = (row[0] || "").trim();
-  if (NON_KW_HEADERS.has(firstCell) || firstCell.includes("編集NG") || firstCell.includes("コピペ")) {
-    return []; // このタブにKWデータなし
+  for (const idx of KW_INDICES) {
+    const cell = (row[idx] || "").trim();
+    if (cell && !cell.includes("前月比") && !NON_KW_HEADERS.has(cell)) {
+      keywords.push(cell);
+    }
   }
-  for (let i = 0; i <= 5; i++) {
-    const cell = (row[i] || "").trim();
-    if (cell && !cell.includes("前月比") && !NON_KW_HEADERS.has(cell)) keywords.push(cell);
-  }
-  // AA1~AD1 (index 9~12)
-  for (let i = 9; i <= 12; i++) {
-    const cell = (row[i] || "").trim();
-    if (cell && !cell.includes("前月比") && !NON_KW_HEADERS.has(cell)) keywords.push(cell);
-  }
-  return keywords.filter(Boolean);
+  return keywords;
 }
