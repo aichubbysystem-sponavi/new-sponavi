@@ -122,10 +122,11 @@ export default function RankingPage() {
       return (await supabase.auth.getSession()).data.session?.access_token;
     };
     token().then(async (t) => {
+      const headers: Record<string, string> = t ? { Authorization: `Bearer ${t}` } : {};
       try {
         const [alertRes, timeRes] = await Promise.all([
-          fetch(`/api/report/rank-alert?shopId=${selectedShopId}`),
-          fetch(`/api/report/optimal-time?shopId=${selectedShopId}`),
+          fetch(`/api/report/rank-alert?shopId=${selectedShopId}`, { headers }),
+          fetch(`/api/report/optimal-time?shopId=${selectedShopId}`, { headers }),
         ]);
         if (alertRes.ok) { const d = await alertRes.json(); setRankAlerts(d.alerts || []); }
         if (timeRes.ok) { const d = await timeRes.json(); setOptimalTime(d); }

@@ -42,6 +42,9 @@ async function getOAuthToken(): Promise<string | null> {
  * 予約投稿一覧を取得
  */
 export async function GET(request: NextRequest) {
+  const { verifyAuth } = await import("@/lib/auth-verify");
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   const shopId = request.nextUrl.searchParams.get("shopId");
   const supabase = getSupabase();
   let query = supabase.from("scheduled_posts").select("*").order("scheduled_at", { ascending: true });

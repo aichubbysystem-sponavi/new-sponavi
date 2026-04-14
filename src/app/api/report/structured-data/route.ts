@@ -11,6 +11,9 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_P
  * 構造化データ(Schema.org JSON-LD)を店舗情報から自動生成
  */
 export async function GET(request: NextRequest) {
+  const { verifyAuth } = await import("@/lib/auth-verify");
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   const shopId = request.nextUrl.searchParams.get("shopId");
   if (!shopId) return NextResponse.json({ error: "shopIdが必要です" }, { status: 400 });
 

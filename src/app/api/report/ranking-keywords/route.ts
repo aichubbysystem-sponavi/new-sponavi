@@ -10,6 +10,9 @@ const SPREADSHEET_ID = "1JpehMxL2I-fgef1sckNaY8RIUDIknvmT2OqhHj0my1k";
  * ※ Google Sheets API v4 は一切使わず、公開gviz URLのみ使用（認証不要）
  */
 export async function GET(request: NextRequest) {
+  const { verifyAuth } = await import("@/lib/auth-verify");
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   const shopName = request.nextUrl.searchParams.get("shopName");
 
   if (!shopName) {

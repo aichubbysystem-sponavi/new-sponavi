@@ -11,6 +11,9 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_P
  * 順位変動アラート: 前回比で急落/急上昇したキーワードを検出
  */
 export async function GET(request: NextRequest) {
+  const { verifyAuth } = await import("@/lib/auth-verify");
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   const shopId = request.nextUrl.searchParams.get("shopId");
   if (!shopId) return NextResponse.json({ error: "shopIdが必要です" }, { status: 400 });
 
