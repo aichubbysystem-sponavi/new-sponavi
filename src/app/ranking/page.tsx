@@ -57,7 +57,7 @@ function normalizeKw(s: any): string {
 }
 
 export default function RankingPage() {
-  const { apiConnected, selectedShopId, selectedShop } = useShop();
+  const { apiConnected, selectedShopId, selectedShop, shops } = useShop();
   const [keywords, setKeywords] = useState("");
   const [points, setPoints] = useState<MeasurePoint[]>(DEFAULT_POINTS);
   const [newPointLabel, setNewPointLabel] = useState("");
@@ -76,6 +76,9 @@ export default function RankingPage() {
   const [kwHistory, setKwHistory] = useState<{ period: string; keywords: { keyword: string; count: number }[] }[]>([]);
   const [volumeResults, setVolumeResults] = useState<{ keyword: string; resultCount: number; level: string }[]>([]);
   const [volumeLoading, setVolumeLoading] = useState(false);
+  const [bulkMeasuring, setBulkMeasuring] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState("");
+  const [bulkResult, setBulkResult] = useState<any>(null);
 
   // 店舗ごとの計測地点をlocalStorageから読み込み/保存
   useEffect(() => {
@@ -267,8 +270,44 @@ export default function RankingPage() {
 
   return (
     <div className="animate-fade-in">
-      <h1 className="text-2xl font-bold text-slate-800 mb-2">店舗検索ランキング</h1>
-      <p className="text-sm text-slate-500 mb-6">キーワード順位を計測（最大100位まで・複数地点対応）</p>
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">店舗検索ランキング</h1>
+          <p className="text-sm text-slate-500 mt-1">キーワード順位を計測（最大100位まで・複数地点対応）</p>
+        </div>
+        <button onClick={async () => {
+          if (!confirm(`全${shops.length}店舗のKW順位を一括計測しますか？\n10店舗ずつバッチ処理します。`)) return;
+          setBulkMeasuring(true); setBulkResult(null);
+          const allIds = shops.map(s => s.id);
+          let totalMeasured = 0;
+          const allResults: any[] = [];
+          const bs = 10;
+          for (let i = 0; i < allIds.length; i += bs) {
+            const batch = allIds.slice(i, i + bs);
+            setBulkProgress(`計測中... ${i}/${allIds.length}店舗完了（${totalMeasured}KW計測済み）`);
+            try {
+              const token = (await (await import("@/lib/supabase")).supabase.auth.getSession()).data.session?.access_token;
+              const res = await fetch("/api/report/ranking-bulk", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ shopIds: batch }),
+              });
+              if (res.ok) {
+                const d = await res.json();
+                totalMeasured += d.totalMeasured || 0;
+                if (d.results) allResults.push(...d.results);
+              }
+            } catch {}
+          }
+          setBulkResult({ totalMeasured, totalShops: allIds.length, results: allResults });
+          setBulkProgress(`完了: ${allIds.length}店舗、${totalMeasured}KW計測`);
+          setBulkMeasuring(false);
+          await fetchHistory();
+        }} disabled={bulkMeasuring || shops.length === 0}
+          className="px-4 py-2 rounded-lg text-xs font-semibold bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50">
+          {bulkMeasuring ? "計測中..." : `全店舗一括計測（${shops.length}店舗）`}
+        </button>
+      </div>
 
       {!apiConnected || !selectedShopId ? (
         <div className="bg-white rounded-xl p-12 shadow-sm border border-slate-100 text-center">
@@ -276,6 +315,25 @@ export default function RankingPage() {
         </div>
       ) : (
         <>
+          {/* 全店舗一括計測の進捗/結果 */}
+          {(bulkProgress || bulkResult) && (
+            <div className={`rounded-xl p-4 shadow-sm mb-5 ${bulkMeasuring ? "bg-purple-50 border border-purple-200" : "bg-emerald-50 border border-emerald-200"}`}>
+              <p className={`text-sm font-semibold ${bulkMeasuring ? "text-purple-700" : "text-emerald-700"}`}>{bulkProgress}</p>
+              {bulkResult && bulkResult.results && (
+                <div className="mt-2 max-h-[200px] overflow-y-auto">
+                  {bulkResult.results.map((r: any, i: number) => (
+                    <div key={i} className="flex items-center gap-2 py-1 text-xs border-b border-slate-100">
+                      <span className="text-slate-700 font-medium">{r.shopName}</span>
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${r.measured > 0 ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-400"}`}>
+                        {r.measured > 0 ? `${r.measured}KW計測` : "KW設定なし"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* 順位変動アラート */}
           {rankAlerts.length > 0 && (
             <div className="bg-amber-50 rounded-xl p-4 shadow-sm border border-amber-200 mb-5">
