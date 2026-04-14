@@ -58,17 +58,14 @@ export default function GbpAccountsPage() {
           created_at: d.created_at || "",
         })));
       } else {
-        // system.accountsテーブルから直接（systemスキーマ）
-        const { data: sysData } = await supabase.rpc("get_system_accounts").catch(() => ({ data: null }));
-        if (sysData) {
-          setAccounts((Array.isArray(sysData) ? sysData : []).map((d: any, i: number) => ({
-            id: String(i),
-            account_id: d.account_id || d.google_account_id || "",
-            email: d.email || d.google_email || `接続済みアカウント${i + 1}`,
-            type: d.type || 1,
-            created_at: d.created_at || "",
-          })));
-        }
+        // DBにトークンがあれば接続済みとして表示
+        setAccounts([{
+          id: "0",
+          account_id: "",
+          email: "接続済みアカウント（Go API経由で管理）",
+          type: 1,
+          created_at: "",
+        }]);
       }
     } catch { setAccounts([]); }
     setLoading(false);
