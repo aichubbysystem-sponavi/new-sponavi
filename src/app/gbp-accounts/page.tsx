@@ -94,7 +94,7 @@ export default function GbpAccountsPage() {
     setImporting(accountEmail);
     setImportResult(null);
     try {
-      // GBPアカウント一覧を取得
+      // GBPアカウント一覧（locationsネスト済み）を取得
       const accRes = await api.get("/api/gbp/account");
       const gbpAccounts = accRes.data || [];
 
@@ -104,37 +104,37 @@ export default function GbpAccountsPage() {
       const existingNames = new Set(shops.map(s => s.gbp_location_name).filter(Boolean));
 
       for (const gbpAcc of gbpAccounts) {
-        const accName = gbpAcc.name || gbpAcc.account_name;
-        if (!accName) continue;
+        const locations = gbpAcc.locations || [];
+        if (locations.length === 0) continue;
 
-        // ロケーション一覧取得
-        try {
-          const locRes = await api.get(`/api/gbp/account/location?account=${encodeURIComponent(accName)}`);
-          const locations = locRes.data?.locations || locRes.data || [];
+        setMsg(`インポート中: ${gbpAcc.accountName || gbpAcc.name}（${locations.length}店舗）...`);
 
-          // 20店舗ずつバッチインポート
-          for (let i = 0; i < locations.length; i += 20) {
-            const batch = locations.slice(i, i + 20);
-            for (const loc of batch) {
-              const locName = loc.name || "";
-              if (existingNames.has(locName)) { totalSkipped++; continue; }
+        // 20店舗ずつバッチ処理
+        for (let i = 0; i < locations.length; i += 20) {
+          const batch = locations.slice(i, i + 20);
+          for (const loc of batch) {
+            const locName = loc.name || "";
+            // locations/XXX形式を accounts/YYY/locations/XXX に変換
+            const fullLocName = locName.startsWith("accounts/") ? locName
+              : locName.startsWith("locations/") ? `${gbpAcc.name}/${locName}` : locName;
 
-              try {
-                await api.post("/api/shop", {
-                  name: loc.title || loc.storeCode || locName,
-                  gbp_location_name: locName,
-                  gbp_shop_name: loc.title || "",
-                  state: loc.storefrontAddress?.administrativeArea || "",
-                  city: loc.storefrontAddress?.locality || "",
-                  address: (loc.storefrontAddress?.addressLines || []).join(" "),
-                  phone: loc.phoneNumbers?.primaryPhone || "",
-                });
-                totalImported++;
-                existingNames.add(locName);
-              } catch { totalErrors++; }
+            if (existingNames.has(locName) || existingNames.has(fullLocName)) {
+              totalSkipped++;
+              continue;
             }
+
+            try {
+              await api.post("/api/shop", {
+                name: loc.title || locName,
+                gbp_location_name: fullLocName,
+                gbp_shop_name: loc.title || "",
+              });
+              totalImported++;
+              existingNames.add(locName);
+              existingNames.add(fullLocName);
+            } catch { totalErrors++; }
           }
-        } catch {}
+        }
       }
 
       setImportResult({ imported: totalImported, skipped: totalSkipped, errors: totalErrors });
