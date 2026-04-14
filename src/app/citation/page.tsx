@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useShop } from "@/components/shop-provider";
+import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
 
 interface NAPResult {
@@ -49,20 +50,30 @@ export default function CitationPage() {
 
   useEffect(() => { fetchResults(); }, [fetchResults]);
 
-  // NAP一括チェック実行
+  // NAP一括チェック実行（10店舗ずつバッチ分割）
   const handleCheck = async () => {
     setChecking(true);
     setError("");
-    setProgress("NAP整合性チェック実行中...");
-    try {
-      const res = await api.post("/api/report/nap-check", {}, { timeout: 300000 });
-      setProgress(`完了: ${res.data.total}店舗チェック（OK: ${res.data.ok} / NG: ${res.data.ng} / エラー: ${res.data.errors}）`);
-      await fetchResults();
-    } catch (e: any) {
-      setError(e?.response?.data?.error || e?.message || "チェックに失敗しました");
-    } finally {
-      setChecking(false);
+    // 全店舗IDを取得
+    const { data: allShops } = await supabase.from("shops").select("id").not("gbp_location_name", "is", null);
+    const allIds = (allShops || []).map((s: any) => s.id);
+    if (allIds.length === 0) { setError("GBP接続済みの店舗がありません"); setChecking(false); return; }
+
+    let totalOk = 0, totalNg = 0, totalErrors = 0;
+    const batchSize = 10;
+    for (let i = 0; i < allIds.length; i += batchSize) {
+      const batch = allIds.slice(i, i + batchSize);
+      setProgress(`NAP整合性チェック中... ${i}/${allIds.length}店舗完了`);
+      try {
+        const res = await api.post("/api/report/nap-check", { shopIds: batch }, { timeout: 55000 });
+        totalOk += res.data.ok || 0;
+        totalNg += res.data.ng || 0;
+        totalErrors += res.data.errors || 0;
+      } catch { totalErrors += batch.length; }
     }
+    setProgress(`完了: ${allIds.length}店舗チェック（OK: ${totalOk} / NG: ${totalNg} / エラー: ${totalErrors}）`);
+    await fetchResults();
+    setChecking(false);
   };
 
   // フィルタリング

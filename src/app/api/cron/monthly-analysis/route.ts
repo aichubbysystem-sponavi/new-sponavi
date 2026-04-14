@@ -59,7 +59,9 @@ export async function GET(request: NextRequest) {
   let analyzed = 0;
   let errors = 0;
 
-  for (const shop of toAnalyze.slice(0, 50)) {
+  // Vercel Hobby 60秒制限: 1店舗約5秒 → 最大10店舗/実行
+  // Cronが毎月1日に実行 → 30日分割で全店舗カバー
+  for (const shop of toAnalyze.slice(0, 10)) {
     // 口コミ取得
     const { data: reviews } = await supabase
       .from("reviews")

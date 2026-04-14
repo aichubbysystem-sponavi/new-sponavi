@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
     .eq("status", "pending")
     .lte("scheduled_at", now)
     .order("scheduled_at", { ascending: true })
-    .limit(20);
+    .limit(10); // Vercel Hobby 60秒制限: 1投稿約5秒 → 最大10件/実行
 
   if (fetchErr || !posts || posts.length === 0) {
     return NextResponse.json({ success: true, message: "実行対象なし", count: 0 });

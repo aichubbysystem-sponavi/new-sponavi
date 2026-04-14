@@ -104,7 +104,8 @@ export async function GET(request: NextRequest) {
   // ★4以上の口コミのみ自動返信（低評価は手動対応推奨）
   const targets = unreplied.filter(r => starToNum(r.star_rating) >= 4);
 
-  for (const review of targets.slice(0, 10)) {
+  // Vercel Hobby 60秒制限: 1件約10秒（Claude API + GBP API） → 最大5件/実行
+  for (const review of targets.slice(0, 5)) {
     const shop = shopMap.get(review.shop_id);
     if (!shop || !shop.gbp_location_name) continue;
 

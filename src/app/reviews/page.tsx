@@ -385,15 +385,31 @@ export default function ReviewsPage() {
 
   const handleSyncMedia = async () => {
     setSyncing(true);
-    setSyncMsg("写真を同期中...");
-    try {
-      const res = await api.post("/api/report/sync-media", { shopIds: selectedShopId ? [selectedShopId] : [] }, { timeout: 300000 });
-      setSyncMsg(`✓ ${res.data.totalSynced}枚の写真を同期しました（${res.data.shops}店舗）`);
-    } catch (e: any) {
-      setSyncMsg(`写真同期に失敗しました: ${e?.response?.data?.error || e?.message || "不明なエラー"}`);
-    } finally {
-      setSyncing(false);
+    if (selectedShopId) {
+      // 1店舗の場合はそのまま
+      setSyncMsg("写真を同期中...");
+      try {
+        const res = await api.post("/api/report/sync-media", { shopIds: [selectedShopId] }, { timeout: 55000 });
+        setSyncMsg(`✓ ${res.data.totalSynced}枚の写真を同期しました`);
+      } catch (e: any) {
+        setSyncMsg(`写真同期に失敗しました: ${e?.response?.data?.error || e?.message || "不明なエラー"}`);
+      }
+    } else {
+      // 全店舗: 10店舗ずつバッチ分割
+      const allIds = shops.map(s => s.id);
+      let totalSynced = 0;
+      const batchSize = 10;
+      for (let i = 0; i < allIds.length; i += batchSize) {
+        const batch = allIds.slice(i, i + batchSize);
+        setSyncMsg(`写真同期中... ${i}/${allIds.length}店舗完了（${totalSynced}枚取得済み）`);
+        try {
+          const res = await api.post("/api/report/sync-media", { shopIds: batch }, { timeout: 55000 });
+          totalSynced += res.data.totalSynced || 0;
+        } catch { /* continue */ }
+      }
+      setSyncMsg(`✓ ${totalSynced}枚の写真を同期しました（${allIds.length}店舗）`);
     }
+    setSyncing(false);
   };
 
   const starToNum = (s: string | null | undefined) => {
