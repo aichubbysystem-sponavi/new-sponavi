@@ -383,6 +383,13 @@ export default function RankingPage() {
                       const res = await api.get(`/api/report/ranking-keywords?shopName=${encodeURIComponent(selectedShop.name)}`);
                       if (res.data.found && res.data.keywords.length > 0) {
                         setKeywords(res.data.keywords.join("\n"));
+                        // 計測地点も自動設定（AR/AS/AT列から）
+                        if (res.data.points && res.data.points.length > 0) {
+                          setPoints(res.data.points);
+                          if (selectedShopId) {
+                            localStorage.setItem(`ranking-points-${selectedShopId}`, JSON.stringify(res.data.points));
+                          }
+                        }
                       } else {
                         const tabs = res.data.availableTabs;
                         const debug = res.data.debug;

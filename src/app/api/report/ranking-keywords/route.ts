@@ -31,6 +31,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         keywords: result.keywords,
         ranks: result.ranks,
+        points: result.points,
         shopName: tabName,
         found: true,
         matchedTab: tabName,
@@ -65,8 +66,24 @@ function generateNameVariants(name: string): string[] {
 /**
  * スプレッドシートからKW名+順位を取得（ヘッダー行+最終行のB列日付で月一致）
  */
+// 都市名→座標マッピング
+const CITY_COORDS: Record<string, { lat: number; lng: number; label: string }> = {
+  tokyo: { lat: 35.6812, lng: 139.7671, label: "東京駅" },
+  osaka: { lat: 34.7024, lng: 135.4959, label: "大阪駅" },
+  fukuoka: { lat: 33.5902, lng: 130.4017, label: "博多駅" },
+  sapporo: { lat: 43.0687, lng: 141.3508, label: "札幌駅" },
+  nagoya: { lat: 35.1709, lng: 136.8815, label: "名古屋駅" },
+  yokohama: { lat: 35.4437, lng: 139.6380, label: "横浜駅" },
+  kobe: { lat: 34.6901, lng: 135.1956, label: "三ノ宮駅" },
+  kyoto: { lat: 34.9858, lng: 135.7588, label: "京都駅" },
+  sendai: { lat: 38.2602, lng: 140.8824, label: "仙台駅" },
+  hiroshima: { lat: 34.3963, lng: 132.4594, label: "広島駅" },
+  naha: { lat: 26.2124, lng: 127.6792, label: "那覇" },
+};
+
 async function fetchKeywordsWithRanks(tabName: string, targetMonth: string): Promise<{
-  success: boolean; keywords: string[]; ranks: { word: string; rank: number; prevRank: number }[]; matchedMonth: string;
+  success: boolean; keywords: string[]; ranks: { word: string; rank: number; prevRank: number }[];
+  matchedMonth: string; points: { label: string; lat: number; lng: number }[];
 }> {
   try {
     // 全データ取得（A列〜AD列）
@@ -76,15 +93,15 @@ async function fetchKeywordsWithRanks(tabName: string, targetMonth: string): Pro
       redirect: "follow",
     });
 
-    if (!res.ok) return { success: false, keywords: [], ranks: [], matchedMonth: "" };
+    if (!res.ok) return { success: false, keywords: [], ranks: [], matchedMonth: "", points: [] };
     const text = await res.text();
     if (text.includes("<!DOCTYPE") || text.includes("<html") || text.includes("Invalid sheet")) {
-      return { success: false, keywords: [], ranks: [], matchedMonth: "" };
+      return { success: false, keywords: [], ranks: [], matchedMonth: "", points: [] };
     }
 
     // CSV全行パース
     const lines = text.split("\n").filter(l => l.trim());
-    if (lines.length < 2) return { success: false, keywords: [], ranks: [], matchedMonth: "" };
+    if (lines.length < 2) return { success: false, keywords: [], ranks: [], matchedMonth: "", points: [] };
 
     const headerRow = parseCSVRow(lines[0]);
     const keywords = extractKeywords(headerRow);
@@ -132,7 +149,7 @@ async function fetchKeywordsWithRanks(tabName: string, targetMonth: string): Pro
       if (m) matchedMonth = `${m[1]}-${String(parseInt(m[2])).padStart(2, "0")}`;
     }
 
-    if (!targetRow) return { success: true, keywords, ranks: [], matchedMonth: "" };
+    if (!targetRow) return { success: true, keywords, ranks: [], matchedMonth: "", points: [] };
 
     // KW列のインデックス: R=17, S=18, T=19, U=20, V=21, W=22, X=23(前月比skip), Y=24(skip), Z=25(skip), AA=26, AB=27, AC=28, AD=29
     const kwIndices = [17, 18, 19, 20, 21, 22, 26, 27, 28, 29];
@@ -146,9 +163,29 @@ async function fetchKeywordsWithRanks(tabName: string, targetMonth: string): Pro
       if (kwName) ranks.push({ word: kwName, rank, prevRank: prevRank || rank });
     }
 
-    return { success: true, keywords, ranks, matchedMonth };
+    // AR列(43)=地点種別, AS列(44)=緯度, AT列(45)=経度 ※ヘッダー行から読む
+    const points: { label: string; lat: number; lng: number }[] = [];
+    const arCell = (headerRow[43] || "").trim().toLowerCase();
+    if (arCell && arCell !== "") {
+      // 複数地点がカンマ区切りの場合
+      const cityNames = arCell.split(",").map(s => s.trim().toLowerCase());
+      for (const city of cityNames) {
+        if (city === "local") {
+          // AS/AT列から緯度経度を取得
+          const lat = parseFloat((headerRow[44] || "").trim());
+          const lng = parseFloat((headerRow[45] || "").trim());
+          if (!isNaN(lat) && !isNaN(lng)) {
+            points.push({ label: "店舗周辺", lat, lng });
+          }
+        } else if (CITY_COORDS[city]) {
+          points.push(CITY_COORDS[city]);
+        }
+      }
+    }
+
+    return { success: true, keywords, ranks, matchedMonth, points };
   } catch {
-    return { success: false, keywords: [], ranks: [], matchedMonth: "" };
+    return { success: false, keywords: [], ranks: [], matchedMonth: "", points: [] };
   }
 }
 
