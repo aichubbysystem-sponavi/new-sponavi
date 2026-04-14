@@ -391,20 +391,18 @@ export default function RankingPage() {
                           }
                         }
                       } else {
-                        const tabs = res.data.availableTabs;
-                        const debug = res.data.debug;
-                        const matched = res.data.matchedTab;
-                        let msg = "";
-                        if (matched) {
-                          msg = `タブ「${matched}」にキーワードがありません。`;
-                          if (debug) msg += ` (${debug})`;
-                        } else if (tabs && tabs.length > 0) {
-                          msg = `シートに「${selectedShop.name}」が見つかりません。類似タブ: ${tabs.join(", ")}`;
+                        if (res.data.found) {
+                          // タブは見つかったがKWデータがない
+                          setError(`「${res.data.matchedTab || selectedShop.name}」のタブにキーワード順位データがありません。R〜AD列にKWが設定されているか確認してください。`);
                         } else {
-                          msg = `シートにキーワードが見つかりませんでした（検索名: ${selectedShop.name}）`;
-                          if (debug) msg += ` [${debug}]`;
+                          // タブ自体が見つからない
+                          setError(`シートに「${selectedShop.name}」のタブが見つかりません。スプレッドシートにこの店舗名のタブがあるか確認してください。`);
                         }
-                        setError(msg);
+                        // 地点だけでも設定（KWなくても地点は有効）
+                        if (res.data.points && res.data.points.length > 0) {
+                          setPoints(res.data.points);
+                          if (selectedShopId) localStorage.setItem(`ranking-points-${selectedShopId}`, JSON.stringify(res.data.points));
+                        }
                       }
                     } catch (e: any) {
                       setError(e?.response?.data?.error || "シート取得に失敗しました");

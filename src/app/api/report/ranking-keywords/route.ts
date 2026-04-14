@@ -214,15 +214,29 @@ function parseCSVRow(line: string): string[] {
   return cells;
 }
 
+// KWではないヘッダーを除外するフィルタ
+const NON_KW_HEADERS = new Set([
+  "最終", "今月点数", "今月件数", "先月点数", "先月件数", "前月比", "コード",
+  "点数コピペ列", "件数コピペ列", "店舗名", "住所", "今月→", "#REF!",
+  "前月比　検索", "前月比　マップ", "前月比　アクション",
+]);
+
 function extractKeywords(row: string[]): string[] {
   const keywords: string[] = [];
-  // R1~W1 (index 0~5)
+  // R1~W1 (index 17~22 in full row, or 0~5 if range=R1:AD1)
+  // 判定: row[0]が日本語の業務用ヘッダーならKWデータなし
+  const firstCell = (row[0] || "").trim();
+  if (NON_KW_HEADERS.has(firstCell) || firstCell.includes("編集NG") || firstCell.includes("コピペ")) {
+    return []; // このタブにKWデータなし
+  }
   for (let i = 0; i <= 5; i++) {
-    if (row[i] && !row[i].includes("前月比")) keywords.push(row[i]);
+    const cell = (row[i] || "").trim();
+    if (cell && !cell.includes("前月比") && !NON_KW_HEADERS.has(cell)) keywords.push(cell);
   }
   // AA1~AD1 (index 9~12)
   for (let i = 9; i <= 12; i++) {
-    if (row[i] && !row[i].includes("前月比")) keywords.push(row[i]);
+    const cell = (row[i] || "").trim();
+    if (cell && !cell.includes("前月比") && !NON_KW_HEADERS.has(cell)) keywords.push(cell);
   }
   return keywords.filter(Boolean);
 }
