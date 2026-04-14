@@ -103,6 +103,23 @@ export default function GbpAccountsPage() {
       let totalErrors = 0;
       const existingNames = new Set(shops.map(s => s.gbp_location_name).filter(Boolean));
 
+      // 既存店舗からowner_idを取得（必須フィールド）
+      let defaultOwnerId = "";
+      try {
+        const ownerRes = await api.get("/api/owner", { timeout: 10000 });
+        const owners = ownerRes.data?.owners || ownerRes.data || [];
+        if (Array.isArray(owners) && owners.length > 0) {
+          defaultOwnerId = owners[0].id || owners[0].ID || "";
+        }
+      } catch {}
+      // owner_idが取れなければ既存店舗から推定
+      if (!defaultOwnerId && shops.length > 0) {
+        try {
+          const shopRes = await api.get(`/api/shop/${shops[0].id}`, { timeout: 10000 });
+          defaultOwnerId = shopRes.data?.owner_id || shopRes.data?.OwnerID || "";
+        } catch {}
+      }
+
       for (const gbpAcc of gbpAccounts) {
         const locations = gbpAcc.locations || [];
         if (locations.length === 0) continue;
@@ -130,6 +147,11 @@ export default function GbpAccountsPage() {
                 name: loc.title || locName,
                 gbp_location_name: fullLocName,
                 gbp_shop_name: loc.title || "",
+                owner_id: defaultOwnerId,
+                state: loc.storefrontAddress?.administrativeArea || "未設定",
+                city: loc.storefrontAddress?.locality || "未設定",
+                address: (loc.storefrontAddress?.addressLines || []).join(" ") || "未設定",
+                postal_code: loc.storefrontAddress?.postalCode || "000-0000",
               });
               totalImported++;
               existingNames.add(locName);
