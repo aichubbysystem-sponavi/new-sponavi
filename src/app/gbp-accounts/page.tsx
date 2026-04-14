@@ -26,35 +26,51 @@ export default function GbpAccountsPage() {
 
   const fetchAccounts = useCallback(async () => {
     setLoading(true);
+    // Go APIからアカウント一覧取得（system.accountsテーブル）
     try {
-      // system_oauth_tokensビューからアカウント一覧取得
-      const { data } = await supabase
-        .from("system_oauth_tokens")
-        .select("account_id, email, type, created_at")
-        .order("created_at", { ascending: true });
-
-      if (data) {
-        setAccounts(data.map((d: any, i: number) => ({
-          id: String(i),
-          account_id: d.account_id || "",
-          email: d.email || `アカウント${i + 1}`,
-          type: d.type || 0,
-          created_at: d.created_at || "",
-        })));
-      }
-    } catch {
-      // system_oauth_tokensがなければGo APIから取得
-      try {
-        const res = await api.get("/api/google/account");
-        setAccounts((res.data || []).map((a: any, i: number) => ({
+      const res = await api.get("/api/google/account");
+      const apiData = res.data || [];
+      if (Array.isArray(apiData) && apiData.length > 0) {
+        setAccounts(apiData.map((a: any, i: number) => ({
           id: a.id || String(i),
-          account_id: a.account_id || "",
-          email: a.email || a.name || `アカウント${i + 1}`,
+          account_id: a.account_id || a.google_account_id || "",
+          email: a.email || a.google_email || a.name || `アカウント${i + 1}`,
           type: a.type || 0,
           created_at: a.created_at || "",
         })));
-      } catch { setAccounts([]); }
-    }
+        setLoading(false);
+        return;
+      }
+    } catch {}
+
+    // フォールバック: Supabaseから直接取得
+    try {
+      const { data } = await supabase
+        .from("system_oauth_tokens")
+        .select("*")
+        .order("created_at", { ascending: true });
+      if (data && data.length > 0) {
+        setAccounts(data.map((d: any, i: number) => ({
+          id: String(i),
+          account_id: d.account_id || "",
+          email: d.email || d.google_email || `接続済みアカウント${i + 1}`,
+          type: d.type || 1,
+          created_at: d.created_at || "",
+        })));
+      } else {
+        // system.accountsテーブルから直接（systemスキーマ）
+        const { data: sysData } = await supabase.rpc("get_system_accounts").catch(() => ({ data: null }));
+        if (sysData) {
+          setAccounts((Array.isArray(sysData) ? sysData : []).map((d: any, i: number) => ({
+            id: String(i),
+            account_id: d.account_id || d.google_account_id || "",
+            email: d.email || d.google_email || `接続済みアカウント${i + 1}`,
+            type: d.type || 1,
+            created_at: d.created_at || "",
+          })));
+        }
+      }
+    } catch { setAccounts([]); }
     setLoading(false);
   }, []);
 
