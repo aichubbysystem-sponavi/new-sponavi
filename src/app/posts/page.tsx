@@ -508,12 +508,37 @@ export default function PostsPage() {
                       {autoPosting ? "確認中..." : "プレビュー"}
                     </button>
                     <button onClick={async () => {
-                      if (!confirm(`${autoPostDate}の投稿を実行しますか？`)) return;
+                      // まずプレビューで件数を取得
                       setAutoPosting(true); setAutoPostResult(null);
                       try {
-                        const res = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, topicType: postSelectedType || newPost.topicType }, { timeout: 300000 });
-                        setAutoPostResult({ ...res.data, mode: "executed" });
-                        logAudit("シート自動投稿", `${autoPostDate} — ${res.data.posted}件投稿`);
+                        const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10 }, { timeout: 60000 });
+                        const total = previewRes.data.matches || 0;
+                        if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません` }); setAutoPosting(false); return; }
+                        if (!confirm(`${autoPostDate}の投稿を実行しますか？\n\n${total}件を10件ずつバッチ処理します（${Math.ceil(total / 10)}回）`)) { setAutoPosting(false); return; }
+
+                        // バッチ分割実行
+                        const bs = 10;
+                        let totalPosted = 0, totalErrors = 0;
+                        const allResults: any[] = [];
+                        for (let offset = 0; offset < total; offset += bs) {
+                          setMsg(`バッチ実行中... ${offset}/${total}件完了（${totalPosted}件投稿済み）`);
+                          try {
+                            const res = await api.post("/api/report/auto-post", {
+                              sheetId: autoPostSheet, targetDate: autoPostDate,
+                              topicType: postSelectedType || newPost.topicType,
+                              batchOffset: offset, batchSize: bs,
+                            }, { timeout: 55000 });
+                            totalPosted += res.data.posted || 0;
+                            totalErrors += res.data.errors || 0;
+                            if (res.data.results) allResults.push(...res.data.results);
+                          } catch (e: any) {
+                            totalErrors++;
+                            allResults.push({ shopName: `バッチ${Math.floor(offset / bs) + 1}`, status: `エラー: ${e?.message}` });
+                          }
+                        }
+                        setAutoPostResult({ mode: "executed", posted: totalPosted, errors: totalErrors, results: allResults, matches: total });
+                        logAudit("シート自動投稿", `${autoPostDate} — ${totalPosted}件投稿（${Math.ceil(total / bs)}バッチ）`);
+                        setMsg(`完了: ${totalPosted}件投稿 / ${totalErrors}件エラー`);
                         await fetchData();
                       } catch (e: any) { setAutoPostResult({ error: e?.response?.data?.error || e?.message }); }
                       finally { setAutoPosting(false); }

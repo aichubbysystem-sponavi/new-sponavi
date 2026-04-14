@@ -216,11 +216,13 @@ export async function POST(request: NextRequest) {
   if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
   const body = await request.json();
-  const { sheetId, targetDate, dryRun, topicType } = body as {
+  const { sheetId, targetDate, dryRun, topicType, batchOffset, batchSize } = body as {
     sheetId: string;
     targetDate: string; // "2026-04-11"
     dryRun?: boolean;
     topicType?: string; // "STANDARD" | "OFFER" | "EVENT" | "PHOTO"
+    batchOffset?: number; // バッチ開始位置
+    batchSize?: number; // バッチサイズ（デフォルト10）
   };
   const isPhotoOnly = topicType === "PHOTO";
 
@@ -317,8 +319,24 @@ export async function POST(request: NextRequest) {
   }
 
   if (dryRun) {
-    return NextResponse.json({ matches: allMatches.length, data: allMatches, message: "プレビュー（実際の投稿はしません）" });
+    // プレビュー時はバッチ情報も返す
+    const bs = batchSize || 10;
+    const totalBatches = Math.ceil(allMatches.length / bs);
+    return NextResponse.json({
+      matches: allMatches.length,
+      data: allMatches,
+      totalBatches,
+      batchSize: bs,
+      message: allMatches.length > bs
+        ? `プレビュー: ${allMatches.length}件を${bs}件ずつ${totalBatches}回に分けて実行します`
+        : "プレビュー（実際の投稿はしません）",
+    });
   }
+
+  // バッチ分割: batchOffset/batchSizeが指定されている場合、その範囲のみ実行
+  const offset = batchOffset || 0;
+  const size = batchSize || allMatches.length; // 未指定時は全件
+  const batchMatches = allMatches.slice(offset, offset + size);
 
   // GBP投稿実行
   const accessToken = await getOAuthToken();
@@ -333,7 +351,7 @@ export async function POST(request: NextRequest) {
   let errors = 0;
   const results: any[] = [];
 
-  for (const match of allMatches) {
+  for (const match of batchMatches) {
     // 店舗名でマッチ
     const shop = (shops || []).find((s) =>
       s.name === match.shopName || s.gbp_shop_name === match.shopName
@@ -421,5 +439,13 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ matches: allMatches.length, posted, errors, results });
+  return NextResponse.json({
+    matches: allMatches.length,
+    posted, errors, results,
+    batchOffset: offset,
+    batchSize: size,
+    batchProcessed: batchMatches.length,
+    hasMore: offset + size < allMatches.length,
+    nextOffset: offset + size,
+  });
 }
