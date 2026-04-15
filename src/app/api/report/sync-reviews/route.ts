@@ -157,22 +157,56 @@ export async function POST(request: NextRequest) {
   const shopIds: string[] = body.shopIds || []; // 空なら全店舗
 
   // OAuthトークン取得
-  const accessToken = await getOAuthToken();
+  let accessToken: string | null = null;
+  try {
+    accessToken = await getOAuthToken();
+  } catch (e: any) {
+    return NextResponse.json({ error: `OAuthトークン取得エラー: ${e?.message || "不明"}` }, { status: 500 });
+  }
   if (!accessToken) {
-    return NextResponse.json({ error: "OAuthトークンが見つかりません。OAuth認証を実行してください。" }, { status: 500 });
+    return NextResponse.json({ error: "OAuthトークンが見つかりません。GBPアカウント管理からOAuth認証を実行してください。" }, { status: 500 });
   }
 
   const supabase = getSupabase();
+  const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
-  // 店舗一覧取得
-  let query = supabase.from("shops").select("id, name, gbp_location_name").not("gbp_location_name", "is", null);
-  if (shopIds.length > 0) {
-    query = query.in("id", shopIds);
+  // 店舗一覧取得（Go API → Supabaseフォールバック）
+  let shops: { id: string; name: string; gbp_location_name: string }[] = [];
+  try {
+    const goRes = await fetch(`${GO_API_URL}/api/shop`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (goRes.ok) {
+      const goData = await goRes.json();
+      shops = (Array.isArray(goData) ? goData : [])
+        .filter((s: any) => s.gbp_location_name)
+        .map((s: any) => ({
+          id: s.id || s.ID,
+          name: s.name || s.Name,
+          gbp_location_name: s.gbp_location_name || s.GbpLocationName,
+        }));
+    }
+  } catch {}
+
+  // Go APIから取れなければSupabaseフォールバック
+  if (shops.length === 0) {
+    const query = supabase.from("shops").select("id, name, gbp_location_name").not("gbp_location_name", "is", null);
+    const { data, error: shopError } = await query;
+    if (shopError || !data) {
+      return NextResponse.json({ error: `店舗の取得に失敗しました: ${shopError?.message || "不明"}` }, { status: 500 });
+    }
+    shops = data;
   }
-  const { data: shops, error: shopError } = await query;
 
-  if (shopError || !shops) {
-    return NextResponse.json({ error: "店舗の取得に失敗しました" }, { status: 500 });
+  // shopIds指定がある場合はフィルタ
+  if (shopIds.length > 0) {
+    const idSet = new Set(shopIds);
+    shops = shops.filter(s => idSet.has(s.id));
+  }
+
+  if (shops.length === 0) {
+    return NextResponse.json({ error: "対象店舗が見つかりません" }, { status: 400 });
   }
 
   let totalSynced = 0;
