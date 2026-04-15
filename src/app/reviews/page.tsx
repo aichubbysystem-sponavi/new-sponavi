@@ -371,7 +371,8 @@ export default function ReviewsPage() {
         }
       } catch (e: any) {
         stoppedAt = i;
-        setSyncMsg(`⚠ ${stoppedAt}/${shopIds.length}店舗で中断（${totalSynced}件取得済み）。原因: ${e?.message || "タイムアウト"}`);
+        const detail = e?.response?.data?.error || e?.message || "タイムアウト";
+        setSyncMsg(`⚠ ${stoppedAt}/${shopIds.length}店舗で中断（${totalSynced}件取得済み）。原因: ${detail}`);
         await fetchReviews();
         setSyncing(false);
         return;

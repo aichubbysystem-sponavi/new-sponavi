@@ -147,6 +147,7 @@ async function fetchAllReviews(
 
 // POST /api/report/sync-reviews
 export async function POST(request: NextRequest) {
+  try {
   const { verifyAuth } = await import("@/lib/auth-verify");
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid) {
@@ -290,4 +291,8 @@ export async function POST(request: NextRequest) {
     totalErrors,
     results,
   });
+  } catch (e: any) {
+    console.error("[sync-reviews] Unhandled error:", e);
+    return NextResponse.json({ error: `サーバーエラー: ${e?.message || "不明なエラー"}` }, { status: 500 });
+  }
 }
