@@ -34,58 +34,51 @@ interface ReviewsResponse {
   nextPageToken?: string;
 }
 
-// OAuthトークンを取得（複数ソースを試行）
+// OAuthトークンを取得
+// Go APIが自動リフレッシュを管理しているので、Go APIにGBP APIを叩かせてトークンを最新化し、
+// その後Go APIのアカウント情報からトークンを間接取得する
 async function getOAuthToken(): Promise<string | null> {
-  // 1. Supabase system_oauth_tokens テーブル/ビュー
+  // 1. まずGo APIにGBP APIを叩かせてトークンを自動リフレッシュさせる
+  try {
+    await fetch(`${GO_API_URL}/api/gbp/account`, {
+      signal: AbortSignal.timeout(15000),
+    });
+    console.log("[sync-reviews] Go API GBP call triggered token refresh");
+  } catch {}
+
+  // 2. Supabase system_oauth_tokens からリフレッシュ済みトークンを取得
   try {
     const supabase = getSupabase();
     const { data } = await supabase
       .from("system_oauth_tokens")
       .select("access_token, refresh_token, expiry")
+      .order("expiry", { ascending: false })
       .limit(1)
       .maybeSingle();
     if (data?.access_token) {
-      if (new Date(data.expiry).getTime() - Date.now() > 5 * 60 * 1000) {
-        return data.access_token;
-      }
-      // リフレッシュ
-      if (data.refresh_token && GBP_CLIENT_ID) {
-        const refreshed = await refreshToken(data.refresh_token);
-        if (refreshed) return refreshed;
-      }
+      console.log("[sync-reviews] Got token from system_oauth_tokens, expiry:", data.expiry);
       return data.access_token;
     }
   } catch (e: any) {
     console.log("[sync-reviews] system_oauth_tokens not accessible:", e?.message);
   }
 
-  // 2. Supabase system スキーマの tokens テーブル（Go APIが使用）
+  // 3. Supabase REST API で system.tokens テーブルから取得
   try {
     const key = SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY;
     if (key) {
       const res = await fetch(
-        `${SUPABASE_URL}/rest/v1/tokens?select=access_token,refresh_token,expiry&limit=1`,
+        `${SUPABASE_URL}/rest/v1/tokens?select=access_token,refresh_token,expiry&order=expiry.desc&limit=1`,
         {
-          headers: {
-            apikey: key,
-            Authorization: `Bearer ${key}`,
-            "Accept-Profile": "system",
-          },
+          headers: { apikey: key, Authorization: `Bearer ${key}`, "Accept-Profile": "system" },
           signal: AbortSignal.timeout(5000),
         }
       );
       if (res.ok) {
         const rows = await res.json();
         if (Array.isArray(rows) && rows.length > 0 && rows[0].access_token) {
-          const t = rows[0];
-          if (new Date(t.expiry).getTime() - Date.now() > 5 * 60 * 1000) {
-            return t.access_token;
-          }
-          if (t.refresh_token) {
-            const refreshed = await refreshToken(t.refresh_token);
-            if (refreshed) return refreshed;
-          }
-          return t.access_token;
+          console.log("[sync-reviews] Got token from system.tokens");
+          return rows[0].access_token;
         }
       }
     }
@@ -93,38 +86,39 @@ async function getOAuthToken(): Promise<string | null> {
     console.log("[sync-reviews] system.tokens not accessible:", e?.message);
   }
 
-  // 3. Supabase public スキーマの tokens テーブル
+  // 4. public.tokens からフォールバック
   try {
     const key = SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY;
     if (key) {
       const res = await fetch(
-        `${SUPABASE_URL}/rest/v1/tokens?select=access_token,refresh_token,expiry&limit=1`,
+        `${SUPABASE_URL}/rest/v1/tokens?select=access_token,refresh_token,expiry&order=expiry.desc&limit=1`,
         {
-          headers: {
-            apikey: key,
-            Authorization: `Bearer ${key}`,
-          },
+          headers: { apikey: key, Authorization: `Bearer ${key}` },
           signal: AbortSignal.timeout(5000),
         }
       );
       if (res.ok) {
         const rows = await res.json();
         if (Array.isArray(rows) && rows.length > 0 && rows[0].access_token) {
+          console.log("[sync-reviews] Got token from public.tokens");
           return rows[0].access_token;
         }
       }
     }
   } catch {}
 
-  // 4. Go APIのOAuth更新エンドポイント（存在する場合）
+  // 5. 最終手段: GBP_CLIENT_ID/SECRETで直接リフレッシュ
   try {
-    const res = await fetch(`${GO_API_URL}/api/google/oauth/refresh`, {
-      method: "POST",
-      signal: AbortSignal.timeout(10000),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.access_token) return data.access_token;
+    const supabase = getSupabase();
+    // refresh_tokenだけでも取得できないか試行
+    const { data } = await supabase
+      .from("system_oauth_tokens")
+      .select("refresh_token")
+      .limit(1)
+      .maybeSingle();
+    if (data?.refresh_token && GBP_CLIENT_ID && GBP_CLIENT_SECRET) {
+      const refreshed = await refreshToken(data.refresh_token);
+      if (refreshed) return refreshed;
     }
   } catch {}
 
