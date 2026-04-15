@@ -105,6 +105,15 @@ async function fetchFromSheetByName(sheetId: string, tabName: string, targetMont
     const headerText = await headerRes.text();
     if (isHtml(headerText)) return EMPTY_RESULT;
 
+    // A1セルが店舗名と一致するか検証（gvizは存在しないタブ名でも最初のタブを返すため）
+    const headerRow = parseCSVRow(headerText.split("\n")[0] || "");
+    const a1 = (headerRow[0] || "").trim();
+    // A1がタブ名と異なり、かつサマリーシートのヘッダー（最終/店舗名/ビジネスプロフィール等）ならスキップ
+    if (a1 !== tabName && a1 !== tabName.replace(/\s+/g, " ").trim()) {
+      const summaryHeaders = ["最終", "店舗名", "ビジネスプロフィール"];
+      if (summaryHeaders.includes(a1)) return EMPTY_RESULT;
+    }
+
     // データ行を取得
     const dataUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodedTab}`;
     const dataRes = await fetch(dataUrl, { headers: { "User-Agent": UA }, redirect: "follow" });
@@ -263,6 +272,8 @@ function parseSheetData(headerText: string, dataText: string, targetMonth: strin
     if (!cell) continue;
     if (NON_KW_HEADERS.has(cell)) continue;
     if (cell.includes("前月比")) continue;
+    // 注記・記号セルを除外
+    if (cell.includes("※") || cell.includes("#REF") || cell.includes("#VALUE") || cell.includes("#DIV")) continue;
     // 数値列（座標等）を除外
     if (/^\d+(\.\d+)?$/.test(cell)) continue;
     // 年月形式を除外（"2025年1月"等）
