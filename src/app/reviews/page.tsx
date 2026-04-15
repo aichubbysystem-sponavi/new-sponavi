@@ -353,13 +353,13 @@ export default function ReviewsPage() {
     let stoppedAt = 0;
     let consecutiveErrors = 0;
     const shopIds = shops.map((s) => s.id);
-    const batchSize = 3; // Vercel Hobby 60秒制限対策（10→3に縮小）
+    const batchSize = 10; // Vercel Pro: 300秒タイムアウト
 
     for (let i = 0; i < shopIds.length; i += batchSize) {
       const batch = shopIds.slice(i, i + batchSize);
       setSyncMsg(`全店舗同期中... ${i}/${shopIds.length}店舗完了（${totalSynced}件取得済み）`);
       try {
-        const res = await api.post("/api/report/sync-reviews", { shopIds: batch }, { timeout: 55000 });
+        const res = await api.post("/api/report/sync-reviews", { shopIds: batch }, { timeout: 290000 });
         totalSynced += res.data.totalSynced || 0;
         totalErrors += res.data.totalErrors || 0;
         stoppedAt = i + batchSize;
