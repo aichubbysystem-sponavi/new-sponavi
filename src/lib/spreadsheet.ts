@@ -366,7 +366,7 @@ async function fetchRankingKeywords(shopName: string): Promise<Keyword[]> {
     const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.VERCEL_URL
       ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000";
     const res = await fetch(`${baseUrl}/api/report/ranking-keywords?shopName=${encodeURIComponent(shopName)}`, {
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "x-internal-call": "1" },
       next: { revalidate: 1800 },
     });
     if (res.ok) {
