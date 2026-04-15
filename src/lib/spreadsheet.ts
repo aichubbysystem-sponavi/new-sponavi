@@ -215,6 +215,12 @@ interface ShopReviewData {
   monthly: ReviewRow[];
   currentRating: number;
   currentCount: number;
+  /** 先月対比の件数増減（スプレッドシートcol 7の値、正確な増減数） */
+  summaryDelta?: number;
+  /** 先月対比の評価（col 4） */
+  summaryRating?: number;
+  /** 先月対比の件数（col 5） */
+  summaryCount?: number;
 }
 
 function parseSheet2(rows: string[][]): Map<string, ShopReviewData> {
@@ -263,10 +269,20 @@ function parseSheet2(rows: string[][]): Map<string, ShopReviewData> {
     }
 
     if (monthly.length > 0) {
+      // 先月対比列（col 2-7）から正確な増減数・評価・件数を取得
+      const summaryRating = numFloat(r[4]); // col 4: 今月評価
+      const summaryCount = num(r[5]);       // col 5: 今月件数
+      const deltaStr = (r[7] || "").trim(); // col 7: 件数増減 "+23(119.2%)"
+      const deltaMatch = deltaStr.match(/([+-]?\d+)/);
+      const summaryDelta = deltaMatch ? parseInt(deltaMatch[1]) : undefined;
+
       shopMap.set(shopName, {
         monthly,
-        currentRating: lastRating,
-        currentCount: lastCount,
+        currentRating: summaryRating > 0 ? summaryRating : lastRating,
+        currentCount: summaryCount > 0 ? summaryCount : lastCount,
+        summaryDelta: summaryDelta !== undefined ? summaryDelta : undefined,
+        summaryRating: summaryRating > 0 ? summaryRating : undefined,
+        summaryCount: summaryCount > 0 ? summaryCount : undefined,
       });
     }
   }
@@ -473,12 +489,20 @@ export async function buildReportData(
   }
 
   // 口コミ増減（KPI 8番目用）
+  // 先月対比列（summaryDelta）を優先使用（月別データは契約後件数のみの店舗があるため）
   let reviewDeltaForKpi = 0;
   let prevReviewCount = 0;
-  if (reviewData && reviewData.monthly.length >= 2) {
-    const rm = reviewData.monthly;
-    prevReviewCount = rm[rm.length - 2].count;
-    reviewDeltaForKpi = totalReviews - prevReviewCount;
+  if (reviewData) {
+    if (reviewData.summaryDelta !== undefined) {
+      // 先月対比列の件数増減（スプレッドシートで正確に管理されている値）
+      reviewDeltaForKpi = reviewData.summaryDelta;
+      prevReviewCount = totalReviews - reviewDeltaForKpi;
+    } else if (reviewData.monthly.length >= 2) {
+      // フォールバック: 月別データから計算
+      const rm = reviewData.monthly;
+      prevReviewCount = rm[rm.length - 2].count;
+      reviewDeltaForKpi = totalReviews - prevReviewCount;
+    }
   }
 
   const kpis: KPI[] = [
@@ -613,13 +637,19 @@ export async function getShopsFromSpreadsheet(): Promise<ShopListItem[] | null> 
     const areaMatch = addr.match(/(東京都|大阪府|北海道|京都府|愛知県|福岡県|神奈川県|埼玉県|千葉県|兵庫県|沖縄県|新潟県|広島県|宮城県|静岡県|岡山県|熊本県|鹿児島県|長野県|三重県|石川県|滋賀県|奈良県|和歌山県|岐阜県|群馬県|栃木県|茨城県|山梨県|長崎県|佐賀県|大分県|山口県|愛媛県|香川県|高知県|徳島県|福井県|富山県|岩手県|青森県|秋田県|山形県|福島県|鳥取県|島根県|宮崎県)/);
     const area = areaMatch ? areaMatch[1] : "その他";
 
-    // 前月の口コミデータ
+    // 前月の口コミデータ（先月対比列を優先）
     let prevRating = 0;
     let prevTotalReviews = 0;
-    if (reviewInfo && reviewInfo.monthly.length >= 2) {
-      const prev = reviewInfo.monthly[reviewInfo.monthly.length - 2];
-      prevRating = prev.rating;
-      prevTotalReviews = prev.count;
+    if (reviewInfo) {
+      if (reviewInfo.summaryDelta !== undefined && reviewInfo.summaryCount) {
+        // 先月対比列から正確な前月件数を逆算
+        prevTotalReviews = reviewInfo.summaryCount - reviewInfo.summaryDelta;
+        prevRating = reviewInfo.monthly.length >= 2 ? reviewInfo.monthly[reviewInfo.monthly.length - 2].rating : 0;
+      } else if (reviewInfo.monthly.length >= 2) {
+        const prev = reviewInfo.monthly[reviewInfo.monthly.length - 2];
+        prevRating = prev.rating;
+        prevTotalReviews = prev.count;
+      }
     }
 
     // パフォーマンス前月比
