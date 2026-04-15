@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300; // 5分
+export const maxDuration = 60; // Vercel Hobby制限
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
@@ -145,7 +145,7 @@ async function refreshToken(refreshTokenStr: string): Promise<string | null> {
   return null;
 }
 
-// GBP Reviews APIからページネーション付きで全件取得
+// GBP Reviews APIからページネーション付きで取得（最大3ページ=150件、タイムアウト対策）
 async function fetchAllReviews(
   locationName: string,
   accessToken: string
@@ -154,6 +154,8 @@ async function fetchAllReviews(
   let nextPageToken: string | undefined;
   let totalCount = 0;
   let avgRating = 0;
+  let pageCount = 0;
+  const MAX_PAGES = 3; // 150件まで（タイムアウト防止）
 
   const parent = locationName.startsWith("accounts/")
     ? locationName
@@ -179,7 +181,8 @@ async function fetchAllReviews(
     if (data.totalReviewCount) totalCount = data.totalReviewCount;
     if (data.averageRating) avgRating = data.averageRating;
     nextPageToken = data.nextPageToken;
-  } while (nextPageToken);
+    pageCount++;
+  } while (nextPageToken && pageCount < MAX_PAGES);
 
   return { reviews: allReviews, totalCount, avgRating };
 }

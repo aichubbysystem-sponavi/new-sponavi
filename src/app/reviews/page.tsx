@@ -351,31 +351,40 @@ export default function ReviewsPage() {
     let totalSynced = 0;
     let totalErrors = 0;
     let stoppedAt = 0;
+    let consecutiveErrors = 0;
     const shopIds = shops.map((s) => s.id);
-    const batchSize = 10;
+    const batchSize = 3; // Vercel Hobby 60秒制限対策（10→3に縮小）
 
     for (let i = 0; i < shopIds.length; i += batchSize) {
       const batch = shopIds.slice(i, i + batchSize);
       setSyncMsg(`全店舗同期中... ${i}/${shopIds.length}店舗完了（${totalSynced}件取得済み）`);
       try {
-        const res = await api.post("/api/report/sync-reviews", { shopIds: batch }, { timeout: 120000 });
+        const res = await api.post("/api/report/sync-reviews", { shopIds: batch }, { timeout: 55000 });
         totalSynced += res.data.totalSynced || 0;
         totalErrors += res.data.totalErrors || 0;
         stoppedAt = i + batchSize;
-        if (totalErrors >= 5) {
-          setSyncMsg(`⚠ レート制限の可能性があるため中断。${stoppedAt}/${shopIds.length}店舗完了、${totalSynced}件取得済み。`);
+        consecutiveErrors = 0; // 成功したらリセット
+        if (totalErrors >= 10) {
+          setSyncMsg(`⚠ エラーが多いため中断。${stoppedAt}/${shopIds.length}店舗完了、${totalSynced}件取得済み。`);
           await fetchReviews();
           await fetchUnrepliedCount();
           setSyncing(false);
           return;
         }
       } catch (e: any) {
-        stoppedAt = i;
-        const detail = e?.response?.data?.error || e?.message || "タイムアウト";
-        setSyncMsg(`⚠ ${stoppedAt}/${shopIds.length}店舗で中断（${totalSynced}件取得済み）。原因: ${detail}`);
-        await fetchReviews();
-        setSyncing(false);
-        return;
+        consecutiveErrors++;
+        totalErrors++;
+        stoppedAt = i + batchSize;
+        // タイムアウトなら次のバッチへ続行、連続3回失敗で中断
+        if (consecutiveErrors >= 3) {
+          const detail = e?.response?.data?.error || e?.message || "タイムアウト";
+          setSyncMsg(`⚠ ${stoppedAt}/${shopIds.length}店舗で中断（${totalSynced}件取得済み）。原因: ${detail}`);
+          await fetchReviews();
+          setSyncing(false);
+          return;
+        }
+        // タイムアウトでもスキップして続行
+        continue;
       }
     }
     setSyncMsg(`✓ ${totalSynced}件の口コミを同期しました（${shopIds.length}店舗完了、エラー${totalErrors}件）`);
