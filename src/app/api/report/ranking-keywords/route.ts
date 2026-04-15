@@ -86,29 +86,37 @@ async function fetchKeywordsWithRanks(tabName: string, targetMonth: string): Pro
   matchedMonth: string; points: { label: string; lat: number; lng: number }[];
 }> {
   try {
-    // 全データ取得（A列〜AD列）
-    const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tabName)}`;
-    const res = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-      redirect: "follow",
-    });
+    const encodedTab = encodeURIComponent(tabName);
+    const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 
-    if (!res.ok) return { success: false, keywords: [], ranks: [], matchedMonth: "", points: [] };
-    const text = await res.text();
-    if (text.includes("<!DOCTYPE") || text.includes("<html") || text.includes("Invalid sheet")) {
+    // ヘッダー行を range 指定で個別取得（gviz はテキストのみセルを空にするため）
+    const headerUrl = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodedTab}&range=A1:AZ1`;
+    const headerRes = await fetch(headerUrl, { headers: { "User-Agent": ua }, redirect: "follow" });
+    if (!headerRes.ok) return { success: false, keywords: [], ranks: [], matchedMonth: "", points: [] };
+    const headerText = await headerRes.text();
+    if (headerText.includes("<!DOCTYPE") || headerText.includes("<html") || headerText.includes("Invalid sheet")) {
       return { success: false, keywords: [], ranks: [], matchedMonth: "", points: [] };
     }
 
-    // CSV全行パース
-    const lines = text.split("\n").filter(l => l.trim());
-    if (lines.length < 2) return { success: false, keywords: [], ranks: [], matchedMonth: "", points: [] };
+    // データ行を取得（ヘッダーなし）
+    const dataUrl = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodedTab}`;
+    const dataRes = await fetch(dataUrl, { headers: { "User-Agent": ua }, redirect: "follow" });
+    if (!dataRes.ok) return { success: false, keywords: [], ranks: [], matchedMonth: "", points: [] };
+    const dataText = await dataRes.text();
 
-    const headerRow = parseCSVRow(lines[0]);
+    // ヘッダー行パース（range指定版 — 正確なヘッダーが取れる）
+    const headerLines = headerText.split("\n").filter(l => l.trim());
+    if (headerLines.length < 1) return { success: false, keywords: [], ranks: [], matchedMonth: "", points: [] };
+    const headerRow = parseCSVRow(headerLines[0]);
     const keywords = extractKeywords(headerRow);
 
+    // データ行パース（gviz のヘッダー行をスキップ）
+    const dataLines = dataText.split("\n").filter(l => l.trim());
+    if (dataLines.length < 2) return { success: false, keywords: [], ranks: [], matchedMonth: "", points: [] };
+
     // 最終行から月を判定し、一致する行と前月行を見つける
-    // B列（index 1）に日付: "2026/03/01" or "2026/3/1" 形式
-    const dataRows = lines.slice(1).map(l => parseCSVRow(l));
+    // B列（index 1）に日付: "2026年3月" or "2026/3/1" 形式
+    const dataRows = dataLines.slice(1).map(l => parseCSVRow(l));
 
     // 対象月の行を探す（targetMonthが指定されていればその月、なければ最終行）
     let targetRow: string[] | null = null;
@@ -116,11 +124,11 @@ async function fetchKeywordsWithRanks(tabName: string, targetMonth: string): Pro
     let matchedMonth = "";
 
     if (targetMonth) {
-      // "2026-03" → "2026/3" or "2026/03" でマッチ
+      // "2026-03" → "2026/3" or "2026年3月" でマッチ
       const [ty, tm] = targetMonth.split("-").map(Number);
       for (let i = dataRows.length - 1; i >= 0; i--) {
         const dateCell = (dataRows[i][1] || "").trim();
-        const m = dateCell.match(/(\d{4})\/(\d{1,2})/);
+        const m = dateCell.match(/(\d{4})[\/年](\d{1,2})/);
         if (m && parseInt(m[1]) === ty && parseInt(m[2]) === tm) {
           targetRow = dataRows[i];
           matchedMonth = `${ty}-${String(tm).padStart(2, "0")}`;
@@ -129,7 +137,7 @@ async function fetchKeywordsWithRanks(tabName: string, targetMonth: string): Pro
           const prevYear = tm === 1 ? ty - 1 : ty;
           for (let j = i - 1; j >= 0; j--) {
             const pd = (dataRows[j][1] || "").trim();
-            const pm = pd.match(/(\d{4})\/(\d{1,2})/);
+            const pm = pd.match(/(\d{4})[\/年](\d{1,2})/);
             if (pm && parseInt(pm[1]) === prevYear && parseInt(pm[2]) === prevMonth) {
               prevRow = dataRows[j];
               break;
@@ -145,7 +153,7 @@ async function fetchKeywordsWithRanks(tabName: string, targetMonth: string): Pro
       targetRow = dataRows[dataRows.length - 1];
       prevRow = dataRows.length >= 2 ? dataRows[dataRows.length - 2] : null;
       const dateCell = (targetRow[1] || "").trim();
-      const m = dateCell.match(/(\d{4})\/(\d{1,2})/);
+      const m = dateCell.match(/(\d{4})[\/年](\d{1,2})/);
       if (m) matchedMonth = `${m[1]}-${String(parseInt(m[2])).padStart(2, "0")}`;
     }
 
