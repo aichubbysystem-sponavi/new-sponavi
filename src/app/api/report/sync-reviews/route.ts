@@ -223,6 +223,21 @@ export async function POST(request: NextRequest) {
 
     // 店舗一覧取得（Go API → Supabaseフォールバック）
     let shops: { id: string; name: string; gbp_location_name: string }[] = [];
+
+    // GBPロケーション名→店舗名マッピング（gbp_location_name未設定の店舗用）
+    let locNameMap = new Map<string, string>(); // shopName → locationName
+    try {
+      const gbpRes = await fetch(`${GO_API_URL}/api/gbp/account`, { signal: AbortSignal.timeout(15000) });
+      if (gbpRes.ok) {
+        const gbpAccounts = await gbpRes.json();
+        for (const acc of (Array.isArray(gbpAccounts) ? gbpAccounts : [])) {
+          for (const loc of (acc.locations || [])) {
+            if (loc.title && loc.name) locNameMap.set(loc.title, loc.name);
+          }
+        }
+      }
+    } catch {}
+
     try {
       const goRes = await fetch(`${GO_API_URL}/api/shop`, {
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -231,12 +246,15 @@ export async function POST(request: NextRequest) {
       if (goRes.ok) {
         const goData = await goRes.json();
         shops = (Array.isArray(goData) ? goData : [])
-          .filter((s: any) => s.gbp_location_name)
-          .map((s: any) => ({
-            id: s.id || s.ID,
-            name: s.name || s.Name,
-            gbp_location_name: s.gbp_location_name || s.GbpLocationName,
-          }));
+          .map((s: any) => {
+            const id = s.id || s.ID;
+            const name = s.name || s.Name;
+            // gbp_location_name が未設定なら店舗名でGBPロケーションをマッチ
+            let gbpLoc = s.gbp_location_name || s.GbpLocationName || "";
+            if (!gbpLoc && name) gbpLoc = locNameMap.get(name) || "";
+            return { id, name, gbp_location_name: gbpLoc };
+          })
+          .filter((s: any) => s.gbp_location_name);
       }
     } catch {}
 
