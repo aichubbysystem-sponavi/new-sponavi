@@ -330,13 +330,16 @@ export default function ReviewsPage() {
   }, [selectedShopId, replyFilter, shopFilterMode, dateSort, selectedMonth]);
 
   const handleSync = async () => {
+    if (!selectedShopId) {
+      setSyncMsg("店舗を選択してください");
+      return;
+    }
     setSyncing(true);
     setSyncMsg("口コミを同期中...");
     try {
-      const shopIds = selectedShopId ? [selectedShopId] : [];
-      const res = await api.post("/api/report/sync-reviews", { shopIds }, { timeout: 300000 });
-      setSyncMsg(`${res.data.totalSynced}件の口コミを同期しました（${res.data.shops}店舗）`);
-      logAudit("口コミ同期", `${res.data.totalSynced}件同期（${res.data.shops}店舗）`);
+      const res = await api.post("/api/report/sync-reviews", { shopIds: [selectedShopId] }, { timeout: 60000 });
+      setSyncMsg(`${res.data.totalSynced}件の口コミを同期しました`);
+      logAudit("口コミ同期", `${res.data.totalSynced}件同期`);
       await fetchReviews();
       await fetchUnrepliedCount();
     } catch (e: any) {
