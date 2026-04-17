@@ -353,22 +353,47 @@ export default function ReviewsPage() {
     setSyncing(true);
     let totalSynced = 0;
     let totalErrors = 0;
-    let stoppedAt = 0;
     let consecutiveErrors = 0;
-    const shopIds = shops.map((s) => s.id);
-    const batchSize = 10; // Vercel Pro: 300秒タイムアウト
+    const allShopIds = shops.map((s) => s.id);
+    const batchSize = 10;
 
-    for (let i = 0; i < shopIds.length; i += batchSize) {
-      const batch = shopIds.slice(i, i + batchSize);
-      setSyncMsg(`全店舗同期中... ${i}/${shopIds.length}店舗完了（${totalSynced}件取得済み）`);
+    // 過去24時間以内に同期済みの店舗を取得してスキップ
+    setSyncMsg("同期済み店舗を確認中...");
+    let alreadySynced = new Set<string>();
+    try {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { data: recentShops } = await supabase
+        .from("reviews")
+        .select("shop_id")
+        .gte("synced_at", since);
+      if (recentShops) {
+        alreadySynced = new Set(recentShops.map((r: any) => r.shop_id));
+      }
+    } catch {}
+
+    const remainingIds = allShopIds.filter(id => !alreadySynced.has(id));
+    const skippedCount = allShopIds.length - remainingIds.length;
+
+    if (remainingIds.length === 0) {
+      setSyncMsg(`✓ 全${allShopIds.length}店舗が同期済みです（過去24時間以内）`);
+      setSyncing(false);
+      return;
+    }
+
+    setSyncMsg(`${skippedCount}店舗スキップ（同期済み）/ 残り${remainingIds.length}店舗を同期開始...`);
+
+    for (let i = 0; i < remainingIds.length; i += batchSize) {
+      const batch = remainingIds.slice(i, i + batchSize);
+      const done = skippedCount + i;
+      setSyncMsg(`全店舗同期中... ${done}/${allShopIds.length}店舗完了（残り${remainingIds.length - i}店舗、${totalSynced}件取得済み）`);
       try {
         const res = await api.post("/api/report/sync-reviews", { shopIds: batch }, { timeout: 290000 });
         totalSynced += res.data.totalSynced || 0;
         totalErrors += res.data.totalErrors || 0;
-        stoppedAt = i + batchSize;
-        consecutiveErrors = 0; // 成功したらリセット
+        consecutiveErrors = 0;
         if (totalErrors >= 10) {
-          setSyncMsg(`⚠ エラーが多いため中断。${stoppedAt}/${shopIds.length}店舗完了、${totalSynced}件取得済み。`);
+          const done2 = skippedCount + i + batchSize;
+          setSyncMsg(`⚠ エラーが多いため中断。${done2}/${allShopIds.length}店舗完了、${totalSynced}件取得済み。再読み込みで残りから再開できます。`);
           await fetchReviews();
           await fetchUnrepliedCount();
           setSyncing(false);
@@ -377,20 +402,18 @@ export default function ReviewsPage() {
       } catch (e: any) {
         consecutiveErrors++;
         totalErrors++;
-        stoppedAt = i + batchSize;
-        // タイムアウトなら次のバッチへ続行、連続3回失敗で中断
         if (consecutiveErrors >= 3) {
+          const done2 = skippedCount + i;
           const detail = e?.response?.data?.error || e?.message || "タイムアウト";
-          setSyncMsg(`⚠ ${stoppedAt}/${shopIds.length}店舗で中断（${totalSynced}件取得済み）。原因: ${detail}`);
+          setSyncMsg(`⚠ ${done2}/${allShopIds.length}店舗で中断（${totalSynced}件取得済み）。原因: ${detail}。再読み込みで残りから再開できます。`);
           await fetchReviews();
           setSyncing(false);
           return;
         }
-        // タイムアウトでもスキップして続行
         continue;
       }
     }
-    setSyncMsg(`✓ ${totalSynced}件の口コミを同期しました（${shopIds.length}店舗完了、エラー${totalErrors}件）`);
+    setSyncMsg(`✓ ${totalSynced}件の口コミを同期しました（全${allShopIds.length}店舗完了、スキップ${skippedCount}件、エラー${totalErrors}件）`);
     await fetchReviews();
     await fetchUnrepliedCount();
     setSyncing(false);
