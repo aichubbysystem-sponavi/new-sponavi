@@ -51,6 +51,10 @@ export default function ReviewsPage() {
   const [showAutoReply, setShowAutoReply] = useState(false);
   const [autoReplySettings, setAutoReplySettings] = useState<any[]>([]);
   const [autoReplySaving, setAutoReplySaving] = useState(false);
+  // 範囲選択同期
+  const [showRangeSync, setShowRangeSync] = useState(false);
+  const [rangeStart, setRangeStart] = useState(1);
+  const [rangeEnd, setRangeEnd] = useState(50);
 
   const isAllMode = shopFilterMode === "all";
 
@@ -419,6 +423,46 @@ export default function ReviewsPage() {
     setSyncing(false);
   };
 
+  // 範囲指定同期（N番目〜M番目の店舗を1店舗ずつ）
+  const handleSyncRange = async (start: number, end: number) => {
+    setSyncing(true);
+    let totalSynced = 0;
+    let totalErrors = 0;
+    const allShopIds = shops.map((s) => s.id);
+    const shopNameMap = new Map(shops.map(s => [s.id, s.name]));
+    const rangeIds = allShopIds.slice(start - 1, end);
+
+    if (rangeIds.length === 0) {
+      setSyncMsg("対象店舗がありません");
+      setSyncing(false);
+      return;
+    }
+
+    for (let i = 0; i < rangeIds.length; i++) {
+      const shopId = rangeIds[i];
+      const shopName = shopNameMap.get(shopId) || `店舗${start + i}`;
+      const no = start + i;
+      setSyncMsg(`範囲同期中... ${no}番目 / ${start}〜${end} （${totalSynced}件取得）\n処理中: ${shopName}`);
+
+      try {
+        const res = await api.post("/api/report/sync-reviews", { shopIds: [shopId] }, { timeout: 60000 });
+        totalSynced += res.data.totalSynced || 0;
+        if (res.data.totalErrors > 0) totalErrors++;
+      } catch {
+        totalErrors++;
+      }
+
+      if (i < rangeIds.length - 1) {
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    }
+
+    setSyncMsg(`✓ ${start}〜${end}番目の同期完了（${totalSynced}件取得、エラー${totalErrors}件）`);
+    await fetchReviews();
+    await fetchUnrepliedCount();
+    setSyncing(false);
+  };
+
   const handleSyncMedia = async () => {
     setSyncing(true);
     if (selectedShopId) {
@@ -501,8 +545,13 @@ export default function ReviewsPage() {
               style={{ color: syncing ? undefined : "#fff" }}>
               {syncing ? "同期中..." : "この店舗を同期"}
             </button>
-            <button onClick={handleSyncAll} disabled={syncing}
+            <button onClick={() => setShowRangeSync(!showRangeSync)} disabled={syncing}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
+              style={{ color: syncing ? undefined : "#fff" }}>
+              {syncing ? "同期中..." : "範囲同期"}
+            </button>
+            <button onClick={handleSyncAll} disabled={syncing}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing ? "bg-slate-200 text-slate-400" : "bg-slate-600 hover:bg-slate-700"}`}
               style={{ color: syncing ? undefined : "#fff" }}>
               {syncing ? "同期中..." : "全店舗同期"}
             </button>
@@ -515,8 +564,39 @@ export default function ReviewsPage() {
         </div>
       </div>
 
+      {/* 範囲選択同期パネル */}
+      {showRangeSync && (
+        <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-200 mb-4">
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-sm font-semibold text-slate-600">範囲指定同期</span>
+            <div className="flex items-center gap-1">
+              <input type="number" min={1} max={shops.length} value={rangeStart}
+                onChange={(e) => setRangeStart(Math.max(1, parseInt(e.target.value) || 1))}
+                className="w-16 border border-slate-200 rounded px-2 py-1 text-sm text-center" />
+              <span className="text-sm text-slate-400">〜</span>
+              <input type="number" min={1} max={shops.length} value={rangeEnd}
+                onChange={(e) => setRangeEnd(Math.min(shops.length, parseInt(e.target.value) || shops.length))}
+                className="w-16 border border-slate-200 rounded px-2 py-1 text-sm text-center" />
+              <span className="text-xs text-slate-400">番目（全{shops.length}店舗）</span>
+            </div>
+            <div className="flex items-center gap-1">
+              {[50, 100, 200].map(n => (
+                <button key={n} onClick={() => { setRangeEnd(Math.min(rangeStart + n - 1, shops.length)); }}
+                  className="px-2 py-1 text-[10px] bg-slate-100 hover:bg-slate-200 rounded text-slate-600">{n}件</button>
+              ))}
+            </div>
+            <button onClick={() => handleSyncRange(rangeStart, rangeEnd)} disabled={syncing}
+              className={`px-4 py-1.5 rounded-lg text-xs font-semibold ${syncing ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a] text-white"}`}>
+              {syncing ? "同期中..." : `${rangeStart}〜${rangeEnd}番を同期（${Math.min(rangeEnd, shops.length) - rangeStart + 1}店舗）`}
+            </button>
+            <button onClick={() => setShowRangeSync(false)} className="text-xs text-slate-400 hover:text-slate-600">閉じる</button>
+          </div>
+          <p className="text-[10px] text-slate-400 mt-2">1店舗ずつ順番に同期します（2秒間隔）。途中で止まっても再度実行で続きから再開可能。</p>
+        </div>
+      )}
+
       {syncMsg && (
-        <div className={`p-3 rounded-lg mb-4 text-sm ${syncMsg.includes("失敗") || syncMsg.includes("⚠") ? "bg-red-50 text-red-700 border border-red-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}>
+        <div className={`p-3 rounded-lg mb-4 text-sm whitespace-pre-line ${syncMsg.includes("失敗") || syncMsg.includes("⚠") ? "bg-red-50 text-red-700 border border-red-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}>
           {syncMsg}
         </div>
       )}
