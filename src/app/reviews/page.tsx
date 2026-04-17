@@ -355,7 +355,7 @@ export default function ReviewsPage() {
     let totalErrors = 0;
     let consecutiveErrors = 0;
     const allShopIds = shops.map((s) => s.id);
-    const batchSize = 5; // GBP APIレート制限対策（小さめバッチ+ディレイ）
+    const shopNameMap = new Map(shops.map(s => [s.id, s.name]));
 
     // 過去24時間以内に同期済みの店舗を取得してスキップ
     setSyncMsg("同期済み店舗を確認中...");
@@ -382,41 +382,35 @@ export default function ReviewsPage() {
 
     setSyncMsg(`${skippedCount}店舗スキップ（同期済み）/ 残り${remainingIds.length}店舗を同期開始...`);
 
-    for (let i = 0; i < remainingIds.length; i += batchSize) {
-      const batch = remainingIds.slice(i, i + batchSize);
+    // 1店舗ずつ順番に処理（確実にレート制限を回避）
+    for (let i = 0; i < remainingIds.length; i++) {
+      const shopId = remainingIds[i];
+      const shopName = shopNameMap.get(shopId) || `店舗${i + 1}`;
       const done = skippedCount + i;
       const remaining = remainingIds.length - i;
-      setSyncMsg(`全店舗同期中... ${done}/${allShopIds.length}店舗完了（残り${remaining}店舗、${totalSynced}件取得済み）`);
+      setSyncMsg(`全店舗同期中... ${done}/${allShopIds.length}店舗完了（残り${remaining}店舗、${totalSynced}件取得）\n処理中: ${shopName}`);
+
       try {
-        const res = await api.post("/api/report/sync-reviews", { shopIds: batch }, { timeout: 120000 });
+        const res = await api.post("/api/report/sync-reviews", { shopIds: [shopId] }, { timeout: 60000 });
         totalSynced += res.data.totalSynced || 0;
-        totalErrors += res.data.totalErrors || 0;
+        if (res.data.totalErrors > 0) totalErrors++;
         consecutiveErrors = 0;
-        // GBP APIレート制限対策: バッチ間に5秒待機
-        if (i + batchSize < remainingIds.length) {
-          setSyncMsg(`全店舗同期中... ${done + batchSize}/${allShopIds.length}店舗完了（残り${remaining - batchSize}店舗、${totalSynced}件取得済み）次バッチまで5秒待機...`);
-          await new Promise(r => setTimeout(r, 5000));
-        }
-        if (totalErrors >= 20) {
-          const done2 = skippedCount + i + batchSize;
-          setSyncMsg(`⚠ エラーが多いため中断。${done2}/${allShopIds.length}店舗完了、${totalSynced}件取得済み。再読み込みで残りから再開できます。`);
-          await fetchReviews();
-          await fetchUnrepliedCount();
-          setSyncing(false);
-          return;
-        }
       } catch (e: any) {
         consecutiveErrors++;
         totalErrors++;
-        if (consecutiveErrors >= 3) {
-          const done2 = skippedCount + i;
+        // 連続10回失敗で中断（それ以外はスキップして続行）
+        if (consecutiveErrors >= 10) {
           const detail = e?.response?.data?.error || e?.message || "タイムアウト";
-          setSyncMsg(`⚠ ${done2}/${allShopIds.length}店舗で中断（${totalSynced}件取得済み）。原因: ${detail}。再読み込みで残りから再開できます。`);
+          setSyncMsg(`⚠ ${done}/${allShopIds.length}店舗で中断（${totalSynced}件取得済み）。原因: ${detail}。再読み込みで残りから再開できます。`);
           await fetchReviews();
           setSyncing(false);
           return;
         }
-        continue;
+      }
+
+      // 次の店舗まで2秒待機（レート制限対策）
+      if (i < remainingIds.length - 1) {
+        await new Promise(r => setTimeout(r, 2000));
       }
     }
     setSyncMsg(`✓ ${totalSynced}件の口コミを同期しました（全${allShopIds.length}店舗完了、スキップ${skippedCount}件、エラー${totalErrors}件）`);

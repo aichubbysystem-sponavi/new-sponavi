@@ -294,8 +294,8 @@ export async function POST(request: NextRequest) {
 
       try {
         const { reviews } = await fetchAllReviews(shop.gbp_location_name, accessToken);
-        // GBP APIレート制限対策: 店舗間に2秒待機
-        if (si < shops.length - 1) await new Promise(r => setTimeout(r, 2000));
+        // 複数店舗の場合のみ店舗間ディレイ（通常は1店舗ずつ呼ばれる）
+        if (shops.length > 1 && si < shops.length - 1) await new Promise(r => setTimeout(r, 2000));
 
         if (reviews.length === 0) {
           results.push({ shopName: shop.name, count: 0, status: "no_reviews" });
