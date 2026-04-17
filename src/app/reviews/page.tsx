@@ -385,13 +385,18 @@ export default function ReviewsPage() {
     for (let i = 0; i < remainingIds.length; i += batchSize) {
       const batch = remainingIds.slice(i, i + batchSize);
       const done = skippedCount + i;
-      setSyncMsg(`全店舗同期中... ${done}/${allShopIds.length}店舗完了（残り${remainingIds.length - i}店舗、${totalSynced}件取得済み）`);
+      const remaining = remainingIds.length - i;
+      setSyncMsg(`全店舗同期中... ${done}/${allShopIds.length}店舗完了（残り${remaining}店舗、${totalSynced}件取得済み）`);
       try {
-        const res = await api.post("/api/report/sync-reviews", { shopIds: batch }, { timeout: 290000 });
+        const res = await api.post("/api/report/sync-reviews", { shopIds: batch }, { timeout: 120000 });
         totalSynced += res.data.totalSynced || 0;
         totalErrors += res.data.totalErrors || 0;
         consecutiveErrors = 0;
-        if (totalErrors >= 10) {
+        // GBP APIレート制限対策: バッチ間に3秒待機
+        if (i + batchSize < remainingIds.length) {
+          await new Promise(r => setTimeout(r, 3000));
+        }
+        if (totalErrors >= 20) {
           const done2 = skippedCount + i + batchSize;
           setSyncMsg(`⚠ エラーが多いため中断。${done2}/${allShopIds.length}店舗完了、${totalSynced}件取得済み。再読み込みで残りから再開できます。`);
           await fetchReviews();

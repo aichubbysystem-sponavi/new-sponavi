@@ -170,6 +170,14 @@ async function fetchAllReviews(
       signal: AbortSignal.timeout(15000),
     });
 
+    if (res.status === 429) {
+      // レート制限: 10秒待ってリトライ
+      console.log(`[sync-reviews] Rate limited for ${parent}, waiting 10s...`);
+      await new Promise(r => setTimeout(r, 10000));
+      pageCount--; // リトライなのでカウントを戻す
+      continue;
+    }
+
     if (!res.ok) {
       const err = await res.text();
       console.error(`[sync-reviews] GBP API error for ${parent}:`, res.status, err);
@@ -280,11 +288,14 @@ export async function POST(request: NextRequest) {
     let totalErrors = 0;
     const results: { shopName: string; count: number; status: string }[] = [];
 
-    for (const shop of shops) {
+    for (let si = 0; si < shops.length; si++) {
+      const shop = shops[si];
       if (!shop.gbp_location_name) continue;
 
       try {
         const { reviews } = await fetchAllReviews(shop.gbp_location_name, accessToken);
+        // GBP APIレート制限対策: 店舗間に1秒待機
+        if (si < shops.length - 1) await new Promise(r => setTimeout(r, 1000));
 
         if (reviews.length === 0) {
           results.push({ shopName: shop.name, count: 0, status: "no_reviews" });
