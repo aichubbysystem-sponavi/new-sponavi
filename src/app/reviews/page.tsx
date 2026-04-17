@@ -355,7 +355,7 @@ export default function ReviewsPage() {
     let totalErrors = 0;
     let consecutiveErrors = 0;
     const allShopIds = shops.map((s) => s.id);
-    const batchSize = 10;
+    const batchSize = 5; // GBP APIレート制限対策（小さめバッチ+ディレイ）
 
     // 過去24時間以内に同期済みの店舗を取得してスキップ
     setSyncMsg("同期済み店舗を確認中...");
@@ -392,9 +392,10 @@ export default function ReviewsPage() {
         totalSynced += res.data.totalSynced || 0;
         totalErrors += res.data.totalErrors || 0;
         consecutiveErrors = 0;
-        // GBP APIレート制限対策: バッチ間に3秒待機
+        // GBP APIレート制限対策: バッチ間に5秒待機
         if (i + batchSize < remainingIds.length) {
-          await new Promise(r => setTimeout(r, 3000));
+          setSyncMsg(`全店舗同期中... ${done + batchSize}/${allShopIds.length}店舗完了（残り${remaining - batchSize}店舗、${totalSynced}件取得済み）次バッチまで5秒待機...`);
+          await new Promise(r => setTimeout(r, 5000));
         }
         if (totalErrors >= 20) {
           const done2 = skippedCount + i + batchSize;
