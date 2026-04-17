@@ -134,12 +134,12 @@ export default function ReviewsPage() {
     fetchUnrepliedCount();
   }, [fetchUnrepliedCount]);
 
-  // 月別口コミ統計取得 + 利用可能月一覧
+  // 月別口コミ統計取得 + 利用可能月一覧 — 全店舗モードでは無効（混合データ防止）
   useEffect(() => {
     const fetchMonthlyStats = async () => {
-      const shopFilter = !isAllMode && selectedShopId ? selectedShopId : null;
+      if (isAllMode || !selectedShopId) { setMonthlyStats([]); setAvailableMonths([]); return; }
       let query = supabase.from("reviews").select("create_time, star_rating");
-      if (shopFilter) query = query.eq("shop_id", shopFilter);
+      query = query.eq("shop_id", selectedShopId);
       const { data } = await query.order("create_time", { ascending: true }).limit(5000);
       if (!data || data.length === 0) { setMonthlyStats([]); setAvailableMonths([]); return; }
 
@@ -246,12 +246,12 @@ export default function ReviewsPage() {
     } catch {}
   };
 
-  // 口コミキーワード抽出（月フィルタ連動）
+  // 口コミキーワード抽出（月フィルタ連動）— 全店舗モードでは無効（混合データ防止）
   useEffect(() => {
     const extractKeywords = async () => {
-      const shopFilter = !isAllMode && selectedShopId ? selectedShopId : null;
+      if (isAllMode || !selectedShopId) { setTopWords([]); return; }
       let query = supabase.from("reviews").select("comment, star_rating").not("comment", "is", null);
-      if (shopFilter) query = query.eq("shop_id", shopFilter);
+      query = query.eq("shop_id", selectedShopId);
       // 月別フィルタ
       if (selectedMonth !== "all") {
         const startDate = `${selectedMonth}-01T00:00:00`;
@@ -697,7 +697,13 @@ export default function ReviewsPage() {
       )}
 
       {/* 口コミキーワード・ワードクラウド */}
-      {topWords.length > 0 && (
+      {isAllMode && (
+        <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100 mb-4">
+          <h3 className="text-sm font-semibold text-slate-500 mb-2">口コミキーワード分析</h3>
+          <p className="text-xs text-slate-400 text-center py-4">店舗を選択するとキーワード分析が表示されます</p>
+        </div>
+      )}
+      {!isAllMode && topWords.length > 0 && (
         <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100 mb-4">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-slate-500">口コミキーワード分析{selectedMonth !== "all" ? `（${selectedMonth.replace("-", "年") + "月"}）` : ""}</h3>
