@@ -59,6 +59,7 @@ export default function ReviewsPage() {
   const [showNoReviewShops, setShowNoReviewShops] = useState(false);
   const [noReviewShops, setNoReviewShops] = useState<{ id: string; name: string }[]>([]);
   const [loadingNoReview, setLoadingNoReview] = useState(false);
+  const [selectedNoReview, setSelectedNoReview] = useState<Set<string>>(new Set());
 
   const isAllMode = shopFilterMode === "all";
 
@@ -368,7 +369,10 @@ export default function ReviewsPage() {
   };
 
   const handleSyncNoReviewShops = async () => {
-    if (noReviewShops.length === 0) return;
+    const targets = selectedNoReview.size > 0
+      ? noReviewShops.filter(s => selectedNoReview.has(s.id))
+      : noReviewShops;
+    if (targets.length === 0) return;
     setSyncing(true);
     let totalSynced = 0;
     let totalErrors = 0;
@@ -376,9 +380,9 @@ export default function ReviewsPage() {
     let api404Count = 0;
     let noReviewCount = 0;
 
-    for (let i = 0; i < noReviewShops.length; i++) {
-      const shop = noReviewShops[i];
-      setSyncMsg(`口コミなし店舗を同期中... ${i + 1}/${noReviewShops.length}（${totalSynced}件取得）\n処理中: ${shop.name}`);
+    for (let i = 0; i < targets.length; i++) {
+      const shop = targets[i];
+      setSyncMsg(`口コミなし店舗を同期中... ${i + 1}/${targets.length}（${totalSynced}件取得）\n処理中: ${shop.name}`);
       try {
         const res = await api.post("/api/report/sync-reviews", { shopIds: [shop.id] }, { timeout: 60000 });
         totalSynced += res.data.totalSynced || 0;
@@ -401,10 +405,11 @@ export default function ReviewsPage() {
       noReviewCount > 0 ? `口コミ0件${noReviewCount}店舗` : "",
       totalErrors > 0 ? `エラー${totalErrors}件` : "",
     ].filter(Boolean).join("、");
-    setSyncMsg(`✓ 口コミなし${noReviewShops.length}店舗の同期完了（${details}）`);
+    setSyncMsg(`✓ 口コミなし${targets.length}店舗の同期完了（${details}）`);
     await fetchReviews();
     await fetchUnrepliedCount();
     await fetchNoReviewShops();
+    setSelectedNoReview(new Set());
     setSyncing(false);
   };
 
@@ -693,29 +698,49 @@ export default function ReviewsPage() {
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold text-amber-700">口コミデータなし — {noReviewShops.length}店舗</span>
               <span className="text-[10px] text-slate-400">（全{shops.length}店舗中）</span>
+              {noReviewShops.length > 0 && (
+                <>
+                  <button onClick={() => {
+                    if (selectedNoReview.size === noReviewShops.length) setSelectedNoReview(new Set());
+                    else setSelectedNoReview(new Set(noReviewShops.map(s => s.id)));
+                  }} className="text-[10px] text-amber-600 hover:underline">
+                    {selectedNoReview.size === noReviewShops.length ? "全解除" : "全選択"}
+                  </button>
+                  {selectedNoReview.size > 0 && (
+                    <span className="text-[10px] text-emerald-600 font-semibold">{selectedNoReview.size}店舗選択中</span>
+                  )}
+                </>
+              )}
             </div>
             <div className="flex items-center gap-2">
               {noReviewShops.length > 0 && (
                 <button onClick={handleSyncNoReviewShops} disabled={syncing}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${syncing ? "bg-slate-200 text-slate-400" : "bg-amber-500 hover:bg-amber-600 text-white"}`}>
-                  {syncing ? "同期中..." : `${noReviewShops.length}店舗をまとめて同期`}
+                  {syncing ? "同期中..." : selectedNoReview.size > 0 ? `${selectedNoReview.size}店舗を同期` : `${noReviewShops.length}店舗をまとめて同期`}
                 </button>
               )}
-              <button onClick={() => setShowNoReviewShops(false)} className="text-xs text-slate-400 hover:text-slate-600">閉じる</button>
+              <button onClick={() => { setShowNoReviewShops(false); setSelectedNoReview(new Set()); }} className="text-xs text-slate-400 hover:text-slate-600">閉じる</button>
             </div>
           </div>
           {noReviewShops.length === 0 ? (
             <p className="text-sm text-emerald-600 font-medium py-2">全店舗に口コミデータがあります</p>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-1 max-h-60 overflow-y-auto">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-0 max-h-60 overflow-y-auto">
               {noReviewShops.map((shop, i) => (
-                <div key={shop.id} className="text-xs text-slate-600 py-1 px-2 bg-amber-50 rounded truncate">
-                  <span className="text-amber-400 mr-1">{i + 1}.</span>{shop.name}
-                </div>
+                <label key={shop.id} className={`flex items-center gap-2 text-xs py-1.5 px-2 rounded cursor-pointer hover:bg-amber-100 transition ${selectedNoReview.has(shop.id) ? "bg-amber-100" : "bg-amber-50"}`}>
+                  <input type="checkbox" checked={selectedNoReview.has(shop.id)}
+                    onChange={() => setSelectedNoReview(prev => {
+                      const next = new Set(prev);
+                      if (next.has(shop.id)) next.delete(shop.id); else next.add(shop.id);
+                      return next;
+                    })}
+                    className="w-3.5 h-3.5 rounded border-amber-300 text-amber-600" />
+                  <span className="text-slate-600 truncate"><span className="text-amber-400 mr-1">{i + 1}.</span>{shop.name}</span>
+                </label>
               ))}
             </div>
           )}
-          <p className="text-[10px] text-slate-400 mt-2">「まとめて同期」で口コミなし店舗のみを1店舗ずつ同期します（2秒間隔）</p>
+          <p className="text-[10px] text-slate-400 mt-2">店舗を選択して同期、または未選択で全店舗をまとめて同期します（2秒間隔）</p>
         </div>
       )}
 
