@@ -143,14 +143,25 @@ async function fetchReviews(fullPath: string, token: string): Promise<GBPReview[
   const all: GBPReview[] = [];
   let nextPage: string | undefined;
   let pages = 0;
+  let retries429 = 0;
+  const MAX_429_RETRIES = 3;
   do {
     const params = new URLSearchParams({ orderBy: "updateTime desc", pageSize: "50" });
     if (nextPage) params.set("pageToken", nextPage);
     const res = await fetch(`${GBP_API_BASE}/${fullPath}/reviews?${params}`, {
       headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000),
     });
-    if (res.status === 429) { await new Promise(r => setTimeout(r, 10000)); continue; }
+    if (res.status === 429) {
+      retries429++;
+      if (retries429 >= MAX_429_RETRIES) {
+        console.warn(`[cron/sync-reviews] 429 rate limit exceeded ${MAX_429_RETRIES} times for ${fullPath}, skipping`);
+        break;
+      }
+      await new Promise(r => setTimeout(r, 10000 * retries429));
+      continue;
+    }
     if (!res.ok) break;
+    retries429 = 0; // 成功したらリセット
     const data = await res.json();
     if (data.reviews) all.push(...data.reviews);
     nextPage = data.nextPageToken;
@@ -200,7 +211,8 @@ async function setSyncOffset(offset: number): Promise<void> {
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+    console.error("[cron/sync-reviews] Unauthorized: CRON_SECRET未設定または不一致");
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -248,6 +260,8 @@ export async function GET(request: NextRequest) {
   const supabase = getSupabase();
   let synced = 0;
   let errors = 0;
+  let consecutiveAuthErrors = 0;
+  let currentToken = token;
 
   for (let i = 0; i < batch.length; i++) {
     const shop = batch[i];
@@ -268,8 +282,10 @@ export async function GET(request: NextRequest) {
     if (!fullPath) continue;
 
     try {
-      const reviews = await fetchReviews(fullPath, token);
+      const reviews = await fetchReviews(fullPath, currentToken);
       if (reviews.length === 0) continue;
+
+      consecutiveAuthErrors = 0; // 成功したらリセット
 
       const rows = reviews.map((r) => ({
         shop_id: shop.id, shop_name: shop.name, review_id: r.reviewId,
@@ -293,6 +309,21 @@ export async function GET(request: NextRequest) {
     } catch (e: any) {
       console.error(`[cron/sync-reviews] Error for ${shop.name}:`, e?.message);
       errors++;
+      consecutiveAuthErrors++;
+
+      // 連続3回失敗 → トークン再取得を試みる
+      if (consecutiveAuthErrors >= 3) {
+        console.warn("[cron/sync-reviews] 連続エラー: トークン再取得中...");
+        const newToken = await getValidToken();
+        if (newToken) {
+          currentToken = newToken;
+          consecutiveAuthErrors = 0;
+          console.log("[cron/sync-reviews] トークン再取得成功");
+        } else {
+          console.error("[cron/sync-reviews] トークン再取得失敗、バッチ中断");
+          break;
+        }
+      }
     }
   }
 

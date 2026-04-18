@@ -16,26 +16,116 @@ function getSupabase() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
 }
 
-async function getOAuthToken(): Promise<string | null> {
-  const supabase = getSupabase();
-  const { data } = await supabase.from("system_oauth_tokens")
-    .select("access_token, refresh_token, expiry").limit(1).maybeSingle();
-  if (!data) return null;
-  if (new Date(data.expiry).getTime() - Date.now() > 5 * 60 * 1000) return data.access_token;
+const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
+const DB_PASSWORD = process.env.SUPABASE_DB_PASSWORD || "";
+const SUPABASE_PROJECT_ID = (SUPABASE_URL.match(/https:\/\/([^.]+)/) || [])[1] || "";
+
+async function refreshOAuthToken(rt: string): Promise<string | null> {
+  if (!rt || !GBP_CLIENT_ID || !GBP_CLIENT_SECRET) return null;
   try {
     const res = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET,
-        refresh_token: data.refresh_token, grant_type: "refresh_token" }),
+      body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET, refresh_token: rt, grant_type: "refresh_token" }),
     });
-    if (!res.ok) return data.access_token;
-    const t = await res.json();
-    await getSupabase().from("system_oauth_tokens").update({
-      access_token: t.access_token,
-      expiry: new Date(Date.now() + (t.expires_in || 3600) * 1000).toISOString(),
-    }).not("account_id", "is", null);
-    return t.access_token;
-  } catch { return data.access_token; }
+    if (res.ok) { const d = await res.json(); return d.access_token || null; }
+  } catch {}
+  return null;
+}
+
+async function getOAuthToken(): Promise<string | null> {
+  // Go APIにGBP APIを叩かせてトークンリフレッシュ発火
+  try {
+    await fetch(`${GO_API_URL}/api/gbp/account`, { signal: AbortSignal.timeout(15000) });
+  } catch {}
+
+  // 1. Supabase REST API (system schema)
+  try {
+    const key = SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY;
+    if (key) {
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/tokens?select=access_token,refresh_token,expiry&order=expiry.desc&limit=1`,
+        { headers: { apikey: key, Authorization: `Bearer ${key}`, "Accept-Profile": "system" }, signal: AbortSignal.timeout(5000) }
+      );
+      if (res.ok) {
+        const rows = await res.json();
+        if (Array.isArray(rows) && rows.length > 0 && rows[0].access_token) {
+          const t = rows[0];
+          if (new Date(t.expiry).getTime() - Date.now() > 60000) return t.access_token;
+          if (t.refresh_token) {
+            const refreshed = await refreshOAuthToken(t.refresh_token);
+            if (refreshed) return refreshed;
+          }
+          return t.access_token;
+        }
+      }
+    }
+  } catch {}
+
+  // 2. Supabase client
+  try {
+    const supabase = getSupabase();
+    const { data } = await supabase.from("system_oauth_tokens")
+      .select("access_token, refresh_token, expiry").order("expiry", { ascending: false }).limit(1).maybeSingle();
+    if (data?.access_token) {
+      if (new Date(data.expiry).getTime() - Date.now() > 60000) return data.access_token;
+      if (data.refresh_token) { const r = await refreshOAuthToken(data.refresh_token); if (r) return r; }
+      return data.access_token;
+    }
+  } catch {}
+
+  // 3. PostgreSQL直接接続
+  try {
+    if (DB_PASSWORD && SUPABASE_PROJECT_ID) {
+      const { Client } = await import("pg");
+      const client = new Client({
+        host: `db.${SUPABASE_PROJECT_ID}.supabase.co`, port: 5432,
+        database: "postgres", user: "postgres", password: DB_PASSWORD,
+        ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 10000,
+      });
+      await client.connect();
+      const result = await client.query("SELECT access_token, refresh_token, expiry FROM system.tokens ORDER BY expiry DESC LIMIT 1");
+      await client.end();
+      if (result.rows.length > 0) {
+        const r = result.rows[0];
+        if (new Date(r.expiry).getTime() - Date.now() > 60000) return r.access_token;
+        if (r.refresh_token) { const refreshed = await refreshOAuthToken(r.refresh_token); if (refreshed) return refreshed; }
+        return r.access_token;
+      }
+    }
+  } catch (e: any) {
+    console.log("[cron/auto-reply] PostgreSQL error:", e?.message);
+  }
+
+  return null;
+}
+
+// ── ロケーションマッピング ──
+
+interface LocMapping { fullPath: string; title: string; }
+
+async function getLocationMap(token: string): Promise<Map<string, LocMapping>> {
+  const map = new Map<string, LocMapping>();
+  try {
+    const res = await fetch(`${GO_API_URL}/api/gbp/account`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(20000),
+    });
+    if (res.ok) {
+      const accounts = await res.json();
+      for (const acc of (Array.isArray(accounts) ? accounts : [])) {
+        const accName = acc.name || "";
+        for (const loc of (acc.locations || [])) {
+          const locName = loc.name || "";
+          const fullPath = `${accName}/${locName}`;
+          const m: LocMapping = { fullPath, title: loc.title || "" };
+          map.set(locName, m);
+          map.set(fullPath, m);
+          if (loc.title) map.set(loc.title, m);
+        }
+      }
+    }
+  } catch {}
+  return map;
 }
 
 const RATING_MAP: Record<string, number> = {
@@ -56,7 +146,8 @@ function starToNum(s: string | null): number {
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+    console.error("[cron/auto-reply] Unauthorized: CRON_SECRET未設定または不一致");
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -97,6 +188,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "OAuthトークンなし" }, { status: 500 });
   }
 
+  // ロケーションマッピング（アカウントIDハードコード排除）
+  const locMap = await getLocationMap(accessToken);
+
   const shopMap = new Map(shops.map(s => [s.id, s]));
   let replied = 0;
   let errors = 0;
@@ -104,10 +198,24 @@ export async function GET(request: NextRequest) {
   // ★4以上の口コミのみ自動返信（低評価は手動対応推奨）
   const targets = unreplied.filter(r => starToNum(r.star_rating) >= 4);
 
-  // Vercel Hobby 60秒制限: 1件約10秒（Claude API + GBP API） → 最大5件/実行
-  for (const review of targets.slice(0, 5)) {
+  // maxDuration=300秒: 1件約10秒（Claude API + GBP API） → 最大20件/実行
+  const MAX_REPLIES_PER_RUN = 20;
+  for (const review of targets.slice(0, MAX_REPLIES_PER_RUN)) {
     const shop = shopMap.get(review.shop_id);
     if (!shop || !shop.gbp_location_name) continue;
+
+    // ロケーションのフルパスを解決
+    let locationName = "";
+    if (shop.gbp_location_name.startsWith("accounts/")) {
+      locationName = shop.gbp_location_name;
+    } else {
+      const mapped = locMap.get(shop.gbp_location_name) || locMap.get(shop.name);
+      if (mapped) locationName = mapped.fullPath;
+    }
+    if (!locationName) {
+      console.warn(`[cron/auto-reply] ロケーション解決失敗: ${shop.name}`);
+      continue;
+    }
 
     // AI返信文を生成
     try {
@@ -138,10 +246,6 @@ export async function GET(request: NextRequest) {
       if (!replyText) { errors++; continue; }
 
       // GBPに返信投稿
-      const locationName = shop.gbp_location_name.startsWith("accounts/")
-        ? shop.gbp_location_name
-        : `accounts/111148362910776147900/${shop.gbp_location_name}`;
-
       const gbpRes = await fetch(`${GBP_API_BASE}/${locationName}/reviews/${review.review_id}/reply`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
