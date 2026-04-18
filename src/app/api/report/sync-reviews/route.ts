@@ -358,6 +358,7 @@ export async function POST(request: NextRequest) {
       }
 
       if (!fullPath) {
+        console.log(`[sync-reviews] No GBP location for "${shop.name}" (gbp_location_name: "${gbpLoc}")`);
         results.push({ shopName: shop.name, count: 0, status: "no_gbp_location" });
         continue;
       }

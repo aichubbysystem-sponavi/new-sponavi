@@ -372,6 +372,8 @@ export default function ReviewsPage() {
     setSyncing(true);
     let totalSynced = 0;
     let totalErrors = 0;
+    let noGbpCount = 0;
+    let noReviewCount = 0;
 
     for (let i = 0; i < noReviewShops.length; i++) {
       const shop = noReviewShops[i];
@@ -380,6 +382,9 @@ export default function ReviewsPage() {
         const res = await api.post("/api/report/sync-reviews", { shopIds: [shop.id] }, { timeout: 60000 });
         totalSynced += res.data.totalSynced || 0;
         if (res.data.totalErrors > 0) totalErrors++;
+        const r = res.data.results?.[0];
+        if (r?.status === "no_gbp_location") noGbpCount++;
+        else if (r?.status === "no_reviews") noReviewCount++;
       } catch {
         totalErrors++;
       }
@@ -387,10 +392,15 @@ export default function ReviewsPage() {
         await new Promise(r => setTimeout(r, 2000));
       }
     }
-    setSyncMsg(`✓ 口コミなし${noReviewShops.length}店舗の同期完了（${totalSynced}件取得、エラー${totalErrors}件）`);
+    const details = [
+      `${totalSynced}件取得`,
+      noGbpCount > 0 ? `GBP未紐付け${noGbpCount}店舗` : "",
+      noReviewCount > 0 ? `口コミ0件${noReviewCount}店舗` : "",
+      totalErrors > 0 ? `エラー${totalErrors}件` : "",
+    ].filter(Boolean).join("、");
+    setSyncMsg(`✓ 口コミなし${noReviewShops.length}店舗の同期完了（${details}）`);
     await fetchReviews();
     await fetchUnrepliedCount();
-    // 再チェック
     await fetchNoReviewShops();
     setSyncing(false);
   };
@@ -404,7 +414,14 @@ export default function ReviewsPage() {
     setSyncMsg("口コミを同期中...");
     try {
       const res = await api.post("/api/report/sync-reviews", { shopIds: [selectedShopId] }, { timeout: 60000 });
-      setSyncMsg(`${res.data.totalSynced}件の口コミを同期しました`);
+      const r = res.data.results?.[0];
+      if (r?.status === "no_gbp_location") {
+        setSyncMsg(`GBPロケーション未紐付け: この店舗はGBPアカウントと紐づいていません。店舗管理でgbp_location_nameを設定してください。`);
+      } else if (r?.status === "no_reviews" && res.data.totalSynced === 0) {
+        setSyncMsg(`GBPから口コミ0件でした（ロケーションは見つかりましたが口コミがありません）`);
+      } else {
+        setSyncMsg(`${res.data.totalSynced}件の口コミを同期しました`);
+      }
       logAudit("口コミ同期", `${res.data.totalSynced}件同期`);
       await fetchReviews();
       await fetchUnrepliedCount();
