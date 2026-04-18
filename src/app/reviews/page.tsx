@@ -60,6 +60,7 @@ export default function ReviewsPage() {
   const [noReviewShops, setNoReviewShops] = useState<{ id: string; name: string }[]>([]);
   const [loadingNoReview, setLoadingNoReview] = useState(false);
   const [selectedNoReview, setSelectedNoReview] = useState<Set<string>>(new Set());
+  const [lastClickedIdx, setLastClickedIdx] = useState<number | null>(null);
 
   const isAllMode = shopFilterMode === "all";
 
@@ -727,14 +728,28 @@ export default function ReviewsPage() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-0 max-h-60 overflow-y-auto">
               {noReviewShops.map((shop, i) => (
-                <label key={shop.id} className={`flex items-center gap-2 text-xs py-1.5 px-2 rounded cursor-pointer hover:bg-amber-100 transition ${selectedNoReview.has(shop.id) ? "bg-amber-100" : "bg-amber-50"}`}>
-                  <input type="checkbox" checked={selectedNoReview.has(shop.id)}
-                    onChange={() => setSelectedNoReview(prev => {
-                      const next = new Set(prev);
-                      if (next.has(shop.id)) next.delete(shop.id); else next.add(shop.id);
-                      return next;
-                    })}
-                    className="w-3.5 h-3.5 rounded border-amber-300 text-amber-600" />
+                <label key={shop.id} className={`flex items-center gap-2 text-xs py-1.5 px-2 rounded cursor-pointer hover:bg-amber-100 transition ${selectedNoReview.has(shop.id) ? "bg-amber-100" : "bg-amber-50"}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (e.shiftKey && lastClickedIdx !== null) {
+                      const start = Math.min(lastClickedIdx, i);
+                      const end = Math.max(lastClickedIdx, i);
+                      setSelectedNoReview(prev => {
+                        const next = new Set(prev);
+                        for (let k = start; k <= end; k++) next.add(noReviewShops[k].id);
+                        return next;
+                      });
+                    } else {
+                      setSelectedNoReview(prev => {
+                        const next = new Set(prev);
+                        if (next.has(shop.id)) next.delete(shop.id); else next.add(shop.id);
+                        return next;
+                      });
+                    }
+                    setLastClickedIdx(i);
+                  }}>
+                  <input type="checkbox" checked={selectedNoReview.has(shop.id)} readOnly
+                    className="w-3.5 h-3.5 rounded border-amber-300 text-amber-600 pointer-events-none" />
                   <span className="text-slate-600 truncate"><span className="text-amber-400 mr-1">{i + 1}.</span>{shop.name}</span>
                 </label>
               ))}
