@@ -340,12 +340,24 @@ export default function ReviewsPage() {
   const fetchNoReviewShops = async () => {
     setLoadingNoReview(true);
     try {
-      // 口コミが1件以上ある店舗IDを取得
-      const { data: shopIdsWithReviews } = await supabase
-        .from("reviews")
-        .select("shop_id");
-      const hasReviewSet = new Set((shopIdsWithReviews || []).map((r: any) => r.shop_id));
-      // 全店舗から引く
+      const hasReviewSet = new Set<string>();
+      const shopIds = shops.map(s => s.id);
+
+      // 20店舗ずつ並列でカウントチェック
+      for (let i = 0; i < shopIds.length; i += 20) {
+        const batch = shopIds.slice(i, i + 20);
+        const results = await Promise.all(
+          batch.map(async (id) => {
+            const { count } = await supabase
+              .from("reviews")
+              .select("id", { count: "exact", head: true })
+              .eq("shop_id", id);
+            return { id, has: (count || 0) > 0 };
+          })
+        );
+        results.forEach(r => { if (r.has) hasReviewSet.add(r.id); });
+      }
+
       const missing = shops.filter(s => !hasReviewSet.has(s.id));
       setNoReviewShops(missing);
       setShowNoReviewShops(true);
