@@ -19,74 +19,64 @@ function getSupabase() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
 }
 
-// ── トークン取得（sync-reviews/route.tsと同じ3段階フォールバック） ──
+// ── トークン取得（全アカウント対応） ──
 
-async function getValidToken(): Promise<string | null> {
+async function getAllValidTokens(): Promise<string[]> {
   // Go APIにGBP APIを叩かせてトークンリフレッシュ発火
   try {
     await fetch(`${GO_API_URL}/api/gbp/account`, { signal: AbortSignal.timeout(15000) });
   } catch {}
 
-  // 1. Supabase REST API (system schema)
-  try {
-    const key = SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY;
-    if (key) {
-      const res = await fetch(
-        `${SUPABASE_URL}/rest/v1/tokens?select=access_token,refresh_token,expiry&order=expiry.desc&limit=1`,
-        { headers: { apikey: key, Authorization: `Bearer ${key}`, "Accept-Profile": "system" }, signal: AbortSignal.timeout(5000) }
-      );
-      if (res.ok) {
-        const rows = await res.json();
-        if (Array.isArray(rows) && rows.length > 0 && rows[0].access_token) {
-          const t = rows[0];
-          if (new Date(t.expiry).getTime() - Date.now() > 60000) return t.access_token;
-          if (t.refresh_token) {
-            const refreshed = await refreshToken(t.refresh_token);
-            if (refreshed) return refreshed;
-          }
-          return t.access_token;
-        }
-      }
-    }
-  } catch {}
+  interface TokenRow { access_token: string; refresh_token: string; expiry: string; }
+  let allRows: TokenRow[] = [];
 
-  // 2. Supabase client
+  // 1. Supabase client (system_oauth_tokens) — 全トークン取得
   try {
     const supabase = getSupabase();
     const { data } = await supabase.from("system_oauth_tokens")
-      .select("access_token, refresh_token, expiry").order("expiry", { ascending: false }).limit(1).maybeSingle();
-    if (data?.access_token) {
-      if (new Date(data.expiry).getTime() - Date.now() > 60000) return data.access_token;
-      if (data.refresh_token) { const r = await refreshToken(data.refresh_token); if (r) return r; }
-      return data.access_token;
-    }
+      .select("access_token, refresh_token, expiry")
+      .order("expiry", { ascending: false });
+    if (data && data.length > 0) allRows = data as TokenRow[];
   } catch {}
 
-  // 3. PostgreSQL直接接続
-  try {
-    if (DB_PASSWORD && SUPABASE_PROJECT_ID) {
-      const { Client } = await import("pg");
-      const client = new Client({
-        host: `db.${SUPABASE_PROJECT_ID}.supabase.co`, port: 5432,
-        database: "postgres", user: "postgres", password: DB_PASSWORD,
-        ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 10000,
-      });
-      await client.connect();
-      const result = await client.query("SELECT access_token, refresh_token, expiry FROM system.tokens ORDER BY expiry DESC LIMIT 1");
-      await client.end();
-      if (result.rows.length > 0) {
-        const r = result.rows[0];
-        const token = r.access_token;
-        if (new Date(r.expiry).getTime() - Date.now() > 60000) return token;
-        if (r.refresh_token) { const refreshed = await refreshToken(r.refresh_token); if (refreshed) return refreshed; }
-        return token;
+  // 2. フォールバック: PostgreSQL直接接続
+  if (allRows.length === 0) {
+    try {
+      if (DB_PASSWORD && SUPABASE_PROJECT_ID) {
+        const { Client } = await import("pg");
+        const client = new Client({
+          host: `db.${SUPABASE_PROJECT_ID}.supabase.co`, port: 5432,
+          database: "postgres", user: "postgres", password: DB_PASSWORD,
+          ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 10000,
+        });
+        await client.connect();
+        const result = await client.query("SELECT access_token, refresh_token, expiry FROM system.tokens ORDER BY expiry DESC");
+        await client.end();
+        if (result.rows.length > 0) allRows = result.rows;
       }
+    } catch (e: any) {
+      console.log("[cron/sync-reviews] PostgreSQL error:", e?.message);
     }
-  } catch (e: any) {
-    console.log("[cron/sync-reviews] PostgreSQL error:", e?.message);
   }
 
-  return null;
+  // 全トークンをリフレッシュして返す
+  const validTokens: string[] = [];
+  for (const row of allRows) {
+    if (new Date(row.expiry).getTime() - Date.now() > 60000) {
+      validTokens.push(row.access_token);
+    } else if (row.refresh_token) {
+      const refreshed = await refreshToken(row.refresh_token);
+      validTokens.push(refreshed || row.access_token);
+    } else {
+      validTokens.push(row.access_token);
+    }
+  }
+  return validTokens;
+}
+
+async function getValidToken(): Promise<string | null> {
+  const tokens = await getAllValidTokens();
+  return tokens[0] || null;
 }
 
 async function refreshToken(rt: string): Promise<string | null> {
@@ -218,12 +208,14 @@ export async function GET(request: NextRequest) {
 
   console.log("[cron/sync-reviews] Starting batch sync...");
 
-  // 1. トークン取得
-  const token = await getValidToken();
+  // 1. 全アカウントのトークン取得
+  const allTokens = await getAllValidTokens();
+  const token = allTokens[0] || null;
   if (!token) {
     console.error("[cron/sync-reviews] No valid token");
     return NextResponse.json({ error: "OAuthトークン取得失敗" }, { status: 500 });
   }
+  console.log(`[cron/sync-reviews] ${allTokens.length} tokens available`);
 
   // 2. ロケーションマッピング
   const locMap = await getLocationMap();
@@ -282,7 +274,12 @@ export async function GET(request: NextRequest) {
     if (!fullPath) continue;
 
     try {
-      const reviews = await fetchReviews(fullPath, currentToken);
+      // 全トークンを試す（アカウントごとにアクセス権が異なるため）
+      let reviews: GBPReview[] = [];
+      for (const t of allTokens) {
+        reviews = await fetchReviews(fullPath, t);
+        if (reviews.length > 0) break;
+      }
       if (reviews.length === 0) continue;
 
       consecutiveAuthErrors = 0; // 成功したらリセット

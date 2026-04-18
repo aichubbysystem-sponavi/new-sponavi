@@ -51,112 +51,87 @@ async function refreshToken(rt: string): Promise<string | null> {
 }
 
 /**
- * 有効なトークンを1つ取得 — Cron版と同じ3段階フォールバック
+ * 全アカウントの有効なトークンを取得（期限切れはリフレッシュ）
  */
-async function getValidToken(): Promise<string | null> {
-  console.log("[sync-reviews] getValidToken: starting...", {
-    supabaseUrl: SUPABASE_URL ? "set" : "empty",
-    serviceKey: SUPABASE_SERVICE_KEY ? "set" : "empty",
-    anonKey: SUPABASE_ANON_KEY ? "set" : "empty",
-    dbPassword: DB_PASSWORD ? "set" : "empty",
-    projectId: SUPABASE_PROJECT_ID || "empty",
-    goApiUrl: GO_API_URL ? "set" : "empty",
-  });
-
+async function getAllValidTokens(): Promise<string[]> {
   // Go APIにGBP APIを叩かせてトークンリフレッシュ発火
   try {
     await fetch(`${GO_API_URL}/api/gbp/account`, { signal: AbortSignal.timeout(15000) });
   } catch {}
 
-  // 1. Supabase REST API (system schema)
-  try {
-    const key = SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY;
-    if (key) {
-      const res = await fetch(
-        `${SUPABASE_URL}/rest/v1/tokens?select=access_token,refresh_token,expiry&order=expiry.desc&limit=1`,
-        {
-          headers: { apikey: key, Authorization: `Bearer ${key}`, "Accept-Profile": "system" },
-          signal: AbortSignal.timeout(5000),
-        }
-      );
-      if (res.ok) {
-        const rows = await res.json();
-        console.log("[sync-reviews] Method 1 (REST system.tokens):", Array.isArray(rows) ? `${rows.length} rows` : "not array");
-        if (Array.isArray(rows) && rows.length > 0 && rows[0].access_token) {
-          const t = rows[0];
-          if (new Date(t.expiry).getTime() - Date.now() > 60000) return t.access_token;
-          if (t.refresh_token) {
-            const refreshed = await refreshToken(t.refresh_token);
-            if (refreshed) return refreshed;
-          }
-          return t.access_token;
-        }
-      } else {
-        console.log("[sync-reviews] Method 1 failed: HTTP", res.status, await res.text().catch(() => ""));
-      }
-    }
-  } catch (e: any) {
-    console.log("[sync-reviews] Method 1 error:", e?.message);
-  }
+  interface TokenRow { access_token: string; refresh_token: string; expiry: string; }
+  let allRows: TokenRow[] = [];
 
-  // 2. Supabase client (system_oauth_tokens view)
+  // 1. Supabase client (system_oauth_tokens view) — 全トークン取得
   try {
     const supabase = getSupabase();
-    const { data, error } = await supabase.from("system_oauth_tokens")
+    const { data } = await supabase.from("system_oauth_tokens")
       .select("access_token, refresh_token, expiry")
-      .order("expiry", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    console.log("[sync-reviews] Method 2 (system_oauth_tokens):", data ? "found" : "empty", error ? `error: ${error.message}` : "");
-    if (data?.access_token) {
-      if (new Date(data.expiry).getTime() - Date.now() > 60000) return data.access_token;
-      if (data.refresh_token) {
-        const r = await refreshToken(data.refresh_token);
-        if (r) return r;
-      }
-      return data.access_token;
+      .order("expiry", { ascending: false });
+    if (data && data.length > 0) {
+      allRows = data as TokenRow[];
+      console.log(`[sync-reviews] Got ${allRows.length} tokens from system_oauth_tokens`);
     }
   } catch (e: any) {
-    console.log("[sync-reviews] Method 2 error:", e?.message);
+    console.log("[sync-reviews] system_oauth_tokens error:", e?.message);
   }
 
-  // 3. PostgreSQL直接接続
-  try {
-    if (DB_PASSWORD && SUPABASE_PROJECT_ID) {
-      const { Client } = await import("pg");
-      const client = new Client({
-        host: `db.${SUPABASE_PROJECT_ID}.supabase.co`,
-        port: 5432,
-        database: "postgres",
-        user: "postgres",
-        password: DB_PASSWORD,
-        ssl: { rejectUnauthorized: false },
-        connectionTimeoutMillis: 10000,
-      });
-      await client.connect();
-      const result = await client.query(
-        "SELECT access_token, refresh_token, expiry FROM system.tokens ORDER BY expiry DESC LIMIT 1"
-      );
-      await client.end();
-      console.log("[sync-reviews] Method 3 (PostgreSQL):", result.rows.length, "rows");
-      if (result.rows.length > 0) {
-        const r = result.rows[0];
-        if (new Date(r.expiry).getTime() - Date.now() > 60000) return r.access_token;
-        if (r.refresh_token) {
-          const refreshed = await refreshToken(r.refresh_token);
-          if (refreshed) return refreshed;
+  // 2. フォールバック: PostgreSQL直接接続
+  if (allRows.length === 0) {
+    try {
+      if (DB_PASSWORD && SUPABASE_PROJECT_ID) {
+        const { Client } = await import("pg");
+        const client = new Client({
+          host: `db.${SUPABASE_PROJECT_ID}.supabase.co`, port: 5432,
+          database: "postgres", user: "postgres", password: DB_PASSWORD,
+          ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 10000,
+        });
+        await client.connect();
+        const result = await client.query("SELECT access_token, refresh_token, expiry FROM system.tokens ORDER BY expiry DESC");
+        await client.end();
+        if (result.rows.length > 0) {
+          allRows = result.rows;
+          console.log(`[sync-reviews] Got ${allRows.length} tokens from PostgreSQL`);
         }
-        return r.access_token;
+      }
+    } catch (e: any) {
+      console.log("[sync-reviews] PostgreSQL error:", e?.message);
+    }
+  }
+
+  if (allRows.length === 0) {
+    console.log("[sync-reviews] No tokens found in DB");
+    return [];
+  }
+
+  // 全トークンをリフレッシュして有効なものを返す
+  const validTokens: string[] = [];
+  for (const row of allRows) {
+    if (new Date(row.expiry).getTime() - Date.now() > 60000) {
+      // まだ有効
+      validTokens.push(row.access_token);
+    } else if (row.refresh_token) {
+      // 期限切れ → リフレッシュ
+      const refreshed = await refreshToken(row.refresh_token);
+      if (refreshed) {
+        validTokens.push(refreshed);
+      } else {
+        // リフレッシュ失敗でも古いトークンを試す
+        validTokens.push(row.access_token);
       }
     } else {
-      console.log("[sync-reviews] Method 3 skipped: DB_PASSWORD or PROJECT_ID missing");
+      validTokens.push(row.access_token);
     }
-  } catch (e: any) {
-    console.log("[sync-reviews] Method 3 error:", e?.message);
   }
 
-  console.log("[sync-reviews] All methods failed — no token available");
-  return null;
+  console.log(`[sync-reviews] ${validTokens.length} valid tokens ready`);
+  return validTokens;
+}
+
+/** 後方互換: 1つだけ返す */
+async function getValidToken(): Promise<string | null> {
+  const tokens = await getAllValidTokens();
+  return tokens[0] || null;
 }
 
 // ============================================================
@@ -281,17 +256,12 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const shopIds: string[] = body.shopIds || [];
 
-    // 1. OAuthトークン取得
-    const accessToken = await getValidToken();
+    // 1. 全アカウントのOAuthトークン取得
+    const allTokens = await getAllValidTokens();
+    const accessToken = allTokens[0] || null;
     if (!accessToken) {
       return NextResponse.json({
         error: "OAuthトークンが取得できません。GBPアカウント管理からGoogleアカウントを再認証してください。",
-        debug: {
-          supabaseUrl: SUPABASE_URL ? "設定済み" : "未設定",
-          serviceKey: SUPABASE_SERVICE_KEY ? "設定済み" : "未設定",
-          dbPassword: DB_PASSWORD ? "設定済み" : "未設定",
-          projectId: SUPABASE_PROJECT_ID || "不明",
-        },
       }, { status: 500 });
     }
 
@@ -367,7 +337,22 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        const { reviews, apiError } = await fetchReviews(fullPath, accessToken);
+        // 全トークンを順番に試す（アカウントごとにアクセス権が異なるため）
+        let reviews: GBPReview[] = [];
+        let apiError: number | undefined;
+        for (let ti = 0; ti < allTokens.length; ti++) {
+          const result = await fetchReviews(fullPath, allTokens[ti]);
+          if (result.reviews.length > 0) {
+            reviews = result.reviews;
+            apiError = undefined;
+            break;
+          }
+          apiError = result.apiError;
+          // 最後のトークン以外でエラーなら次を試す
+          if (ti < allTokens.length - 1 && (result.apiError || result.reviews.length === 0)) {
+            continue;
+          }
+        }
 
         if (reviews.length === 0) {
           if (apiError === 404) {
