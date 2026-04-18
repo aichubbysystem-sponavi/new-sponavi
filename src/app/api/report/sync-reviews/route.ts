@@ -217,13 +217,14 @@ interface GBPReview {
 async function fetchReviews(
   fullPath: string,
   accessToken: string
-): Promise<{ reviews: GBPReview[]; totalCount: number; avgRating: number }> {
+): Promise<{ reviews: GBPReview[]; totalCount: number; avgRating: number; apiError?: number }> {
   const allReviews: GBPReview[] = [];
   let nextPageToken: string | undefined;
   let totalCount = 0;
   let avgRating = 0;
   let pageCount = 0;
   let retries429 = 0;
+  let apiError: number | undefined;
 
   do {
     const params = new URLSearchParams({ orderBy: "updateTime desc", pageSize: "50" });
@@ -238,6 +239,7 @@ async function fetchReviews(
       retries429 = (retries429 || 0) + 1;
       if (retries429 >= 3) {
         console.warn(`[sync-reviews] 429 rate limit exceeded 3 times for ${fullPath}, skipping`);
+        apiError = 429;
         break;
       }
       console.log(`[sync-reviews] Rate limited for ${fullPath}, waiting ${10 * retries429}s... (retry ${retries429}/3)`);
@@ -249,6 +251,7 @@ async function fetchReviews(
     if (!res.ok) {
       const err = await res.text().catch(() => "");
       console.error(`[sync-reviews] GBP API error for ${fullPath}:`, res.status, err.slice(0, 200));
+      apiError = res.status;
       break;
     }
 
@@ -260,7 +263,7 @@ async function fetchReviews(
     pageCount++;
   } while (nextPageToken && pageCount < 20);
 
-  return { reviews: allReviews, totalCount, avgRating };
+  return { reviews: allReviews, totalCount, avgRating, apiError };
 }
 
 // ============================================================
@@ -364,10 +367,17 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        const { reviews } = await fetchReviews(fullPath, accessToken);
+        const { reviews, apiError } = await fetchReviews(fullPath, accessToken);
 
         if (reviews.length === 0) {
-          results.push({ shopName: shop.name, count: 0, status: "no_reviews" });
+          if (apiError === 404) {
+            console.log(`[sync-reviews] 404 for "${shop.name}" → location may be wrong: ${fullPath}`);
+            results.push({ shopName: shop.name, count: 0, status: "api_404" });
+          } else if (apiError) {
+            results.push({ shopName: shop.name, count: 0, status: `api_error_${apiError}` });
+          } else {
+            results.push({ shopName: shop.name, count: 0, status: "no_reviews" });
+          }
           continue;
         }
 

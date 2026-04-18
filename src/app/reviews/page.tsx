@@ -373,6 +373,7 @@ export default function ReviewsPage() {
     let totalSynced = 0;
     let totalErrors = 0;
     let noGbpCount = 0;
+    let api404Count = 0;
     let noReviewCount = 0;
 
     for (let i = 0; i < noReviewShops.length; i++) {
@@ -384,6 +385,7 @@ export default function ReviewsPage() {
         if (res.data.totalErrors > 0) totalErrors++;
         const r = res.data.results?.[0];
         if (r?.status === "no_gbp_location") noGbpCount++;
+        else if (r?.status === "api_404") api404Count++;
         else if (r?.status === "no_reviews") noReviewCount++;
       } catch {
         totalErrors++;
@@ -395,6 +397,7 @@ export default function ReviewsPage() {
     const details = [
       `${totalSynced}件取得`,
       noGbpCount > 0 ? `GBP未紐付け${noGbpCount}店舗` : "",
+      api404Count > 0 ? `ロケーションID無効${api404Count}店舗` : "",
       noReviewCount > 0 ? `口コミ0件${noReviewCount}店舗` : "",
       totalErrors > 0 ? `エラー${totalErrors}件` : "",
     ].filter(Boolean).join("、");
@@ -417,6 +420,10 @@ export default function ReviewsPage() {
       const r = res.data.results?.[0];
       if (r?.status === "no_gbp_location") {
         setSyncMsg(`GBPロケーション未紐付け: この店舗はGBPアカウントと紐づいていません。店舗管理でgbp_location_nameを設定してください。`);
+      } else if (r?.status === "api_404") {
+        setSyncMsg(`GBP API 404エラー: ロケーションIDが無効です。GBPアカウントから再インポートするか、gbp_location_nameを確認してください。`);
+      } else if (r?.status?.startsWith("api_error_")) {
+        setSyncMsg(`GBP APIエラー (${r.status.replace("api_error_", "")}): 口コミを取得できませんでした`);
       } else if (r?.status === "no_reviews" && res.data.totalSynced === 0) {
         setSyncMsg(`GBPから口コミ0件でした（ロケーションは見つかりましたが口コミがありません）`);
       } else {
