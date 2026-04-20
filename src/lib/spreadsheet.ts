@@ -159,14 +159,6 @@ interface PerfRow {
 function parseSheet3(rows: string[][]): Map<string, PerfRow[]> {
   const shopMap = new Map<string, PerfRow[]>();
 
-  // ヘッダー行と最初のデータ行をログ出力（列マッピングのデバッグ用）
-  if (rows.length > 0) {
-    console.log("[Sheet3] Header:", rows[0].map((h, i) => `${i}:${h}`).join(" | "));
-  }
-  if (rows.length > 1) {
-    console.log("[Sheet3] Row1:", rows[1].map((v, i) => `${i}:${v?.slice(0, 20)}`).join(" | "));
-  }
-
   // Row 0 = header, skip
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
@@ -236,14 +228,6 @@ function parseSheet2(rows: string[][]): Map<string, ShopReviewData> {
 
   if (rows.length < 3) return shopMap;
 
-  // ヘッダー行と最初のデータ行をログ出力
-  if (rows.length > 0) {
-    console.log("[Sheet2] Header:", rows[0].map((h, i) => `${i}:${h}`).slice(0, 15).join(" | "));
-  }
-  if (rows.length > 2) {
-    console.log("[Sheet2] Row2:", rows[2].map((v, i) => `${i}:${v?.slice(0, 20)}`).slice(0, 15).join(" | "));
-  }
-
   // Row 0: ヘッダー（月名）— 実際の列位置を追跡
   const headerRow = rows[0];
   const monthEntries: { label: string; colIdx: number }[] = [];
@@ -255,8 +239,6 @@ function parseSheet2(rows: string[][]): Map<string, ShopReviewData> {
       monthEntries.push({ label: toLabel(d), colIdx: c });
     }
   }
-  console.log(`[Sheet2] Found ${monthEntries.length} month columns, first at col ${monthEntries[0]?.colIdx}, last at col ${monthEntries[monthEntries.length - 1]?.colIdx}`);
-
   // Row 2以降: データ
   for (let i = 2; i < rows.length; i++) {
     const r = rows[i];
@@ -293,9 +275,6 @@ function parseSheet2(rows: string[][]): Map<string, ShopReviewData> {
       const summaryDelta = deltaMatch ? parseInt(deltaMatch[1]) : undefined;
 
       const finalCount = summaryCount > 0 ? summaryCount : lastCount;
-      if (shopName.includes("よし乃")) {
-        console.log(`[Sheet2 DEBUG] ${shopName}: summaryCount=${summaryCount}, lastCount=${lastCount}, finalCount=${finalCount}, summaryRating=${summaryRating}, lastRating=${lastRating}, deltaStr="${deltaStr}", monthly.length=${monthly.length}, lastMonthly=${monthly[monthly.length-1]?.label}:${monthly[monthly.length-1]?.count}`);
-      }
       shopMap.set(shopName, {
         monthly,
         currentRating: summaryRating > 0 ? summaryRating : lastRating,
@@ -506,9 +485,6 @@ export async function buildReportData(
     reviewDelta = reviewCounts.map((c, i) => (i === 0 ? null : c - reviewCounts[i - 1]));
     currentRating = reviewData.currentRating;
     totalReviews = reviewData.currentCount;
-    if (shopName.includes("よし乃")) {
-      console.log(`[buildReport DEBUG] ${shopName}: currentCount=${reviewData.currentCount}, currentRating=${reviewData.currentRating}, summaryCount=${reviewData.summaryCount}, lastReviewCount=${reviewCounts[reviewCounts.length-1]}`);
-    }
   }
 
   // 口コミ増減（KPI 8番目用）

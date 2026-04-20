@@ -32,71 +32,57 @@ async function refreshOAuthToken(rt: string): Promise<string | null> {
   return null;
 }
 
-async function getOAuthToken(): Promise<string | null> {
+async function getAllValidTokens(): Promise<string[]> {
   // Go APIにGBP APIを叩かせてトークンリフレッシュ発火
   try {
     await fetch(`${GO_API_URL}/api/gbp/account`, { signal: AbortSignal.timeout(15000) });
   } catch {}
 
-  // 1. Supabase REST API (system schema)
-  try {
-    const key = SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY;
-    if (key) {
-      const res = await fetch(
-        `${SUPABASE_URL}/rest/v1/tokens?select=access_token,refresh_token,expiry&order=expiry.desc&limit=1`,
-        { headers: { apikey: key, Authorization: `Bearer ${key}`, "Accept-Profile": "system" }, signal: AbortSignal.timeout(5000) }
-      );
-      if (res.ok) {
-        const rows = await res.json();
-        if (Array.isArray(rows) && rows.length > 0 && rows[0].access_token) {
-          const t = rows[0];
-          if (new Date(t.expiry).getTime() - Date.now() > 60000) return t.access_token;
-          if (t.refresh_token) {
-            const refreshed = await refreshOAuthToken(t.refresh_token);
-            if (refreshed) return refreshed;
-          }
-          return t.access_token;
-        }
-      }
-    }
-  } catch {}
+  interface TokenRow { access_token: string; refresh_token: string; expiry: string; }
+  let allRows: TokenRow[] = [];
 
-  // 2. Supabase client
+  // 1. Supabase client (system_oauth_tokens) — 全トークン取得
   try {
     const supabase = getSupabase();
     const { data } = await supabase.from("system_oauth_tokens")
-      .select("access_token, refresh_token, expiry").order("expiry", { ascending: false }).limit(1).maybeSingle();
-    if (data?.access_token) {
-      if (new Date(data.expiry).getTime() - Date.now() > 60000) return data.access_token;
-      if (data.refresh_token) { const r = await refreshOAuthToken(data.refresh_token); if (r) return r; }
-      return data.access_token;
-    }
+      .select("access_token, refresh_token, expiry")
+      .order("expiry", { ascending: false });
+    if (data && data.length > 0) allRows = data as TokenRow[];
   } catch {}
 
-  // 3. PostgreSQL直接接続
-  try {
-    if (DB_PASSWORD && SUPABASE_PROJECT_ID) {
-      const { Client } = await import("pg");
-      const client = new Client({
-        host: `db.${SUPABASE_PROJECT_ID}.supabase.co`, port: 5432,
-        database: "postgres", user: "postgres", password: DB_PASSWORD,
-        ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 10000,
-      });
-      await client.connect();
-      const result = await client.query("SELECT access_token, refresh_token, expiry FROM system.tokens ORDER BY expiry DESC LIMIT 1");
-      await client.end();
-      if (result.rows.length > 0) {
-        const r = result.rows[0];
-        if (new Date(r.expiry).getTime() - Date.now() > 60000) return r.access_token;
-        if (r.refresh_token) { const refreshed = await refreshOAuthToken(r.refresh_token); if (refreshed) return refreshed; }
-        return r.access_token;
+  // 2. フォールバック: PostgreSQL直接接続
+  if (allRows.length === 0) {
+    try {
+      if (DB_PASSWORD && SUPABASE_PROJECT_ID) {
+        const { Client } = await import("pg");
+        const client = new Client({
+          host: `db.${SUPABASE_PROJECT_ID}.supabase.co`, port: 5432,
+          database: "postgres", user: "postgres", password: DB_PASSWORD,
+          ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 10000,
+        });
+        await client.connect();
+        const result = await client.query("SELECT access_token, refresh_token, expiry FROM system.tokens ORDER BY expiry DESC");
+        await client.end();
+        if (result.rows.length > 0) allRows = result.rows;
       }
+    } catch (e: any) {
+      console.log("[cron/auto-reply] PostgreSQL error:", e?.message);
     }
-  } catch (e: any) {
-    console.log("[cron/auto-reply] PostgreSQL error:", e?.message);
   }
 
-  return null;
+  // 全トークンをリフレッシュして返す
+  const validTokens: string[] = [];
+  for (const row of allRows) {
+    if (new Date(row.expiry).getTime() - Date.now() > 60000) {
+      validTokens.push(row.access_token);
+    } else if (row.refresh_token) {
+      const refreshed = await refreshOAuthToken(row.refresh_token);
+      validTokens.push(refreshed || row.access_token);
+    } else {
+      validTokens.push(row.access_token);
+    }
+  }
+  return validTokens;
 }
 
 // ── ロケーションマッピング ──
@@ -183,10 +169,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: true, message: "未返信口コミなし", replied: 0 });
   }
 
-  const accessToken = await getOAuthToken();
-  if (!accessToken) {
+  const allTokens = await getAllValidTokens();
+  if (allTokens.length === 0) {
     return NextResponse.json({ error: "OAuthトークンなし" }, { status: 500 });
   }
+  const accessToken = allTokens[0];
 
   // ロケーションマッピング（アカウントIDハードコード排除）
   const locMap = await getLocationMap(accessToken);
@@ -245,20 +232,22 @@ export async function GET(request: NextRequest) {
       const replyText = aiData.content?.[0]?.text?.trim();
       if (!replyText) { errors++; continue; }
 
-      // GBPに返信投稿
-      const gbpRes = await fetch(`${GBP_API_BASE}/${locationName}/reviews/${review.review_id}/reply`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify({ comment: replyText }),
-      });
-
-      if (gbpRes.ok) {
-        // Supabaseのreviewsテーブルも更新
-        await supabase.from("reviews").update({ reply_comment: replyText }).eq("id", review.id);
-        replied++;
-      } else {
-        errors++;
+      // GBPに返信投稿（全トークンを試す）
+      let replySuccess = false;
+      for (const token of allTokens) {
+        const gbpRes = await fetch(`${GBP_API_BASE}/${locationName}/reviews/${review.review_id}/reply`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ comment: replyText }),
+        });
+        if (gbpRes.ok) {
+          await supabase.from("reviews").update({ reply_comment: replyText }).eq("id", review.id);
+          replied++;
+          replySuccess = true;
+          break;
+        }
       }
+      if (!replySuccess) errors++;
     } catch {
       errors++;
     }
