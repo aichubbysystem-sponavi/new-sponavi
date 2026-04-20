@@ -118,6 +118,34 @@ export default function ReportClient({
   const [memo, setMemo] = useState("");
   const [memoSaved, setMemoSaved] = useState(false);
   const [memoEditing, setMemoEditing] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+
+  // セクション表示ON/OFF（店舗ごとにlocalStorage保存）
+  const visKey = `report-visibility-${shopId}`;
+  const [sectionVisibility, setSectionVisibility] = useState<Record<string, boolean>>({
+    keywords: true,       // キーワード順位変動
+    rankingHistory: true, // 順位推移テーブル
+    searchQueries: true,  // 検索語句
+  });
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(visKey);
+      if (saved) setSectionVisibility(JSON.parse(saved));
+    } catch {}
+  }, [visKey]);
+
+  const toggleSection = (key: string) => {
+    setSectionVisibility(prev => {
+      const next = { ...prev, [key]: !prev[key] };
+      localStorage.setItem(visKey, JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const showKeywords = sectionVisibility.keywords !== false && hasKeywords;
+  const showRankingHistory = sectionVisibility.rankingHistory !== false && hasRankingHistory;
+  const showSearchQueries = sectionVisibility.searchQueries !== false && hasSearchQueries;
 
   // メモをlocalStorageから読み込み
   const memoKey = `report-memo-${shopId}-${data.monthlyLabels[data.monthlyLabels.length - 1] || ""}`;
@@ -168,9 +196,9 @@ export default function ReportClient({
 
   // ── Page count ──
   let totalPages = 10; // P1-P6, P8-P11
-  if (hasKeywords) totalPages++;
-  if (hasRankingHistory) totalPages++;
-  if (hasSearchQueries) totalPages++; // 検索語句ページ
+  if (showKeywords) totalPages++;
+  if (showRankingHistory) totalPages++;
+  if (showSearchQueries) totalPages++;
 
   function pn(slideNum: number) {
     return `${slideNum} / ${totalPages}`;
@@ -221,11 +249,34 @@ export default function ReportClient({
         <Link href="/report" style={{ color: "rgba(255,255,255,0.8)", textDecoration: "none", fontSize: 14 }}>← レポート一覧に戻る</Link>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {dataSource === "mock" && <span style={{ fontSize: 11, color: "#ffd54f", background: "rgba(255,213,79,0.15)", padding: "4px 12px", borderRadius: 20, border: "1px solid rgba(255,213,79,0.3)" }}>デモデータ</span>}
+          <button onClick={() => setShowSettings(!showSettings)} style={{ background: "rgba(255,255,255,0.15)", color: "#fff", border: "1px solid rgba(255,255,255,0.3)", padding: "10px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+            表示設定
+          </button>
           <button onClick={handlePdfDownload} disabled={pdfGenerating} style={{ background: pdfGenerating ? "#999" : "linear-gradient(135deg,#e94560,#c73050)", color: "#fff", border: "none", padding: "10px 24px", borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: pdfGenerating ? "wait" : "pointer" }}>
             {pdfGenerating ? "PDF生成中..." : "PDFダウンロード"}
           </button>
         </div>
       </div>
+
+      {/* 表示設定パネル */}
+      {showSettings && (
+        <div className="no-print" style={{ background: "#1a1a2e", padding: "16px 32px", display: "flex", alignItems: "center", gap: 24, borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+          <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: 600 }}>表示ON/OFF:</span>
+          {[
+            { key: "keywords", label: "キーワード順位", hasData: hasKeywords },
+            { key: "rankingHistory", label: "順位推移テーブル", hasData: hasRankingHistory },
+            { key: "searchQueries", label: "検索語句", hasData: hasSearchQueries },
+          ].map(item => (
+            <label key={item.key} style={{ display: "flex", alignItems: "center", gap: 6, cursor: item.hasData ? "pointer" : "not-allowed", opacity: item.hasData ? 1 : 0.4 }}>
+              <input type="checkbox" checked={sectionVisibility[item.key] !== false && item.hasData} disabled={!item.hasData}
+                onChange={() => toggleSection(item.key)}
+                style={{ width: 16, height: 16, cursor: item.hasData ? "pointer" : "not-allowed" }} />
+              <span style={{ color: "#fff", fontSize: 13 }}>{item.label}</span>
+              {!item.hasData && <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 10 }}>（データなし）</span>}
+            </label>
+          ))}
+        </div>
+      )}
 
       {/* ════ P1: ヘッダー + KPI ════ */}
       <div style={slideStyle} className="slide">
@@ -444,7 +495,7 @@ export default function ReportClient({
       </div>
 
       {/* ════ P7: キーワード順位 (データある場合のみ) ════ */}
-      {hasKeywords && (() => { pageNum = 7; return (
+      {showKeywords && (() => { pageNum = 7; return (
         <div style={slideStyle} className="slide">
           <div style={slideBarStyle}><span>{shop.name} — キーワード順位変動</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={slideBodyStyle}>
@@ -472,7 +523,7 @@ export default function ReportClient({
       ); })()}
 
       {/* ════ P7.5: キーワード順位推移テーブル ════ */}
-      {hasRankingHistory && (() => { pageNum++; return (
+      {showRankingHistory && (() => { pageNum++; return (
         <div style={slideStyle} className="slide">
           <div style={slideBarStyle}><span>{shop.name} — キーワード順位推移</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={{ ...slideBodyStyle, display: "flex", flexDirection: "column", justifyContent: "center" }}>
@@ -529,7 +580,7 @@ export default function ReportClient({
       ); })()}
 
       {/* ════ 検索語句 ════ */}
-      {hasSearchQueries && (() => { pageNum++;
+      {showSearchQueries && (() => { pageNum++;
         // 最新月と前月の比較データを作成
         const sqLatest = searchQueries.history[searchQueries.history.length - 1];
         const sqPrev = searchQueries.history.length >= 2 ? searchQueries.history[searchQueries.history.length - 2] : null;
