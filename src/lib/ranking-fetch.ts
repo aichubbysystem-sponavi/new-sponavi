@@ -9,6 +9,10 @@ const SHEETS = [
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 
 export interface RankEntry { word: string; rank: number; prevRank: number; }
+export interface RankHistoryData {
+  labels: string[];
+  datasets: { word: string; ranks: (number | null)[] }[];
+}
 
 export async function fetchRankingFromSheets(shopName: string): Promise<RankEntry[]> {
   const variants = generateNameVariants(shopName);
@@ -150,10 +154,104 @@ function findMatchingTabs(shopName: string, tabMap: Map<string, string>): { name
   return results;
 }
 
-function parseRanks(headerText: string, dataText: string): RankEntry[] {
-  const headerRow = parseCSVRow(headerText.split("\n").filter(l => l.trim())[0] || "");
+export async function fetchRankingHistoryFromSheets(shopName: string): Promise<RankHistoryData> {
+  const variants = generateNameVariants(shopName);
 
-  const kwIndices: number[] = [];
+  for (const tabName of variants) {
+    const history = await trySheetHistoryByName(SHEETS[0].id, tabName);
+    if (history.labels.length > 0) return history;
+  }
+
+  try {
+    const tabMap = await fetchTabGidMap(SHEETS[1].id);
+    const matchedTabs = findMatchingTabs(shopName, tabMap);
+    for (const tab of matchedTabs) {
+      const history = await trySheetHistoryByGid(SHEETS[1].id, tab.gid, shopName);
+      if (history.labels.length > 0) return history;
+    }
+  } catch {}
+
+  return { labels: [], datasets: [] };
+}
+
+async function trySheetHistoryByName(sheetId: string, tabName: string): Promise<RankHistoryData> {
+  try {
+    const encoded = encodeURIComponent(tabName);
+    const headerRes = await fetch(
+      `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encoded}&range=A1:AZ1`,
+      { headers: { "User-Agent": UA }, redirect: "follow" }
+    );
+    if (!headerRes.ok) return { labels: [], datasets: [] };
+    const headerText = await headerRes.text();
+    if (headerText.includes("<!DOCTYPE") || headerText.includes("<html")) return { labels: [], datasets: [] };
+    const headerRow = parseCSVRow(headerText.split("\n")[0] || "");
+    const a1 = (headerRow[0] || "").trim();
+    if (a1 !== tabName && a1 !== tabName.replace(/\s+/g, " ").trim()) {
+      if (["最終", "店舗名", "ビジネスプロフィール"].includes(a1)) return { labels: [], datasets: [] };
+    }
+    const dataRes = await fetch(
+      `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encoded}`,
+      { headers: { "User-Agent": UA }, redirect: "follow" }
+    );
+    if (!dataRes.ok) return { labels: [], datasets: [] };
+    return parseRanksHistory(headerText, await dataRes.text());
+  } catch { return { labels: [], datasets: [] }; }
+}
+
+async function trySheetHistoryByGid(sheetId: string, gid: string, shopName: string): Promise<RankHistoryData> {
+  try {
+    const headerRes = await fetch(
+      `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}&range=A1:AZ1`,
+      { headers: { "User-Agent": UA }, redirect: "follow" }
+    );
+    if (!headerRes.ok) return { labels: [], datasets: [] };
+    const headerText = await headerRes.text();
+    if (headerText.includes("<!DOCTYPE") || headerText.includes("<html")) return { labels: [], datasets: [] };
+    const a1Row = parseCSVRow(headerText.split("\n")[0] || "");
+    const a1 = (a1Row[0] || "").trim();
+    if (a1 && !shopName.includes(a1) && !a1.includes(shopName)) return { labels: [], datasets: [] };
+    const dataRes = await fetch(
+      `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}`,
+      { headers: { "User-Agent": UA }, redirect: "follow" }
+    );
+    if (!dataRes.ok) return { labels: [], datasets: [] };
+    return parseRanksHistory(headerText, await dataRes.text());
+  } catch { return { labels: [], datasets: [] }; }
+}
+
+function parseRanksHistory(headerText: string, dataText: string): RankHistoryData {
+  const headerRow = parseCSVRow(headerText.split("\n").filter(l => l.trim())[0] || "");
+  const kwIndices = getKwIndices(headerRow);
+  if (kwIndices.length === 0) return { labels: [], datasets: [] };
+
+  const dataLines = dataText.split("\n").filter(l => l.trim());
+  if (dataLines.length < 2) return { labels: [], datasets: [] };
+  const dataRows = dataLines.slice(1).map(l => parseCSVRow(l));
+
+  // 月ラベルと順位を全行分取得（直近12ヶ月）
+  const allMonths: { label: string; row: string[] }[] = [];
+  for (const row of dataRows) {
+    const dateCell = (row[1] || "").trim();
+    const m = dateCell.match(/(\d{4})[\/年](\d{1,2})/);
+    if (m) allMonths.push({ label: `${m[1]}/${m[2]}`, row });
+  }
+  const recent = allMonths.slice(-12);
+
+  const labels = recent.map(m => m.label);
+  const datasets = kwIndices.map(idx => {
+    const word = (headerRow[idx] || "").trim();
+    const ranks = recent.map(m => {
+      const v = parseInt((m.row[idx] || "0").replace(/,/g, "")) || 0;
+      return v > 0 ? v : null;
+    });
+    return { word, ranks };
+  });
+
+  return { labels, datasets };
+}
+
+function getKwIndices(headerRow: string[]): number[] {
+  const indices: number[] = [];
   for (let i = 0; i < headerRow.length; i++) {
     const cell = (headerRow[i] || "").trim();
     if (!cell || NON_KW_HEADERS.has(cell)) continue;
@@ -162,9 +260,14 @@ function parseRanks(headerText: string, dataText: string): RankEntry[] {
     if (/^\d+(\.\d+)?$/.test(cell)) continue;
     if (/^\d{4}年\d{1,2}月$/.test(cell)) continue;
     if (i === 0) continue;
-    kwIndices.push(i);
+    indices.push(i);
   }
+  return indices;
+}
 
+function parseRanks(headerText: string, dataText: string): RankEntry[] {
+  const headerRow = parseCSVRow(headerText.split("\n").filter(l => l.trim())[0] || "");
+  const kwIndices = getKwIndices(headerRow);
   if (kwIndices.length === 0) return [];
 
   const dataLines = dataText.split("\n").filter(l => l.trim());

@@ -379,14 +379,19 @@ async function fetchRankingKeywords(shopName: string): Promise<Keyword[]> {
   try {
     const { fetchRankingFromSheets } = await import("./ranking-fetch");
     const ranks = await fetchRankingFromSheets(shopName);
-    return ranks.map(r => ({
-      word: r.word,
-      rank: r.rank,
-      prevRank: r.prevRank,
-    }));
+    return ranks.map(r => ({ word: r.word, rank: r.rank, prevRank: r.prevRank }));
   } catch (e) {
     console.error("[spreadsheet] fetchRankingKeywords error:", e);
     return [];
+  }
+}
+
+async function fetchRankingHistory(shopName: string): Promise<import("./report-data").RankingHistory> {
+  try {
+    const { fetchRankingHistoryFromSheets } = await import("./ranking-fetch");
+    return await fetchRankingHistoryFromSheets(shopName);
+  } catch {
+    return { labels: [], datasets: [] };
   }
 }
 
@@ -515,6 +520,7 @@ export async function buildReportData(
     monthlyLabels,
     charts,
     keywords: await fetchRankingKeywords(shopName),
+    rankingHistory: await fetchRankingHistory(shopName),
     reviewLabels,
     reviewCounts,
     reviewDelta,

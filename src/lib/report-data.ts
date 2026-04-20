@@ -40,12 +40,18 @@ export interface ReviewAnalysis {
   summary: string;
 }
 
+export interface RankingHistory {
+  labels: string[];  // 月ラベル ["2025/10", "2025/11", ...]
+  datasets: { word: string; ranks: (number | null)[] }[];
+}
+
 export interface ReportData {
   shop: ShopInfo;
   kpis: KPI[];
   monthlyLabels: string[];
   charts: ChartData;
   keywords: Keyword[];
+  rankingHistory: RankingHistory;
   reviewLabels: string[];
   reviewCounts: number[];
   reviewDelta: (number | null)[];
