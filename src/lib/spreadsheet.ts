@@ -83,7 +83,7 @@ async function fetchCSV(sheetId: string, gid: string): Promise<string[][] | null
   const url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`;
   try {
     const res = await fetch(url, {
-      next: { revalidate: 1800 },
+      next: { tags: ["spreadsheet"], revalidate: 1800 },
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
       },
@@ -244,18 +244,18 @@ function parseSheet2(rows: string[][]): Map<string, ShopReviewData> {
     console.log("[Sheet2] Row2:", rows[2].map((v, i) => `${i}:${v?.slice(0, 20)}`).slice(0, 15).join(" | "));
   }
 
-  // Row 0: ヘッダー（月名）
+  // Row 0: ヘッダー（月名）— 実際の列位置を追跡
   const headerRow = rows[0];
-  // 月ラベルを抽出（col 8以降、2列おき）
-  const monthLabels: string[] = [];
-  for (let c = 8; c < headerRow.length; c += 2) {
+  const monthEntries: { label: string; colIdx: number }[] = [];
+  for (let c = 0; c < headerRow.length; c++) {
     const label = headerRow[c]?.trim();
     if (!label) continue;
     const d = parseDateJP(label);
     if (d) {
-      monthLabels.push(toLabel(d));
+      monthEntries.push({ label: toLabel(d), colIdx: c });
     }
   }
+  console.log(`[Sheet2] Found ${monthEntries.length} month columns, first at col ${monthEntries[0]?.colIdx}, last at col ${monthEntries[monthEntries.length - 1]?.colIdx}`);
 
   // Row 2以降: データ
   for (let i = 2; i < rows.length; i++) {
@@ -267,15 +267,15 @@ function parseSheet2(rows: string[][]): Map<string, ShopReviewData> {
     let lastRating = 0;
     let lastCount = 0;
 
-    for (let j = 0; j < monthLabels.length; j++) {
-      const colIdx = 8 + j * 2;
+    for (let j = 0; j < monthEntries.length; j++) {
+      const colIdx = monthEntries[j].colIdx;
       const rating = numFloat(r[colIdx]);
       const count = num(r[colIdx + 1]);
 
       // データがある月のみ追加
       if (rating > 0 || count > 0) {
         monthly.push({
-          label: monthLabels[j],
+          label: monthEntries[j].label,
           rating,
           count,
         });
