@@ -83,7 +83,7 @@ async function fetchCSV(sheetId: string, gid: string): Promise<string[][] | null
   const url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`;
   try {
     const res = await fetch(url, {
-      next: { tags: ["spreadsheet"], revalidate: 1800 },
+      cache: "no-store",
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
       },
