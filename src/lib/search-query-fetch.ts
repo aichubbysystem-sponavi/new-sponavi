@@ -73,77 +73,54 @@ function parseCSVRow(line: string): string[] {
   return cells;
 }
 
+async function fetchOneTab(tabName: string, gid: string, shopName: string): Promise<SearchQueryMonth | null> {
+  try {
+    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${gid}`;
+    const res = await fetch(url, { cache: "no-store", headers: { "User-Agent": UA }, redirect: "follow" });
+    if (!res.ok) return null;
+
+    const text = await res.text();
+    const lines = text.split(/\r?\n/).filter(l => l.trim());
+    if (lines.length < 2) return null;
+
+    const headerRow = parseCSVRow(lines[0]);
+
+    let kwColIdx = -1;
+    let countColIdx = -1;
+    for (let c = 0; c < headerRow.length; c++) {
+      const h = (headerRow[c] || "").trim();
+      if (h.startsWith("キーワード") && (h.includes(shopName) || shopNameMatch(h, shopName))) kwColIdx = c;
+      if (h.startsWith("検索数") && (h.includes(shopName) || shopNameMatch(h, shopName))) countColIdx = c;
+    }
+    if (kwColIdx === -1 || countColIdx === -1) return null;
+
+    const keywords: { word: string; count: number }[] = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cols = parseCSVRow(lines[i]);
+      const word = (cols[kwColIdx] || "").trim();
+      const count = parseInt((cols[countColIdx] || "0").replace(/,/g, "")) || 0;
+      if (word && word !== "キーワード") keywords.push({ word, count });
+    }
+    if (keywords.length === 0) return null;
+
+    const year = tabName.slice(0, 4);
+    const month = String(parseInt(tabName.slice(4)));
+    return { month: `${year}/${month}`, keywords };
+  } catch { return null; }
+}
+
 export async function fetchSearchQueries(shopName: string): Promise<SearchQueryData> {
   const tabs = await getMonthlyTabs();
   if (tabs.size === 0) return { months: [], latestKeywords: [], latestMonth: "" };
 
-  // タブを日付順にソート
   const sortedTabs = Array.from(tabs.entries()).sort((a, b) => a[0].localeCompare(b[0]));
 
-  const months: SearchQueryMonth[] = [];
+  // 全タブを並列で取得（大幅高速化）
+  const results = await Promise.all(
+    sortedTabs.map(([tabName, gid]) => fetchOneTab(tabName, gid, shopName))
+  );
 
-  for (const [tabName, gid] of sortedTabs) {
-    try {
-      const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${gid}`;
-      const res = await fetch(url, { cache: "no-store", headers: { "User-Agent": UA }, redirect: "follow" });
-      if (!res.ok) continue;
-
-      const text = await res.text();
-      const lines = text.split(/\r?\n/).filter(l => l.trim());
-      if (lines.length < 2) continue;
-
-      const headerRow = parseCSVRow(lines[0]);
-
-      // この店舗のキーワード列と検索数列を探す
-      let kwColIdx = -1;
-      let countColIdx = -1;
-      for (let c = 0; c < headerRow.length; c++) {
-        const h = (headerRow[c] || "").trim();
-        if (h.startsWith("キーワード") && h.includes(shopName)) {
-          kwColIdx = c;
-        }
-        if (h.startsWith("検索数") && h.includes(shopName)) {
-          countColIdx = c;
-        }
-      }
-
-      // 完全一致しない場合、部分一致で探す
-      if (kwColIdx === -1) {
-        for (let c = 0; c < headerRow.length; c++) {
-          const h = (headerRow[c] || "").trim();
-          if (h.startsWith("キーワード") && shopNameMatch(h, shopName)) {
-            kwColIdx = c;
-          }
-          if (h.startsWith("検索数") && shopNameMatch(h, shopName)) {
-            countColIdx = c;
-          }
-        }
-      }
-
-      if (kwColIdx === -1 || countColIdx === -1) continue;
-
-      // データ行からキーワードと検索数を取得
-      const keywords: { word: string; count: number }[] = [];
-      for (let i = 1; i < lines.length; i++) {
-        const cols = parseCSVRow(lines[i]);
-        const word = (cols[kwColIdx] || "").trim();
-        const count = parseInt((cols[countColIdx] || "0").replace(/,/g, "")) || 0;
-        if (word && word !== "キーワード") {
-          keywords.push({ word, count });
-        }
-      }
-
-      if (keywords.length > 0) {
-        // YYYYMM → YYYY/M
-        const year = tabName.slice(0, 4);
-        const month = String(parseInt(tabName.slice(4)));
-        months.push({ month: `${year}/${month}`, keywords });
-      }
-    } catch {
-      continue;
-    }
-  }
-
+  const months = results.filter((m): m is SearchQueryMonth => m !== null);
   const latestMonth = months.length > 0 ? months[months.length - 1] : null;
 
   return {

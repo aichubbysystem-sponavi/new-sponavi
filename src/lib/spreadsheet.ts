@@ -375,38 +375,49 @@ function generateReviewAnalysis(
 
 // ── ランキングデータ取得（Supabase → レポートP7用）──
 
-async function fetchRankingKeywords(shopName: string): Promise<Keyword[]> {
-  try {
-    const { fetchRankingFromSheets } = await import("./ranking-fetch");
-    const ranks = await fetchRankingFromSheets(shopName);
-    return ranks.map(r => ({ word: r.word, rank: r.rank, prevRank: r.prevRank }));
-  } catch (e) {
-    console.error("[spreadsheet] fetchRankingKeywords error:", e);
-    return [];
-  }
-}
+/**
+ * 順位・順位履歴・検索語句を並列取得（パフォーマンス最適化）
+ */
+async function fetchAllExternalData(shopName: string): Promise<{
+  keywords: Keyword[];
+  rankingHistory: import("./report-data").RankingHistory;
+  searchQueries: import("./report-data").ReportData["searchQueries"];
+}> {
+  const [rankingResult, searchResult] = await Promise.all([
+    // 順位 + 履歴を1モジュールで同時取得
+    (async () => {
+      try {
+        const { fetchRankingFromSheets, fetchRankingHistoryFromSheets } = await import("./ranking-fetch");
+        const [ranks, history] = await Promise.all([
+          fetchRankingFromSheets(shopName),
+          fetchRankingHistoryFromSheets(shopName),
+        ]);
+        return {
+          keywords: ranks.map(r => ({ word: r.word, rank: r.rank, prevRank: r.prevRank })),
+          history,
+        };
+      } catch (e) {
+        console.error("[spreadsheet] ranking error:", e);
+        return { keywords: [] as Keyword[], history: { labels: [], datasets: [] } };
+      }
+    })(),
+    // 検索語句を並列取得
+    (async () => {
+      try {
+        const { fetchSearchQueries } = await import("./search-query-fetch");
+        const data = await fetchSearchQueries(shopName);
+        return { latest: data.latestKeywords, latestMonth: data.latestMonth, history: data.months };
+      } catch {
+        return { latest: [] as { word: string; count: number }[], latestMonth: "", history: [] as any[] };
+      }
+    })(),
+  ]);
 
-async function fetchSearchQueryData(shopName: string): Promise<import("./report-data").ReportData["searchQueries"]> {
-  try {
-    const { fetchSearchQueries } = await import("./search-query-fetch");
-    const data = await fetchSearchQueries(shopName);
-    return {
-      latest: data.latestKeywords,
-      latestMonth: data.latestMonth,
-      history: data.months,
-    };
-  } catch {
-    return { latest: [], latestMonth: "", history: [] };
-  }
-}
-
-async function fetchRankingHistory(shopName: string): Promise<import("./report-data").RankingHistory> {
-  try {
-    const { fetchRankingHistoryFromSheets } = await import("./ranking-fetch");
-    return await fetchRankingHistoryFromSheets(shopName);
-  } catch {
-    return { labels: [], datasets: [] };
-  }
+  return {
+    keywords: rankingResult.keywords,
+    rankingHistory: rankingResult.history,
+    searchQueries: searchResult,
+  };
 }
 
 export async function buildReportData(
@@ -533,9 +544,7 @@ export async function buildReportData(
     kpis,
     monthlyLabels,
     charts,
-    keywords: await fetchRankingKeywords(shopName),
-    rankingHistory: await fetchRankingHistory(shopName),
-    searchQueries: await fetchSearchQueryData(shopName),
+    ...await fetchAllExternalData(shopName),
     reviewLabels,
     reviewCounts,
     reviewDelta,
