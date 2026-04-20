@@ -159,6 +159,14 @@ interface PerfRow {
 function parseSheet3(rows: string[][]): Map<string, PerfRow[]> {
   const shopMap = new Map<string, PerfRow[]>();
 
+  // ヘッダー行と最初のデータ行をログ出力（列マッピングのデバッグ用）
+  if (rows.length > 0) {
+    console.log("[Sheet3] Header:", rows[0].map((h, i) => `${i}:${h}`).join(" | "));
+  }
+  if (rows.length > 1) {
+    console.log("[Sheet3] Row1:", rows[1].map((v, i) => `${i}:${v?.slice(0, 20)}`).join(" | "));
+  }
+
   // Row 0 = header, skip
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
@@ -227,6 +235,14 @@ function parseSheet2(rows: string[][]): Map<string, ShopReviewData> {
   const shopMap = new Map<string, ShopReviewData>();
 
   if (rows.length < 3) return shopMap;
+
+  // ヘッダー行と最初のデータ行をログ出力
+  if (rows.length > 0) {
+    console.log("[Sheet2] Header:", rows[0].map((h, i) => `${i}:${h}`).slice(0, 15).join(" | "));
+  }
+  if (rows.length > 2) {
+    console.log("[Sheet2] Row2:", rows[2].map((v, i) => `${i}:${v?.slice(0, 20)}`).slice(0, 15).join(" | "));
+  }
 
   // Row 0: ヘッダー（月名）
   const headerRow = rows[0];
