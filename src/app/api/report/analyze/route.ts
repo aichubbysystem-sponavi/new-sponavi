@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60; // Vercel Hobby上限
+export const maxDuration = 300;
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5555";
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";

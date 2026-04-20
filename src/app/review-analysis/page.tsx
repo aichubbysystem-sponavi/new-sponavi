@@ -52,7 +52,7 @@ export default function ReviewAnalysisPage() {
       const shop = selectedShops[i];
       setProgress({ current: i, total: selectedShops.length });
       try {
-        const res = await api.post("/api/report/analyze", { shops: [shop], force: forceReanalyze }, { timeout: 60000 });
+        const res = await api.post("/api/report/analyze", { shops: [shop], force: forceReanalyze }, { timeout: 120000 });
         const data = res.data;
         allResults.push(...(data.results || []));
         setResults([...allResults]);
