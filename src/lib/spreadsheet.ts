@@ -597,17 +597,10 @@ export async function buildReportData(
 
 // ── 公開API ──
 
-let cachedPerfData: Map<string, PerfRow[]> | null = null;
-let cachedReviewData: Map<string, ShopReviewData> | null = null;
-
 async function loadData(): Promise<{
   perf: Map<string, PerfRow[]>;
   reviews: Map<string, ShopReviewData>;
 } | null> {
-  if (cachedPerfData && cachedReviewData) {
-    return { perf: cachedPerfData, reviews: cachedReviewData };
-  }
-
   const [sheet3Rows, sheet2Rows] = await Promise.all([
     fetchCSV(SHEET3_ID, SHEET3_GID),
     fetchCSV(SHEET2_ID, SHEET2_GID),
@@ -618,18 +611,14 @@ async function loadData(): Promise<{
   const perf = parseSheet3(sheet3Rows);
   const reviews = sheet2Rows ? parseSheet2(sheet2Rows) : new Map<string, ShopReviewData>();
 
-  cachedPerfData = perf;
-  cachedReviewData = reviews;
-
   return { perf, reviews };
 }
 
 /**
- * キャッシュクリア（反映ボタン用）
+ * キャッシュクリア（反映ボタン用）— revalidateTagで制御
  */
 export function clearSpreadsheetCache() {
-  cachedPerfData = null;
-  cachedReviewData = null;
+  // インメモリキャッシュ廃止: Next.js fetchキャッシュ(revalidateTag)で管理
 }
 
 /**
