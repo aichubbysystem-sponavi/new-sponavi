@@ -232,7 +232,7 @@ export default function ReportClient({
                   <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: 3, background: kpiTopColors[i] }} />
                   <div style={{ fontSize: 11, color: "#888", fontWeight: 500 }}>{kpi.label}</div>
                   <div style={{ fontSize: 28, fontWeight: 900, lineHeight: 1.1, margin: "4px 0" }}>
-                    {isLastKpi ? `+${kpi.value.toLocaleString()}件` : kpi.value.toLocaleString()}
+                    {isLastKpi ? `${kpi.value >= 0 ? "+" : ""}${kpi.value.toLocaleString()}件` : kpi.value.toLocaleString()}
                   </div>
                   <div style={{ fontSize: 11, color: "#aaa" }}>
                     {isLastKpi ? (
@@ -243,7 +243,7 @@ export default function ReportClient({
                       <span>&nbsp;</span>
                     )}
                   </div>
-                  <span style={{ display: "inline-block", marginTop: 6, padding: "3px 8px", borderRadius: 16, fontSize: 10, fontWeight: 600, background: c.isUp ? "#e6f9ee" : "#fde8e8", color: c.isUp ? "#0a8f3c" : "#c0392b", alignSelf: "flex-start" }}>
+                  <span style={{ display: "inline-block", marginTop: 6, padding: "3px 8px", borderRadius: 16, fontSize: 10, fontWeight: 600, background: isLastKpi ? (kpi.value >= 0 ? "#e6f9ee" : "#fde8e8") : (c.isUp ? "#e6f9ee" : "#fde8e8"), color: isLastKpi ? (kpi.value >= 0 ? "#0a8f3c" : "#c0392b") : (c.isUp ? "#0a8f3c" : "#c0392b"), alignSelf: "flex-start" }}>
                     {isLastKpi
                       ? `${kpi.value >= 0 ? "▲" : "▼"} ${(shop.totalReviews - kpi.value).toLocaleString()}→${shop.totalReviews.toLocaleString()}件`
                       : `${c.isUp ? "▲" : "▼"} ${c.text}（${kpi.prevValue.toLocaleString()}→${kpi.value.toLocaleString()}）`
