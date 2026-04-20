@@ -573,13 +573,11 @@ export async function buildReportData(
   const reviewAnalysis = analyzed.analysis;
   const comments = analyzed.comments;
 
-  // DBの評価・口コミ数があればSpreadsheetデータを上書き
-  if (analyzed.source === "db" && analyzed.rating && analyzed.rating > 0) {
+  // DBの評価はスプレッドシートに値がない場合のみフォールバック
+  if (analyzed.source === "db" && analyzed.rating && analyzed.rating > 0 && currentRating === 0) {
     currentRating = analyzed.rating;
   }
-  if (analyzed.source === "db" && analyzed.reviewCount && analyzed.reviewCount > 0) {
-    totalReviews = analyzed.reviewCount;
-  }
+  // 口コミ数はスプレッドシートを常に優先（DBは古い値の場合がある）
 
   return {
     shop: {
