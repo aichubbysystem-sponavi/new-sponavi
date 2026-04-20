@@ -396,51 +396,8 @@ async function fetchRankingKeywords(shopName: string): Promise<Keyword[]> {
     }
   } catch {}
 
-  // 2. フォールバック: Supabase ranking_search_logsから取得
-  const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!SUPABASE_URL || !SUPABASE_KEY) return [];
-
-  try {
-    const { createClient } = await import("@supabase/supabase-js");
-    const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
-    const { data: shop } = await supabase
-      .from("shops").select("id")
-      .or(`name.eq.${shopName},gbp_shop_name.eq.${shopName}`)
-      .limit(1).maybeSingle();
-    if (!shop) return [];
-
-    const { data: logs } = await supabase
-      .from("ranking_search_logs")
-      .select("search_words, rank, searched_at, point_label")
-      .eq("shop_id", shop.id).eq("is_display", true)
-      .order("searched_at", { ascending: false }).limit(200);
-    if (!logs || logs.length === 0) return [];
-
-    const groups = new Map<string, { rank: number; prevRank: number }>();
-    for (const log of logs) {
-      let kw: string;
-      try {
-        const parsed = JSON.parse(log.search_words);
-        kw = Array.isArray(parsed) ? parsed.join(", ") : String(log.search_words);
-      } catch { kw = String(log.search_words); }
-
-      if (!groups.has(kw)) {
-        groups.set(kw, { rank: log.rank || 0, prevRank: 0 });
-      } else {
-        const existing = groups.get(kw)!;
-        if (existing.prevRank === 0) existing.prevRank = log.rank || 0;
-      }
-    }
-
-    return Array.from(groups.entries())
-      .filter(([, data]) => data.rank > 0)
-      .map(([word, data]) => ({ word, rank: data.rank, prevRank: data.prevRank || data.rank }));
-  } catch (err) {
-    console.error("[spreadsheet] fetchRankingKeywords error:", err);
-    return [];
-  }
+  // スプレッドシートから取得できなければ空を返す（Supabaseフォールバック廃止）
+  return [];
 }
 
 export async function buildReportData(
@@ -448,8 +405,8 @@ export async function buildReportData(
   perfRows: PerfRow[],
   reviewData: ShopReviewData | undefined
 ): Promise<ReportData> {
-  // 直近12ヶ月に絞り込み
-  const recent = perfRows.slice(-12);
+  // 直近13ヶ月に絞り込み（前年比表示のため13ヶ月必要）
+  const recent = perfRows.slice(-13);
 
   const monthlyLabels = recent.map((r) => toLabel(r.date));
 

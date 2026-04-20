@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import DOMPurify from "isomorphic-dompurify";
 import Link from "next/link";
 import {
@@ -113,6 +113,23 @@ export default function ReportClient({
   const hasReviews = reviewCounts.length > 0;
   const curLabel = monthlyLabels[monthlyLabels.length - 1] || "";
   const [pdfGenerating, setPdfGenerating] = useState(false);
+  const [memo, setMemo] = useState("");
+  const [memoSaved, setMemoSaved] = useState(false);
+  const [memoEditing, setMemoEditing] = useState(false);
+
+  // メモをlocalStorageから読み込み
+  const memoKey = `report-memo-${shopId}-${data.monthlyLabels[data.monthlyLabels.length - 1] || ""}`;
+  useEffect(() => {
+    const saved = localStorage.getItem(memoKey);
+    if (saved) setMemo(saved);
+  }, [memoKey]);
+
+  const saveMemo = () => {
+    localStorage.setItem(memoKey, memo);
+    setMemoSaved(true);
+    setMemoEditing(false);
+    setTimeout(() => setMemoSaved(false), 2000);
+  };
 
   const handlePdfDownload = async () => {
     setPdfGenerating(true);
@@ -333,13 +350,27 @@ export default function ReportClient({
       {(() => { pageNum = 4; return null; })()}
       <div style={slideStyle} className="slide">
         <div style={slideBarStyle}><span>{shop.name} — Google検索数推移</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
-        <div style={{ ...slideBodyStyle, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ width: "95%", maxHeight: 600 }}>
+        <div style={slideBodyStyle}>
+          <div style={{ width: "95%", margin: "0 auto" }}>
             <Bar data={{ labels: monthlyLabels, datasets: [
               { label: "モバイル", data: charts.searchMobile, backgroundColor: "rgba(79,195,247,.75)" },
               { label: "PC", data: charts.searchPC, backgroundColor: "rgba(2,136,209,.75)" },
             ]}} options={buildStackedOptions()} />
           </div>
+          <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 9 }}>
+            <tbody>
+              <tr style={{ background: "#f8f9fa" }}>
+                <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60 }}>月</td>
+                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l.replace(/^\d{4}\//, "")}</td>)}
+              </tr>
+              <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>モバイル</td>
+                {charts.searchMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
+              <tr style={{ background: "#f8f9fa" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>PC</td>
+                {charts.searchPC.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
+              <tr><td style={{ padding: "3px 4px", fontWeight: 700, color: "#333" }}>合計</td>
+                {charts.searchMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700 }}>{(v + charts.searchPC[i]).toLocaleString()}</td>)}</tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -347,13 +378,27 @@ export default function ReportClient({
       {(() => { pageNum = 5; return null; })()}
       <div style={slideStyle} className="slide">
         <div style={slideBarStyle}><span>{shop.name} — Googleマップ表示数推移</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
-        <div style={{ ...slideBodyStyle, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ width: "95%", maxHeight: 600 }}>
+        <div style={slideBodyStyle}>
+          <div style={{ width: "95%", margin: "0 auto" }}>
             <Bar data={{ labels: monthlyLabels, datasets: [
               { label: "モバイル", data: charts.mapMobile, backgroundColor: "rgba(129,199,132,.75)" },
               { label: "PC", data: charts.mapPC, backgroundColor: "rgba(56,142,60,.75)" },
             ]}} options={buildStackedOptions()} />
           </div>
+          <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 9 }}>
+            <tbody>
+              <tr style={{ background: "#f8f9fa" }}>
+                <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60 }}>月</td>
+                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l.replace(/^\d{4}\//, "")}</td>)}
+              </tr>
+              <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>モバイル</td>
+                {charts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
+              <tr style={{ background: "#f8f9fa" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>PC</td>
+                {charts.mapPC.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
+              <tr><td style={{ padding: "3px 4px", fontWeight: 700, color: "#333" }}>合計</td>
+                {charts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700 }}>{(v + charts.mapPC[i]).toLocaleString()}</td>)}</tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -361,8 +406,8 @@ export default function ReportClient({
       {(() => { pageNum = 6; return null; })()}
       <div style={slideStyle} className="slide">
         <div style={slideBarStyle}><span>{shop.name} — ユーザー反応数推移</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
-        <div style={{ ...slideBodyStyle, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ width: "95%", maxHeight: 600 }}>
+        <div style={slideBodyStyle}>
+          <div style={{ width: "95%", margin: "0 auto" }}>
             <Bar data={{ labels: monthlyLabels, datasets: [
               { label: "ウェブサイト", data: charts.websites, backgroundColor: "rgba(255,183,77,.75)" },
               { label: "ルート", data: charts.routes, backgroundColor: "rgba(186,104,200,.75)" },
@@ -371,6 +416,26 @@ export default function ReportClient({
               { label: "予約", data: charts.bookings, backgroundColor: "rgba(121,134,203,.75)" },
             ]}} options={buildStackedOptions()} />
           </div>
+          <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 9 }}>
+            <tbody>
+              <tr style={{ background: "#f8f9fa" }}>
+                <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60 }}>月</td>
+                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l.replace(/^\d{4}\//, "")}</td>)}
+              </tr>
+              <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>Web</td>
+                {charts.websites.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
+              <tr style={{ background: "#f8f9fa" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>ルート</td>
+                {charts.routes.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
+              <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>通話</td>
+                {charts.calls.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
+              <tr style={{ background: "#f8f9fa" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>メニュー</td>
+                {charts.foodMenus.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
+              <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>予約</td>
+                {charts.bookings.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
+              <tr style={{ background: "#e8eaf6" }}><td style={{ padding: "3px 4px", fontWeight: 700, color: "#333" }}>合計</td>
+                {charts.websites.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700 }}>{(v + charts.routes[i] + charts.calls[i] + charts.foodMenus[i] + charts.bookings[i]).toLocaleString()}</td>)}</tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -476,13 +541,40 @@ export default function ReportClient({
         <div style={slideBarStyle}><span>{shop.name} — 担当者コメント</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={stitleStyle}>担当者コメント</div>
-          <div style={{ background: "linear-gradient(135deg,#f0f4ff,#fff)", border: "2px solid #0f3460", borderRadius: 14, padding: "32px 36px", flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
-            <h3 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", marginBottom: 14 }}>{curLabel} 総評</h3>
-            <ul style={{ paddingLeft: 20 }}>
+          <div style={{ background: "linear-gradient(135deg,#f0f4ff,#fff)", border: "2px solid #0f3460", borderRadius: 14, padding: "28px 32px", flex: 1, display: "flex", flexDirection: "column" }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", marginBottom: 12 }}>{curLabel} 総評</h3>
+            <ul style={{ paddingLeft: 20, margin: 0 }}>
               {comments.map((c, i) => (
                 <li key={i} style={{ fontSize: 14, lineHeight: 2, color: "#444" }} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(c, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
               ))}
             </ul>
+            {/* メモ欄 */}
+            <div style={{ marginTop: 16, borderTop: "1px solid #dde", paddingTop: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "#0f3460" }}>メモ（担当者用）</span>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {!memoEditing ? (
+                    <button onClick={() => setMemoEditing(true)} style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, border: "1px solid #ccd", background: "#fff", cursor: "pointer", color: "#555" }}>
+                      {memo ? "編集" : "追加"}
+                    </button>
+                  ) : (
+                    <>
+                      <button onClick={saveMemo} style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, border: "none", background: "#0f3460", color: "#fff", cursor: "pointer" }}>保存</button>
+                      <button onClick={() => { setMemoEditing(false); const s = localStorage.getItem(memoKey); setMemo(s || ""); }} style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, border: "1px solid #ccd", background: "#fff", cursor: "pointer", color: "#555" }}>キャンセル</button>
+                    </>
+                  )}
+                  {memoSaved && <span style={{ fontSize: 10, color: "#0a8f3c" }}>保存しました</span>}
+                </div>
+              </div>
+              {memoEditing ? (
+                <textarea value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="この店舗への所感やメモを記入..."
+                  style={{ width: "100%", minHeight: 60, padding: "8px 10px", fontSize: 13, lineHeight: 1.6, border: "1px solid #ccd", borderRadius: 8, resize: "vertical", fontFamily: "inherit" }} />
+              ) : memo ? (
+                <p style={{ fontSize: 13, lineHeight: 1.8, color: "#444", margin: 0, whiteSpace: "pre-wrap" }}>{memo}</p>
+              ) : (
+                <p style={{ fontSize: 12, color: "#aaa", margin: 0, fontStyle: "italic" }}>メモなし</p>
+              )}
+            </div>
           </div>
         </div>
       </div>
