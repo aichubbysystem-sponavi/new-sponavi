@@ -245,7 +245,7 @@ export default function ReportClient({
                   </div>
                   <span style={{ display: "inline-block", marginTop: 6, padding: "3px 8px", borderRadius: 16, fontSize: 10, fontWeight: 600, background: c.isUp ? "#e6f9ee" : "#fde8e8", color: c.isUp ? "#0a8f3c" : "#c0392b", alignSelf: "flex-start" }}>
                     {isLastKpi
-                      ? `${c.isUp ? "▲" : "▼"} ${kpi.prevValue.toLocaleString()}→${shop.totalReviews.toLocaleString()}件`
+                      ? `${kpi.value >= 0 ? "▲" : "▼"} ${(shop.totalReviews - kpi.value).toLocaleString()}→${shop.totalReviews.toLocaleString()}件`
                       : `${c.isUp ? "▲" : "▼"} ${c.text}（${kpi.prevValue.toLocaleString()}→${kpi.value.toLocaleString()}）`
                     }
                   </span>
