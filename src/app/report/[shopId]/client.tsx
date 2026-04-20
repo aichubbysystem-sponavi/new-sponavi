@@ -108,10 +108,11 @@ export default function ReportClient({
 }: {
   data: ReportData; shopId: string; dataSource?: "spreadsheet" | "mock";
 }) {
-  const { shop, kpis, monthlyLabels, charts, keywords, rankingHistory, reviewLabels, reviewCounts, reviewDelta, reviewAnalysis, comments } = data;
+  const { shop, kpis, monthlyLabels, charts, keywords, rankingHistory, reviewLabels, reviewCounts, reviewDelta, reviewAnalysis, comments, searchQueries } = data;
   const hasKeywords = keywords.length > 0;
   const hasRankingHistory = rankingHistory && rankingHistory.labels.length > 0;
   const hasReviews = reviewCounts.length > 0;
+  const hasSearchQueries = searchQueries && searchQueries.latest.length > 0;
   const curLabel = monthlyLabels[monthlyLabels.length - 1] || "";
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const [memo, setMemo] = useState("");
@@ -167,8 +168,9 @@ export default function ReportClient({
 
   // ── Page count ──
   let totalPages = 10; // P1-P6, P8-P11
-  if (hasKeywords) totalPages++; // +P7
-  if (hasRankingHistory) totalPages++; // +P7.5 順位推移グラフ
+  if (hasKeywords) totalPages++;
+  if (hasRankingHistory) totalPages++;
+  if (hasSearchQueries) totalPages++; // 検索語句ページ
 
   function pn(slideNum: number) {
     return `${slideNum} / ${totalPages}`;
@@ -516,6 +518,51 @@ export default function ReportClient({
                         }}>
                           {diff > 0 ? `↑${diff}` : diff < 0 ? `↓${Math.abs(diff)}` : "→"}
                         </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ); })()}
+
+      {/* ════ 検索語句 ════ */}
+      {hasSearchQueries && (() => { pageNum++;
+        // 最新月と前月の比較データを作成
+        const sqLatest = searchQueries.history[searchQueries.history.length - 1];
+        const sqPrev = searchQueries.history.length >= 2 ? searchQueries.history[searchQueries.history.length - 2] : null;
+        const prevMap = new Map(sqPrev?.keywords.map(k => [k.word, k.count]) || []);
+        return (
+        <div style={slideStyle} className="slide">
+          <div style={slideBarStyle}><span>{shop.name} — 検索語句</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+          <div style={{ ...slideBodyStyle, display: "flex", flexDirection: "column" }}>
+            <div style={stitleStyle}>検索語句ランキング（{searchQueries.latestMonth}）</div>
+            <div style={{ overflow: "hidden", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", flex: 1 }}>
+                <thead>
+                  <tr>
+                    <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 40 }}>順位</th>
+                    <th style={{ background: "#0f3460", color: "#fff", padding: "10px 12px", textAlign: "left", fontWeight: 600, fontSize: 11 }}>検索語句</th>
+                    <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 70 }}>検索数</th>
+                    {sqPrev && <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 70 }}>前月</th>}
+                    {sqPrev && <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 60 }}>変動</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {searchQueries.latest.slice(0, 30).map((kw, i) => {
+                    const prev = prevMap.get(kw.word);
+                    const diff = prev !== undefined ? kw.count - prev : null;
+                    return (
+                      <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#f8f9fb", borderBottom: "1px solid #eee" }}>
+                        <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 13, fontWeight: 700, color: i < 3 ? "#e94560" : i < 10 ? "#0f3460" : "#888" }}>{i + 1}</td>
+                        <td style={{ padding: "7px 12px", fontSize: 13, color: "#333" }}>{kw.word}</td>
+                        <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 14, fontWeight: 700, color: "#0f3460" }}>{kw.count.toLocaleString()}</td>
+                        {sqPrev && <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 12, color: "#888" }}>{prev !== undefined ? prev.toLocaleString() : "-"}</td>}
+                        {sqPrev && <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: diff === null ? "#ccc" : diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
+                          {diff === null ? "-" : diff > 0 ? `+${diff}` : diff === 0 ? "→" : String(diff)}
+                        </td>}
                       </tr>
                     );
                   })}

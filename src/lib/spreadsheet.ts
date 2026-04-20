@@ -386,6 +386,20 @@ async function fetchRankingKeywords(shopName: string): Promise<Keyword[]> {
   }
 }
 
+async function fetchSearchQueryData(shopName: string): Promise<import("./report-data").ReportData["searchQueries"]> {
+  try {
+    const { fetchSearchQueries } = await import("./search-query-fetch");
+    const data = await fetchSearchQueries(shopName);
+    return {
+      latest: data.latestKeywords,
+      latestMonth: data.latestMonth,
+      history: data.months,
+    };
+  } catch {
+    return { latest: [], latestMonth: "", history: [] };
+  }
+}
+
 async function fetchRankingHistory(shopName: string): Promise<import("./report-data").RankingHistory> {
   try {
     const { fetchRankingHistoryFromSheets } = await import("./ranking-fetch");
@@ -521,6 +535,7 @@ export async function buildReportData(
     charts,
     keywords: await fetchRankingKeywords(shopName),
     rankingHistory: await fetchRankingHistory(shopName),
+    searchQueries: await fetchSearchQueryData(shopName),
     reviewLabels,
     reviewCounts,
     reviewDelta,

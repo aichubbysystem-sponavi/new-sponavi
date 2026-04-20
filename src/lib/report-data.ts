@@ -45,6 +45,9 @@ export interface RankingHistory {
   datasets: { word: string; ranks: (number | null)[] }[];
 }
 
+export interface SearchQueryEntry { word: string; count: number; }
+export interface SearchQueryMonthData { month: string; keywords: SearchQueryEntry[]; }
+
 export interface ReportData {
   shop: ShopInfo;
   kpis: KPI[];
@@ -57,6 +60,7 @@ export interface ReportData {
   reviewDelta: (number | null)[];
   reviewAnalysis: ReviewAnalysis;
   comments: string[];
+  searchQueries: { latest: SearchQueryEntry[]; latestMonth: string; history: SearchQueryMonthData[] };
 }
 
 export interface ShopListItem {
