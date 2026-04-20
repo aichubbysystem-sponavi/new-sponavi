@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getReportFromSpreadsheet } from "@/lib/spreadsheet";
 
 export const dynamic = "force-dynamic";
 
@@ -98,14 +99,16 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // 方法3: spreadsheet.tsのgetReportFromSpreadsheetを呼ぶ
+  const reportData = await getReportFromSpreadsheet(shopName);
+
   return NextResponse.json({
     shopName,
-    parseCSV_totalRows: rows.length,
-    split_totalLines: lines.length,
-    parseCSV_result: parseCsvResult,
-    split_result: splitResult,
-    col5_match: parseCsvResult && splitResult
-      ? `parseCSV[5]="${rows[parseCsvResult.rowIndex][5]}" vs split[5]="${lines[splitResult.lineIndex].split(",")[5]}"`
-      : "比較不可",
+    directCSV_col5: parseCsvResult ? rows[parseCsvResult.rowIndex][5] : "N/A",
+    spreadsheetTS_totalReviews: reportData?.shop.totalReviews ?? "null",
+    spreadsheetTS_lastReviewCount: reportData?.reviewCounts?.slice(-1)[0] ?? "null",
+    match: reportData?.shop.totalReviews === parseInt(rows[parseCsvResult?.rowIndex ?? 0]?.[5] || "0")
+      ? "一致！"
+      : `不一致: spreadsheet.ts=${reportData?.shop.totalReviews} vs CSV col5=${parseCsvResult ? rows[parseCsvResult.rowIndex][5] : "N/A"}`,
   });
 }
