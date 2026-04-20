@@ -469,57 +469,59 @@ export default function ReportClient({
         </div>
       ); })()}
 
-      {/* ════ P7.5: キーワード順位推移グラフ ════ */}
-      {hasRankingHistory && (() => { pageNum++; const rankColors = ["#e94560","#0f3460","#3fc1c9","#f5a623","#7b61ff","#0a8f3c","#c0392b","#8e44ad","#e67e22","#1abc9c","#2c3e50","#e74c3c"];
-        // Y軸の最大値をデータに合わせる
-        const allRanks = rankingHistory.datasets.flatMap(ds => ds.ranks.filter((r): r is number => r !== null));
-        const yMax = Math.min(Math.max(...allRanks, 5) + 1, 20);
-        return (
+      {/* ════ P7.5: キーワード順位推移テーブル ════ */}
+      {hasRankingHistory && (() => { pageNum++; return (
         <div style={slideStyle} className="slide">
           <div style={slideBarStyle}><span>{shop.name} — キーワード順位推移</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
-          <div style={slideBodyStyle}>
-            <div style={{ width: "95%", margin: "0 auto", flex: 1, display: "flex", flexDirection: "column" }}>
-              <div style={{ flex: 1, minHeight: 0 }}>
-                <Line data={{
-                  labels: rankingHistory.labels.map(l => l.replace(/^\d{4}\//, "") + "月"),
-                  datasets: rankingHistory.datasets.map((ds, i) => ({
-                    label: ds.word,
-                    data: ds.ranks,
-                    borderColor: rankColors[i % rankColors.length],
-                    backgroundColor: "transparent",
-                    borderWidth: 2.5,
-                    pointRadius: 4,
-                    pointBackgroundColor: rankColors[i % rankColors.length],
-                    tension: 0,
-                    spanGaps: true,
-                  })),
-                }} options={{
-                  responsive: true,
-                  maintainAspectRatio: false,
-                  plugins: { legend: { position: "bottom" as const, labels: { font: { size: 11 }, boxWidth: 14, padding: 12 } } },
-                  scales: {
-                    y: { reverse: true, min: 1, max: yMax, title: { display: true, text: "順位", font: { size: 11 } }, grid: { color: "#eee" }, ticks: { stepSize: 1, font: { size: 10 } } },
-                    x: { grid: { display: false }, ticks: { font: { size: 11 } } },
-                  },
-                }} />
-              </div>
-            </div>
-            <table style={{ width: "95%", margin: "10px auto 0", borderCollapse: "collapse", fontSize: 10 }}>
-              <thead>
-                <tr style={{ background: "#0f3460" }}>
-                  <th style={{ padding: "5px 8px", color: "#fff", fontWeight: 600, textAlign: "left", whiteSpace: "nowrap" }}>キーワード</th>
-                  {rankingHistory.labels.map((l, i) => <th key={i} style={{ padding: "5px 4px", color: "#fff", fontWeight: 600, textAlign: "center" }}>{l.replace(/^\d{4}\//, "")}月</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {rankingHistory.datasets.map((ds, di) => (
-                  <tr key={di} style={{ background: di % 2 === 0 ? "#fff" : "#f8f9fb", borderBottom: "1px solid #eee" }}>
-                    <td style={{ padding: "4px 8px", fontWeight: 600, color: rankColors[di % rankColors.length], whiteSpace: "nowrap", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis" }}>{ds.word}</td>
-                    {ds.ranks.map((r, ri) => <td key={ri} style={{ padding: "4px 4px", textAlign: "center", fontWeight: r && r <= 3 ? 800 : 400, color: r === null ? "#ccc" : r <= 3 ? "#0a8f3c" : r <= 5 ? "#0f3460" : r <= 10 ? "#666" : "#999" }}>{r ?? "-"}</td>)}
+          <div style={{ ...slideBodyStyle, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+            <div style={stitleStyle}>キーワード順位推移（直近{rankingHistory.labels.length}ヶ月）</div>
+            <div style={{ overflow: "hidden", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", flex: 1 }}>
+                <thead>
+                  <tr>
+                    <th style={{ background: "#0f3460", color: "#fff", padding: "12px 12px", textAlign: "left", fontWeight: 600, whiteSpace: "nowrap", fontSize: 12, position: "sticky", left: 0 }}>キーワード</th>
+                    {rankingHistory.labels.map((l, i) => (
+                      <th key={i} style={{ background: i === rankingHistory.labels.length - 1 ? "#e94560" : "#0f3460", color: "#fff", padding: "12px 8px", textAlign: "center", fontWeight: 600, whiteSpace: "nowrap", fontSize: 12 }}>
+                        {l.replace(/^\d{4}\//, "")}月
+                      </th>
+                    ))}
+                    <th style={{ background: "#0f3460", color: "#fff", padding: "12px 8px", textAlign: "center", fontWeight: 600, fontSize: 11 }}>変動</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {rankingHistory.datasets.map((ds, di) => {
+                    const validRanks = ds.ranks.filter((r): r is number => r !== null);
+                    const latest = validRanks.length > 0 ? validRanks[validRanks.length - 1] : null;
+                    const prev = validRanks.length > 1 ? validRanks[validRanks.length - 2] : null;
+                    const diff = latest !== null && prev !== null ? prev - latest : 0;
+                    return (
+                      <tr key={di} style={{ background: di % 2 === 0 ? "#fff" : "#f8f9fb" }}>
+                        <td style={{ padding: "10px 12px", fontWeight: 700, color: "#333", whiteSpace: "nowrap", borderBottom: "1px solid #eee", fontSize: 13 }}>{ds.word}</td>
+                        {ds.ranks.map((r, ri) => {
+                          const isLatest = ri === rankingHistory.labels.length - 1;
+                          return (
+                            <td key={ri} style={{
+                              padding: "10px 8px", textAlign: "center", borderBottom: "1px solid #eee", fontSize: 15,
+                              fontWeight: r !== null && r <= 3 ? 900 : isLatest ? 700 : 400,
+                              color: r === null ? "#ddd" : r <= 3 ? "#0a8f3c" : r <= 5 ? "#0f3460" : r <= 10 ? "#555" : "#999",
+                              background: isLatest ? "#fff8f0" : undefined,
+                            }}>
+                              {r ?? "-"}
+                            </td>
+                          );
+                        })}
+                        <td style={{
+                          padding: "10px 8px", textAlign: "center", borderBottom: "1px solid #eee", fontSize: 13, fontWeight: 700,
+                          color: diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888",
+                        }}>
+                          {diff > 0 ? `↑${diff}` : diff < 0 ? `↓${Math.abs(diff)}` : "→"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       ); })()}
