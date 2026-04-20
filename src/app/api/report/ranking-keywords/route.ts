@@ -51,10 +51,14 @@ export async function GET(request: NextRequest) {
   // Sheet2: HTMLからタブ名→gidマッピングを取得し、部分マッチで検索
   try {
     const tabMap = await fetchTabGidMap(SHEETS[1].id);
-    const matchedTab = findMatchingTab(shopName, tabMap);
-    if (matchedTab) {
+    const matchedTabs = findMatchingTabs(shopName, tabMap);
+    for (const matchedTab of matchedTabs) {
       const result = await fetchFromSheetByGid(SHEETS[1].id, matchedTab.gid, month);
       if (result.success) {
+        // A1セルで店舗名を検証（レディース/メンズの区別）
+        if (result.a1ShopName && !shopName.includes(result.a1ShopName) && !result.a1ShopName.includes(shopName)) {
+          continue; // A1の店舗名が合わない → 次のタブを試す
+        }
         return NextResponse.json({
           keywords: result.keywords,
           ranks: result.ranks,
@@ -137,13 +141,19 @@ async function fetchFromSheetByGid(sheetId: string, gid: string, targetMonth: st
     const headerText = await headerRes.text();
     if (isHtml(headerText)) return EMPTY_RESULT;
 
+    // A1セルから店舗名を取得
+    const a1Row = parseCSVRow(headerText.split("\n")[0] || "");
+    const a1ShopName = (a1Row[0] || "").trim();
+
     // データ行を取得
     const dataUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}`;
     const dataRes = await fetch(dataUrl, { headers: { "User-Agent": UA }, redirect: "follow" });
     if (!dataRes.ok) return EMPTY_RESULT;
     const dataText = await dataRes.text();
 
-    return parseSheetData(headerText, dataText, targetMonth);
+    const result = parseSheetData(headerText, dataText, targetMonth);
+    result.a1ShopName = a1ShopName;
+    return result;
   } catch {
     return EMPTY_RESULT;
   }
@@ -180,36 +190,37 @@ async function fetchTabGidMap(sheetId: string): Promise<Map<string, string>> {
  * 例: "エミナルクリニック 旭川院" → "旭川院" にマッチ
  * 例: "メンズエミナル 渋谷駅前院" → "渋谷駅前" or "渋谷駅前院" にマッチ
  */
-function findMatchingTab(shopName: string, tabMap: Map<string, string>): { name: string; gid: string } | null {
+function findMatchingTabs(shopName: string, tabMap: Map<string, string>): { name: string; gid: string }[] {
   const normalized = shopName.replace(/\s+/g, " ").trim();
+  const results: { name: string; gid: string; len: number }[] = [];
 
   // 1. 完全一致
   for (const [name, gid] of Array.from(tabMap.entries())) {
-    if (name === normalized || name === shopName) return { name, gid };
+    if (name === normalized || name === shopName) return [{ name, gid }];
   }
 
-  // 2. タブ名が店舗名に含まれる（長い順に優先: "渋谷駅前院" > "渋谷"）
-  const candidates: { name: string; gid: string; len: number }[] = [];
+  // 2. タブ名が店舗名に含まれる（全候補を返す）
   for (const [name, gid] of Array.from(tabMap.entries())) {
-    // 管理用タブは除外
-    if (name.match(/全店舗|ひな型|kw\s|シート|まとめ|P-MAX|口コミ|◯△|レディース[^　]|メンズ[^エ]/)) continue;
+    // 管理用・地方タブは除外
+    if (name.match(/全店舗|ひな型|kw\s|シート|まとめ|P-MAX|口コミ|◯△|レディース|メンズ/)) continue;
     if (normalized.includes(name) || shopName.includes(name)) {
-      candidates.push({ name, gid, len: name.length });
+      results.push({ name, gid, len: name.length });
     }
   }
 
-  if (candidates.length > 0) {
-    // 最も長いマッチを優先（"旭川院" > "旭川"）
-    candidates.sort((a, b) => b.len - a.len);
-    return candidates[0];
+  if (results.length > 0) {
+    results.sort((a, b) => b.len - a.len);
+    return results;
   }
 
   // 3. 店舗名がタブ名に含まれる（逆方向）
   for (const [name, gid] of Array.from(tabMap.entries())) {
-    if (name.includes(normalized) || name.includes(shopName)) return { name, gid };
+    if (name.includes(normalized) || name.includes(shopName)) {
+      results.push({ name, gid, len: name.length });
+    }
   }
 
-  return null;
+  return results;
 }
 
 // ===== 共通パーサー =====
@@ -220,6 +231,7 @@ interface FetchResult {
   ranks: { word: string; rank: number; prevRank: number }[];
   matchedMonth: string;
   points: { label: string; lat: number; lng: number }[];
+  a1ShopName?: string;
 }
 
 const EMPTY_RESULT: FetchResult = { success: false, keywords: [], ranks: [], matchedMonth: "", points: [] };
