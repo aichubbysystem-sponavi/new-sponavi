@@ -376,28 +376,18 @@ function generateReviewAnalysis(
 // ── ランキングデータ取得（Supabase → レポートP7用）──
 
 async function fetchRankingKeywords(shopName: string): Promise<Keyword[]> {
-  // 1. まずスプレッドシートからKW順位を取得（B列日付で最新月マッチ）
   try {
-    const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || (process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
-    const res = await fetch(`${baseUrl}/api/report/ranking-keywords?shopName=${encodeURIComponent(shopName)}`, {
-      headers: { "Content-Type": "application/json", "x-internal-call": "1" },
-      cache: "no-store",
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.ranks && data.ranks.length > 0) {
-        return data.ranks.map((r: any) => ({
-          word: r.word,
-          rank: r.rank || 0,
-          prevRank: r.prevRank || r.rank || 0,
-        }));
-      }
-    }
-  } catch {}
-
-  // スプレッドシートから取得できなければ空を返す（Supabaseフォールバック廃止）
-  return [];
+    const { fetchRankingFromSheets } = await import("./ranking-fetch");
+    const ranks = await fetchRankingFromSheets(shopName);
+    return ranks.map(r => ({
+      word: r.word,
+      rank: r.rank,
+      prevRank: r.prevRank,
+    }));
+  } catch (e) {
+    console.error("[spreadsheet] fetchRankingKeywords error:", e);
+    return [];
+  }
 }
 
 export async function buildReportData(
