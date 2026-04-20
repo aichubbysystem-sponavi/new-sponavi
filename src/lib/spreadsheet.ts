@@ -292,10 +292,14 @@ function parseSheet2(rows: string[][]): Map<string, ShopReviewData> {
       const deltaMatch = deltaStr.match(/([+-]?\d+)/);
       const summaryDelta = deltaMatch ? parseInt(deltaMatch[1]) : undefined;
 
+      const finalCount = summaryCount > 0 ? summaryCount : lastCount;
+      if (shopName.includes("よし乃")) {
+        console.log(`[Sheet2 DEBUG] ${shopName}: summaryCount=${summaryCount}, lastCount=${lastCount}, finalCount=${finalCount}, summaryRating=${summaryRating}, lastRating=${lastRating}, deltaStr="${deltaStr}", monthly.length=${monthly.length}, lastMonthly=${monthly[monthly.length-1]?.label}:${monthly[monthly.length-1]?.count}`);
+      }
       shopMap.set(shopName, {
         monthly,
         currentRating: summaryRating > 0 ? summaryRating : lastRating,
-        currentCount: summaryCount > 0 ? summaryCount : lastCount,
+        currentCount: finalCount,
         summaryDelta: summaryDelta !== undefined ? summaryDelta : undefined,
         summaryRating: summaryRating > 0 ? summaryRating : undefined,
         summaryCount: summaryCount > 0 ? summaryCount : undefined,
@@ -502,6 +506,9 @@ export async function buildReportData(
     reviewDelta = reviewCounts.map((c, i) => (i === 0 ? null : c - reviewCounts[i - 1]));
     currentRating = reviewData.currentRating;
     totalReviews = reviewData.currentCount;
+    if (shopName.includes("よし乃")) {
+      console.log(`[buildReport DEBUG] ${shopName}: currentCount=${reviewData.currentCount}, currentRating=${reviewData.currentRating}, summaryCount=${reviewData.summaryCount}, lastReviewCount=${reviewCounts[reviewCounts.length-1]}`);
+    }
   }
 
   // 口コミ増減（KPI 8番目用）
