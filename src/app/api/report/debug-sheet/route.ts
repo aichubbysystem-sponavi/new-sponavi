@@ -65,7 +65,8 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // 店舗行を検索
+  // 店舗行を全て検索（重複チェック）
+  const allMatches: any[] = [];
   for (let i = 2; i < lines.length; i++) {
     const cols = parseCSVLine(lines[i]);
     if (cols[0]?.trim() !== shopName) continue;
@@ -91,33 +92,22 @@ export async function GET(request: NextRequest) {
 
     const finalCount = summaryCount > 0 ? summaryCount : lastMonthCount;
 
-    return NextResponse.json({
-      shopName,
+    allMatches.push({
       csvRow: i,
-      raw: {
-        col0_shopName: cols[0],
-        col2: cols[2],
-        col3: cols[3],
-        col4_summaryRating: cols[4],
-        col5_summaryCount: cols[5],
-        col6: cols[6],
-        col7_delta: cols[7],
-      },
-      parsed: {
-        summaryRating,
-        summaryCount,
-        deltaStr,
-        lastMonthLabel,
-        lastMonthRating,
-        lastMonthCount,
-        finalCount,
-        question: `summaryCount(${summaryCount}) > 0 ? summaryCount(${summaryCount}) : lastMonthCount(${lastMonthCount}) = ${finalCount}`,
-      },
-      monthColumnsTotal: monthCols.length,
-      firstMonth: monthCols[0],
-      lastMonth: monthCols[monthCols.length - 1],
+      col5_summaryCount: cols[5],
+      col7_delta: cols[7],
+      summaryCount,
+      lastMonthLabel,
+      lastMonthCount,
+      finalCount,
     });
   }
 
-  return NextResponse.json({ error: "店舗が見つかりません", shopName });
+  return NextResponse.json({
+    shopName,
+    totalMatches: allMatches.length,
+    matches: allMatches,
+    monthColumnsTotal: monthCols.length,
+    note: allMatches.length > 1 ? "重複行あり！最後の行がレポートに使われます" : "重複なし",
+  });
 }
