@@ -1,47 +1,111 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getReportFromSpreadsheet } from "@/lib/spreadsheet";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: NextRequest) {
-  const shopName = request.nextUrl.searchParams.get("shop") || "みそラーメンのよし乃 札幌アピア店";
-
-  // 方法1: spreadsheet.tsの実コードパスで取得
-  const reportData = await getReportFromSpreadsheet(shopName);
-
-  // 方法2: 直接CSVを取得してcol5を確認
-  const SHEET2_ID = "1czdHEs0cc2ci01uTlTgezVsuOGCHOBH6oyEGJAY-Ofk";
-  const SHEET2_GID = "806898743";
-  let directCol5 = "N/A";
-  try {
-    const res = await fetch(
-      `https://docs.google.com/spreadsheets/d/${SHEET2_ID}/export?format=csv&gid=${SHEET2_GID}`,
-      { cache: "no-store", headers: { "User-Agent": "Mozilla/5.0" }, redirect: "follow" }
-    );
-    if (res.ok) {
-      const text = await res.text();
-      for (const line of text.split(/\r?\n/).slice(2)) {
-        if (line.startsWith(shopName)) {
-          const parts = line.split(",");
-          directCol5 = parts[5] || "empty";
+// spreadsheet.tsと全く同じparseCSV関数をコピー
+function parseCSV(text: string): string[][] {
+  const rows: string[][] = [];
+  let i = 0;
+  const len = text.length;
+  while (i < len) {
+    const row: string[] = [];
+    while (i < len) {
+      if (text[i] === '"') {
+        i++;
+        let field = "";
+        while (i < len) {
+          if (text[i] === '"') {
+            if (i + 1 < len && text[i + 1] === '"') {
+              field += '"';
+              i += 2;
+            } else {
+              i++;
+              break;
+            }
+          } else {
+            field += text[i];
+            i++;
+          }
+        }
+        row.push(field);
+        if (i < len && text[i] === ",") i++;
+      } else {
+        let field = "";
+        while (i < len && text[i] !== "," && text[i] !== "\n" && text[i] !== "\r") {
+          field += text[i];
+          i++;
+        }
+        row.push(field);
+        if (i < len && text[i] === ",") {
+          i++;
+        } else {
           break;
         }
       }
     }
-  } catch {}
+    while (i < len && (text[i] === "\n" || text[i] === "\r")) i++;
+    if (row.length > 1 || (row.length === 1 && row[0] !== "")) {
+      rows.push(row);
+    }
+  }
+  return rows;
+}
+
+export async function GET(request: NextRequest) {
+  const shopName = request.nextUrl.searchParams.get("shop") || "みそラーメンのよし乃 札幌アピア店";
+
+  const SHEET2_ID = "1czdHEs0cc2ci01uTlTgezVsuOGCHOBH6oyEGJAY-Ofk";
+  const SHEET2_GID = "806898743";
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET2_ID}/export?format=csv&gid=${SHEET2_GID}`;
+
+  const res = await fetch(url, { cache: "no-store", headers: { "User-Agent": "Mozilla/5.0" }, redirect: "follow" });
+  if (!res.ok) return NextResponse.json({ error: `Fetch: ${res.status}` });
+
+  const text = await res.text();
+
+  // parseCSVで解析
+  const rows = parseCSV(text);
+
+  // 直接split解析
+  const lines = text.split(/\r?\n/);
+
+  // この店舗を両方で検索
+  let parseCsvResult: any = null;
+  let splitResult: any = null;
+
+  // parseCSV版
+  for (let i = 2; i < rows.length; i++) {
+    if (rows[i][0]?.trim() === shopName) {
+      parseCsvResult = {
+        rowIndex: i,
+        totalCols: rows[i].length,
+        cols0to9: rows[i].slice(0, 10).map((v, j) => `${j}:${v}`),
+      };
+      break;
+    }
+  }
+
+  // split版
+  for (let i = 2; i < lines.length; i++) {
+    const parts = lines[i].split(",");
+    if (parts[0]?.trim() === shopName) {
+      splitResult = {
+        lineIndex: i,
+        totalParts: parts.length,
+        parts0to9: parts.slice(0, 10).map((v, j) => `${j}:${v}`),
+      };
+      break;
+    }
+  }
 
   return NextResponse.json({
     shopName,
-    // spreadsheet.tsの結果
-    fromSpreadsheetTS: {
-      totalReviews: reportData?.shop.totalReviews ?? "null",
-      rating: reportData?.shop.rating ?? "null",
-      lastReviewCount: reportData?.reviewCounts?.slice(-1)[0] ?? "null",
-    },
-    // 直接CSV読みの結果
-    directCSV: {
-      col5_value: directCol5,
-    },
-    match: reportData?.shop.totalReviews === parseInt(directCol5) ? "一致" : `不一致！ spreadsheet.ts=${reportData?.shop.totalReviews} vs CSV=${directCol5}`,
+    parseCSV_totalRows: rows.length,
+    split_totalLines: lines.length,
+    parseCSV_result: parseCsvResult,
+    split_result: splitResult,
+    col5_match: parseCsvResult && splitResult
+      ? `parseCSV[5]="${rows[parseCsvResult.rowIndex][5]}" vs split[5]="${lines[splitResult.lineIndex].split(",")[5]}"`
+      : "比較不可",
   });
 }
