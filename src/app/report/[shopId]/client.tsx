@@ -118,14 +118,15 @@ export default function ReportClient({
   const [memo, setMemo] = useState("");
   const [memoSaved, setMemoSaved] = useState(false);
   const [memoEditing, setMemoEditing] = useState(false);
+  const [memoLoading, setMemoLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
 
   // セクション表示ON/OFF（店舗ごとにlocalStorage保存）
   const visKey = `report-visibility-${shopId}`;
   const [sectionVisibility, setSectionVisibility] = useState<Record<string, boolean>>({
-    keywords: true,       // キーワード順位変動
-    rankingHistory: true, // 順位推移テーブル
-    searchQueries: true,  // 検索語句
+    keywords: true,
+    rankingHistory: true,
+    searchQueries: true,
   });
 
   useEffect(() => {
@@ -147,18 +148,34 @@ export default function ReportClient({
   const showRankingHistory = sectionVisibility.rankingHistory !== false && hasRankingHistory;
   const showSearchQueries = sectionVisibility.searchQueries !== false && hasSearchQueries;
 
-  // メモをlocalStorageから読み込み
-  const memoKey = `report-memo-${shopId}-${data.monthlyLabels[data.monthlyLabels.length - 1] || ""}`;
+  // メモをSupabaseから読み込み
   useEffect(() => {
-    const saved = localStorage.getItem(memoKey);
-    if (saved) setMemo(saved);
-  }, [memoKey]);
+    (async () => {
+      try {
+        const res = await fetch(`/api/report/memo?shopName=${encodeURIComponent(shop.name)}&month=${encodeURIComponent(curLabel)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.memo) setMemo(data.memo);
+        }
+      } catch {}
+    })();
+  }, [shop.name, curLabel]);
 
-  const saveMemo = () => {
-    localStorage.setItem(memoKey, memo);
-    setMemoSaved(true);
-    setMemoEditing(false);
-    setTimeout(() => setMemoSaved(false), 2000);
+  const saveMemo = async () => {
+    setMemoLoading(true);
+    try {
+      const res = await fetch("/api/report/memo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shopName: shop.name, month: curLabel, memo }),
+      });
+      if (res.ok) {
+        setMemoSaved(true);
+        setMemoEditing(false);
+        setTimeout(() => setMemoSaved(false), 2000);
+      }
+    } catch {}
+    setMemoLoading(false);
   };
 
   const handlePdfDownload = async () => {
@@ -716,8 +733,8 @@ export default function ReportClient({
                     </button>
                   ) : (
                     <>
-                      <button onClick={saveMemo} style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, border: "none", background: "#0f3460", color: "#fff", cursor: "pointer" }}>保存</button>
-                      <button onClick={() => { setMemoEditing(false); const s = localStorage.getItem(memoKey); setMemo(s || ""); }} style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, border: "1px solid #ccd", background: "#fff", cursor: "pointer", color: "#555" }}>キャンセル</button>
+                      <button onClick={saveMemo} disabled={memoLoading} style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, border: "none", background: memoLoading ? "#999" : "#0f3460", color: "#fff", cursor: memoLoading ? "wait" : "pointer" }}>{memoLoading ? "保存中..." : "保存"}</button>
+                      <button onClick={() => setMemoEditing(false)} style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, border: "1px solid #ccd", background: "#fff", cursor: "pointer", color: "#555" }}>キャンセル</button>
                     </>
                   )}
                   {memoSaved && <span style={{ fontSize: 10, color: "#0a8f3c" }}>保存しました</span>}
