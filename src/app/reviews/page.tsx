@@ -61,6 +61,7 @@ export default function ReviewsPage() {
   const [loadingNoReview, setLoadingNoReview] = useState(false);
   const [selectedNoReview, setSelectedNoReview] = useState<Set<string>>(new Set());
   const [lastClickedIdx, setLastClickedIdx] = useState<number | null>(null);
+  const [shopSyncStatus, setShopSyncStatus] = useState<Map<string, string>>(new Map());
 
   const isAllMode = shopFilterMode === "all";
 
@@ -381,6 +382,7 @@ export default function ReviewsPage() {
     let api404Count = 0;
     let noReviewCount = 0;
 
+    const newStatusMap = new Map(shopSyncStatus);
     for (let i = 0; i < targets.length; i++) {
       const shop = targets[i];
       setSyncMsg(`口コミなし店舗を同期中... ${i + 1}/${targets.length}（${totalSynced}件取得）\n処理中: ${shop.name}`);
@@ -389,16 +391,20 @@ export default function ReviewsPage() {
         totalSynced += res.data.totalSynced || 0;
         if (res.data.totalErrors > 0) totalErrors++;
         const r = res.data.results?.[0];
-        if (r?.status === "no_gbp_location") noGbpCount++;
-        else if (r?.status === "api_404") api404Count++;
-        else if (r?.status === "no_reviews") noReviewCount++;
+        if (r?.status === "no_gbp_location") { noGbpCount++; newStatusMap.set(shop.id, "GBP未紐付け"); }
+        else if (r?.status === "api_404") { api404Count++; newStatusMap.set(shop.id, "ロケーションID無効"); }
+        else if (r?.status?.startsWith("api_error_")) { totalErrors++; newStatusMap.set(shop.id, `APIエラー(${r.status.replace("api_error_", "")})`); }
+        else if (r?.status === "no_reviews") { noReviewCount++; newStatusMap.set(shop.id, "口コミ0件（API応答なし）"); }
+        else if (res.data.totalSynced > 0) { newStatusMap.set(shop.id, `${res.data.totalSynced}件取得`); }
       } catch {
         totalErrors++;
+        newStatusMap.set(shop.id, "通信エラー");
       }
-      if (i < noReviewShops.length - 1) {
+      if (i < targets.length - 1) {
         await new Promise(r => setTimeout(r, 2000));
       }
     }
+    setShopSyncStatus(newStatusMap);
     const details = [
       `${totalSynced}件取得`,
       noGbpCount > 0 ? `GBP未紐付け${noGbpCount}店舗` : "",
@@ -750,7 +756,15 @@ export default function ReviewsPage() {
                   }}>
                   <input type="checkbox" checked={selectedNoReview.has(shop.id)} readOnly
                     className="w-3.5 h-3.5 rounded border-amber-300 text-amber-600 pointer-events-none" />
-                  <span className="text-slate-600 truncate"><span className="text-amber-400 mr-1">{i + 1}.</span>{shop.name}</span>
+                  <span className="text-slate-600 truncate flex-1"><span className="text-amber-400 mr-1">{i + 1}.</span>{shop.name}</span>
+                  {shopSyncStatus.has(shop.id) && (
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded-full whitespace-nowrap flex-shrink-0 ${
+                      shopSyncStatus.get(shop.id)?.includes("件取得") ? "bg-emerald-100 text-emerald-700" :
+                      shopSyncStatus.get(shop.id) === "GBP未紐付け" ? "bg-red-100 text-red-600" :
+                      shopSyncStatus.get(shop.id) === "ロケーションID無効" ? "bg-orange-100 text-orange-600" :
+                      "bg-slate-100 text-slate-500"
+                    }`}>{shopSyncStatus.get(shop.id)}</span>
+                  )}
                 </label>
               ))}
             </div>
