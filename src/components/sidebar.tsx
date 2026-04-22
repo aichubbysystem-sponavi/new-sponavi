@@ -33,6 +33,7 @@ const navSections = [
       { href: "/ranking", label: "店舗検索ランキング" },
       { href: "/reports", label: "店舗パフォーマンス" },
       { href: "/basic-info", label: "基礎情報管理" },
+      { href: "/basic-info/fixed-message", label: "差し込み文字列設定" },
       { href: "/setup", label: "初期整備" },
       { href: "/citation", label: "NAP整合性" },
     ],

@@ -223,15 +223,15 @@ export default function ShopManagementPage() {
                       <button onClick={() => setEditShop(shop)} className="text-[10px] px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition">編集</button>
                       {shop.gbpConnected && (
                         <button onClick={async () => {
-                          if (!confirm(`「${shop.name}」のGBPロケーション連携を解除しますか？\n※ GBPの情報は削除されません。システム上の紐付けのみ解除されます。`)) return;
+                          if (!confirm(`「${shop.name}」のビジネスロケーション連携を解除しますか？\n\n※ GBP側の情報は削除されません。\n※ システム上の紐付け（gbp_location_name）のみクリアされます。`)) return;
                           try {
-                            await api.delete(`/api/shop/${shop.id}/business_location_unlink`);
-                            setShops(shops.map(s => s.id === shop.id ? { ...s, gbpConnected: false, gbpShopName: "" } : s));
+                            await api.put(`/api/shop/${shop.id}`, { gbp_location_name: "" });
+                            await fetchData();
                             setError("");
                           } catch (e: any) {
-                            setError(`GBP解除失敗: ${e?.response?.data?.message || e?.message || "エラー"}`);
+                            setError(`ロケーション解除失敗: ${e?.response?.data?.message || e?.message || "エラー"}`);
                           }
-                        }} className="text-[10px] px-2 py-1 bg-amber-50 text-amber-600 rounded hover:bg-amber-100 transition">GBP解除</button>
+                        }} className="text-[10px] px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition">ロケーション解除</button>
                       )}
                       <button onClick={() => setDeleteTarget(shop)} className="text-[10px] px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition">削除</button>
                     </div>
