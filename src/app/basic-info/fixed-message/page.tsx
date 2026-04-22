@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useShop } from "@/components/shop-provider";
 import api from "@/lib/api";
-import { supabase } from "@/lib/supabase";
 
 interface FieldEntry {
   id?: string;
@@ -25,16 +24,8 @@ export default function FixedMessagePage() {
     setError("");
     setMsg("");
     try {
-      // 内部API: Go APIから同名店舗のfixed_messagesも含めて検索
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData?.session?.access_token || "";
-      const res = await fetch(`/api/internal/fixed-messages/${selectedShopId}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      const json = await res.json();
-      console.log("[fixed_message] internal API response:", JSON.stringify(json)?.slice(0, 1000));
-      // デバッグ情報付きレスポンスの場合
-      const msgs = Array.isArray(json) ? json : (json.messages || json);
+      const res = await api.get(`/api/shop/${selectedShopId}`);
+      const msgs = res.data?.fixed_messages;
       if (Array.isArray(msgs) && msgs.length > 0) {
         setFields(msgs.map((m: any) => ({
           id: m.id || undefined,
@@ -45,8 +36,11 @@ export default function FixedMessagePage() {
         setFields([]);
       }
     } catch (e: any) {
-      console.error("[fixed_message] fetch error:", e);
-      setError("差し込み文字列の取得に失敗しました");
+      if (e?.response?.status === 404) {
+        setFields([]);
+      } else {
+        setError(e?.userMessage || "差し込み文字列の取得に失敗しました");
+      }
     } finally {
       setLoading(false);
     }

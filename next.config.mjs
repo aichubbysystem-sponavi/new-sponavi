@@ -13,10 +13,6 @@ const nextConfig = {
         destination: "/api/report/:path*", // レポートAPI はNext.js内部で処理
       },
       {
-        source: "/api/internal/:path*",
-        destination: "/api/internal/:path*", // 内部API はNext.js内部で処理
-      },
-      {
         source: "/api/:path*",
         destination: `${apiUrl}/api/:path*`,
       },

@@ -102,8 +102,26 @@ export default function PostsPage() {
   const [editingSummary, setEditingSummary] = useState("");
   const [retrying, setRetrying] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [fixedMessages, setFixedMessages] = useState<{ id: string; title: string; message: string }[]>([]);
+  const [showInsertMenu, setShowInsertMenu] = useState(false);
 
   const isAllMode = shopFilterMode === "all";
+
+  // 差し込み文字列取得
+  useEffect(() => {
+    if (!selectedShopId) { setFixedMessages([]); return; }
+    (async () => {
+      try {
+        const res = await api.get(`/api/shop/${selectedShopId}`);
+        const msgs = res.data?.fixed_messages;
+        if (Array.isArray(msgs) && msgs.length > 0) {
+          setFixedMessages(msgs.map((m: any) => ({ id: m.id, title: m.title || "", message: m.message || "" })));
+        } else {
+          setFixedMessages([]);
+        }
+      } catch { setFixedMessages([]); }
+    })();
+  }, [selectedShopId]);
 
   // 投稿計画取得
   const fetchPlan = useCallback(async () => {
@@ -716,8 +734,35 @@ export default function PostsPage() {
                 </div>
                 <div>
                   <label className="text-xs text-slate-500 block mb-1">投稿本文 *</label>
-                  <textarea value={newPost.summary} onChange={(e) => setNewPost({ ...newPost, summary: e.target.value })}
-                    placeholder="投稿の内容を入力..." className="w-full border border-slate-200 rounded-lg px-4 py-3 text-sm min-h-[120px] resize-y focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20" />
+                  <div className="relative flex gap-2">
+                    <textarea value={newPost.summary} onChange={(e) => setNewPost({ ...newPost, summary: e.target.value })}
+                      placeholder="投稿の内容を入力..." className="flex-1 border border-slate-200 rounded-lg px-4 py-3 text-sm min-h-[120px] resize-y focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20" />
+                    {fixedMessages.length > 0 && (
+                      <div className="relative">
+                        <button type="button" onClick={() => setShowInsertMenu(!showInsertMenu)}
+                          className="px-3 py-2 text-xs font-semibold border border-slate-300 rounded-lg hover:bg-slate-50 whitespace-nowrap h-fit">
+                          差し込み
+                        </button>
+                        {showInsertMenu && (
+                          <div className="absolute right-0 top-10 z-50 bg-white border border-slate-200 rounded-lg shadow-lg p-3 w-64">
+                            <p className="text-xs font-bold text-slate-600 mb-1">差し込み文字列</p>
+                            <p className="text-[10px] text-slate-400 mb-2">追加したい文字列を選択してください</p>
+                            <div className="space-y-1 max-h-48 overflow-y-auto">
+                              {fixedMessages.map((fm) => (
+                                <button key={fm.id} type="button" onClick={() => {
+                                  setNewPost(prev => ({ ...prev, summary: prev.summary + fm.message }));
+                                  setShowInsertMenu(false);
+                                }}
+                                  className="w-full text-left px-3 py-2 text-sm rounded hover:bg-blue-50 hover:text-blue-700 transition">
+                                  {fm.title}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                   <div className="flex items-center gap-2 mt-1">
                     <p className="text-xs text-slate-400">{newPost.summary.length} / 1500文字</p>
                     <div className="flex items-center gap-1.5 ml-auto">
