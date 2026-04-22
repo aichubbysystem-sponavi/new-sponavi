@@ -26,8 +26,10 @@ export default function FixedMessagePage() {
     try {
       // 内部API: Supabaseから同名店舗のfixed_messagesも含めて検索
       const res = await fetch(`/api/internal/fixed-messages/${selectedShopId}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const msgs = await res.json();
+      const json = await res.json();
+      console.log("[fixed_message] internal API response:", JSON.stringify(json)?.slice(0, 1000));
+      // デバッグ情報付きレスポンスの場合
+      const msgs = Array.isArray(json) ? json : (json.messages || json);
       if (Array.isArray(msgs) && msgs.length > 0) {
         setFields(msgs.map((m: any) => ({
           id: m.id || undefined,
@@ -38,6 +40,7 @@ export default function FixedMessagePage() {
         setFields([]);
       }
     } catch (e: any) {
+      console.error("[fixed_message] fetch error:", e);
       setError("差し込み文字列の取得に失敗しました");
     } finally {
       setLoading(false);
