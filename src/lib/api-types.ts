@@ -57,5 +57,12 @@ export interface Shop {
   created_at: string;
   updated_at: string;
   owner?: Owner;
+  fixed_messages?: FixedMessage[];
   is_instagram_connected: boolean;
+}
+
+export interface FixedMessage {
+  id: string;
+  title: string;
+  message: string;
 }
