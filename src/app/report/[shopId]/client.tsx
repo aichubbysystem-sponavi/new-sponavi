@@ -129,12 +129,18 @@ export default function ReportClient({
     searchQueries: true,
   });
 
+  // 個別キーワード表示ON/OFF（店舗ごとにlocalStorage保存）
+  const kwVisKey = `report-kw-visibility-${shopId}`;
+  const [kwVisibility, setKwVisibility] = useState<Record<string, boolean>>({});
+
   useEffect(() => {
     try {
       const saved = localStorage.getItem(visKey);
       if (saved) setSectionVisibility(JSON.parse(saved));
+      const kwSaved = localStorage.getItem(kwVisKey);
+      if (kwSaved) setKwVisibility(JSON.parse(kwSaved));
     } catch {}
-  }, [visKey]);
+  }, [visKey, kwVisKey]);
 
   const toggleSection = (key: string) => {
     setSectionVisibility(prev => {
@@ -143,6 +149,18 @@ export default function ReportClient({
       return next;
     });
   };
+
+  const toggleKeyword = (word: string) => {
+    setKwVisibility(prev => {
+      const next = { ...prev, [word]: prev[word] === false ? true : false };
+      localStorage.setItem(kwVisKey, JSON.stringify(next));
+      return next;
+    });
+  };
+
+  // 表示するキーワードのみフィルタ
+  const visibleKeywords = keywords.filter(kw => kwVisibility[kw.word] !== false);
+  const visibleRankingDatasets = rankingHistory?.datasets?.filter(ds => kwVisibility[ds.word] !== false) || [];
 
   const showKeywords = sectionVisibility.keywords !== false && hasKeywords;
   const showRankingHistory = sectionVisibility.rankingHistory !== false && hasRankingHistory;
@@ -293,6 +311,20 @@ export default function ReportClient({
               {!item.hasData && <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 10 }}>（データなし）</span>}
             </label>
           ))}
+          {hasKeywords && (
+            <>
+              <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.15)", margin: "0 4px" }} />
+              <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: 600 }}>個別KW:</span>
+              {keywords.map(kw => (
+                <label key={kw.word} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+                  <input type="checkbox" checked={kwVisibility[kw.word] !== false}
+                    onChange={() => toggleKeyword(kw.word)}
+                    style={{ width: 14, height: 14, cursor: "pointer" }} />
+                  <span style={{ color: "#fff", fontSize: 12 }}>{kw.word}</span>
+                </label>
+              ))}
+            </>
+          )}
         </div>
       )}
 
@@ -519,7 +551,7 @@ export default function ReportClient({
           <div style={slideBodyStyle}>
             <div style={stitleStyle}>キーワード順位変動</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16, flex: 1 }}>
-              {keywords.map((kw, i) => {
+              {visibleKeywords.map((kw, i) => {
                 const diff = kw.prevRank - kw.rank;
                 const arrow = diff > 0 ? "↑" : diff < 0 ? "↓" : "→";
                 const arrowColor = diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888";
@@ -560,7 +592,7 @@ export default function ReportClient({
                   </tr>
                 </thead>
                 <tbody>
-                  {rankingHistory.datasets.map((ds, di) => {
+                  {visibleRankingDatasets.map((ds, di) => {
                     const validRanks = ds.ranks.filter((r): r is number => r !== null);
                     const latest = validRanks.length > 0 ? validRanks[validRanks.length - 1] : null;
                     const prev = validRanks.length > 1 ? validRanks[validRanks.length - 2] : null;
