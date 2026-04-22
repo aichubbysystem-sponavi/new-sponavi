@@ -26,6 +26,7 @@ export default function FixedMessagePage() {
     try {
       const res = await api.get(`/api/shop/${selectedShopId}/fixed_message`);
       const data = res.data;
+      console.log("[fixed_message] API response:", JSON.stringify(data).slice(0, 500));
       if (Array.isArray(data)) {
         setFields(data.map((item: any) => ({
           id: item.id || item.ID || undefined,
