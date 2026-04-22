@@ -2,7 +2,7 @@ import { getShopList } from "@/lib/report-api";
 import { createClient } from "@supabase/supabase-js";
 import ReportListClient from "./report-list-client";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 3600; // 1時間キャッシュ（反映ボタンで即時更新）
 
 async function getAnalyzedShops(): Promise<Set<string>> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;

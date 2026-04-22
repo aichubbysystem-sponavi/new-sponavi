@@ -106,7 +106,7 @@ const lineOptions = {
 export default function ReportClient({
   data, shopId, dataSource = "mock",
 }: {
-  data: ReportData; shopId: string; dataSource?: "spreadsheet" | "mock";
+  data: ReportData; shopId: string; dataSource?: "cache" | "spreadsheet" | "mock";
 }) {
   const { shop, kpis, monthlyLabels, charts, keywords, rankingHistory, reviewLabels, reviewCounts, reviewDelta, reviewAnalysis, comments, searchQueries } = data;
   const hasKeywords = keywords.length > 0;

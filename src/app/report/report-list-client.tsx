@@ -54,7 +54,7 @@ export default function ReportListClient({
   source,
 }: {
   shops: ShopListItem[];
-  source: "spreadsheet" | "mock";
+  source: "cache" | "spreadsheet" | "mock";
 }) {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("name");
