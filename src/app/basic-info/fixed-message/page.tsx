@@ -26,6 +26,8 @@ export default function FixedMessagePage() {
 
     // まず店舗データのプリロード済みfixed_messagesを使う
     const preloaded = (selectedShop as any)?.fixed_messages;
+    console.log("[fixed_message] selectedShop keys:", selectedShop ? Object.keys(selectedShop) : "null");
+    console.log("[fixed_message] preloaded:", JSON.stringify(preloaded)?.slice(0, 500));
     if (Array.isArray(preloaded) && preloaded.length > 0) {
       setFields(preloaded.map((m: any) => ({
         id: m.id || undefined,
@@ -40,6 +42,7 @@ export default function FixedMessagePage() {
     try {
       const res = await api.get(`/api/shop/${selectedShopId}/fixed_message`);
       const data = res.data;
+      console.log("[fixed_message] API fallback response:", JSON.stringify(data)?.slice(0, 500));
       if (Array.isArray(data) && data.length > 0) {
         setFields(data.map((item: any) => ({
           id: item.id || undefined,
