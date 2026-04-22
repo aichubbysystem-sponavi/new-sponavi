@@ -364,9 +364,9 @@ export async function POST(request: NextRequest) {
       continue;
     }
 
-    const locationName = shop.gbp_location_name.startsWith("accounts/")
-      ? shop.gbp_location_name
-      : `accounts/111148362910776147900/${shop.gbp_location_name}`;
+    const { resolveLocationName } = await import("@/lib/gbp-location");
+    const locationName = await resolveLocationName(shop.gbp_location_name);
+    if (!locationName) { results.push({ shop: shop.name, status: "ロケーション解決失敗" }); continue; }
 
     // 写真のみ投稿（追加写真）の場合はGBP Media APIで直接アップロード
     if (!match.summary && match.photoUrl) {

@@ -137,9 +137,9 @@ export async function PUT(request: NextRequest) {
       continue;
     }
 
-    const locationName = shop.gbp_location_name.startsWith("accounts/")
-      ? shop.gbp_location_name
-      : `accounts/111148362910776147900/${shop.gbp_location_name}`;
+    const { resolveLocationName } = await import("@/lib/gbp-location");
+    const locationName = await resolveLocationName(shop.gbp_location_name);
+    if (!locationName) { errors++; continue; }
 
     const postBody: any = { summary: post.summary, topicType: post.topic_type, languageCode: "ja" };
     if (post.action_type && post.action_url) {

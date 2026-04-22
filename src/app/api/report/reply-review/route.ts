@@ -94,10 +94,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "店舗のGBP情報が見つかりません" }, { status: 404 });
   }
 
-  // locationNameを accounts/XXX/locations/YYY 形式に正規化
-  const locationName = shop.gbp_location_name.startsWith("accounts/")
-    ? shop.gbp_location_name
-    : `accounts/111148362910776147900/${shop.gbp_location_name}`;
+  const { resolveLocationName } = await import("@/lib/gbp-location");
+  const locationName = await resolveLocationName(shop.gbp_location_name);
+  if (!locationName) return NextResponse.json({ error: "GBPロケーション解決失敗" }, { status: 400 });
 
   // GBP API v4: PUT {locationName}/reviews/{reviewId}/reply
   const replyUrl = `${GBP_API_BASE}/${locationName}/reviews/${reviewId}/reply`;

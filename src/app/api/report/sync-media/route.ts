@@ -76,9 +76,11 @@ interface MediaItem {
 }
 
 async function fetchMedia(locationName: string, accessToken: string): Promise<MediaItem[]> {
-  const parent = locationName.startsWith("accounts/")
-    ? locationName
-    : `accounts/111148362910776147900/${locationName}`;
+  let parent = locationName;
+  if (!locationName.startsWith("accounts/")) {
+    const { resolveLocationName } = await import("@/lib/gbp-location");
+    parent = await resolveLocationName(locationName) || locationName;
+  }
 
   const allMedia: MediaItem[] = [];
   let nextPageToken: string | undefined;

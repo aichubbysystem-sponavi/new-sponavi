@@ -51,9 +51,15 @@ export async function POST(request: NextRequest) {
   const accessToken = await getOAuthToken();
   if (!accessToken) return NextResponse.json({ error: "OAuthトークンなし" }, { status: 500 });
 
-  // postName = accounts/xxx/locations/yyy/localPosts/zzz
-  const name = postName.startsWith("accounts/") ? postName
-    : `accounts/111148362910776147900/${postName}`;
+  // postName = accounts/xxx/locations/yyy/localPosts/zzz or locations/yyy/localPosts/zzz
+  let name = postName;
+  if (!postName.startsWith("accounts/")) {
+    const { resolveLocationName } = await import("@/lib/gbp-location");
+    const locPart = postName.split("/localPosts/")[0] || "";
+    const postPart = postName.includes("/localPosts/") ? "/localPosts/" + postName.split("/localPosts/")[1] : "";
+    const resolved = await resolveLocationName(locPart);
+    name = resolved ? `${resolved}${postPart}` : postName;
+  }
 
   try {
     const res = await fetch(`${GBP_API_BASE}/${name}`, {
