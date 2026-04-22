@@ -240,7 +240,7 @@ export default function ReportListClient({
             <span className="text-xs text-slate-500 bg-white/60 px-2.5 py-0.5 rounded-full">レポート管理</span>
           </div>
           <div className="flex items-center gap-2">
-            {source !== "spreadsheet" && <span className="text-xs text-amber-700 bg-amber-100 px-3 py-1 rounded-full font-medium">デモデータ</span>}
+            {source === "mock" && <span className="text-xs text-amber-700 bg-amber-100 px-3 py-1 rounded-full font-medium">デモデータ</span>}
             {lastSync && <span className="text-xs text-slate-400">反映: {new Date(lastSync).toLocaleTimeString("ja-JP")}</span>}
             {selected.size > 0 && (
               <>
