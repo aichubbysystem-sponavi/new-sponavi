@@ -84,13 +84,13 @@ export default function FixedMessagePage() {
     setSaving(true);
     setMsg("");
     try {
-      // 配列形式で送信（旧システムと同じ形式）
-      const data = fields.filter(f => f.title.trim()).map(f => ({
+      // POST + { messages: [...] } 形式（旧システムと同じ形式）
+      const messages = fields.filter(f => f.title.trim()).map(f => ({
         ...(f.id ? { id: f.id } : {}),
         title: f.title.trim(),
         message: f.message,
       }));
-      await api.put(`/api/shop/${selectedShopId}/fixed_message`, data);
+      await api.post(`/api/shop/${selectedShopId}/fixed_message`, { messages });
       setMsg("保存しました");
       await fetchData();
     } catch (e: any) {
