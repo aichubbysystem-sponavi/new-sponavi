@@ -253,7 +253,6 @@ export async function GET(request: NextRequest) {
   let synced = 0;
   let errors = 0;
   let consecutiveAuthErrors = 0;
-  let currentToken = token;
 
   for (let i = 0; i < batch.length; i++) {
     const shop = batch[i];
@@ -308,18 +307,10 @@ export async function GET(request: NextRequest) {
       errors++;
       consecutiveAuthErrors++;
 
-      // 連続3回失敗 → トークン再取得を試みる
-      if (consecutiveAuthErrors >= 3) {
-        console.warn("[cron/sync-reviews] 連続エラー: トークン再取得中...");
-        const newToken = await getValidToken();
-        if (newToken) {
-          currentToken = newToken;
-          consecutiveAuthErrors = 0;
-          console.log("[cron/sync-reviews] トークン再取得成功");
-        } else {
-          console.error("[cron/sync-reviews] トークン再取得失敗、バッチ中断");
-          break;
-        }
+      // 連続5回失敗 → バッチ中断
+      if (consecutiveAuthErrors >= 5) {
+        console.error("[cron/sync-reviews] 連続5回エラー、バッチ中断");
+        break;
       }
     }
   }

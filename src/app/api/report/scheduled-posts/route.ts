@@ -94,6 +94,10 @@ export async function POST(request: NextRequest) {
  * 予約投稿を削除
  */
 export async function DELETE(request: NextRequest) {
+  const { verifyAuth } = await import("@/lib/auth-verify");
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+
   const { id } = await request.json();
   if (!id) return NextResponse.json({ error: "idが必要です" }, { status: 400 });
   const supabase = getSupabase();

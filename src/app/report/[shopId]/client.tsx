@@ -212,7 +212,8 @@ export default function ReportClient({
   };
 
   // ── Page count ──
-  let totalPages = 10; // P1-P6, P8-P11
+  let totalPages = 8; // P1-P6, P11(口コミ分析), P12(担当者コメント)
+  if (hasReviews) totalPages += 2; // P9(口コミ件数推移), P10(月間増加数)
   if (showKeywords) totalPages++;
   if (showRankingHistory) totalPages++;
   if (showSearchQueries) totalPages++;

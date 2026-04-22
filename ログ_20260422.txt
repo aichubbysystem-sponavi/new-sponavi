@@ -1,0 +1,226 @@
+===================================================
+2026-04-18〜04-22 セッション: 口コミ同期安定化+レポート改善+投稿修正
+===================================================
+
+【概要】
+口コミ同期の安定化から始まり、レポートのデータ精度向上、
+投稿機能のマルチアカウント対応、セキュリティ修正まで幅広く対応。
+
+===================================================
+■ 口コミ同期の安定化
+===================================================
+
+【問題1】429無限ループのリスク
+- 原因: GBP APIが429(レート制限)を返し続けた場合、リトライ上限がなかった
+- 修正: リトライ上限3回+バックオフ(10秒→20秒→30秒)を追加
+- 対象: sync-reviews(Cron), report/sync-reviews(手動)
+
+【問題2】CRON_SECRET未設定時に無認証で実行可能
+- 原因: if (cronSecret && ...) で未設定時は条件スキップ
+- 修正: if (!cronSecret || ...) に変更。全6つのCronエンドポイント修正
+- 対象: sync-reviews, auto-reply, execute-posts, sync-shops, health-check, monthly-analysis
+
+【問題3】手動「全店舗同期」が動かない
+- 原因: /api/report/sync-reviewsのトークン取得コード(getAllTokensFromDB)が
+  Cron版と微妙に異なり、3段階全てでDBからトークンを読めなかった
+- 修正: Cronで成功しているコードと同じ方式に統一+詳細デバッグログ追加
+- 結果: 手動同期が正常動作(POST 200)
+
+【問題4】特定店舗で口コミが取得できない(0件)
+- 原因: 3つのGoogleアカウント(chubby.yamada/chubby1204.meo/meo@japanselect)が
+  接続されているが、コードは1つのトークンしか使わなかった。
+  別アカウント配下の店舗は口コミにアクセスできず0件になっていた
+- 修正: getAllValidTokens()で全アカウントのトークンをリフレッシュし、
+  口コミ取得時に全トークンを順番に試す方式に変更(Cron/手動同期の両方)
+
+【問題5】auto-replyのアカウントIDがハードコード
+- 原因: accounts/111148362910776147900/ が決め打ちで、別アカウントの店舗は全て返信失敗
+- 修正: Go APIからロケーションマップを動的取得する方式に変更。
+  トークン取得も3段階フォールバックに統一、処理上限5件→20件に引き上げ
+
+【問題6】口コミなし店舗の検出が不正確
+- 原因: Supabaseのselect("shop_id")がデフォルト最大1000行しか返さない
+- 修正: 20店舗ずつ並列でcountチェックする方式に変更
+- 追加: 0件の理由(GBP未紐付け/ロケーションID無効(404)/口コミ0件)を区別表示
+
+【追加機能】口コミなし店舗パネル
+- 「口コミなし店舗」ボタン追加(オレンジ色)
+- チェックボックスで複数選択+Shift+クリックで範囲選択
+- 選択した店舗だけ同期 or 全店舗まとめて同期
+- 同期後に各店舗の失敗理由をステータスバッジで表示
+
+===================================================
+■ レポートのデータ精度修正
+===================================================
+
+【問題7】口コミ件数がスプレッドシートと不一致(926 vs 920)
+- 調査経緯:
+  1. fetchキャッシュ(revalidate:1800) → no-storeに変更 → 効果なし
+  2. インメモリキャッシュ(cachedPerfData) → 削除 → 効果なし
+  3. parseCSV関数のバグ? → 比較テストで同一結果
+  4. Sheet2の重複行? → 1行のみ
+  5. 最終的に発見: review-analyzerのDB(report_analysis)に保存された古いreview_count(926)が
+     スプレッドシートの最新値(920)を上書きしていた
+- 修正: DBの口コミ数でスプレッドシートを上書きするコードを削除。
+  スプレッドシートの値を常に優先
+
+【問題8】口コミ増減の表示矛盾
+- 原因: +1件なのに919→926件と表示(増減数と差分が不一致)
+- 修正: 前月数をtotalReviews - kpi.valueで算出し常に一致するように
+- 追加: マイナス値(+-3件→-3件)、背景色の判定も修正
+
+【問題9】パフォーマンスデータの数値不一致
+- 調査: ユーザーがスプレッドシートの行9754(2026年1月)と比較していたが、
+  レポートは行11275(2026年3月)を使用していた → 実は正しかった
+- 確認: Sheet3の列マッピングは正しい(col5=検索モバイル等)
+
+===================================================
+■ レポート新機能追加
+===================================================
+
+【課題1】順位計測がレポートに表示されない
+- 原因1: fetchRankingKeywordsがHTTPで自分自身のAPIを呼ぶ(自己fetch)方式で、
+  Vercelサーバーレス環境でタイムアウト/デッドロック発生
+- 修正: ranking-fetch.tsモジュールを新設し、スプレッドシートを直接読み取る方式に変更
+- 原因2: baseURL演算子優先順位バグ
+  (A || B ? C : D) → (A || B)がtruthyで常にVERCEL_URLが使われていた
+- 修正: 括弧追加 A || (B ? C : D)
+
+- 結果: P7にキーワード順位カード、P8に順位推移テーブル(全月データ)を表示
+- 対応シート:
+  Sheet1: 1JpehMxL2I-fgef1sckNaY8RIUDIknvmT2OqhHj0my1k (タブ名=店舗名)
+  Sheet2: 10hvP7iSEyst0Bp_96eVsjicM4_qxVfG0BmMkDgFyg-Q (エミナル専用、gid方式)
+- エミナル系: レディース/メンズの同名タブ判別(A1セル検証)
+
+【課題2】前年データが取れていない
+- 修正: perfRows.slice(-12)→slice(-13)に変更(13ヶ月分で前年同月比較可能)
+
+【課題3】グラフの下に数値テーブル
+- P4(Google検索): モバイル/PC/合計の月別数値テーブル追加
+- P5(Googleマップ): モバイル/PC/合計の月別数値テーブル追加
+- P6(ユーザー反応): Web/ルート/通話/メニュー/予約/合計の月別数値テーブル追加
+
+【課題4】総評にメモ機能
+- P11担当者コメントにメモ欄追加
+- 初期実装: localStorage保存 → Supabase永続化に変更
+- /api/report/memo APIエンドポイント新設(GET/POST)
+- テーブル: report_memos (shop_name, month, memo) ← Supabaseで作成済み
+
+【検索語句ランキング】
+- search-query-fetch.ts新設
+- RPAスプレッドシート(1tTpqYjGju0txvr6p5E--)から月別検索語句データ取得
+- 月別タブ(YYYYMM)からヘッダーの店舗名で列を特定(部分一致対応)
+- レポートに検索語句TOP30テーブルページ追加(前月比較付き)
+
+【表示ON/OFF機能】
+- 「表示設定」ボタンをPDFボタン横に追加
+- キーワード順位/順位推移テーブル/検索語句の3セクションをON/OFF切替
+- 店舗ごとにlocalStorageで設定保存
+- OFFにしたセクションはPDF出力からも除外
+
+===================================================
+■ パフォーマンス最適化
+===================================================
+
+- 順位+順位履歴+検索語句の取得を全てPromise.allで並列化
+- 検索語句: 14タブの順次取得→全タブ並列取得に変更
+- 体感速度: 20秒以上→3-5秒に短縮
+
+===================================================
+■ セキュリティ・品質修正
+===================================================
+
+【ハードコードGBPアカウントID完全除去】
+- gbp-location.ts共通モジュール新設(Go APIロケーションマップで動的解決)
+- 修正ファイル(7つ):
+  - cron/execute-posts: マルチアカウント+ステータス修正
+  - report/create-post
+  - report/delete-post
+  - report/reply-review
+  - report/scheduled-posts
+  - report/sync-media
+  - report/auto-post
+
+【投稿ステータス統一】
+- execute-postsの"posted"→"published"に統一(scheduled-postsと一致)
+
+【execute-posts マルチアカウント対応】
+- getOAuthToken→getAllValidTokens に変更
+- 全トークンを順番に試して投稿
+
+【client_secret*.json】
+- .gitignoreに追加済み、Git追跡外を確認
+
+【口コミ分析タイムアウト修正】
+- maxDuration: 60→300秒(Vercel Pro対応)
+- UI側axios timeout: 60→120秒
+
+===================================================
+■ Supabaseテーブル作成(実行済み)
+===================================================
+
+-- sync_progress(口コミ同期進捗)
+CREATE TABLE IF NOT EXISTS public.sync_progress (
+    job_name TEXT PRIMARY KEY,
+    offset_value INTEGER DEFAULT 0,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- report_memos(レポートメモ)
+CREATE TABLE IF NOT EXISTS public.report_memos (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  shop_name TEXT NOT NULL,
+  month TEXT NOT NULL,
+  memo TEXT DEFAULT '',
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(shop_name, month)
+);
+
+===================================================
+■ 現在の構成
+===================================================
+
+【Cronジョブ(全てCRON_SECRET必須)】
+- sync-reviews: 毎時、50店舗バッチ、マルチアカウント対応
+- execute-posts: 毎時、予約投稿実行、マルチアカウント対応
+- auto-reply: 毎日0時UTC、AI自動返信、マルチアカウント対応
+- monthly-analysis: 毎月1日1時UTC
+- sync-shops: 毎日20時UTC、新店舗自動検出
+- health-check: ヘルスチェック
+
+【GBPアカウント(3つ接続済み)】
+- chubby.yamada@gmail.com
+- chubby1204.meo@gmail.com
+- meo@japanselect.co.jp
+
+【レポートページ構成(最大13ページ)】
+P1: ヘッダー+KPIカード(8指標)
+P2: 前月比・前年比
+P3: 月次推移データテーブル
+P4: Google検索数推移(グラフ+数値テーブル)
+P5: Googleマップ表示数推移(グラフ+数値テーブル)
+P6: ユーザー反応数推移(グラフ+数値テーブル)
+P7: キーワード順位変動(カード) ※ON/OFF可
+P8: キーワード順位推移(テーブル) ※ON/OFF可
+P9: 検索語句ランキングTOP30 ※ON/OFF可
+P10: 口コミ件数推移
+P11: 月間口コミ増加数
+P12: 口コミ分析(ポジ/ネガワード+総評)
+P13: 担当者コメント+メモ欄
+
+【データソース】
+- パフォーマンス: Sheet3 (1ZyBiy_TYO_xqdyEItXmjS4k4ORagLjN3C5KWetSe1vY)
+- 口コミ: Sheet2 (1czdHEs0cc2ci01uTlTgezVsuOGCHOBH6oyEGJAY-Ofk)
+- 順位計測: Sheet1 (1JpehMxL2I-fgef1sckNaY8RIUDIknvmT2OqhHj0my1k)
+             Sheet2 (10hvP7iSEyst0Bp_96eVsjicM4_qxVfG0BmMkDgFyg-Q)
+- 検索語句: RPA Sheet (1tTpqYjGju0txvr6p5E--NSEzbNmysSIodCxcSGQyeW0)
+- 口コミ分析: Supabase report_analysis + Claude AI
+- メモ: Supabase report_memos
+
+===================================================
+■ 残課題
+===================================================
+
+- 口コミ0件(API応答なし)の14店舗: GBP API v4の制限 or 未接続アカウントの可能性
+- 投稿機能の完成: 失敗投稿のリトライ、予約投稿の編集機能
+- TypeScript any型の整理(機能に影響なし)

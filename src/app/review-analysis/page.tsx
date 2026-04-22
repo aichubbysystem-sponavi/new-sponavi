@@ -65,7 +65,7 @@ export default function ReviewAnalysisPage() {
 
     setRunning(false);
     setProgress(null);
-  }, [selected, shops]);
+  }, [selected, shops, forceReanalyze]);
 
   const successCount = results.filter((r) => r.status === "success").length;
 
