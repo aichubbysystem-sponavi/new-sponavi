@@ -19,20 +19,15 @@ export default function FixedMessagePage() {
   const [msg, setMsg] = useState("");
 
   const fetchData = useCallback(async () => {
-    console.log("[fixed_message] fetchData called, shopId:", selectedShopId);
     if (!selectedShopId) return;
     setLoading(true);
     setError("");
     setMsg("");
     try {
-      // 単体店舗API（GET /api/shop/:id）はfixed_messagesをPreloadして返す
-      const url = `/api/shop/${selectedShopId}`;
-      console.log("[fixed_message] fetching:", url);
-      const res = await api.get(url);
-      const shop = res.data;
-      console.log("[fixed_message] shop response keys:", Object.keys(shop || {}));
-      console.log("[fixed_message] fixed_messages:", JSON.stringify(shop?.fixed_messages)?.slice(0, 500));
-      const msgs = shop?.fixed_messages;
+      // 内部API: Supabaseから同名店舗のfixed_messagesも含めて検索
+      const res = await fetch(`/api/internal/fixed-messages/${selectedShopId}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const msgs = await res.json();
       if (Array.isArray(msgs) && msgs.length > 0) {
         setFields(msgs.map((m: any) => ({
           id: m.id || undefined,
@@ -43,12 +38,7 @@ export default function FixedMessagePage() {
         setFields([]);
       }
     } catch (e: any) {
-      console.error("[fixed_message] error:", e?.response?.status, e?.message);
-      if (e?.response?.status === 404) {
-        setFields([]);
-      } else {
-        setError(e?.userMessage || "差し込み文字列の取得に失敗しました");
-      }
+      setError("差し込み文字列の取得に失敗しました");
     } finally {
       setLoading(false);
     }
