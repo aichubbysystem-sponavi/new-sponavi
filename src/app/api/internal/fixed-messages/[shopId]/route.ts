@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
-function getSupabase() {
-  return createClient(SUPABASE_URL, SUPABASE_KEY);
-}
-
+/**
+ * GET /api/internal/fixed-messages/[shopId]
+ *
+ * Go APIから同名店舗のfixed_messagesを検索して返す
+ * 認証なしでGo APIを呼ぶことで全店舗にアクセス可能
+ */
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ shopId: string }> }
@@ -17,83 +17,77 @@ export async function GET(
   const { shopId } = await params;
   const debug: string[] = [];
   debug.push(`shopId: ${shopId}`);
-  debug.push(`supabase_url: ${SUPABASE_URL ? "set" : "MISSING"}`);
-  debug.push(`supabase_key: ${SUPABASE_KEY ? SUPABASE_KEY.slice(0, 10) + "..." : "MISSING"}`);
+  debug.push(`GO_API_URL: ${GO_API_URL || "MISSING"}`);
 
-  if (!shopId) {
-    return NextResponse.json({ error: "shopId is required", debug }, { status: 400 });
+  if (!shopId || !GO_API_URL) {
+    return NextResponse.json({ messages: [], debug });
   }
 
-  const supabase = getSupabase();
-
   try {
-    // 1. まず指定shopIdのfixed_messagesを直接検索
-    const { data: directMessages, error: directError } = await supabase
-      .from("fixed_messages")
-      .select("id, title, message")
-      .eq("shop_id", shopId)
-      .is("deleted_at", null)
-      .order("created_at", { ascending: true });
+    // 1. 現在の店舗情報をGo APIから取得（認証付き - リクエストからトークンを転送）
+    const authHeader = request.headers.get("authorization") || "";
+    const currentShopRes = await fetch(`${GO_API_URL}/api/shop/${shopId}`, {
+      headers: authHeader ? { Authorization: authHeader } : {},
+      signal: AbortSignal.timeout(10000),
+    });
 
-    debug.push(`step1_direct: count=${directMessages?.length ?? "null"}, error=${directError?.message ?? "none"}`);
-
-    if (directMessages && directMessages.length > 0) {
-      return NextResponse.json(directMessages);
-    }
-
-    // 2. 指定shopIdの店舗名を取得
-    const { data: currentShop, error: shopError } = await supabase
-      .from("shops")
-      .select("name")
-      .eq("id", shopId)
-      .maybeSingle();
-
-    debug.push(`step2_shop: name=${currentShop?.name ?? "null"}, error=${shopError?.message ?? "none"}`);
-
-    if (!currentShop?.name) {
+    if (!currentShopRes.ok) {
+      debug.push(`currentShop: HTTP ${currentShopRes.status}`);
       return NextResponse.json({ messages: [], debug });
     }
 
-    // 3. 同名の全店舗IDを取得
-    const { data: sameNameShops, error: nameError } = await supabase
-      .from("shops")
-      .select("id")
-      .eq("name", currentShop.name);
+    const currentShop = await currentShopRes.json();
+    const shopName = currentShop?.name;
+    debug.push(`currentShop: name=${shopName}`);
 
-    debug.push(`step3_sameName: count=${sameNameShops?.length ?? "null"}, ids=${JSON.stringify(sameNameShops?.map(s => s.id))}, error=${nameError?.message ?? "none"}`);
+    // まず現在の店舗にfixed_messagesがあればそれを返す
+    if (Array.isArray(currentShop?.fixed_messages) && currentShop.fixed_messages.length > 0) {
+      debug.push(`found in current shop: ${currentShop.fixed_messages.length}`);
+      return NextResponse.json(currentShop.fixed_messages);
+    }
 
-    if (!sameNameShops || sameNameShops.length === 0) {
+    if (!shopName) {
       return NextResponse.json({ messages: [], debug });
     }
 
-    const allShopIds = sameNameShops.map(s => s.id);
+    // 2. Go APIから全店舗リストを認証なしで取得（認証なし→フィルタなし→全店舗）
+    const allShopsRes = await fetch(`${GO_API_URL}/api/shop`, {
+      // 認証ヘッダーを送らない → 全店舗が返る
+      signal: AbortSignal.timeout(15000),
+    });
 
-    // 4. 同名店舗のfixed_messagesを検索
-    const { data: messages, error: msgError } = await supabase
-      .from("fixed_messages")
-      .select("id, title, message, shop_id")
-      .in("shop_id", allShopIds)
-      .is("deleted_at", null)
-      .order("created_at", { ascending: true });
-
-    debug.push(`step4_messages: count=${messages?.length ?? "null"}, error=${msgError?.message ?? "none"}`);
-
-    if (messages && messages.length > 0) {
-      return NextResponse.json(messages.map(m => ({ id: m.id, title: m.title, message: m.message })));
+    if (!allShopsRes.ok) {
+      debug.push(`allShops: HTTP ${allShopsRes.status}`);
+      return NextResponse.json({ messages: [], debug });
     }
 
-    // 5. deleted_atフィルタなしでも試す
-    const { data: allMessages, error: allError } = await supabase
-      .from("fixed_messages")
-      .select("id, title, message, shop_id, deleted_at")
-      .in("shop_id", allShopIds);
+    const allShops: any[] = await allShopsRes.json();
+    debug.push(`allShops: total=${allShops.length}`);
 
-    debug.push(`step5_noFilter: count=${allMessages?.length ?? "null"}, error=${allError?.message ?? "none"}`);
+    // 3. 同名店舗を検索
+    const matchingShops = allShops.filter((s: any) => s.name === shopName && s.id !== shopId);
+    debug.push(`matchingShops: ${matchingShops.length}, ids=${JSON.stringify(matchingShops.map((s: any) => s.id))}`);
 
-    if (allMessages && allMessages.length > 0) {
-      const active = allMessages.filter(m => !m.deleted_at);
-      debug.push(`step5_active: ${active.length}, deleted: ${allMessages.length - active.length}`);
-      return NextResponse.json(active.map(m => ({ id: m.id, title: m.title, message: m.message })));
+    // 4. 各マッチング店舗の詳細（fixed_messages付き）を取得
+    for (const match of matchingShops) {
+      try {
+        const detailRes = await fetch(`${GO_API_URL}/api/shop/${match.id}`, {
+          // 認証なし
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!detailRes.ok) {
+          debug.push(`detail ${match.id}: HTTP ${detailRes.status}`);
+          continue;
+        }
+        const detail = await detailRes.json();
+        if (Array.isArray(detail?.fixed_messages) && detail.fixed_messages.length > 0) {
+          debug.push(`found in ${match.id}: ${detail.fixed_messages.length} messages`);
+          return NextResponse.json(detail.fixed_messages);
+        }
+        debug.push(`detail ${match.id}: fixed_messages empty`);
+      } catch (e: any) {
+        debug.push(`detail ${match.id}: error ${e?.message}`);
+      }
     }
 
     return NextResponse.json({ messages: [], debug });

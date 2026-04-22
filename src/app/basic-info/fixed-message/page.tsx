@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useShop } from "@/components/shop-provider";
 import api from "@/lib/api";
+import { supabase } from "@/lib/supabase";
 
 interface FieldEntry {
   id?: string;
@@ -24,8 +25,12 @@ export default function FixedMessagePage() {
     setError("");
     setMsg("");
     try {
-      // 内部API: Supabaseから同名店舗のfixed_messagesも含めて検索
-      const res = await fetch(`/api/internal/fixed-messages/${selectedShopId}`);
+      // 内部API: Go APIから同名店舗のfixed_messagesも含めて検索
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token || "";
+      const res = await fetch(`/api/internal/fixed-messages/${selectedShopId}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       const json = await res.json();
       console.log("[fixed_message] internal API response:", JSON.stringify(json)?.slice(0, 1000));
       // デバッグ情報付きレスポンスの場合
