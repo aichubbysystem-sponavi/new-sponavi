@@ -73,6 +73,28 @@ function parseCSVRow(line: string): string[] {
   return cells;
 }
 
+/** 店舗名の正規化（スペース・記号の揺れを吸収） */
+function normalizeName(name: string): string {
+  return name
+    .replace(/\s+/g, " ")           // 全角/半角スペース統一
+    .replace(/．/g, ".").replace(/―/g, "-").replace(/（/g, "(").replace(/）/g, ")")
+    .trim().toLowerCase();
+}
+
+/** ヘッダーから店舗名を抽出して正規化比較 */
+function matchShopInHeader(header: string, shopName: string): boolean {
+  const headerShop = header.replace(/^(キーワード|検索数)\s*/, "").trim();
+  if (!headerShop) return false;
+  const a = normalizeName(headerShop);
+  const b = normalizeName(shopName);
+  if (a === b) return true;
+  // 長い方が短い方を含む（短すぎる場合は除外）
+  if (a.length >= 3 && b.length >= 3) {
+    return a.includes(b) || b.includes(a);
+  }
+  return false;
+}
+
 async function fetchOneTab(tabName: string, gid: string, shopName: string): Promise<SearchQueryMonth | null> {
   try {
     const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${gid}`;
@@ -85,12 +107,20 @@ async function fetchOneTab(tabName: string, gid: string, shopName: string): Prom
 
     const headerRow = parseCSVRow(lines[0]);
 
+    // キーワード列を探し、隣の検索数列とペアで確定
     let kwColIdx = -1;
     let countColIdx = -1;
     for (let c = 0; c < headerRow.length; c++) {
       const h = (headerRow[c] || "").trim();
-      if (h.startsWith("キーワード") && (h.includes(shopName) || shopNameMatch(h, shopName))) kwColIdx = c;
-      if (h.startsWith("検索数") && (h.includes(shopName) || shopNameMatch(h, shopName))) countColIdx = c;
+      if (h.startsWith("キーワード") && matchShopInHeader(h, shopName)) {
+        // 隣の列が対応する検索数列か確認
+        const nextH = (headerRow[c + 1] || "").trim();
+        if (nextH.startsWith("検索数")) {
+          kwColIdx = c;
+          countColIdx = c + 1;
+          break; // 最初にマッチしたペアを使用
+        }
+      }
     }
     if (kwColIdx === -1 || countColIdx === -1) return null;
 
@@ -115,12 +145,17 @@ export async function fetchSearchQueries(shopName: string): Promise<SearchQueryD
 
   const sortedTabs = Array.from(tabs.entries()).sort((a, b) => a[0].localeCompare(b[0]));
 
-  // 全タブを並列で取得（大幅高速化）
-  const results = await Promise.all(
-    sortedTabs.map(([tabName, gid]) => fetchOneTab(tabName, gid, shopName))
-  );
+  // 5タブずつバッチ並列（Google APIレート制限回避）
+  const months: SearchQueryMonth[] = [];
+  for (let i = 0; i < sortedTabs.length; i += 5) {
+    const batch = sortedTabs.slice(i, i + 5);
+    const results = await Promise.all(
+      batch.map(([tabName, gid]) => fetchOneTab(tabName, gid, shopName))
+    );
+    for (const r of results) { if (r) months.push(r); }
+  }
 
-  const months = results.filter((m): m is SearchQueryMonth => m !== null);
+  months.sort((a, b) => a.month.localeCompare(b.month));
   const latestMonth = months.length > 0 ? months[months.length - 1] : null;
 
   return {
@@ -128,12 +163,4 @@ export async function fetchSearchQueries(shopName: string): Promise<SearchQueryD
     latestKeywords: latestMonth ? latestMonth.keywords.slice(0, 30) : [],
     latestMonth: latestMonth?.month || "",
   };
-}
-
-function shopNameMatch(header: string, shopName: string): boolean {
-  // "キーワード 有馬焼肉 丞 -TASUKU-" のようなヘッダーから店舗名を抽出
-  const headerShop = header.replace(/^(キーワード|検索数)\s*/, "").trim();
-  if (!headerShop) return false;
-  // 完全一致 or 部分一致
-  return shopName.includes(headerShop) || headerShop.includes(shopName);
 }

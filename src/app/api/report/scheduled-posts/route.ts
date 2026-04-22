@@ -106,6 +106,34 @@ export async function DELETE(request: NextRequest) {
 }
 
 /**
+ * PATCH /api/report/scheduled-posts
+ * 予約投稿を更新（編集・リトライ）
+ */
+export async function PATCH(request: NextRequest) {
+  const { verifyAuth } = await import("@/lib/auth-verify");
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+
+  const body = await request.json();
+  const { id, summary, scheduledAt, status } = body;
+  if (!id) return NextResponse.json({ error: "idが必要です" }, { status: 400 });
+
+  const supabase = getSupabase();
+  const update: Record<string, any> = {};
+  if (summary !== undefined) update.summary = summary;
+  if (scheduledAt !== undefined) update.scheduled_at = scheduledAt;
+  if (status !== undefined) update.status = status;
+  if (status === "pending") {
+    update.error_detail = null;
+    update.approval_status = "pending";
+  }
+
+  const { error } = await supabase.from("scheduled_posts").update(update).eq("id", id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ success: true });
+}
+
+/**
  * PUT /api/report/scheduled-posts
  * 予約投稿を実行（cronから呼ばれる or 手動実行）
  */

@@ -356,7 +356,7 @@ export async function POST(request: NextRequest) {
 
         if (reviews.length === 0) {
           if (apiError === 404) {
-            console.log(`[sync-reviews] 404 for "${shop.name}" → location may be wrong: ${fullPath}`);
+            console.log(`[sync-reviews] 404 for "${shop.name}" (path: ${fullPath}, tried ${allTokens.length} tokens)`);
             results.push({ shopName: shop.name, count: 0, status: "api_404" });
           } else if (apiError) {
             results.push({ shopName: shop.name, count: 0, status: `api_error_${apiError}` });
