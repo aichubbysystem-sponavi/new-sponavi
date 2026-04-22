@@ -1,15 +1,28 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { fuzzyMatch } from "@/lib/normalize";
 import api from "@/lib/api";
 import type { Shop, Owner } from "@/lib/api-types";
+
+// モーダルをbody直下にレンダリング（fixedが確実に効く）
+function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[9999]" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()}>{children}</div>
+    </div>,
+    document.body
+  );
+}
 
 interface MasterRow {
   shopId: string; shopName: string; ownerName: string; agentName: string;
   city: string; state: string; phone: string; gbpConnected: boolean;
   service: "meo" | "pmax" | "both" | "none";
   reviewCount: number;
+  status: "active" | "paused" | "churned";
 }
 
 type FilterService = "all" | "meo" | "pmax" | "both" | "none";
@@ -31,6 +44,19 @@ export default function CustomerMasterPage() {
   const [ownerForm, setOwnerForm] = useState({ name: "", postal_code: "", state: "", city: "", address: "", building: "", phone: "" });
   const [submitting, setSubmitting] = useState(false);
   const [customerData, setCustomerData] = useState<Map<string, { name: string; service: "meo" | "pmax" | "both" | "none" }>>(new Map());
+
+  // ── 店舗編集モーダル ──
+  const [editShop, setEditShop] = useState<MasterRow | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // ── GBPインポート ──
+  const [showImport, setShowImport] = useState(false);
+  const [gbpLocations, setGbpLocations] = useState<{ name: string; title: string }[]>([]);
+  const [importSelected, setImportSelected] = useState<Set<string>>(new Set());
+  const [importLoading, setImportLoading] = useState(false);
+  const [importMsg, setImportMsg] = useState("");
+  const [ownerId, setOwnerId] = useState("");
+  const [gbpAccountName, setGbpAccountName] = useState("");
 
   const fetchData = useCallback(async () => {
     try {
@@ -77,6 +103,7 @@ export default function CustomerMasterPage() {
           gbpConnected: !!s.gbp_location_name,
           service,
           reviewCount: 0,
+          status: "active" as const,
         };
       }));
     } catch { setError("API接続エラー"); } finally { setLoading(false); }
@@ -105,9 +132,89 @@ export default function CustomerMasterPage() {
   };
 
   const handleDelete = async (shopId: string, shopName: string) => {
-    if (!confirm(`「${shopName}」を削除しますか？`)) return;
+    if (!confirm(`「${shopName}」を削除しますか？\n\nこの操作は取り消せません。関連するデータも全て削除されます。`)) return;
     try { await api.delete(`/api/shop/${shopId}`); setSuccess(`「${shopName}」を削除しました`); setTimeout(() => setSuccess(""), 3000); await fetchData(); }
     catch { setError("削除に失敗しました"); }
+  };
+
+  // ── ロケーション解除 ──
+  const handleUnlinkGbp = async (shopId: string, shopName: string) => {
+    if (!confirm(`「${shopName}」のビジネスロケーション連携を解除しますか？\n\n※ GBP側の情報は削除されません。\n※ システム上の紐付け（gbp_location_name）のみクリアされます。`)) return;
+    try {
+      await api.put(`/api/shop/${shopId}`, { gbp_location_name: "" });
+      setSuccess(`「${shopName}」のGBP連携を解除しました`);
+      setTimeout(() => setSuccess(""), 3000);
+      await fetchData();
+    } catch (e: any) {
+      setError(`ロケーション解除失敗: ${e?.response?.data?.message || e?.message || "エラー"}`);
+    }
+  };
+
+  // ── 店舗編集保存 ──
+  const handleEditSave = async () => {
+    if (!editShop) return;
+    setSaving(true); setError("");
+    try {
+      await api.put(`/api/shop/${editShop.shopId}`, { name: editShop.shopName, phone: editShop.phone });
+      setSuccess("店舗情報を更新しました");
+      setTimeout(() => setSuccess(""), 3000);
+      await fetchData();
+      setEditShop(null);
+    } catch { setError("更新に失敗しました"); }
+    finally { setSaving(false); }
+  };
+
+  // ── GBPインポート ──
+  const openImport = async () => {
+    setShowImport(true);
+    setImportMsg("");
+    setImportSelected(new Set());
+    setGbpLocations([]);
+    setImportLoading(true);
+    try {
+      const ownerRes = await api.get("/api/owner");
+      const ownerList = Array.isArray(ownerRes.data) ? ownerRes.data : [];
+      if (ownerList.length === 0) { setImportMsg("オーナーを先に登録してください"); setImportLoading(false); return; }
+      const oId = ownerList[0].id;
+      setOwnerId(oId);
+      const ownerDetail = await api.get(`/api/owner/${oId}`);
+      const bgGroups = ownerDetail.data?.business_groups || ownerDetail.data?.BusinessGroups || [];
+      const accName = bgGroups[0]?.gbp_account_name || bgGroups[0]?.GbpAccountName || "";
+      setGbpAccountName(accName);
+      const locRes = await api.get(`/api/owner/${oId}/location?is_associated=0`);
+      const locs = Array.isArray(locRes.data) ? locRes.data : [];
+      setGbpLocations(locs);
+      if (locs.length === 0) setImportMsg("全てのGBPロケーションが紐付け済みです");
+    } catch { setImportMsg("GBPロケーションの取得に失敗しました。GBPアカウントが紐付けられているか確認してください。"); }
+    finally { setImportLoading(false); }
+  };
+
+  const handleImport = async () => {
+    if (importSelected.size === 0 || !ownerId) return;
+    setImportLoading(true); setImportMsg("");
+    try {
+      const allNames = Array.from(importSelected).map(name => {
+        if (name.startsWith("accounts/")) return name;
+        if (gbpAccountName && name.startsWith("locations/")) return `${gbpAccountName}/${name}`;
+        return name;
+      });
+      const batchSize = 20;
+      let imported = 0;
+      for (let i = 0; i < allNames.length; i += batchSize) {
+        const batch = allNames.slice(i, i + batchSize);
+        setImportMsg(`インポート中... ${imported}/${allNames.length}店舗完了`);
+        await api.post(`/api/owner/${ownerId}/location/associate`, { location_names: batch }, { timeout: 60000 });
+        imported += batch.length;
+      }
+      setImportMsg(`${imported}店舗をインポートしました！`);
+      setImportSelected(new Set());
+      await fetchData();
+      setTimeout(() => setShowImport(false), 2000);
+    } catch (e: any) {
+      const detail = e?.response?.data ? JSON.stringify(e.response.data) : e?.message || "";
+      setImportMsg(`インポートに失敗しました: ${detail}`);
+    }
+    finally { setImportLoading(false); }
   };
 
   const filtered = useMemo(() => {
@@ -180,9 +287,10 @@ export default function CustomerMasterPage() {
       <div className="flex items-center gap-3">
         <div className="flex-1 relative">
           <input className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#003D6B]/30"
-            placeholder="店舗名・ID・オーナー・エリアで検索" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+            placeholder="店舗名・ID・オーナー・エリアで検索（全角/半角OK）" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
           {searchQuery && <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-lg">×</button>}
         </div>
+        <button onClick={openImport} className="bg-emerald-600 text-xs px-4 py-2 rounded-lg hover:bg-emerald-700 text-white whitespace-nowrap">GBPインポート</button>
         <button onClick={() => setShowOwnerModal(true)} className="bg-emerald-600 text-xs px-4 py-2 rounded-lg hover:bg-emerald-700 text-white whitespace-nowrap">+ オーナー</button>
         <button onClick={() => { setShowModal(true); if (owners.length > 0 && !formData.owner_id) setFormData({...formData, owner_id: owners[0].id}); }}
           className="bg-[#003D6B] text-xs px-4 py-2 rounded-lg hover:bg-[#002a4a] text-white whitespace-nowrap">+ 店舗登録</button>
@@ -199,10 +307,10 @@ export default function CustomerMasterPage() {
     {success && <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-4 text-sm text-green-700">{success}</div>}
     {error && <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm text-red-700">{error}</div>}
 
-    {/* ── モーダル ── */}
+    {/* ── 新規店舗登録モーダル ── */}
     {showModal && (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowModal(false)}>
-        <div className="bg-white rounded-xl p-6 w-[500px] shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      <Modal onClose={() => setShowModal(false)}>
+        <div className="bg-white rounded-xl p-6 w-[500px] shadow-2xl">
           <h3 className="text-lg font-bold mb-4">新規店舗登録</h3>
           <div className="space-y-3">
             <div><label className="text-xs text-slate-500 block mb-1">オーナー *</label>
@@ -226,11 +334,13 @@ export default function CustomerMasterPage() {
             <button onClick={handleCreate} disabled={submitting} className="text-sm px-4 py-2 rounded-lg bg-[#003D6B] hover:bg-[#002a4a] disabled:opacity-50 text-white">{submitting ? "登録中..." : "登録する"}</button>
           </div>
         </div>
-      </div>
+      </Modal>
     )}
+
+    {/* ── オーナー登録モーダル ── */}
     {showOwnerModal && (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowOwnerModal(false)}>
-        <div className="bg-white rounded-xl p-6 w-[440px] shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      <Modal onClose={() => setShowOwnerModal(false)}>
+        <div className="bg-white rounded-xl p-6 w-[440px] shadow-2xl">
           <h3 className="text-lg font-bold mb-4">新規オーナー登録</h3>
           <div className="space-y-3">
             <div><label className="text-xs text-slate-500 block mb-1">オーナー名 *</label><input className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" value={ownerForm.name} onChange={(e) => setOwnerForm({...ownerForm, name: e.target.value})} /></div>
@@ -249,7 +359,104 @@ export default function CustomerMasterPage() {
             <button onClick={handleCreateOwner} disabled={submitting} className="text-sm px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white">{submitting ? "登録中..." : "登録する"}</button>
           </div>
         </div>
-      </div>
+      </Modal>
+    )}
+
+    {/* ── 店舗編集モーダル ── */}
+    {editShop && (
+      <Modal onClose={() => setEditShop(null)}>
+        <div className="bg-white rounded-xl p-6 w-[500px] max-h-[80vh] overflow-y-auto shadow-2xl">
+          <h3 className="text-lg font-bold mb-4">店舗情報を編集</h3>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-slate-600 block mb-1">店舗名</label>
+              <input className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" value={editShop.shopName} onChange={(e) => setEditShop({ ...editShop, shopName: e.target.value })} />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 block mb-1">電話番号</label>
+              <input className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" value={editShop.phone} onChange={(e) => setEditShop({ ...editShop, phone: e.target.value })} />
+            </div>
+          </div>
+          <div className="flex gap-2 mt-6">
+            <button
+              disabled={saving}
+              onClick={handleEditSave}
+              className="flex-1 bg-[#003D6B] text-white py-2 rounded-lg text-sm font-medium hover:bg-[#002a4a] transition disabled:opacity-50"
+            >
+              {saving ? "保存中..." : "保存"}
+            </button>
+            <button onClick={() => setEditShop(null)} className="px-4 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50 transition">キャンセル</button>
+          </div>
+        </div>
+      </Modal>
+    )}
+
+    {/* ── GBPインポートモーダル ── */}
+    {showImport && (
+      <Modal onClose={() => setShowImport(false)}>
+        <div className="bg-white rounded-xl p-6 w-[600px] max-h-[80vh] overflow-y-auto shadow-2xl">
+          <h3 className="text-lg font-bold mb-2">GBPから店舗をインポート</h3>
+          <p className="text-xs text-slate-500 mb-4">GBPに登録されている店舗を選択してインポートします。店舗名・住所・電話番号がGBPから自動取得されます。</p>
+
+          {importMsg && (
+            <div className={`p-3 rounded-lg mb-4 text-sm ${importMsg.includes("失敗") || importMsg.includes("先に") ? "bg-red-50 text-red-700 border border-red-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}>
+              {importMsg}
+            </div>
+          )}
+
+          {importLoading ? (
+            <div className="py-12 text-center text-slate-500 text-sm">GBPロケーションを読み込み中...</div>
+          ) : gbpLocations.length > 0 ? (
+            <>
+              <div className="flex items-center justify-between mb-3">
+                <button
+                  onClick={() => {
+                    if (importSelected.size === gbpLocations.length) setImportSelected(new Set());
+                    else setImportSelected(new Set(gbpLocations.map(l => l.name)));
+                  }}
+                  className="text-xs text-[#003D6B] hover:underline font-medium"
+                >
+                  {importSelected.size === gbpLocations.length ? "全解除" : `全選択 (${gbpLocations.length}件)`}
+                </button>
+                <span className="text-xs text-slate-400">{importSelected.size}件選択中</span>
+              </div>
+              <div className="border border-slate-200 rounded-lg overflow-hidden mb-4 max-h-[400px] overflow-y-auto">
+                {gbpLocations.map((loc) => (
+                  <label key={loc.name} className={`flex items-center gap-3 px-4 py-3 border-b border-slate-50 cursor-pointer hover:bg-slate-50 transition ${importSelected.has(loc.name) ? "bg-blue-50" : ""}`}>
+                    <input
+                      type="checkbox"
+                      checked={importSelected.has(loc.name)}
+                      onChange={() => {
+                        const next = new Set(importSelected);
+                        if (next.has(loc.name)) next.delete(loc.name); else next.add(loc.name);
+                        setImportSelected(next);
+                      }}
+                      className="w-4 h-4 rounded border-slate-300"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-slate-800">{loc.title}</p>
+                      <p className="text-[10px] text-slate-400 truncate">{loc.name}</p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </>
+          ) : null}
+
+          <div className="flex justify-end gap-3">
+            <button onClick={() => setShowImport(false)} className="text-sm px-4 py-2 rounded-lg border border-slate-200 hover:bg-slate-50">閉じる</button>
+            {gbpLocations.length > 0 && (
+              <button
+                onClick={handleImport}
+                disabled={importSelected.size === 0 || importLoading}
+                className="text-sm px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white"
+              >
+                {importLoading ? "インポート中..." : `${importSelected.size}店舗をインポート`}
+              </button>
+            )}
+          </div>
+        </div>
+      </Modal>
     )}
 
     {/* ── テーブル ── */}
@@ -262,13 +469,14 @@ export default function CustomerMasterPage() {
               <th className="text-center py-3 px-2 text-xs font-semibold text-slate-500 w-24">契約</th>
               <th className="text-left py-3 px-2 text-xs font-semibold text-slate-500 cursor-pointer hover:text-slate-800" onClick={() => hs("ownerName")}>オーナー {si("ownerName")}</th>
               <th className="text-left py-3 px-2 text-xs font-semibold text-slate-500 cursor-pointer hover:text-slate-800" onClick={() => hs("city")}>エリア {si("city")}</th>
+              <th className="text-left py-3 px-2 text-xs font-semibold text-slate-500">電話番号</th>
               <th className="text-center py-3 px-2 text-xs font-semibold text-slate-500 w-20">GBP</th>
-              <th className="text-center py-3 px-2 text-xs font-semibold text-slate-500 w-16">操作</th>
+              <th className="text-center py-3 px-2 text-xs font-semibold text-slate-500 w-40">操作</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={6} className="py-12 text-center text-slate-400">{shops.length === 0 ? "店舗が登録されていません" : "該当なし"}</td></tr>
+              <tr><td colSpan={7} className="py-12 text-center text-slate-400">{shops.length === 0 ? "店舗が登録されていません" : "該当なし"}</td></tr>
             ) : filtered.map((row) => (
               <tr key={row.shopId} className="border-b border-slate-50 hover:bg-blue-50/30 transition">
                 <td className="py-2.5 px-3">
@@ -276,15 +484,25 @@ export default function CustomerMasterPage() {
                   <span className="block text-[10px] text-slate-400 font-mono">{row.shopId.slice(0, 8)}...</span>
                 </td>
                 <td className="py-2.5 px-2 text-center">{serviceLabel(row.service)}</td>
-                <td className="py-2.5 px-2 text-xs text-slate-600">{row.ownerName}</td>
+                <td className="py-2.5 px-2 text-xs text-slate-600">
+                  <div>{row.ownerName}</div>
+                  {row.agentName !== "（直接契約）" && <div className="text-[10px] text-slate-400">via {row.agentName}</div>}
+                </td>
                 <td className="py-2.5 px-2 text-xs text-slate-500">{row.state}{row.city}</td>
+                <td className="py-2.5 px-2 text-xs text-slate-500">{row.phone || "—"}</td>
                 <td className="py-2.5 px-2 text-center">
                   {row.gbpConnected
                     ? <span className="text-green-600 text-xs font-semibold">● 接続</span>
                     : <span className="text-slate-300 text-xs">○ 未接続</span>}
                 </td>
                 <td className="py-2.5 px-2 text-center">
-                  <button onClick={() => handleDelete(row.shopId, row.shopName)} className="text-xs text-red-400 hover:text-red-600">削除</button>
+                  <div className="flex items-center justify-center gap-1">
+                    <button onClick={() => setEditShop(row)} className="text-[10px] px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition">編集</button>
+                    {row.gbpConnected && (
+                      <button onClick={() => handleUnlinkGbp(row.shopId, row.shopName)} className="text-[10px] px-2 py-1 bg-orange-50 text-orange-600 rounded hover:bg-orange-100 transition">ロケーション解除</button>
+                    )}
+                    <button onClick={() => handleDelete(row.shopId, row.shopName)} className="text-[10px] px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition">削除</button>
+                  </div>
                 </td>
               </tr>
             ))}

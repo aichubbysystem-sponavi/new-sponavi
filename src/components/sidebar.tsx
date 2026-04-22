@@ -29,7 +29,7 @@ const navSections = [
   {
     title: "店舗情報管理",
     children: [
-      { href: "/shop-management", label: "店舗一覧" },
+      { href: "/customer-master", label: "店舗一覧" },
       { href: "/ranking", label: "店舗検索ランキング" },
       { href: "/reports", label: "店舗パフォーマンス" },
       { href: "/basic-info", label: "基礎情報管理" },
@@ -54,7 +54,6 @@ const navSections = [
     title: "システム管理",
     children: [
       { href: "/user-management", label: "ユーザー・権限管理" },
-      { href: "/customer-master", label: "顧客マスタ" },
       { href: "/group-management", label: "グループ管理" },
       { href: "/gbp-accounts", label: "GBPアカウント管理" },
     ],

@@ -5,8 +5,9 @@ import { useShop } from "@/components/shop-provider";
 import api from "@/lib/api";
 
 interface FieldEntry {
-  key: string;
-  value: string;
+  id?: string;
+  title: string;
+  message: string;
 }
 
 export default function FixedMessagePage() {
@@ -15,43 +16,38 @@ export default function FixedMessagePage() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
-  const [newKey, setNewKey] = useState("");
-  const [newValue, setNewValue] = useState("");
+  const [msg, setMsg] = useState("");
 
   const fetchData = useCallback(async () => {
     if (!selectedShopId) return;
     setLoading(true);
     setError("");
-    setMessage("");
+    setMsg("");
     try {
       const res = await api.get(`/api/shop/${selectedShopId}/fixed_message`);
       const data = res.data;
-      // Convert object to key-value array
-      if (data && typeof data === "object") {
-        // If data is an array, use it directly; otherwise convert from object
-        if (Array.isArray(data)) {
-          setFields(data.map((item: any) => ({
-            key: String(item.key || item.name || ""),
-            value: String(item.value || item.content || ""),
-          })));
+      if (Array.isArray(data)) {
+        setFields(data.map((item: any) => ({
+          id: item.id || item.ID || undefined,
+          title: String(item.title || item.Title || item.key || item.name || ""),
+          message: String(item.message || item.Message || item.value || item.content || ""),
+        })));
+      } else if (data && typeof data === "object") {
+        // オブジェクト形式の場合
+        const metaKeys = new Set(["id", "ID", "shop_id", "ShopID", "created_at", "updated_at", "deleted_at"]);
+        if (data.title || data.Title || data.message || data.Message) {
+          // 単一オブジェクト
+          setFields([{ title: data.title || data.Title || "", message: data.message || data.Message || "" }]);
         } else {
-          // Filter out metadata-like fields (id, shop_id, created_at, updated_at)
-          const metaKeys = new Set(["id", "shop_id", "created_at", "updated_at", "deleted_at"]);
-          const entries = Object.entries(data)
-            .filter(([k]) => !metaKeys.has(k))
-            .map(([key, value]) => ({
-              key,
-              value: typeof value === "string" ? value : JSON.stringify(value ?? ""),
-            }));
-          setFields(entries.length > 0 ? entries : []);
+          // キーバリュー形式
+          const entries = Object.entries(data).filter(([k]) => !metaKeys.has(k));
+          setFields(entries.map(([k, v]) => ({ title: k, message: String(v ?? "") })));
         }
       } else {
         setFields([]);
       }
     } catch (e: any) {
       if (e?.response?.status === 404) {
-        // No data yet - start with empty
         setFields([]);
       } else {
         setError(e?.userMessage || "差し込み文字列の取得に失敗しました");
@@ -65,51 +61,39 @@ export default function FixedMessagePage() {
     fetchData();
   }, [fetchData]);
 
-  const handleFieldChange = (index: number, value: string) => {
-    setFields((prev) =>
-      prev.map((f, i) => (i === index ? { ...f, value } : f))
-    );
+  const handleTitleChange = (index: number, title: string) => {
+    setFields(prev => prev.map((f, i) => (i === index ? { ...f, title } : f)));
   };
 
-  const handleKeyChange = (index: number, key: string) => {
-    setFields((prev) =>
-      prev.map((f, i) => (i === index ? { ...f, key } : f))
-    );
+  const handleMessageChange = (index: number, message: string) => {
+    setFields(prev => prev.map((f, i) => (i === index ? { ...f, message } : f)));
   };
 
   const handleRemoveField = (index: number) => {
-    setFields((prev) => prev.filter((_, i) => i !== index));
+    if (!confirm(`設定${index + 1}「${fields[index]?.title || ""}」を削除しますか？`)) return;
+    setFields(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleAddField = () => {
-    const trimmedKey = newKey.trim();
-    if (!trimmedKey) return;
-    if (fields.some((f) => f.key === trimmedKey)) {
-      setMessage("同じキー名が既に存在します");
-      return;
-    }
-    setFields((prev) => [...prev, { key: trimmedKey, value: newValue }]);
-    setNewKey("");
-    setNewValue("");
-    setMessage("");
+    setFields(prev => [...prev, { title: "", message: "" }]);
   };
 
   const handleSave = async () => {
     if (!selectedShopId) return;
     setSaving(true);
-    setMessage("");
+    setMsg("");
     try {
-      // Convert fields array back to object
-      const data: Record<string, string> = {};
-      for (const field of fields) {
-        if (field.key.trim()) {
-          data[field.key.trim()] = field.value;
-        }
-      }
+      // 配列形式で送信（旧システムと同じ形式）
+      const data = fields.filter(f => f.title.trim()).map(f => ({
+        ...(f.id ? { id: f.id } : {}),
+        title: f.title.trim(),
+        message: f.message,
+      }));
       await api.put(`/api/shop/${selectedShopId}/fixed_message`, data);
-      setMessage("保存しました");
+      setMsg("保存しました");
+      await fetchData();
     } catch (e: any) {
-      setMessage(`保存失敗: ${e?.response?.data?.message || e?.userMessage || e?.message || "不明なエラー"}`);
+      setMsg(`保存失敗: ${e?.response?.data?.message || e?.userMessage || e?.message || "不明なエラー"}`);
     } finally {
       setSaving(false);
     }
@@ -145,118 +129,48 @@ export default function FixedMessagePage() {
         </div>
       ) : (
         <>
-          {/* Message */}
-          {message && (
-            <div
-              className={`p-3 rounded-lg mb-4 text-sm ${
-                message.includes("失敗") ? "bg-red-50 text-red-600 border border-red-200" : "bg-emerald-50 text-emerald-600 border border-emerald-200"
-              }`}
-            >
-              {message}
+          {msg && (
+            <div className={`p-3 rounded-lg mb-4 text-sm ${msg.includes("失敗") ? "bg-red-50 text-red-600 border border-red-200" : "bg-emerald-50 text-emerald-600 border border-emerald-200"}`}>
+              {msg}
             </div>
           )}
 
-          {/* Existing fields */}
-          <div className="space-y-4 mb-6">
+          <div className="space-y-5 mb-6">
             {fields.length === 0 && (
               <div className="bg-white rounded-xl p-8 shadow-sm border border-slate-100 text-center">
-                <p className="text-slate-400 text-sm">
-                  まだ差し込み文字列が登録されていません。下の「フィールド追加」から追加してください。
-                </p>
+                <p className="text-slate-400 text-sm">まだ差し込み文字列が登録されていません</p>
               </div>
             )}
             {fields.map((field, index) => (
-              <div
-                key={index}
-                className="bg-white rounded-xl p-5 shadow-sm border border-slate-100"
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <input
-                    type="text"
-                    value={field.key}
-                    onChange={(e) => handleKeyChange(index, e.target.value)}
-                    className="text-sm font-semibold text-[#003D6B] bg-transparent border-b border-dashed border-slate-300 focus:border-[#003D6B] focus:outline-none px-1 py-0.5"
-                    placeholder="キー名"
-                  />
-                  <button
-                    onClick={() => handleRemoveField(index)}
-                    className="text-xs text-red-400 hover:text-red-600 transition px-2 py-1 rounded hover:bg-red-50"
-                  >
-                    削除
+              <div key={index} className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-base font-bold text-slate-700">設定{index + 1}</h3>
+                  <button onClick={() => handleRemoveField(index)} className="text-xs text-red-400 hover:text-red-600 flex items-center gap-1">
+                    <span>⊖</span> 削除
                   </button>
                 </div>
-                <textarea
-                  value={field.value}
-                  onChange={(e) => handleFieldChange(index, e.target.value)}
-                  rows={3}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20 resize-y"
-                  placeholder="値を入力..."
-                />
-                <p className="text-[10px] text-slate-400 mt-1">
-                  投稿テンプレート内で <code className="bg-slate-100 px-1 rounded">{`{${field.key}}`}</code> として使用できます
-                </p>
+                <div className="mb-4">
+                  <label className="text-sm font-semibold text-slate-600 block mb-1">タイトル<span className="text-red-500">*</span></label>
+                  <input type="text" value={field.title} onChange={(e) => handleTitleChange(index, e.target.value)}
+                    className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20"
+                    placeholder="例: 日本語の定型文" />
+                </div>
+                <div>
+                  <label className="text-sm font-semibold text-slate-600 block mb-1">差し込み文字列<span className="text-red-500">*</span></label>
+                  <textarea value={field.message} onChange={(e) => handleMessageChange(index, e.target.value)}
+                    rows={4} className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20 resize-y"
+                    placeholder="投稿に自動挿入される文字列を入力..." />
+                </div>
               </div>
             ))}
           </div>
 
-          {/* Add new field */}
-          <div className="bg-slate-50 rounded-xl p-5 border border-slate-200 mb-6">
-            <h3 className="text-sm font-semibold text-slate-600 mb-3">フィールド追加</h3>
-            <div className="flex flex-col sm:flex-row gap-3">
-              <div className="sm:w-1/3">
-                <label className="text-[10px] text-slate-500 block mb-1">キー名</label>
-                <input
-                  type="text"
-                  value={newKey}
-                  onChange={(e) => setNewKey(e.target.value)}
-                  placeholder="例: store_name, greeting, hashtags"
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleAddField();
-                  }}
-                />
-              </div>
-              <div className="flex-1">
-                <label className="text-[10px] text-slate-500 block mb-1">値</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={newValue}
-                    onChange={(e) => setNewValue(e.target.value)}
-                    placeholder="例: サンプル店舗, #MEO #Googleマップ"
-                    className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleAddField();
-                    }}
-                  />
-                  <button
-                    onClick={handleAddField}
-                    disabled={!newKey.trim()}
-                    className="px-4 py-2 rounded-lg text-xs font-semibold bg-slate-600 text-white hover:bg-slate-700 disabled:opacity-50 transition whitespace-nowrap"
-                  >
-                    追加
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Save button */}
           <div className="flex items-center gap-3">
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="px-6 py-2.5 rounded-lg text-sm font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-50 transition"
-            >
+            <button onClick={handleAddField} className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition">+ 設定追加</button>
+            <button onClick={handleSave} disabled={saving} className="px-6 py-2.5 rounded-lg text-sm font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-50 transition">
               {saving ? "保存中..." : "保存する"}
             </button>
-            <button
-              onClick={fetchData}
-              disabled={loading}
-              className="px-4 py-2.5 rounded-lg text-sm font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-50 transition"
-            >
-              リセット
-            </button>
+            <button onClick={fetchData} disabled={loading} className="px-4 py-2.5 rounded-lg text-sm font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-50 transition">リセット</button>
           </div>
         </>
       )}
