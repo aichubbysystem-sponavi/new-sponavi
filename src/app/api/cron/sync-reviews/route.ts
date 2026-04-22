@@ -241,6 +241,24 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "店舗取得失敗" }, { status: 500 });
   }
 
+  // 3.5 契約中の店舗のみに絞り込み（API代節約）
+  try {
+    const { fetchCustomerSheet } = await import("@/lib/customer-sheet");
+    const custMap = await fetchCustomerSheet();
+    if (custMap.size > 0) {
+      const beforeCount = shops.length;
+      shops = shops.filter(s => {
+        const key = s.name.replace(/\s+/g, " ").trim().toLowerCase();
+        if (custMap.has(key)) return true;
+        for (const k of Array.from(custMap.keys())) {
+          if (k.length >= 3 && key.length >= 3 && (key.includes(k) || k.includes(key))) return true;
+        }
+        return false;
+      });
+      console.log(`[cron/sync-reviews] Filtered: ${beforeCount} → ${shops.length} contracted shops`);
+    }
+  } catch {}
+
   // 4. オフセットから50店舗分を取得
   let offset = await getSyncOffset();
   if (offset >= shops.length) offset = 0; // 1周完了 → 最初から

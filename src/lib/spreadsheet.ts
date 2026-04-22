@@ -586,10 +586,30 @@ export async function getShopsFromSpreadsheet(): Promise<ShopListItem[] | null> 
   const data = await loadData();
   if (!data) return null;
 
+  // 契約中の店舗のみに絞り込み（顧客管理スプレッドシート連携）
+  let contractedShops: Map<string, { service: string }> | null = null;
+  try {
+    const { fetchCustomerSheet } = await import("./customer-sheet");
+    const custMap = await fetchCustomerSheet();
+    if (custMap.size > 0) contractedShops = new Map(Array.from(custMap.entries()).map(([k, v]) => [k, { service: v.service }]));
+  } catch {}
+
   const shops: ShopListItem[] = [];
 
   data.perf.forEach((rows, shopName) => {
     if (rows.length === 0) return;
+
+    // 顧客シートがある場合、契約中の店舗のみ表示
+    if (contractedShops) {
+      const key = shopName.replace(/\s+/g, " ").trim().toLowerCase();
+      let found = contractedShops.has(key);
+      if (!found) {
+        for (const k of Array.from(contractedShops.keys())) {
+          if (k.length >= 3 && key.length >= 3 && (key.includes(k) || k.includes(key))) { found = true; break; }
+        }
+      }
+      if (!found) return; // 契約外の店舗はスキップ
+    }
 
     const latest = rows[rows.length - 1];
     const reviewInfo = data.reviews.get(shopName);
