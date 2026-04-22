@@ -19,14 +19,19 @@ export default function FixedMessagePage() {
   const [msg, setMsg] = useState("");
 
   const fetchData = useCallback(async () => {
+    console.log("[fixed_message] fetchData called, shopId:", selectedShopId);
     if (!selectedShopId) return;
     setLoading(true);
     setError("");
     setMsg("");
     try {
       // 単体店舗API（GET /api/shop/:id）はfixed_messagesをPreloadして返す
-      const res = await api.get(`/api/shop/${selectedShopId}`);
+      const url = `/api/shop/${selectedShopId}`;
+      console.log("[fixed_message] fetching:", url);
+      const res = await api.get(url);
       const shop = res.data;
+      console.log("[fixed_message] shop response keys:", Object.keys(shop || {}));
+      console.log("[fixed_message] fixed_messages:", JSON.stringify(shop?.fixed_messages)?.slice(0, 500));
       const msgs = shop?.fixed_messages;
       if (Array.isArray(msgs) && msgs.length > 0) {
         setFields(msgs.map((m: any) => ({
@@ -38,6 +43,7 @@ export default function FixedMessagePage() {
         setFields([]);
       }
     } catch (e: any) {
+      console.error("[fixed_message] error:", e?.response?.status, e?.message);
       if (e?.response?.status === 404) {
         setFields([]);
       } else {
