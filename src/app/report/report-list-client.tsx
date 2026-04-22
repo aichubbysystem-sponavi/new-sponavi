@@ -164,22 +164,34 @@ export default function ReportListClient({
 
   function handleSyncAll() {
     startSync(async () => {
-      const result = await syncAllData();
-      setLastSync(result.timestamp);
-      showToast(`全${shops.length}店舗のデータを反映しました`);
-      setTimeout(() => window.location.reload(), 1500);
+      try {
+        const result = await syncAllData();
+        setLastSync(result?.timestamp || new Date().toISOString());
+        if (result?.success) {
+          showToast(`${result.count || shops.length}店舗のデータを反映しました`);
+        } else {
+          showToast(`反映失敗: ${result?.error || "不明なエラー"}`);
+        }
+        setTimeout(() => window.location.reload(), 1500);
+      } catch (e: any) {
+        showToast(`反映エラー: ${e?.message || "不明"}`);
+      }
     });
   }
 
   function handleSyncSelected() {
     if (selected.size === 0) { showToast("店舗を選択してください"); return; }
     startSync(async () => {
-      const ids = Array.from(selected);
-      const result = await syncShopData(ids);
-      setLastSync(result.timestamp);
-      setSelected(new Set());
-      showToast(`${result.count}店舗のデータを反映しました`);
-      setTimeout(() => window.location.reload(), 1500);
+      try {
+        const ids = Array.from(selected);
+        const result = await syncShopData(ids);
+        setLastSync(result?.timestamp || new Date().toISOString());
+        setSelected(new Set());
+        showToast(`${result?.count || ids.length}店舗のデータを反映しました`);
+        setTimeout(() => window.location.reload(), 1500);
+      } catch (e: any) {
+        showToast(`反映エラー: ${e?.message || "不明"}`);
+      }
     });
   }
 

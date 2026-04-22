@@ -4,7 +4,7 @@
  */
 
 import type { ReportData, ShopListItem } from "./report-data";
-import { readShopListFromCache, readReportDataFromCache } from "./report-cache";
+import { readShopListFromCache, readReportDataFromCache, writeReportDataToCache } from "./report-cache";
 import { getShopsFromSpreadsheet, getReportFromSpreadsheet } from "./spreadsheet";
 
 /**
@@ -48,9 +48,11 @@ export async function getReportData(shopId: string): Promise<{
     }
   } catch {}
 
-  // 2. フォールバック: スプレッドシートから取得
+  // 2. フォールバック: スプレッドシートから取得 → 自動キャッシュ
   const data = await getReportFromSpreadsheet(shopName);
   if (data) {
+    // 次回から高速読み取りできるようキャッシュに保存
+    try { await writeReportDataToCache(shopName, data); } catch {}
     return { data, source: "spreadsheet" };
   }
 
