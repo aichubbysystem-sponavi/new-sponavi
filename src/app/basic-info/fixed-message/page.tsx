@@ -11,7 +11,7 @@ interface FieldEntry {
 }
 
 export default function FixedMessagePage() {
-  const { apiConnected, selectedShopId, selectedShop, refreshShops } = useShop();
+  const { apiConnected, selectedShopId, selectedShop } = useShop();
   const [fields, setFields] = useState<FieldEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -23,31 +23,16 @@ export default function FixedMessagePage() {
     setLoading(true);
     setError("");
     setMsg("");
-
-    // まず店舗データのプリロード済みfixed_messagesを使う
-    const preloaded = (selectedShop as any)?.fixed_messages;
-    console.log("[fixed_message] selectedShop keys:", selectedShop ? Object.keys(selectedShop) : "null");
-    console.log("[fixed_message] preloaded:", JSON.stringify(preloaded)?.slice(0, 500));
-    if (Array.isArray(preloaded) && preloaded.length > 0) {
-      setFields(preloaded.map((m: any) => ({
-        id: m.id || undefined,
-        title: String(m.title || ""),
-        message: String(m.message || ""),
-      })));
-      setLoading(false);
-      return;
-    }
-
-    // フォールバック: APIエンドポイントから取得
     try {
-      const res = await api.get(`/api/shop/${selectedShopId}/fixed_message`);
-      const data = res.data;
-      console.log("[fixed_message] API fallback response:", JSON.stringify(data)?.slice(0, 500));
-      if (Array.isArray(data) && data.length > 0) {
-        setFields(data.map((item: any) => ({
-          id: item.id || undefined,
-          title: String(item.title || ""),
-          message: String(item.message || ""),
+      // 単体店舗API（GET /api/shop/:id）はfixed_messagesをPreloadして返す
+      const res = await api.get(`/api/shop/${selectedShopId}`);
+      const shop = res.data;
+      const msgs = shop?.fixed_messages;
+      if (Array.isArray(msgs) && msgs.length > 0) {
+        setFields(msgs.map((m: any) => ({
+          id: m.id || undefined,
+          title: String(m.title || ""),
+          message: String(m.message || ""),
         })));
       } else {
         setFields([]);
@@ -61,7 +46,7 @@ export default function FixedMessagePage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedShopId, selectedShop]);
+  }, [selectedShopId]);
 
   useEffect(() => {
     fetchData();
@@ -97,7 +82,7 @@ export default function FixedMessagePage() {
       }));
       await api.post(`/api/shop/${selectedShopId}/fixed_message`, { messages });
       setMsg("保存しました");
-      await refreshShops(); // 店舗データを再取得してプリロード済みfixed_messagesを更新
+      await fetchData();
     } catch (e: any) {
       setMsg(`保存失敗: ${e?.response?.data?.message || e?.userMessage || e?.message || "不明なエラー"}`);
     } finally {
