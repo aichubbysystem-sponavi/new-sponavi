@@ -101,7 +101,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
       const listRes = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
-        body: JSON.stringify({ path: "", shared_link: { url: shareUrl }, limit: 200 }),
+        body: JSON.stringify({ path: "", shared_link: { url: shareUrl }, recursive: true, limit: 2000 }),
         signal: AbortSignal.timeout(15000),
       });
       if (listRes.ok) {
@@ -134,7 +134,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
             const listRes = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
               method: "POST",
               headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
-              body: JSON.stringify({ path: folderPath, limit: 200 }),
+              body: JSON.stringify({ path: folderPath, recursive: true, limit: 2000 }),
               signal: AbortSignal.timeout(15000),
             });
             if (listRes.ok) {
