@@ -560,7 +560,7 @@ export default function PostsPage() {
                     <button onClick={async () => {
                       setAutoPosting(true); setAutoPostResult(null);
                       try {
-                        const res = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType }, { timeout: 60000 });
+                        const res = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, filterShopName: !isAllMode && selectedShop ? selectedShop.name : undefined }, { timeout: 60000 });
                         setAutoPostResult({ ...res.data, mode: "preview" });
                       } catch (e: any) { setAutoPostResult({ error: e?.response?.data?.error || e?.message }); }
                       finally { setAutoPosting(false); }
@@ -572,7 +572,7 @@ export default function PostsPage() {
                       // まずプレビューで件数を取得
                       setAutoPosting(true); setAutoPostResult(null);
                       try {
-                        const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10 }, { timeout: 60000 });
+                        const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, filterShopName: !isAllMode && selectedShop ? selectedShop.name : undefined }, { timeout: 60000 });
                         const total = previewRes.data.matches || 0;
                         if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません` }); setAutoPosting(false); return; }
                         if (!confirm(`${autoPostDate}の投稿を実行しますか？\n\n${total}件を10件ずつバッチ処理します（${Math.ceil(total / 10)}回）`)) { setAutoPosting(false); return; }
@@ -588,6 +588,7 @@ export default function PostsPage() {
                               sheetId: autoPostSheet, targetDate: autoPostDate,
                               topicType: postSelectedType || newPost.topicType,
                               batchOffset: offset, batchSize: bs,
+                              filterShopName: !isAllMode && selectedShop ? selectedShop.name : undefined,
                             }, { timeout: 180000 });
                             totalPosted += res.data.posted || 0;
                             totalErrors += res.data.errors || 0;
