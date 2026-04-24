@@ -26,6 +26,7 @@ async function getOAuthToken(): Promise<string | null> {
       method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET,
         refresh_token: data.refresh_token, grant_type: "refresh_token" }),
+      signal: AbortSignal.timeout(10000),
     });
     if (!res.ok) return data.access_token;
     const t = await res.json();
@@ -86,6 +87,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
         body: JSON.stringify({ url: shareUrl }),
+        signal: AbortSignal.timeout(15000),
       });
       if (metaRes.ok) {
         const meta = await metaRes.json();
@@ -95,6 +97,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
             body: JSON.stringify({ path: folderPath, limit: 200 }),
+            signal: AbortSignal.timeout(15000),
           });
           if (listRes.ok) {
             const listData = await listRes.json();
@@ -112,6 +115,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
         body: JSON.stringify({ query: dateCompact, options: { max_results: 50 } }),
+        signal: AbortSignal.timeout(15000),
       });
       if (searchRes.ok) {
         const searchData = await searchRes.json();
@@ -151,6 +155,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
           body: JSON.stringify({ path: file.path }),
+          signal: AbortSignal.timeout(10000),
         });
         if (linkRes.ok) {
           const linkData = await linkRes.json();
@@ -391,6 +396,7 @@ export async function POST(request: NextRequest) {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
           body: JSON.stringify({ mediaFormat: "PHOTO", sourceUrl: directUrl, locationAssociation: { category: "ADDITIONAL" } }),
+          signal: AbortSignal.timeout(30000),
         });
         if (mediaRes.ok) {
           results.push({ shopName: match.shopName, status: "写真投稿成功", summary: `写真: ${match.photoDebug}` });
@@ -420,6 +426,7 @@ export async function POST(request: NextRequest) {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
         body: JSON.stringify(postBody),
+        signal: AbortSignal.timeout(30000),
       });
 
       // 写真付きで失敗したら写真なしでリトライ
@@ -429,6 +436,7 @@ export async function POST(request: NextRequest) {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
           body: JSON.stringify(retryBody),
+          signal: AbortSignal.timeout(30000),
         });
       }
 
