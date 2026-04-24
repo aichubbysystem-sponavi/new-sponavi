@@ -525,8 +525,10 @@ export async function POST(request: NextRequest) {
       }
 
       // 差し込み文字列を投稿文に結合
-      if (!isPhotoOnly && match.summary && fixedMsgMap[shop.id]) {
-        match.summary = `${match.summary}\n\n${fixedMsgMap[shop.id]}`;
+      const fixedMsg = fixedMsgMap[shop.id] || "";
+      const fixedMsgKeys = Object.keys(fixedMsgMap);
+      if (!isPhotoOnly && match.summary && fixedMsg) {
+        match.summary = `${match.summary}\n\n${fixedMsg}`;
       }
 
       // === 予約投稿バリデーション ===
@@ -571,10 +573,10 @@ export async function POST(request: NextRequest) {
           schedResults.push({ shopName: match.shopName, status: `DB保存エラー: ${insertErr.message}` });
           schedErrors++;
         } else if (warnings.length > 0) {
-          schedResults.push({ shopName: match.shopName, status: `保留（要確認）`, warnings, savedSummary: (match.summary || "").slice(0, 50), savedCtaUrl: match.ctaUrl || "" });
+          schedResults.push({ shopName: match.shopName, status: `保留（要確認）`, warnings, savedSummary: (match.summary || "").slice(0, 80), savedCtaUrl: match.ctaUrl || "", debug: `shopId=${shop.id.slice(0,8)}, fixedMsg=${fixedMsg ? fixedMsg.slice(0,30) : "なし"}, fixedMsgKeys=${fixedMsgKeys.length}件` });
           schedErrors++;
         } else {
-          schedResults.push({ shopName: match.shopName, status: "予約登録成功", warnings: [], savedSummary: (match.summary || "").slice(0, 50), savedCtaUrl: match.ctaUrl || "" });
+          schedResults.push({ shopName: match.shopName, status: "予約登録成功", warnings: [], savedSummary: (match.summary || "").slice(0, 80), savedCtaUrl: match.ctaUrl || "" });
           scheduled++;
         }
       } catch (e: any) {

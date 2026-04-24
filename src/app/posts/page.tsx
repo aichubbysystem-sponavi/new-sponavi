@@ -727,6 +727,7 @@ export default function PostsPage() {
                                 ))}
                                 {r.savedSummary && <p className="text-[9px] text-slate-500 mt-0.5 ml-[140px]">本文: {r.savedSummary}...</p>}
                                 {r.savedCtaUrl && <p className="text-[9px] text-slate-400 mt-0.5 ml-[140px]">CTA: {r.savedCtaUrl.slice(0, 60)}</p>}
+                                {r.debug && <p className="text-[9px] text-purple-500 mt-0.5 ml-[140px]">DEBUG: {r.debug}</p>}
                               </div>
                             ))}
                           </div>
