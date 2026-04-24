@@ -321,14 +321,15 @@ export async function POST(request: NextRequest) {
   if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
   const body = await request.json();
-  const { sheetId, targetDate, dryRun, topicType, batchOffset, batchSize, filterShopName } = body as {
+  const { sheetId, targetDate, dryRun, topicType, batchOffset, batchSize, filterShopName, filterShopNames } = body as {
     sheetId: string;
     targetDate: string; // "2026-04-11"
     dryRun?: boolean;
     topicType?: string; // "STANDARD" | "OFFER" | "EVENT" | "PHOTO"
     batchOffset?: number; // バッチ開始位置
     batchSize?: number; // バッチサイズ（デフォルト10）
-    filterShopName?: string; // 特定店舗のみに絞り込み
+    filterShopName?: string; // 特定店舗のみに絞り込み（単一）
+    filterShopNames?: string[]; // 特定店舗リストに絞り込み（再実行用）
   };
   const isPhotoOnly = topicType === "PHOTO";
 
@@ -383,7 +384,10 @@ export async function POST(request: NextRequest) {
         if (!dateMatch) continue;
 
         // 店舗フィルタ（特定店舗が指定されている場合、その店舗のみ対象）
-        if (filterShopName && shopName !== filterShopName && !shopName.includes(filterShopName) && !filterShopName.includes(shopName)) continue;
+        if (filterShopNames && filterShopNames.length > 0) {
+          const match = filterShopNames.some(fn => shopName === fn || shopName.includes(fn) || fn.includes(shopName));
+          if (!match) continue;
+        } else if (filterShopName && shopName !== filterShopName && !shopName.includes(filterShopName) && !filterShopName.includes(shopName)) continue;
 
         // dryRun（プレビュー）時はDropbox写真検索をスキップ → 高速化
         if (dryRun) {

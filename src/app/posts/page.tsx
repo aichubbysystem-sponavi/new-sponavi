@@ -73,6 +73,8 @@ export default function PostsPage() {
   const [autoPostDate, setAutoPostDate] = useState(new Date().toISOString().slice(0, 10));
   const [autoPosting, setAutoPosting] = useState(false);
   const [autoPostResult, setAutoPostResult] = useState<any>(null);
+  const [autoPostAttempt, setAutoPostAttempt] = useState(1); // 実行回数
+  const [autoPostFailedShops, setAutoPostFailedShops] = useState<string[]>([]); // 失敗店舗名一覧（再実行用）
   const [showAutoPost, setShowAutoPost] = useState(false);
   const [creating, setCreating] = useState(false);
   const [msg, setMsg] = useState("");
@@ -553,7 +555,7 @@ export default function PostsPage() {
                   <div>
                     <label className="text-xs text-slate-500 block mb-1">対象日付</label>
                     <input type="date" value={autoPostDate}
-                      onChange={(e) => setAutoPostDate(e.target.value)}
+                      onChange={(e) => { setAutoPostDate(e.target.value); setAutoPostAttempt(1); setAutoPostFailedShops([]); setAutoPostResult(null); }}
                       className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
                   </div>
                   <div className="flex items-end gap-2">
@@ -569,44 +571,51 @@ export default function PostsPage() {
                       {autoPosting ? "確認中..." : "プレビュー"}
                     </button>
                     <button onClick={async () => {
-                      // まずプレビューで件数を取得
                       setAutoPosting(true); setAutoPostResult(null);
+                      const currentAttempt = autoPostAttempt;
+                      // 2回目以降は失敗店舗のみ対象、1回目は選択店舗フィルタ
+                      const filterName = !isAllMode && selectedShop ? selectedShop.name : undefined;
+                      const retryShops = currentAttempt > 1 && autoPostFailedShops.length > 0 ? autoPostFailedShops : undefined;
                       try {
-                        const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, filterShopName: !isAllMode && selectedShop ? selectedShop.name : undefined }, { timeout: 60000 });
+                        const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, filterShopName: filterName, filterShopNames: retryShops }, { timeout: 60000 });
                         const total = previewRes.data.matches || 0;
                         if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません` }); setAutoPosting(false); return; }
-                        if (!confirm(`${autoPostDate}の投稿を実行しますか？\n\n${total}件を10件ずつバッチ処理します（${Math.ceil(total / 10)}回）`)) { setAutoPosting(false); return; }
+                        if (!confirm(`【${currentAttempt}回目実行】${autoPostDate}の投稿を実行しますか？\n\n${total}件を10件ずつバッチ処理します（${Math.ceil(total / 10)}回）`)) { setAutoPosting(false); return; }
 
-                        // バッチ分割実行
                         const bs = 10;
                         let totalPosted = 0, totalErrors = 0;
                         const allResults: any[] = [];
                         for (let offset = 0; offset < total; offset += bs) {
-                          setMsg(`バッチ実行中... ${offset}/${total}件完了（${totalPosted}件投稿済み）`);
+                          setMsg(`${currentAttempt}回目実行中... ${offset}/${total}件完了（${totalPosted}件投稿済み）`);
                           try {
                             const res = await api.post("/api/report/auto-post", {
                               sheetId: autoPostSheet, targetDate: autoPostDate,
                               topicType: postSelectedType || newPost.topicType,
                               batchOffset: offset, batchSize: bs,
-                              filterShopName: !isAllMode && selectedShop ? selectedShop.name : undefined,
+                              filterShopName: filterName, filterShopNames: retryShops,
                             }, { timeout: 180000 });
                             totalPosted += res.data.posted || 0;
                             totalErrors += res.data.errors || 0;
                             if (res.data.results) allResults.push(...res.data.results);
                           } catch (e: any) {
                             totalErrors++;
-                            allResults.push({ shopName: `バッチ${Math.floor(offset / bs) + 1}`, status: `エラー: ${e?.message}` });
+                            allResults.push({ shopName: `バッチ${Math.floor(offset / bs) + 1}`, status: `通信エラー: ${e?.message}` });
                           }
                         }
-                        setAutoPostResult({ mode: "executed", posted: totalPosted, errors: totalErrors, results: allResults, matches: total });
-                        logAudit("シート自動投稿", `${autoPostDate} — ${totalPosted}件投稿（${Math.ceil(total / bs)}バッチ）`);
-                        setMsg(`完了: ${totalPosted}件投稿 / ${totalErrors}件エラー`);
+                        // 失敗店舗を抽出（再実行用）
+                        const failed = allResults.filter((r: any) => !r.status?.includes("成功")).map((r: any) => r.shopName);
+                        const uniqueFailed = Array.from(new Set(failed));
+                        setAutoPostFailedShops(uniqueFailed);
+                        setAutoPostResult({ mode: "executed", posted: totalPosted, errors: totalErrors, results: allResults, matches: total, attempt: currentAttempt, failedShops: uniqueFailed });
+                        setAutoPostAttempt(currentAttempt + 1);
+                        logAudit("シート自動投稿", `${currentAttempt}回目 ${autoPostDate} — ${totalPosted}件投稿 / ${totalErrors}件エラー`);
+                        setMsg(`${currentAttempt}回目完了: ${totalPosted}件投稿 / ${totalErrors}件エラー`);
                         await fetchData();
                       } catch (e: any) { setAutoPostResult({ error: e?.response?.data?.error || e?.message }); }
                       finally { setAutoPosting(false); }
                     }} disabled={autoPosting}
                       className="px-4 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700" style={{ color: "#fff" }}>
-                      {autoPosting ? "投稿中..." : "自動投稿を実行"}
+                      {autoPosting ? "投稿中..." : autoPostAttempt > 1 ? `${autoPostAttempt}回目: 未完了${autoPostFailedShops.length}件を実行` : "自動投稿を実行"}
                     </button>
                   </div>
                 </div>
@@ -633,22 +642,54 @@ export default function PostsPage() {
                           </div>
                         ))}
                       </>
-                    ) : (
+                    ) : (() => {
+                      const results = autoPostResult.results || [];
+                      const successItems = results.filter((r: any) => r.status?.includes("成功"));
+                      const failedItems = results.filter((r: any) => !r.status?.includes("成功"));
+                      return (
                       <>
-                        <p className="font-semibold mb-2">実行結果: {autoPostResult.posted}件投稿 / {autoPostResult.errors}件エラー</p>
-                        {autoPostResult.results?.map((r: any, i: number) => (
-                          <div key={i} className="py-1.5 border-t border-emerald-100">
-                            <div className="flex items-center gap-3">
-                              <span className="text-xs font-medium">{r.shopName}</span>
-                              <span className={`text-[10px] px-1.5 py-0.5 rounded ${r.status.includes("成功") ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>{r.status}</span>
-                            </div>
-                            {r.detail && <p className="text-[9px] text-red-400 mt-0.5 break-all">{r.detail}</p>}
-                            {r.locationName && <p className="text-[9px] text-slate-400 mt-0.5">Location: {r.locationName}</p>}
-                            {r.gbpPostName && <p className="text-[9px] text-emerald-500 mt-0.5">Post ID: {r.gbpPostName}</p>}
+                        <div className="flex items-center gap-3 mb-3">
+                          <p className="font-semibold">{autoPostResult.attempt || 1}回目実行結果:</p>
+                          <span className="text-xs px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-semibold">{successItems.length}件成功</span>
+                          {failedItems.length > 0 && <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-700 font-semibold">{failedItems.length}件スキップ/エラー</span>}
+                        </div>
+
+                        {/* 失敗一覧（上部に目立つように表示） */}
+                        {failedItems.length > 0 && (
+                          <div className="mb-3 bg-red-50 border border-red-200 rounded-lg p-3">
+                            <p className="text-xs font-semibold text-red-700 mb-2">未完了一覧（{failedItems.length}件）— 再実行対象</p>
+                            {failedItems.map((r: any, i: number) => (
+                              <div key={`f-${i}`} className="py-1 border-t border-red-100 first:border-t-0">
+                                <div className="flex items-start gap-2">
+                                  <span className="text-xs font-medium text-red-800 min-w-[140px]">{r.shopName}</span>
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 whitespace-nowrap">{r.status}</span>
+                                </div>
+                                {r.detail && <p className="text-[9px] text-red-500 mt-0.5 break-all ml-[140px]">{r.detail}</p>}
+                              </div>
+                            ))}
                           </div>
-                        ))}
+                        )}
+
+                        {/* 成功一覧（折りたたみ） */}
+                        {successItems.length > 0 && (
+                          <details className="mb-2">
+                            <summary className="text-xs text-emerald-600 cursor-pointer hover:text-emerald-800 font-semibold">成功一覧（{successItems.length}件）▼</summary>
+                            <div className="mt-1">
+                              {successItems.map((r: any, i: number) => (
+                                <div key={`s-${i}`} className="py-1 border-t border-emerald-100">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-medium">{r.shopName}</span>
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">{r.status}</span>
+                                  </div>
+                                  {r.gbpPostName && <p className="text-[9px] text-emerald-500 mt-0.5">Post ID: {r.gbpPostName}</p>}
+                                </div>
+                              ))}
+                            </div>
+                          </details>
+                        )}
                       </>
-                    )}
+                      );
+                    })()}
                   </div>
                 )}
               </div>
