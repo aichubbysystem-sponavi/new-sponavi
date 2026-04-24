@@ -700,16 +700,35 @@ export default function PostsPage() {
                     ) : (() => {
                       const results = autoPostResult.results || [];
                       const successItems = results.filter((r: any) => r.status?.includes("成功"));
-                      const failedItems = results.filter((r: any) => !r.status?.includes("成功"));
-                      const warnItems = successItems.filter((r: any) => r.warnings?.length > 0);
+                      const holdItems = results.filter((r: any) => r.status?.includes("保留"));
+                      const failedItems = results.filter((r: any) => !r.status?.includes("成功") && !r.status?.includes("保留"));
+                      const warnItems = holdItems;
                       return (
                       <>
                         <div className="flex items-center gap-3 mb-3 flex-wrap">
                           <p className="font-semibold">{autoPostResult.attempt || 1}回目実行結果:</p>
                           <span className="text-xs px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-semibold">{successItems.length}件成功</span>
-                          {warnItems.length > 0 && <span className="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-semibold">{warnItems.length}件警告あり</span>}
+                          {holdItems.length > 0 && <span className="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-semibold">{holdItems.length}件保留</span>}
                           {failedItems.length > 0 && <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-700 font-semibold">{failedItems.length}件スキップ/エラー</span>}
                         </div>
+
+                        {/* 保留一覧（警告あり） */}
+                        {holdItems.length > 0 && (
+                          <div className="mb-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                            <p className="text-xs font-semibold text-amber-700 mb-2">保留一覧（{holdItems.length}件）— 警告あり・自動実行されません</p>
+                            {holdItems.map((r: any, i: number) => (
+                              <div key={`h-${i}`} className="py-1.5 border-t border-amber-100 first:border-t-0">
+                                <div className="flex items-start gap-2">
+                                  <span className="text-xs font-medium text-amber-800 min-w-[140px]">{r.shopName}</span>
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 whitespace-nowrap">{r.status}</span>
+                                </div>
+                                {r.warnings?.map((w: string, wi: number) => (
+                                  <p key={wi} className="text-[9px] text-amber-600 mt-0.5 ml-[140px]">⚠ {w}</p>
+                                ))}
+                              </div>
+                            ))}
+                          </div>
+                        )}
 
                         {/* 失敗一覧（上部に目立つように表示） */}
                         {failedItems.length > 0 && (

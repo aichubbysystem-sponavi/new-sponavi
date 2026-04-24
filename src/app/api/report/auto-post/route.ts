@@ -522,14 +522,19 @@ export async function POST(request: NextRequest) {
         } catch {
           warnings.push(`CTAリンク到達不可: ${match.ctaUrl.slice(0, 60)}`);
         }
+      } else if (!isPhotoOnly) {
+        warnings.push("CTAリンク(J列)が未設定");
       }
 
-      // 2. 店舗名が投稿文中に3回以上含まれているかチェック
+      // 2. 店舗名が投稿文中に3回未満なら警告（SEO対策: 3回以上推奨）
       if (!isPhotoOnly && match.summary) {
         const shopNameForCount = shop.name;
         const nameCount = (match.summary.split(shopNameForCount).length - 1);
-        if (nameCount >= 3) warnings.push(`店舗名「${shopNameForCount}」が本文中に${nameCount}回出現（3回以上）`);
+        if (nameCount < 3) warnings.push(`店舗名「${shopNameForCount}」が本文中に${nameCount}回（3回以上推奨）`);
       }
+
+      // 警告ありなら保留（on_hold）、なしなら予約（pending）
+      const postStatus = warnings.length > 0 ? "on_hold" : "pending";
 
       try {
         const { error: insertErr } = await supabase.from("scheduled_posts").insert({
@@ -542,14 +547,16 @@ export async function POST(request: NextRequest) {
           action_type: match.ctaUrl ? "LEARN_MORE" : null,
           action_url: match.ctaUrl || null,
           scheduled_at: scheduledTime,
-          status: "pending",
+          status: postStatus,
         });
         if (insertErr) {
           schedResults.push({ shopName: match.shopName, status: `DB保存エラー: ${insertErr.message}` });
           schedErrors++;
+        } else if (warnings.length > 0) {
+          schedResults.push({ shopName: match.shopName, status: `保留（要確認）`, warnings });
+          schedErrors++;
         } else {
-          const warnText = warnings.length > 0 ? ` ⚠ ${warnings.join(" / ")}` : "";
-          schedResults.push({ shopName: match.shopName, status: `予約登録成功${warnText}`, warnings });
+          schedResults.push({ shopName: match.shopName, status: "予約登録成功", warnings: [] });
           scheduled++;
         }
       } catch (e: any) {
