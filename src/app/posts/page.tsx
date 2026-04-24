@@ -1177,6 +1177,61 @@ export default function PostsPage() {
             </div>
           )}
 
+          {/* 保留投稿一覧（on_hold） */}
+          {scheduledPosts.filter((p) => p.status === "on_hold").length > 0 && (
+            <div className="bg-amber-50 rounded-xl shadow-sm border border-amber-200 p-4 mb-4">
+              <h3 className="text-sm font-semibold text-amber-700 mb-3">保留中の投稿（{scheduledPosts.filter((p) => p.status === "on_hold").length}件）— 警告あり・自動実行されません</h3>
+              <div className="space-y-2">
+                {scheduledPosts.filter((p) => p.status === "on_hold").map((sp) => (
+                  <div key={sp.id} className="bg-white rounded-lg p-3 border border-amber-100">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs font-semibold text-amber-800">{sp.shop_name}</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">保留</span>
+                        </div>
+                        <p className="text-sm text-slate-700 line-clamp-2">{sp.summary}</p>
+                        <p className="text-xs text-amber-600 mt-1">
+                          予約: {new Date(sp.scheduled_at).toLocaleString("ja-JP")}
+                          {sp.action_url && <span className="ml-2">CTA: {sp.action_url}</span>}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5 ml-3 flex-shrink-0">
+                        <button onClick={async () => {
+                          await supabase.from("scheduled_posts").update({ status: "pending" }).eq("id", sp.id);
+                          setScheduledPosts(scheduledPosts.map(p => p.id === sp.id ? { ...p, status: "pending" } : p));
+                          setMsg("承認して予約に変更しました");
+                        }} className="text-[10px] text-emerald-600 hover:text-emerald-800 font-semibold bg-emerald-50 px-2 py-1 rounded">承認→予約</button>
+                        <button onClick={() => { setEditingPostId(sp.id); setEditingSummary(sp.summary); }}
+                          className="text-[10px] text-blue-600 hover:text-blue-800 font-semibold bg-blue-50 px-2 py-1 rounded">編集</button>
+                        <button onClick={async () => {
+                          if (!confirm("この保留投稿を削除しますか？")) return;
+                          await api.delete("/api/report/scheduled-posts", { data: { id: sp.id } });
+                          setScheduledPosts(scheduledPosts.filter((p) => p.id !== sp.id));
+                          setMsg("削除しました");
+                        }} className="text-[10px] text-red-500 hover:text-red-700 font-semibold">削除</button>
+                      </div>
+                    </div>
+                    {editingPostId === sp.id && (
+                      <div className="mt-2 space-y-2">
+                        <textarea value={editingSummary} onChange={(e) => setEditingSummary(e.target.value)}
+                          className="w-full border border-amber-200 rounded-lg px-3 py-2 text-sm min-h-[80px] resize-y" />
+                        <div className="flex gap-2">
+                          <button onClick={() => handleSaveEdit(sp.id)} disabled={savingEdit}
+                            className="text-[10px] font-semibold px-3 py-1 rounded bg-[#003D6B] text-white">
+                            {savingEdit ? "保存中..." : "保存"}
+                          </button>
+                          <button onClick={() => { setEditingPostId(null); setEditingSummary(""); }}
+                            className="text-[10px] font-semibold px-3 py-1 rounded bg-slate-100 text-slate-600">キャンセル</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* エラー投稿一覧 */}
           {scheduledPosts.filter((p) => p.status === "error").length > 0 && (
             <div className="bg-red-50 rounded-xl shadow-sm border border-red-200 p-4 mb-4">
