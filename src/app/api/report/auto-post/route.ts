@@ -96,47 +96,75 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
     let files: { name: string; path: string }[] = [];
     let debugSteps: string[] = [];
 
-    // 共有リンク経由でフォルダ内ファイル一覧（recursive: trueで全階層を自動探索）
-    try {
-      const res1 = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
+    // 共有リンク経由でフォルダ内ファイル一覧（サブフォルダも手動で再帰展開）
+    // shared_linkではrecursive非対応のため、サブフォルダを個別にlist_folder
+    const listSharedFolder = async (relativePath: string): Promise<{ files: any[]; folders: any[] }> => {
+      const res = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
-        body: JSON.stringify({ path: "", shared_link: { url: shareUrl }, recursive: true, limit: 2000 }),
-        signal: AbortSignal.timeout(30000),
+        body: JSON.stringify({ path: relativePath, shared_link: { url: shareUrl }, limit: 2000 }),
+        signal: AbortSignal.timeout(15000),
       });
-      const res1Body = await res1.text();
-      debugSteps.push(`list_folder: HTTP${res1.status}`);
-      if (res1.ok) {
-        const data = JSON.parse(res1Body);
-        let allEntries = data.entries || [];
-
-        // has_moreがtrueの場合、list_folder/continueでページネーション
-        let hasMore = data.has_more;
-        let cursor = data.cursor;
-        while (hasMore && cursor) {
-          try {
-            const contRes = await fetch("https://api.dropboxapi.com/2/files/list_folder/continue", {
-              method: "POST",
-              headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
-              body: JSON.stringify({ cursor }),
-              signal: AbortSignal.timeout(15000),
-            });
-            if (contRes.ok) {
-              const contData = await contRes.json();
-              allEntries = allEntries.concat(contData.entries || []);
-              hasMore = contData.has_more;
-              cursor = contData.cursor;
-            } else { break; }
-          } catch { break; }
-        }
-
-        const fileEntries = allEntries.filter((e: any) => e[".tag"] === "file");
-        const folderEntries = allEntries.filter((e: any) => e[".tag"] === "folder");
-        files.push(...fileEntries.map((e: any) => ({ name: e.name || "", path: e.path_display || e.path_lower || "" })));
-        debugSteps.push(`${files.length}件のファイル発見(フォルダ${folderEntries.length}個を再帰探索)`);
-      } else {
-        debugSteps.push(`レスポンス: ${res1Body.slice(0, 200)}`);
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        debugSteps.push(`list(${relativePath || "/"}): HTTP${res.status} ${body.slice(0, 100)}`);
+        return { files: [], folders: [] };
       }
+      const data = await res.json();
+      let allEntries = data.entries || [];
+      // ページネーション
+      let hasMore = data.has_more;
+      let cursor = data.cursor;
+      while (hasMore && cursor) {
+        try {
+          const contRes = await fetch("https://api.dropboxapi.com/2/files/list_folder/continue", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
+            body: JSON.stringify({ cursor }),
+            signal: AbortSignal.timeout(15000),
+          });
+          if (contRes.ok) {
+            const contData = await contRes.json();
+            allEntries = allEntries.concat(contData.entries || []);
+            hasMore = contData.has_more;
+            cursor = contData.cursor;
+          } else { break; }
+        } catch { break; }
+      }
+      return {
+        files: allEntries.filter((e: any) => e[".tag"] === "file"),
+        folders: allEntries.filter((e: any) => e[".tag"] === "folder"),
+      };
+    }
+
+    try {
+      // ルートフォルダを取得
+      const root = await listSharedFolder("");
+      files.push(...root.files.map((e: any) => ({ name: e.name || "", path: e.path_display || e.path_lower || "" })));
+
+      // サブフォルダを最大3階層まで再帰展開（パスは共有ルートからの相対パス）
+      const pendingFolders = root.folders.map((f: any) => ({
+        // 共有リンクのlist_folderでは相対パスを使う必要がある
+        // path_displayが返される場合もあるが、安全のため name ベースで組み立て
+        relativePath: `/${f.name}`,
+        depth: 1,
+      }));
+      while (pendingFolders.length > 0) {
+        const sf = pendingFolders.shift()!;
+        if (sf.depth > 3) continue; // 3階層まで
+        try {
+          const sub = await listSharedFolder(sf.relativePath);
+          files.push(...sub.files.map((e: any) => ({ name: e.name || "", path: e.path_display || e.path_lower || "" })));
+          // さらに深いサブフォルダがあれば追加
+          for (const f of sub.folders) {
+            pendingFolders.push({
+              relativePath: `${sf.relativePath}/${f.name}`,
+              depth: sf.depth + 1,
+            });
+          }
+        } catch {}
+      }
+      debugSteps.push(`${files.length}件のファイル発見(フォルダ${root.folders.length}個+サブ展開)`);
     } catch (e: any) {
       debugSteps.push(`list_folder例外: ${e?.message}`);
     }
