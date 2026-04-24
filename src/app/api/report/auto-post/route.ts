@@ -96,68 +96,88 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
     let files: { name: string; path: string }[] = [];
     let debugSteps: string[] = [];
 
-    // 共有リンク経由でフォルダ内ファイル一覧（サブフォルダも展開）
-    // 方法1: shared_link パラメータでlist_folder
+    // 共有リンク経由でフォルダ内ファイル一覧（recursive: trueで全階層を自動探索）
     try {
       const res1 = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
-        body: JSON.stringify({ path: "", shared_link: { url: shareUrl }, limit: 200 }),
-        signal: AbortSignal.timeout(15000),
+        body: JSON.stringify({ path: "", shared_link: { url: shareUrl }, recursive: true, limit: 2000 }),
+        signal: AbortSignal.timeout(30000),
       });
       const res1Body = await res1.text();
-      debugSteps.push(`方法1: HTTP${res1.status} body=${res1Body.slice(0, 150)}`);
+      debugSteps.push(`list_folder: HTTP${res1.status}`);
       if (res1.ok) {
         const data = JSON.parse(res1Body);
-        const entries = data.entries || [];
-        // ファイルとフォルダを分離
-        const directFiles = entries.filter((e: any) => e[".tag"] === "file");
-        const subFolders = entries.filter((e: any) => e[".tag"] === "folder");
-        files.push(...directFiles.map((e: any) => ({ name: e.name || "", path: e.path_display || e.path_lower || "" })));
+        let allEntries = data.entries || [];
 
-        // サブフォルダを展開
-        for (const sf of subFolders) {
-          const sfPath = sf.path_display || sf.path_lower || `/${sf.name}`;
+        // has_moreがtrueの場合、list_folder/continueでページネーション
+        let hasMore = data.has_more;
+        let cursor = data.cursor;
+        while (hasMore && cursor) {
           try {
-            const sfRes = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
+            const contRes = await fetch("https://api.dropboxapi.com/2/files/list_folder/continue", {
               method: "POST",
               headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
-              body: JSON.stringify({ path: sfPath, shared_link: { url: shareUrl }, limit: 200 }),
+              body: JSON.stringify({ cursor }),
               signal: AbortSignal.timeout(15000),
             });
-            if (sfRes.ok) {
-              const sfData = await sfRes.json();
-              for (const e of sfData.entries || []) {
-                if (e[".tag"] === "file") {
-                  files.push({ name: e.name || "", path: e.path_display || e.path_lower || "" });
-                }
-              }
-            }
-          } catch {}
+            if (contRes.ok) {
+              const contData = await contRes.json();
+              allEntries = allEntries.concat(contData.entries || []);
+              hasMore = contData.has_more;
+              cursor = contData.cursor;
+            } else { break; }
+          } catch { break; }
         }
-        debugSteps.push(`展開後: ${files.length}件(直接${directFiles.length}+サブ${subFolders.length}フォルダ)`);
+
+        const fileEntries = allEntries.filter((e: any) => e[".tag"] === "file");
+        const folderEntries = allEntries.filter((e: any) => e[".tag"] === "folder");
+        files.push(...fileEntries.map((e: any) => ({ name: e.name || "", path: e.path_display || e.path_lower || "" })));
+        debugSteps.push(`${files.length}件のファイル発見(フォルダ${folderEntries.length}個を再帰探索)`);
+      } else {
+        debugSteps.push(`レスポンス: ${res1Body.slice(0, 200)}`);
       }
     } catch (e: any) {
-      debugSteps.push(`方法1例外: ${e?.message}`);
+      debugSteps.push(`list_folder例外: ${e?.message}`);
     }
 
     if (files.length === 0) return { urls: [], debug: `フォルダ内にファイルが0件 [${debugSteps.join(" → ")}] URL: ${shareUrl.slice(0, 80)}` };
 
-    // 日付を含む画像ファイルをフィルタ
+    // 日付を含む画像ファイルをフィルタ（ファイル名に dateCompact "26-4-12" 形式で部分一致）
     const dateMatches = files.filter(f => {
       if (!/\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(f.name)) return false;
       return f.name.includes(dateCompact);
     });
 
     if (dateMatches.length === 0) {
-      return { urls: [], debug: `フォルダ内${files.length}件中「${dateCompact}」マッチ0件。ファイル例: ${files.slice(0, 3).map(f => f.name).join(", ")}` };
+      return { urls: [], debug: `フォルダ内${files.length}件中「${dateCompact}」マッチ0件。ファイル例: ${files.slice(0, 5).map(f => f.name).join(", ")}` };
     }
 
     // 全マッチファイルのDLリンクを取得
     const urls: string[] = [];
+    let dlDebug: string[] = [];
+
+    // 共有フォルダのルート絶対パスを取得（get_temporary_link用）
+    let sharedRootPath = "";
+    try {
+      const metaRes = await fetch("https://api.dropboxapi.com/2/sharing/get_shared_link_metadata", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
+        body: JSON.stringify({ url: shareUrl }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (metaRes.ok) {
+        const meta = await metaRes.json();
+        sharedRootPath = meta.path_lower || "";
+        dlDebug.push(`共有ルート: ${sharedRootPath}`);
+      }
+    } catch {}
+
     for (const file of dateMatches.slice(0, 10)) {
+      let got = false;
+
+      // 方法1: get_temporary_link（パスをそのまま試行）
       try {
-        // 共有リンク経由のファイルはget_shared_link_fileではなくget_temporary_linkを使用
         const linkRes = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
@@ -166,12 +186,57 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
         });
         if (linkRes.ok) {
           const linkData = await linkRes.json();
-          if (linkData.link) urls.push(linkData.link);
+          if (linkData.link) { urls.push(linkData.link); got = true; }
         }
       } catch {}
+
+      // 方法2: 共有ルートパス + 相対パスで再試行
+      if (!got && sharedRootPath) {
+        const absPath = file.path.startsWith(sharedRootPath)
+          ? file.path
+          : `${sharedRootPath}${file.path.startsWith("/") ? "" : "/"}${file.path}`;
+        try {
+          const linkRes2 = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
+            body: JSON.stringify({ path: absPath }),
+            signal: AbortSignal.timeout(10000),
+          });
+          if (linkRes2.ok) {
+            const linkData2 = await linkRes2.json();
+            if (linkData2.link) { urls.push(linkData2.link); got = true; }
+          } else {
+            dlDebug.push(`方法2失敗(${linkRes2.status}): ${absPath.slice(0, 60)}`);
+          }
+        } catch {}
+      }
+
+      // 方法3: ファイル単体の共有リンクを新規作成
+      if (!got) {
+        const tryPath = sharedRootPath
+          ? `${sharedRootPath}${file.path.startsWith("/") ? "" : "/"}${file.path}`
+          : file.path;
+        try {
+          const shareRes = await fetch("https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
+            body: JSON.stringify({ path: tryPath, settings: { requested_visibility: "public", access: "viewer" } }),
+            signal: AbortSignal.timeout(10000),
+          });
+          const shareBody = await shareRes.json();
+          const fileShareUrl = shareBody?.url || shareBody?.error?.shared_link_already_exists?.metadata?.url;
+          if (fileShareUrl) {
+            urls.push(fileShareUrl.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace(/\?dl=0/, "?dl=1"));
+            got = true;
+          } else {
+            dlDebug.push(`方法3失敗: ${JSON.stringify(shareBody).slice(0, 100)}`);
+          }
+        } catch {}
+      }
     }
 
-    return { urls, debug: urls.length > 0 ? `${urls.length}枚取得（${dateMatches.length}件マッチ）` : `${dateMatches.length}件マッチしたがDLリンク取得失敗` };
+    const debugExtra = dlDebug.length > 0 ? ` [${dlDebug.join("; ")}]` : "";
+    return { urls, debug: urls.length > 0 ? `${urls.length}枚取得（${dateMatches.length}件マッチ）${debugExtra}` : `${dateMatches.length}件マッチしたがDLリンク取得失敗${debugExtra}` };
   } catch (e: any) {
     return { urls: [], debug: `例外: ${e?.message}` };
   }
@@ -244,7 +309,9 @@ export async function POST(request: NextRequest) {
 
   // 日付フォーマット変換
   const dateObj = new Date(targetDate);
-  const dateCompact = `${String(dateObj.getFullYear()).slice(2)}-${dateObj.getMonth() + 1}-${dateObj.getDate()}`; // "26-4-24"形式
+  const dateCompact = `${String(dateObj.getFullYear()).slice(2)}-${dateObj.getMonth() + 1}-${dateObj.getDate()}`; // "26-4-12" — 写真投稿のDropboxファイル名用
+  const dateYymmdd = `${String(dateObj.getFullYear()).slice(2)}${String(dateObj.getMonth() + 1).padStart(2, "0")}${String(dateObj.getDate()).padStart(2, "0")}`; // "260412" — 写真以外のDropboxファイル名用
+  const dateYmd = `${dateObj.getFullYear()}${String(dateObj.getMonth() + 1).padStart(2, "0")}${String(dateObj.getDate()).padStart(2, "0")}`; // "20260412" — スプレッドシートE列用
   const dateSlash = `${dateObj.getFullYear()}/${dateObj.getMonth() + 1}/${dateObj.getDate()}`;
   const dateSlashPad = `${dateObj.getFullYear()}/${String(dateObj.getMonth() + 1).padStart(2, "0")}/${String(dateObj.getDate()).padStart(2, "0")}`;
 
@@ -278,7 +345,8 @@ export async function POST(request: NextRequest) {
         if (!isPhotoOnly && !postText) continue; // 写真のみ投稿ではテキスト不要
 
         // 日付マッチ（複数フォーマット対応）
-        const dateMatch = dateCell.includes(dateCompact)
+        const dateMatch = dateCell.includes(dateYmd)
+          || dateCell.includes(dateCompact)
           || dateCell.includes(dateSlash)
           || dateCell.includes(dateSlashPad)
           || dateCell.includes(targetDate);
@@ -309,14 +377,16 @@ export async function POST(request: NextRequest) {
 
       let photoUrls: string[] = [];
       let photoDebug = "";
+      // 写真投稿は "26-4-12" 形式、それ以外は "260412" 形式でファイル名マッチ
+      const fileNameDate = isPhotoOnly ? dateCompact : dateYymmdd;
       if (p.photoCell.includes("dropbox.com")) {
-        const result = await searchDropboxPhotosMultiple(p.photoCell.trim(), dateCompact, p.shopName);
+        const result = await searchDropboxPhotosMultiple(p.photoCell.trim(), fileNameDate, p.shopName);
         photoUrls = result.urls;
         photoDebug = result.debug;
       }
       if (photoUrls.length === 0) {
         const urls = p.photoCell.match(/https?:\/\/[^\s,"]+/g) || [];
-        const dated = urls.filter((u: string) => u.includes(dateCompact));
+        const dated = urls.filter((u: string) => u.includes(fileNameDate));
         photoUrls = dated.length > 0 ? dated.map(convertDropboxUrl) : [];
       }
       if (photoUrls.length === 0 && !photoDebug) photoDebug = "URLから写真を抽出できません";
