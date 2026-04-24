@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useShop } from "@/components/shop-provider";
 import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
@@ -104,6 +104,19 @@ export default function PostsPage() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [fixedMessages, setFixedMessages] = useState<{ id: string; title: string; message: string }[]>([]);
   const [showInsertMenu, setShowInsertMenu] = useState(false);
+  const insertMenuRef = useRef<HTMLDivElement>(null);
+
+  // 差し込みメニュー外クリックで閉じる
+  useEffect(() => {
+    if (!showInsertMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (insertMenuRef.current && !insertMenuRef.current.contains(e.target as Node)) {
+        setShowInsertMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showInsertMenu]);
 
   const isAllMode = shopFilterMode === "all";
 
@@ -740,7 +753,7 @@ export default function PostsPage() {
                     <textarea value={newPost.summary} onChange={(e) => setNewPost({ ...newPost, summary: e.target.value })}
                       placeholder="投稿の内容を入力..." className="flex-1 border border-slate-200 rounded-lg px-4 py-3 text-sm min-h-[120px] resize-y focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20" />
                     {fixedMessages.length > 0 && (
-                      <div className="relative">
+                      <div className="relative" ref={insertMenuRef}>
                         <button type="button" onClick={() => setShowInsertMenu(!showInsertMenu)}
                           className="px-3 py-2 text-xs font-semibold border border-slate-300 rounded-lg hover:bg-slate-50 whitespace-nowrap h-fit">
                           差し込み

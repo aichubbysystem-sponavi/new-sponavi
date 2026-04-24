@@ -46,7 +46,10 @@ let cachedDropboxToken: { token: string; expires: number } | null = null;
 
 async function getDropboxAccessToken(): Promise<string | null> {
   if (cachedDropboxToken && cachedDropboxToken.expires > Date.now()) return cachedDropboxToken.token;
-  if (!DROPBOX_APP_KEY || !DROPBOX_REFRESH_TOKEN) return null;
+  if (!DROPBOX_APP_KEY || !DROPBOX_REFRESH_TOKEN) {
+    console.error("[Dropbox] DROPBOX_APP_KEY or DROPBOX_REFRESH_TOKEN not set");
+    return null;
+  }
 
   try {
     const res = await fetch("https://api.dropboxapi.com/oauth2/token", {
@@ -58,12 +61,23 @@ async function getDropboxAccessToken(): Promise<string | null> {
         client_id: DROPBOX_APP_KEY,
         client_secret: DROPBOX_APP_SECRET,
       }),
+      signal: AbortSignal.timeout(10000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.error(`[Dropbox] Token refresh failed: ${res.status}`, await res.text().catch(() => ""));
+      return null;
+    }
     const data = await res.json();
+    if (!data.access_token) {
+      console.error("[Dropbox] No access_token in response");
+      return null;
+    }
     cachedDropboxToken = { token: data.access_token, expires: Date.now() + (data.expires_in - 60) * 1000 };
     return data.access_token;
-  } catch { return null; }
+  } catch (e: any) {
+    console.error("[Dropbox] Token fetch error:", e?.message);
+    return null;
+  }
 }
 
 /**

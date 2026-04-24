@@ -56,9 +56,6 @@ export async function readShopListFromCache(): Promise<ShopListItem[] | null> {
 export async function writeShopListToCache(shops: ShopListItem[]): Promise<void> {
   const sb = writeClient();
 
-  // 全削除 → 一括挿入
-  await sb.from("report_shop_list").delete().neq("id", "");
-
   if (shops.length === 0) return;
 
   const rows = shops.map(s => ({
@@ -81,11 +78,11 @@ export async function writeShopListToCache(shops: ShopListItem[]): Promise<void>
     synced_at: new Date().toISOString(),
   }));
 
-  // 100件ずつバッチ挿入
+  // 100件ずつバッチupsert（既存データは上書き、新規は挿入）
   for (let i = 0; i < rows.length; i += 100) {
     const batch = rows.slice(i, i + 100);
-    const { error } = await sb.from("report_shop_list").insert(batch);
-    if (error) console.error("[report-cache] shop list insert error:", error.message);
+    const { error } = await sb.from("report_shop_list").upsert(batch, { onConflict: "id" });
+    if (error) console.error("[report-cache] shop list upsert error:", error.message);
   }
 }
 
