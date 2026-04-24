@@ -553,10 +553,10 @@ export async function POST(request: NextRequest) {
           schedResults.push({ shopName: match.shopName, status: `DB保存エラー: ${insertErr.message}` });
           schedErrors++;
         } else if (warnings.length > 0) {
-          schedResults.push({ shopName: match.shopName, status: `保留（要確認）`, warnings });
+          schedResults.push({ shopName: match.shopName, status: `保留（要確認）`, warnings, savedSummary: (match.summary || "").slice(0, 50), savedCtaUrl: match.ctaUrl || "" });
           schedErrors++;
         } else {
-          schedResults.push({ shopName: match.shopName, status: "予約登録成功", warnings: [] });
+          schedResults.push({ shopName: match.shopName, status: "予約登録成功", warnings: [], savedSummary: (match.summary || "").slice(0, 50), savedCtaUrl: match.ctaUrl || "" });
           scheduled++;
         }
       } catch (e: any) {

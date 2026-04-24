@@ -725,6 +725,8 @@ export default function PostsPage() {
                                 {r.warnings?.map((w: string, wi: number) => (
                                   <p key={wi} className="text-[9px] text-amber-600 mt-0.5 ml-[140px]">⚠ {w}</p>
                                 ))}
+                                {r.savedSummary && <p className="text-[9px] text-slate-500 mt-0.5 ml-[140px]">本文: {r.savedSummary}...</p>}
+                                {r.savedCtaUrl && <p className="text-[9px] text-slate-400 mt-0.5 ml-[140px]">CTA: {r.savedCtaUrl.slice(0, 60)}</p>}
                               </div>
                             ))}
                           </div>
@@ -758,6 +760,8 @@ export default function PostsPage() {
                                     <span className={`text-[10px] px-1.5 py-0.5 rounded ${r.verified === false ? "bg-yellow-100 text-yellow-700" : "bg-emerald-100 text-emerald-700"}`}>{r.status}</span>
                                   </div>
                                   {r.gbpPostName && <p className="text-[9px] text-emerald-500 mt-0.5">Post ID: {r.gbpPostName}</p>}
+                                  {r.savedSummary && <p className="text-[9px] text-slate-500 mt-0.5">本文: {r.savedSummary}...</p>}
+                                  {r.savedCtaUrl && <p className="text-[9px] text-slate-400 mt-0.5">CTA: {r.savedCtaUrl.slice(0, 60)}</p>}
                                   {r.warnings?.length > 0 && r.warnings.map((w: string, wi: number) => (
                                     <p key={wi} className="text-[9px] text-amber-600 mt-0.5">⚠ {w}</p>
                                   ))}
