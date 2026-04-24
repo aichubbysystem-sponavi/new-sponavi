@@ -484,16 +484,26 @@ export async function POST(request: NextRequest) {
     .not("gbp_location_name", "is", null);
 
   // 差し込み文字列を一括取得（全店舗分）
-  const { data: allFixedMsgs } = await supabase.from("fixed_messages").select("shop_id, message");
   const fixedMsgMap: Record<string, string> = {};
-  if (allFixedMsgs) {
-    for (const fm of allFixedMsgs) {
-      if (fm.shop_id && fm.message) {
-        fixedMsgMap[fm.shop_id] = fixedMsgMap[fm.shop_id]
-          ? `${fixedMsgMap[fm.shop_id]}\n${fm.message}`
-          : fm.message;
+  let fixedMsgDebug = "";
+  try {
+    const { data: allFixedMsgs, error: fmErr } = await supabase.from("fixed_messages").select("shop_id, message");
+    if (fmErr) {
+      fixedMsgDebug = `fixed_messagesクエリエラー: ${fmErr.message}`;
+    } else if (allFixedMsgs && allFixedMsgs.length > 0) {
+      for (const fm of allFixedMsgs) {
+        if (fm.shop_id && fm.message) {
+          fixedMsgMap[fm.shop_id] = fixedMsgMap[fm.shop_id]
+            ? `${fixedMsgMap[fm.shop_id]}\n${fm.message}`
+            : fm.message;
+        }
       }
+      fixedMsgDebug = `${allFixedMsgs.length}件取得, ${Object.keys(fixedMsgMap).length}店舗分`;
+    } else {
+      fixedMsgDebug = "fixed_messagesテーブルにデータなし(0件)";
     }
+  } catch (e: any) {
+    fixedMsgDebug = `fixed_messages例外: ${e?.message}`;
   }
 
   // === 予約投稿モード: scheduled_postsテーブルに保存して終了 ===
@@ -573,7 +583,7 @@ export async function POST(request: NextRequest) {
           schedResults.push({ shopName: match.shopName, status: `DB保存エラー: ${insertErr.message}` });
           schedErrors++;
         } else if (warnings.length > 0) {
-          schedResults.push({ shopName: match.shopName, status: `保留（要確認）`, warnings, savedSummary: (match.summary || "").slice(0, 80), savedCtaUrl: match.ctaUrl || "", debug: `shopId=${shop.id.slice(0,8)}, fixedMsg=${fixedMsg ? fixedMsg.slice(0,30) : "なし"}, fixedMsgKeys=${fixedMsgKeys.length}件` });
+          schedResults.push({ shopName: match.shopName, status: `保留（要確認）`, warnings, savedSummary: (match.summary || "").slice(0, 80), savedCtaUrl: match.ctaUrl || "", debug: `shopId=${shop.id.slice(0,8)}, fixedMsg=${fixedMsg ? fixedMsg.slice(0,30) : "なし"}, DB=${fixedMsgDebug}` });
           schedErrors++;
         } else {
           schedResults.push({ shopName: match.shopName, status: "予約登録成功", warnings: [], savedSummary: (match.summary || "").slice(0, 80), savedCtaUrl: match.ctaUrl || "" });

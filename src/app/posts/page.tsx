@@ -124,15 +124,14 @@ export default function PostsPage() {
 
   const isAllMode = shopFilterMode === "all";
 
-  // 差し込み文字列取得
+  // 差し込み文字列取得（Supabase直接）
   useEffect(() => {
     if (!selectedShopId) { setFixedMessages([]); return; }
     (async () => {
       try {
-        const res = await api.get(`/api/shop/${selectedShopId}`);
-        const msgs = res.data?.fixed_messages;
-        if (Array.isArray(msgs) && msgs.length > 0) {
-          setFixedMessages(msgs.map((m: any) => ({ id: m.id, title: m.title || "", message: m.message || "" })));
+        const { data } = await supabase.from("fixed_messages").select("*").eq("shop_id", selectedShopId);
+        if (Array.isArray(data) && data.length > 0) {
+          setFixedMessages(data.map((m: any) => ({ id: m.id, title: m.title || "", message: m.message || "" })));
         } else {
           setFixedMessages([]);
         }
