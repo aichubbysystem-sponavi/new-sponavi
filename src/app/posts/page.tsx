@@ -75,7 +75,8 @@ export default function PostsPage() {
   const [autoPostResult, setAutoPostResult] = useState<any>(null);
   const [autoPostAttempt, setAutoPostAttempt] = useState(1); // 実行回数
   const [autoPostFailedShops, setAutoPostFailedShops] = useState<string[]>([]); // 失敗店舗名一覧（再実行用）
-  const [scheduleTime, setScheduleTime] = useState("09:00"); // 予約投稿時刻
+  const [scheduleDate, setScheduleDate] = useState(new Date().toISOString().slice(0, 10)); // 予約日付
+  const [scheduleTime, setScheduleTime] = useState("09:00"); // 予約時刻
   const [showAutoPost, setShowAutoPost] = useState(false);
   const [creating, setCreating] = useState(false);
   const [msg, setMsg] = useState("");
@@ -621,20 +622,22 @@ export default function PostsPage() {
                   </div>
                 </div>
                 {/* 予約投稿 */}
-                <div className="flex items-center gap-3 mt-2">
-                  <label className="text-xs text-slate-500 whitespace-nowrap">予約時刻</label>
+                <div className="flex items-center gap-3 mt-2 flex-wrap">
+                  <label className="text-xs text-slate-500 whitespace-nowrap">予約日時</label>
+                  <input type="date" value={scheduleDate} onChange={(e) => setScheduleDate(e.target.value)}
+                    className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm w-36" />
                   <input type="time" value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)}
                     className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm w-24" />
                   <button onClick={async () => {
                     setAutoPosting(true); setAutoPostResult(null);
                     const filterName = !isAllMode && selectedShop ? selectedShop.name : undefined;
                     const retryShops = autoPostAttempt > 1 && autoPostFailedShops.length > 0 ? autoPostFailedShops : undefined;
-                    const scheduledAt = `${autoPostDate}T${scheduleTime}:00+09:00`;
+                    const scheduledAt = `${scheduleDate}T${scheduleTime}:00+09:00`;
                     try {
                       const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, filterShopName: filterName, filterShopNames: retryShops }, { timeout: 60000 });
                       const total = previewRes.data.matches || 0;
                       if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません` }); setAutoPosting(false); return; }
-                      if (!confirm(`${autoPostDate} ${scheduleTime} に予約投稿しますか？\n\n${total}件を予約登録します`)) { setAutoPosting(false); return; }
+                      if (!confirm(`${scheduleDate} ${scheduleTime} に予約投稿しますか？\n\n${total}件を予約登録します`)) { setAutoPosting(false); return; }
 
                       const bs = 10;
                       let totalPosted = 0, totalErrors = 0;
@@ -698,11 +701,13 @@ export default function PostsPage() {
                       const results = autoPostResult.results || [];
                       const successItems = results.filter((r: any) => r.status?.includes("成功"));
                       const failedItems = results.filter((r: any) => !r.status?.includes("成功"));
+                      const warnItems = successItems.filter((r: any) => r.warnings?.length > 0);
                       return (
                       <>
-                        <div className="flex items-center gap-3 mb-3">
+                        <div className="flex items-center gap-3 mb-3 flex-wrap">
                           <p className="font-semibold">{autoPostResult.attempt || 1}回目実行結果:</p>
                           <span className="text-xs px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-semibold">{successItems.length}件成功</span>
+                          {warnItems.length > 0 && <span className="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-semibold">{warnItems.length}件警告あり</span>}
                           {failedItems.length > 0 && <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-700 font-semibold">{failedItems.length}件スキップ/エラー</span>}
                         </div>
 
@@ -729,11 +734,14 @@ export default function PostsPage() {
                             <div className="mt-1">
                               {successItems.map((r: any, i: number) => (
                                 <div key={`s-${i}`} className="py-1 border-t border-emerald-100">
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-2 flex-wrap">
                                     <span className="text-xs font-medium">{r.shopName}</span>
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">{r.status}</span>
+                                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${r.verified === false ? "bg-yellow-100 text-yellow-700" : "bg-emerald-100 text-emerald-700"}`}>{r.status}</span>
                                   </div>
                                   {r.gbpPostName && <p className="text-[9px] text-emerald-500 mt-0.5">Post ID: {r.gbpPostName}</p>}
+                                  {r.warnings?.length > 0 && r.warnings.map((w: string, wi: number) => (
+                                    <p key={wi} className="text-[9px] text-amber-600 mt-0.5">⚠ {w}</p>
+                                  ))}
                                 </div>
                               ))}
                             </div>

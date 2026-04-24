@@ -510,6 +510,27 @@ export async function POST(request: NextRequest) {
         schedErrors++;
         continue;
       }
+
+      // === 予約投稿バリデーション ===
+      const warnings: string[] = [];
+
+      // 1. CTAリンク生存確認（J列にURLがある場合）
+      if (match.ctaUrl) {
+        try {
+          const linkRes = await fetch(match.ctaUrl, { method: "HEAD", signal: AbortSignal.timeout(8000), redirect: "follow" });
+          if (!linkRes.ok) warnings.push(`CTAリンク異常(${linkRes.status}): ${match.ctaUrl.slice(0, 60)}`);
+        } catch {
+          warnings.push(`CTAリンク到達不可: ${match.ctaUrl.slice(0, 60)}`);
+        }
+      }
+
+      // 2. 店舗名が投稿文中に3回以上含まれているかチェック
+      if (!isPhotoOnly && match.summary) {
+        const shopNameForCount = shop.name;
+        const nameCount = (match.summary.split(shopNameForCount).length - 1);
+        if (nameCount >= 3) warnings.push(`店舗名「${shopNameForCount}」が本文中に${nameCount}回出現（3回以上）`);
+      }
+
       try {
         const { error: insertErr } = await supabase.from("scheduled_posts").insert({
           id: crypto.randomUUID(),
@@ -527,7 +548,8 @@ export async function POST(request: NextRequest) {
           schedResults.push({ shopName: match.shopName, status: `DB保存エラー: ${insertErr.message}` });
           schedErrors++;
         } else {
-          schedResults.push({ shopName: match.shopName, status: "予約登録成功" });
+          const warnText = warnings.length > 0 ? ` ⚠ ${warnings.join(" / ")}` : "";
+          schedResults.push({ shopName: match.shopName, status: `予約登録成功${warnText}`, warnings });
           scheduled++;
         }
       } catch (e: any) {
@@ -669,7 +691,16 @@ export async function POST(request: NextRequest) {
             media_url: match.photoUrl || null, search_url: result.searchUrl || null,
             gbp_post_name: result.name,
           });
-          results.push({ shopName: match.shopName, status: "投稿成功", summary: match.summary.slice(0, 30), gbpPostName: result.name, searchUrl: result.searchUrl });
+          // GBPに実際に投稿が存在するか確認（GET投稿）
+          let verified = false;
+          try {
+            const verifyRes = await fetch(`${GBP_API_BASE}/${result.name}`, {
+              headers: { Authorization: `Bearer ${accessToken}` },
+              signal: AbortSignal.timeout(10000),
+            });
+            verified = verifyRes.ok;
+          } catch {}
+          results.push({ shopName: match.shopName, status: verified ? "投稿成功（確認済み）" : "投稿成功（未確認）", summary: match.summary.slice(0, 30), gbpPostName: result.name, searchUrl: result.searchUrl, verified });
           posted++;
         } else {
           // HTTP 200だがGBP投稿が作成されていない
