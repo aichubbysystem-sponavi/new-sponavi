@@ -347,7 +347,7 @@ export async function POST(request: NextRequest) {
 
   // 対象タブを読み込み
   const tabs = ["投稿用シート", "報告必須店舗 投稿用シート", "WHITE 系列 投稿用シート"];
-  const allMatches: { shopName: string; summary: string; photoUrl: string; tab: string; rawPhotoCell: string; rawDateCell: string; photoDebug: string }[] = [];
+  const allMatches: { shopName: string; summary: string; photoUrl: string; ctaUrl: string; tab: string; rawPhotoCell: string; rawDateCell: string; photoDebug: string }[] = [];
   const pendingPhotoSearch: { index: number; photoCell: string; shopName: string }[] = [];
 
   for (const tab of tabs) {
@@ -370,6 +370,7 @@ export async function POST(request: NextRequest) {
         const postText = (row[2] || "").trim(); // C列（index 2）
         const dateCell = (row[4] || "").trim(); // E列（index 4）
         const photoCell = (row[5] || "").trim(); // F列（index 5）
+        const ctaUrl = (row[9] || "").trim(); // J列（index 9）CTAボタンURL
 
         if (!shopName) continue;
         if (!isPhotoOnly && !postText) continue; // 写真のみ投稿ではテキスト不要
@@ -392,13 +393,13 @@ export async function POST(request: NextRequest) {
         // dryRun（プレビュー）時はDropbox写真検索をスキップ → 高速化
         if (dryRun) {
           const hasPhoto = !!photoCell;
-          allMatches.push({ shopName, summary: postText || (isPhotoOnly ? "（写真のみ）" : ""), photoUrl: "", tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: hasPhoto ? "写真あり（確認時はスキップ）" : "F列が空" });
+          allMatches.push({ shopName, summary: postText || (isPhotoOnly ? "（写真のみ）" : ""), photoUrl: "", ctaUrl, tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: hasPhoto ? "写真あり（確認時はスキップ）" : "F列が空" });
           continue;
         }
 
         // 実行時: 一旦写真なしでマッチを記録（後で並列検索）
         pendingPhotoSearch.push({ index: allMatches.length, photoCell, shopName });
-        allMatches.push({ shopName, summary: postText || "", photoUrl: "", tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: "" });
+        allMatches.push({ shopName, summary: postText || "", photoUrl: "", ctaUrl, tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: "" });
       }
     } catch (e) {
       console.error(`[auto-post] Tab "${tab}" error:`, e);
@@ -564,6 +565,10 @@ export async function POST(request: NextRequest) {
     // 本文を1500文字に制限
     const trimmedSummary = match.summary.slice(0, 1500);
     const postBody: any = { summary: trimmedSummary, topicType: "STANDARD", languageCode: "ja" };
+    // J列にURLがあれば「詳細」CTAボタンを設定
+    if (match.ctaUrl) {
+      postBody.callToAction = { actionType: "LEARN_MORE", url: match.ctaUrl };
+    }
     if (match.photoUrl) {
       const directUrl = match.photoUrl.includes("dropboxusercontent.com") || match.photoUrl.includes("dl.dropbox")
         ? match.photoUrl : convertDropboxUrl(match.photoUrl);
@@ -580,7 +585,8 @@ export async function POST(request: NextRequest) {
 
       // 写真付きで失敗したら写真なしでリトライ
       if (!res.ok && match.photoUrl) {
-        const retryBody = { summary: trimmedSummary, topicType: "STANDARD", languageCode: "ja" };
+        const retryBody: any = { summary: trimmedSummary, topicType: "STANDARD", languageCode: "ja" };
+        if (match.ctaUrl) retryBody.callToAction = { actionType: "LEARN_MORE", url: match.ctaUrl };
         res = await fetch(`${GBP_API_BASE}/${locationName}/localPosts`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
