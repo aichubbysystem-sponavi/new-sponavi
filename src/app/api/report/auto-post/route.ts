@@ -483,6 +483,31 @@ export async function POST(request: NextRequest) {
     .select("id, name, gbp_location_name, gbp_shop_name")
     .not("gbp_location_name", "is", null);
 
+  // 差し込み文字列を一括取得（全店舗分）
+  const { data: allFixedMsgs } = await supabase.from("fixed_messages").select("shop_id, message");
+  const fixedMsgMap: Record<string, string> = {};
+  if (allFixedMsgs) {
+    for (const fm of allFixedMsgs) {
+      if (fm.shop_id && fm.message) {
+        fixedMsgMap[fm.shop_id] = fixedMsgMap[fm.shop_id]
+          ? `${fixedMsgMap[fm.shop_id]}\n${fm.message}`
+          : fm.message;
+      }
+    }
+  }
+
+  // 各マッチの投稿文に差し込み文字列を結合
+  for (const match of batchMatches) {
+    if (isPhotoOnly) continue; // 写真のみは結合不要
+    const shop = (shops || []).find((s) =>
+      s.name === match.shopName || s.gbp_shop_name === match.shopName
+      || s.name.includes(match.shopName) || match.shopName.includes(s.name)
+    );
+    if (shop && fixedMsgMap[shop.id] && match.summary) {
+      match.summary = `${match.summary}\n\n${fixedMsgMap[shop.id]}`;
+    }
+  }
+
   // === 予約投稿モード: scheduled_postsテーブルに保存して終了 ===
   if (scheduleMode) {
     const scheduledTime = scheduleAt || `${targetDate}T09:00:00+09:00`;
