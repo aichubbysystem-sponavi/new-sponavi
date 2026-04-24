@@ -398,7 +398,7 @@ export async function POST(request: NextRequest) {
     // 写真のみモード: GBP Media APIで写真アップロードのみ（テキスト投稿しない）
     if (isPhotoOnly) {
       if (!match.photoUrl) {
-        results.push({ shopName: match.shopName, status: "写真なし（スキップ）", summary: match.photoDebug || "Dropboxから写真取得失敗" });
+        results.push({ shopName: match.shopName, status: "写真なし（スキップ）", detail: match.photoDebug || "Dropboxから写真取得失敗", summary: `F列: ${match.rawPhotoCell?.slice(0, 80) || "空"}`, dateCompact });
         errors++;
         continue;
       }
