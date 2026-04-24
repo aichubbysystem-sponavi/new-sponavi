@@ -483,28 +483,43 @@ export async function POST(request: NextRequest) {
     .select("id, name, gbp_location_name, gbp_shop_name")
     .not("gbp_location_name", "is", null);
 
-  // 差し込み文字列を一括取得（全店舗分）
-  const fixedMsgMap: Record<string, string> = {};
-  let fixedMsgDebug = "";
+  // 差し込み文字列を一括取得（shop_idとshop_name両方でマッチできるように）
+  const fixedMsgByShopId: Record<string, string> = {};
+  const fixedMsgByShopName: Record<string, string> = {};
   try {
-    const { data: allFixedMsgs, error: fmErr } = await supabase.from("fixed_messages").select("shop_id, message");
-    if (fmErr) {
-      fixedMsgDebug = `fixed_messagesクエリエラー: ${fmErr.message}`;
-    } else if (allFixedMsgs && allFixedMsgs.length > 0) {
+    // fixed_messagesにshop_nameカラムがない場合はshops経由で名前を解決
+    const { data: allFixedMsgs } = await supabase.from("fixed_messages").select("shop_id, message");
+    if (allFixedMsgs) {
+      // shop_id→shop_nameのマッピングを構築
+      const shopIdToName: Record<string, string> = {};
+      for (const s of (shops || [])) { shopIdToName[s.id] = s.name; }
+      // 全shop一覧から追加（gbp_location_nameがnullの店舗も含む）
+      const { data: allShopsForName } = await supabase.from("shops").select("id, name");
+      if (allShopsForName) {
+        for (const s of allShopsForName) { shopIdToName[s.id] = s.name; }
+      }
+
       for (const fm of allFixedMsgs) {
         if (fm.shop_id && fm.message) {
-          fixedMsgMap[fm.shop_id] = fixedMsgMap[fm.shop_id]
-            ? `${fixedMsgMap[fm.shop_id]}\n${fm.message}`
+          fixedMsgByShopId[fm.shop_id] = fixedMsgByShopId[fm.shop_id]
+            ? `${fixedMsgByShopId[fm.shop_id]}\n${fm.message}`
             : fm.message;
+          // shop_name経由でもマッチできるように
+          const name = shopIdToName[fm.shop_id];
+          if (name) {
+            fixedMsgByShopName[name] = fixedMsgByShopName[name]
+              ? `${fixedMsgByShopName[name]}\n${fm.message}`
+              : fm.message;
+          }
         }
       }
-      fixedMsgDebug = `${allFixedMsgs.length}件取得, ${Object.keys(fixedMsgMap).length}店舗分`;
-    } else {
-      fixedMsgDebug = "fixed_messagesテーブルにデータなし(0件)";
     }
-  } catch (e: any) {
-    fixedMsgDebug = `fixed_messages例外: ${e?.message}`;
-  }
+  } catch {}
+
+  // shop_idまたはshop_nameで差し込み文字列を取得するヘルパー
+  const getFixedMsg = (shopId: string, shopName: string): string => {
+    return fixedMsgByShopId[shopId] || fixedMsgByShopName[shopName] || "";
+  };
 
   // === 予約投稿モード: scheduled_postsテーブルに保存して終了 ===
   if (scheduleMode) {
@@ -534,9 +549,8 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      // 差し込み文字列を投稿文に結合
-      const fixedMsg = fixedMsgMap[shop.id] || "";
-      const fixedMsgKeys = Object.keys(fixedMsgMap);
+      // 差し込み文字列を投稿文に結合（shop_idまたはshop_nameでマッチ）
+      const fixedMsg = getFixedMsg(shop.id, shop.name);
       if (!isPhotoOnly && match.summary && fixedMsg) {
         match.summary = `${match.summary}\n\n${fixedMsg}`;
       }
@@ -583,7 +597,7 @@ export async function POST(request: NextRequest) {
           schedResults.push({ shopName: match.shopName, status: `DB保存エラー: ${insertErr.message}` });
           schedErrors++;
         } else if (warnings.length > 0) {
-          schedResults.push({ shopName: match.shopName, status: `保留（要確認）`, warnings, savedSummary: (match.summary || "").slice(0, 80), savedCtaUrl: match.ctaUrl || "", debug: `shopId=${shop.id.slice(0,8)}, fixedMsg=${fixedMsg ? fixedMsg.slice(0,30) : "なし"}, DB=${fixedMsgDebug}` });
+          schedResults.push({ shopName: match.shopName, status: `保留（要確認）`, warnings, savedSummary: (match.summary || "").slice(0, 80), savedCtaUrl: match.ctaUrl || "" });
           schedErrors++;
         } else {
           schedResults.push({ shopName: match.shopName, status: "予約登録成功", warnings: [], savedSummary: (match.summary || "").slice(0, 80), savedCtaUrl: match.ctaUrl || "" });
@@ -626,8 +640,9 @@ export async function POST(request: NextRequest) {
     }
 
     // 差し込み文字列を投稿文に結合（即時投稿）
-    if (!isPhotoOnly && match.summary && fixedMsgMap[shop.id]) {
-      match.summary = `${match.summary}\n\n${fixedMsgMap[shop.id]}`;
+    const fixedMsgImm = getFixedMsg(shop.id, shop.name);
+    if (!isPhotoOnly && match.summary && fixedMsgImm) {
+      match.summary = `${match.summary}\n\n${fixedMsgImm}`;
     }
 
     const { resolveLocationName } = await import("@/lib/gbp-location");
