@@ -271,6 +271,13 @@ export async function POST(request: NextRequest) {
 
         if (!dateMatch) continue;
 
+        // dryRun（プレビュー）時はDropbox写真検索をスキップ → 高速化
+        if (dryRun) {
+          const hasPhoto = !!photoCell;
+          allMatches.push({ shopName, summary: postText, photoUrl: "", tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: hasPhoto ? "写真あり（確認時はスキップ）" : "F列が空" });
+          continue;
+        }
+
         // F列のDropboxフォルダURLから日付で写真を検索（複数写真対応）
         let photoUrls: string[] = [];
         let photoDebug = "";
