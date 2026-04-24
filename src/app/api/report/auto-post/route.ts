@@ -496,18 +496,6 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // 各マッチの投稿文に差し込み文字列を結合
-  for (const match of batchMatches) {
-    if (isPhotoOnly) continue; // 写真のみは結合不要
-    const shop = (shops || []).find((s) =>
-      s.name === match.shopName || s.gbp_shop_name === match.shopName
-      || s.name.includes(match.shopName) || match.shopName.includes(s.name)
-    );
-    if (shop && fixedMsgMap[shop.id] && match.summary) {
-      match.summary = `${match.summary}\n\n${fixedMsgMap[shop.id]}`;
-    }
-  }
-
   // === 予約投稿モード: scheduled_postsテーブルに保存して終了 ===
   if (scheduleMode) {
     const scheduledTime = scheduleAt || `${targetDate}T09:00:00+09:00`;
@@ -534,6 +522,11 @@ export async function POST(request: NextRequest) {
         schedResults.push({ shopName: match.shopName, status: "店舗未登録（スキップ）" });
         schedErrors++;
         continue;
+      }
+
+      // 差し込み文字列を投稿文に結合
+      if (!isPhotoOnly && match.summary && fixedMsgMap[shop.id]) {
+        match.summary = `${match.summary}\n\n${fixedMsgMap[shop.id]}`;
       }
 
       // === 予約投稿バリデーション ===
@@ -618,6 +611,11 @@ export async function POST(request: NextRequest) {
       results.push({ shopName: match.shopName, status: "店舗未登録", summary: match.summary.slice(0, 30) });
       errors++;
       continue;
+    }
+
+    // 差し込み文字列を投稿文に結合（即時投稿）
+    if (!isPhotoOnly && match.summary && fixedMsgMap[shop.id]) {
+      match.summary = `${match.summary}\n\n${fixedMsgMap[shop.id]}`;
     }
 
     const { resolveLocationName } = await import("@/lib/gbp-location");
