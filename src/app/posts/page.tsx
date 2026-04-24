@@ -75,6 +75,7 @@ export default function PostsPage() {
   const [autoPostResult, setAutoPostResult] = useState<any>(null);
   const [autoPostAttempt, setAutoPostAttempt] = useState(1); // 実行回数
   const [autoPostFailedShops, setAutoPostFailedShops] = useState<string[]>([]); // 失敗店舗名一覧（再実行用）
+  const [scheduleTime, setScheduleTime] = useState("09:00"); // 予約投稿時刻
   const [showAutoPost, setShowAutoPost] = useState(false);
   const [creating, setCreating] = useState(false);
   const [msg, setMsg] = useState("");
@@ -619,7 +620,58 @@ export default function PostsPage() {
                     </button>
                   </div>
                 </div>
-                <p className="text-[10px] text-slate-400">タブ「投稿用シート」「報告必須店舗 投稿用シート」「WHITE 系列 投稿用シート」のB列=店舗名、C列=投稿本文、E列=日付、F列=写真URL</p>
+                {/* 予約投稿 */}
+                <div className="flex items-center gap-3 mt-2">
+                  <label className="text-xs text-slate-500 whitespace-nowrap">予約時刻</label>
+                  <input type="time" value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)}
+                    className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm w-24" />
+                  <button onClick={async () => {
+                    setAutoPosting(true); setAutoPostResult(null);
+                    const filterName = !isAllMode && selectedShop ? selectedShop.name : undefined;
+                    const retryShops = autoPostAttempt > 1 && autoPostFailedShops.length > 0 ? autoPostFailedShops : undefined;
+                    const scheduledAt = `${autoPostDate}T${scheduleTime}:00+09:00`;
+                    try {
+                      const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, filterShopName: filterName, filterShopNames: retryShops }, { timeout: 60000 });
+                      const total = previewRes.data.matches || 0;
+                      if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません` }); setAutoPosting(false); return; }
+                      if (!confirm(`${autoPostDate} ${scheduleTime} に予約投稿しますか？\n\n${total}件を予約登録します`)) { setAutoPosting(false); return; }
+
+                      const bs = 10;
+                      let totalPosted = 0, totalErrors = 0;
+                      const allResults: any[] = [];
+                      for (let off = 0; off < total; off += bs) {
+                        setMsg(`予約登録中... ${off}/${total}件`);
+                        try {
+                          const res = await api.post("/api/report/auto-post", {
+                            sheetId: autoPostSheet, targetDate: autoPostDate,
+                            topicType: postSelectedType || newPost.topicType,
+                            batchOffset: off, batchSize: bs,
+                            filterShopName: filterName, filterShopNames: retryShops,
+                            scheduleMode: true, scheduleAt: scheduledAt,
+                          }, { timeout: 180000 });
+                          totalPosted += res.data.posted || 0;
+                          totalErrors += res.data.errors || 0;
+                          if (res.data.results) allResults.push(...res.data.results);
+                        } catch (e: any) {
+                          totalErrors++;
+                          allResults.push({ shopName: `バッチ${Math.floor(off / bs) + 1}`, status: `エラー: ${e?.message}` });
+                        }
+                      }
+                      const failed = allResults.filter((r: any) => !r.status?.includes("成功")).map((r: any) => r.shopName);
+                      const uniqueFailed = Array.from(new Set(failed));
+                      setAutoPostFailedShops(uniqueFailed);
+                      setAutoPostResult({ mode: "executed", posted: totalPosted, errors: totalErrors, results: allResults, matches: total, attempt: autoPostAttempt, failedShops: uniqueFailed });
+                      setAutoPostAttempt(autoPostAttempt + 1);
+                      logAudit("シート予約投稿", `${autoPostDate} ${scheduleTime} — ${totalPosted}件予約`);
+                      setMsg(`完了: ${totalPosted}件予約登録 / ${totalErrors}件エラー`);
+                    } catch (e: any) { setAutoPostResult({ error: e?.response?.data?.error || e?.message }); }
+                    finally { setAutoPosting(false); }
+                  }} disabled={autoPosting}
+                    className="px-4 py-2 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700" style={{ color: "#fff" }}>
+                    {autoPosting ? "予約中..." : "予約投稿として登録"}
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-400">タブ「投稿用シート」「報告必須店舗 投稿用シート」「WHITE 系列 投稿用シート」のB列=店舗名、C列=投稿本文、E列=日付、F列=写真URL、J列=CTAボタンURL</p>
 
                 {autoPostResult && (
                   <div className={`rounded-lg p-3 text-sm ${autoPostResult.error ? "bg-red-50 text-red-700 border border-red-200" : autoPostResult.mode === "preview" ? "bg-blue-50 text-blue-700 border border-blue-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}>

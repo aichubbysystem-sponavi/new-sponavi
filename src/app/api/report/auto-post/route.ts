@@ -321,7 +321,7 @@ export async function POST(request: NextRequest) {
   if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
   const body = await request.json();
-  const { sheetId, targetDate, dryRun, topicType, batchOffset, batchSize, filterShopName, filterShopNames } = body as {
+  const { sheetId, targetDate, dryRun, topicType, batchOffset, batchSize, filterShopName, filterShopNames, scheduleMode, scheduleAt } = body as {
     sheetId: string;
     targetDate: string; // "2026-04-11"
     dryRun?: boolean;
@@ -330,6 +330,8 @@ export async function POST(request: NextRequest) {
     batchSize?: number; // バッチサイズ（デフォルト10）
     filterShopName?: string; // 特定店舗のみに絞り込み（単一）
     filterShopNames?: string[]; // 特定店舗リストに絞り込み（再実行用）
+    scheduleMode?: boolean; // true: 即時投稿ではなく予約投稿として保存
+    scheduleAt?: string; // 予約日時 "2026-04-12T09:00:00"（scheduleMode時）
   };
   const isPhotoOnly = topicType === "PHOTO";
 
@@ -476,14 +478,76 @@ export async function POST(request: NextRequest) {
   const size = batchSize || allMatches.length; // 未指定時は全件
   const batchMatches = allMatches.slice(offset, offset + size);
 
-  // GBP投稿実行
-  const accessToken = await getOAuthToken();
-  if (!accessToken) return NextResponse.json({ error: "OAuthトークンなし" }, { status: 500 });
-
   const supabase = getSupabase();
   const { data: shops } = await supabase.from("shops")
     .select("id, name, gbp_location_name, gbp_shop_name")
     .not("gbp_location_name", "is", null);
+
+  // === 予約投稿モード: scheduled_postsテーブルに保存して終了 ===
+  if (scheduleMode) {
+    const scheduledTime = scheduleAt || `${targetDate}T09:00:00+09:00`;
+    let scheduled = 0;
+    let schedErrors = 0;
+    const schedResults: any[] = [];
+
+    for (const match of batchMatches) {
+      if (isPhotoOnly && !match.photoUrl) {
+        schedResults.push({ shopName: match.shopName, status: "写真なし（スキップ）", detail: match.photoDebug });
+        schedErrors++;
+        continue;
+      }
+      if (!isPhotoOnly && !match.summary) {
+        schedResults.push({ shopName: match.shopName, status: "本文なし（スキップ）" });
+        schedErrors++;
+        continue;
+      }
+      const shop = (shops || []).find((s) =>
+        s.name === match.shopName || s.gbp_shop_name === match.shopName
+        || s.name.includes(match.shopName) || match.shopName.includes(s.name)
+      );
+      if (!shop) {
+        schedResults.push({ shopName: match.shopName, status: "店舗未登録（スキップ）" });
+        schedErrors++;
+        continue;
+      }
+      try {
+        const { error: insertErr } = await supabase.from("scheduled_posts").insert({
+          id: crypto.randomUUID(),
+          shop_id: shop.id,
+          shop_name: shop.name,
+          summary: match.summary || "",
+          topic_type: isPhotoOnly ? "PHOTO" : "STANDARD",
+          photo_url: match.photoUrl || null,
+          action_type: match.ctaUrl ? "LEARN_MORE" : null,
+          action_url: match.ctaUrl || null,
+          scheduled_at: scheduledTime,
+          status: "pending",
+        });
+        if (insertErr) {
+          schedResults.push({ shopName: match.shopName, status: `DB保存エラー: ${insertErr.message}` });
+          schedErrors++;
+        } else {
+          schedResults.push({ shopName: match.shopName, status: "予約登録成功" });
+          scheduled++;
+        }
+      } catch (e: any) {
+        schedResults.push({ shopName: match.shopName, status: `エラー: ${e?.message}` });
+        schedErrors++;
+      }
+    }
+
+    return NextResponse.json({
+      matches: allMatches.length,
+      posted: scheduled, errors: schedErrors, results: schedResults,
+      batchOffset: offset, batchSize: size, batchProcessed: batchMatches.length,
+      hasMore: offset + size < allMatches.length, nextOffset: offset + size,
+      scheduleMode: true, scheduledAt: scheduledTime,
+    });
+  }
+
+  // === 即時投稿モード ===
+  const accessToken = await getOAuthToken();
+  if (!accessToken) return NextResponse.json({ error: "OAuthトークンなし" }, { status: 500 });
 
   let posted = 0;
   let errors = 0;
