@@ -232,7 +232,7 @@ export async function POST(request: NextRequest) {
 
   // 日付フォーマット変換
   const dateObj = new Date(targetDate);
-  const dateCompact = `${dateObj.getFullYear()}${String(dateObj.getMonth() + 1).padStart(2, "0")}${String(dateObj.getDate()).padStart(2, "0")}`;
+  const dateCompact = `${String(dateObj.getFullYear()).slice(2)}-${dateObj.getMonth() + 1}-${dateObj.getDate()}`; // "26-4-24"形式
   const dateSlash = `${dateObj.getFullYear()}/${dateObj.getMonth() + 1}/${dateObj.getDate()}`;
   const dateSlashPad = `${dateObj.getFullYear()}/${String(dateObj.getMonth() + 1).padStart(2, "0")}/${String(dateObj.getDate()).padStart(2, "0")}`;
 
