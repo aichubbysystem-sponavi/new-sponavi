@@ -24,8 +24,9 @@ export default function FixedMessagePage() {
     setError("");
     setMsg("");
     try {
-      const res = await api.get(`/api/shop/${selectedShopId}`);
-      const msgs = res.data?.fixed_messages;
+      // 専用エンドポイントで差し込み文字列を取得（/api/shop/{id}の400エラー回避）
+      const res = await api.get(`/api/shop/${selectedShopId}/fixed_message`);
+      const msgs = Array.isArray(res.data) ? res.data : res.data?.fixed_messages;
       if (Array.isArray(msgs) && msgs.length > 0) {
         setFields(msgs.map((m: any) => ({
           id: m.id || undefined,
@@ -36,7 +37,7 @@ export default function FixedMessagePage() {
         setFields([]);
       }
     } catch (e: any) {
-      if (e?.response?.status === 404) {
+      if (e?.response?.status === 404 || e?.response?.status === 400) {
         setFields([]);
       } else {
         setError(e?.userMessage || "差し込み文字列の取得に失敗しました");
