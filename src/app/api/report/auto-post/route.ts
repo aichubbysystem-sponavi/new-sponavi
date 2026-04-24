@@ -395,7 +395,38 @@ export async function POST(request: NextRequest) {
     const locationName = await resolveLocationName(shop.gbp_location_name);
     if (!locationName) { results.push({ shop: shop.name, status: "ロケーション解決失敗" }); continue; }
 
-    // 写真のみ投稿（追加写真）の場合はGBP Media APIで直接アップロード
+    // 写真のみモード: GBP Media APIで写真アップロードのみ（テキスト投稿しない）
+    if (isPhotoOnly) {
+      if (!match.photoUrl) {
+        results.push({ shopName: match.shopName, status: "写真なし（スキップ）", summary: match.photoDebug || "Dropboxから写真取得失敗" });
+        errors++;
+        continue;
+      }
+      try {
+        const directUrl = match.photoUrl.includes("dropboxusercontent.com") || match.photoUrl.includes("dl.dropbox")
+          ? match.photoUrl : convertDropboxUrl(match.photoUrl);
+        const mediaRes = await fetch(`${GBP_API_BASE}/${locationName}/media`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+          body: JSON.stringify({ mediaFormat: "PHOTO", sourceUrl: directUrl, locationAssociation: { category: "ADDITIONAL" } }),
+          signal: AbortSignal.timeout(30000),
+        });
+        if (mediaRes.ok) {
+          results.push({ shopName: match.shopName, status: "写真投稿成功", summary: `写真: ${match.photoDebug}` });
+          posted++;
+        } else {
+          const err = await mediaRes.text().catch(() => "");
+          results.push({ shopName: match.shopName, status: `写真エラー(${mediaRes.status})`, detail: err.slice(0, 200), summary: match.photoDebug });
+          errors++;
+        }
+      } catch (e: any) {
+        results.push({ shopName: match.shopName, status: `写真エラー: ${e?.message}`, summary: match.photoDebug });
+        errors++;
+      }
+      continue;
+    }
+
+    // 通常投稿: テキスト無しでsummaryが空の場合はMedia APIで写真のみアップロード
     if (!match.summary && match.photoUrl) {
       try {
         const directUrl = match.photoUrl.includes("dropboxusercontent.com") || match.photoUrl.includes("dl.dropbox")
