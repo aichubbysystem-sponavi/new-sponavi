@@ -239,6 +239,7 @@ export async function POST(request: NextRequest) {
   // 対象タブを読み込み
   const tabs = ["投稿用シート", "報告必須店舗 投稿用シート", "WHITE 系列 投稿用シート"];
   const allMatches: { shopName: string; summary: string; photoUrl: string; tab: string; rawPhotoCell: string; rawDateCell: string; photoDebug: string }[] = [];
+  const pendingPhotoSearch: { index: number; photoCell: string; shopName: string }[] = [];
 
   for (const tab of tabs) {
     try {
@@ -278,47 +279,53 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        // F列のDropboxフォルダURLから日付で写真を検索（複数写真対応）
-        let photoUrls: string[] = [];
-        let photoDebug = "";
-        if (photoCell) {
-          if (photoCell.includes("dropbox.com")) {
-            const result = await searchDropboxPhotosMultiple(photoCell.trim(), dateCompact, shopName);
-            photoUrls = result.urls;
-            photoDebug = result.debug;
-          }
-          if (photoUrls.length === 0) {
-            const urls = photoCell.match(/https?:\/\/[^\s,"]+/g) || [];
-            const dated = urls.filter((u) => u.includes(dateCompact));
-            photoUrls = dated.length > 0 ? dated.map(convertDropboxUrl) : [];
-          }
-          if (photoUrls.length === 0 && !photoDebug) photoDebug = "URLから写真を抽出できません";
-        } else {
-          photoDebug = "F列が空";
-        }
-
-        // 写真タイプ: 全て写真のみMedia API投稿（投稿文なし）
-        if (isPhotoOnly) {
-          for (let pi = 0; pi < photoUrls.length; pi++) {
-            allMatches.push({ shopName, summary: "", photoUrl: photoUrls[pi], tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: `写真${pi + 1}/${photoUrls.length}` });
-          }
-          if (photoUrls.length === 0) {
-            allMatches.push({ shopName, summary: "", photoUrl: "", tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug });
-          }
-        } else if (photoUrls.length <= 1) {
-          // 通常投稿: 投稿文+写真1枚
-          allMatches.push({ shopName, summary: postText, photoUrl: photoUrls[0] || "", tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: photoUrls.length > 0 ? `写真${photoUrls.length}枚取得` : photoDebug });
-        } else {
-          // 通常投稿+複数写真: 1件目は投稿文+写真、2件目以降は写真のみ
-          allMatches.push({ shopName, summary: postText, photoUrl: photoUrls[0], tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: `写真${photoUrls.length}枚取得（1/${photoUrls.length}）` });
-          for (let pi = 1; pi < photoUrls.length; pi++) {
-            allMatches.push({ shopName, summary: "", photoUrl: photoUrls[pi], tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: `写真${pi + 1}/${photoUrls.length}` });
-          }
-        }
+        // 実行時: 一旦写真なしでマッチを記録（後で並列検索）
+        pendingPhotoSearch.push({ index: allMatches.length, photoCell, shopName });
+        allMatches.push({ shopName, summary: postText, photoUrl: "", tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: "" });
       }
     } catch (e) {
       console.error(`[auto-post] Tab "${tab}" error:`, e);
     }
+  }
+
+  // Dropbox写真検索を並列実行（実行時のみ）
+  if (!dryRun && pendingPhotoSearch.length > 0) {
+    await Promise.all(pendingPhotoSearch.map(async (p) => {
+      const match = allMatches[p.index];
+      if (!p.photoCell) { match.photoDebug = "F列が空"; return; }
+
+      let photoUrls: string[] = [];
+      let photoDebug = "";
+      if (p.photoCell.includes("dropbox.com")) {
+        const result = await searchDropboxPhotosMultiple(p.photoCell.trim(), dateCompact, p.shopName);
+        photoUrls = result.urls;
+        photoDebug = result.debug;
+      }
+      if (photoUrls.length === 0) {
+        const urls = p.photoCell.match(/https?:\/\/[^\s,"]+/g) || [];
+        const dated = urls.filter((u: string) => u.includes(dateCompact));
+        photoUrls = dated.length > 0 ? dated.map(convertDropboxUrl) : [];
+      }
+      if (photoUrls.length === 0 && !photoDebug) photoDebug = "URLから写真を抽出できません";
+
+      if (isPhotoOnly) {
+        // 写真のみ: 1枚目をこのマッチに、残りを追加
+        match.photoUrl = photoUrls[0] || "";
+        match.photoDebug = photoUrls.length > 0 ? `写真1/${photoUrls.length}` : photoDebug;
+        for (let pi = 1; pi < photoUrls.length; pi++) {
+          allMatches.push({ ...match, summary: "", photoUrl: photoUrls[pi], photoDebug: `写真${pi + 1}/${photoUrls.length}` });
+        }
+      } else if (photoUrls.length <= 1) {
+        match.photoUrl = photoUrls[0] || "";
+        match.photoDebug = photoUrls.length > 0 ? `写真${photoUrls.length}枚取得` : photoDebug;
+      } else {
+        match.photoUrl = photoUrls[0];
+        match.photoDebug = `写真${photoUrls.length}枚取得（1/${photoUrls.length}）`;
+        for (let pi = 1; pi < photoUrls.length; pi++) {
+          allMatches.push({ ...match, summary: "", photoUrl: photoUrls[pi], photoDebug: `写真${pi + 1}/${photoUrls.length}` });
+        }
+      }
+    }));
   }
 
   if (allMatches.length === 0) {

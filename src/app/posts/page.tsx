@@ -575,7 +575,7 @@ export default function PostsPage() {
                               sheetId: autoPostSheet, targetDate: autoPostDate,
                               topicType: postSelectedType || newPost.topicType,
                               batchOffset: offset, batchSize: bs,
-                            }, { timeout: 55000 });
+                            }, { timeout: 180000 });
                             totalPosted += res.data.posted || 0;
                             totalErrors += res.data.errors || 0;
                             if (res.data.results) allResults.push(...res.data.results);
