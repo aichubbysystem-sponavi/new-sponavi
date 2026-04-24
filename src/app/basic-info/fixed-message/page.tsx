@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useShop } from "@/components/shop-provider";
-import api from "@/lib/api";
+import { supabase } from "@/lib/supabase";
 
 interface FieldEntry {
   id?: string;
@@ -24,12 +24,15 @@ export default function FixedMessagePage() {
     setError("");
     setMsg("");
     try {
-      // 専用エンドポイントで差し込み文字列を取得（/api/shop/{id}の400エラー回避）
-      const res = await api.get(`/api/shop/${selectedShopId}/fixed_message`);
-      const msgs = Array.isArray(res.data) ? res.data : res.data?.fixed_messages;
-      if (Array.isArray(msgs) && msgs.length > 0) {
-        setFields(msgs.map((m: any) => ({
-          id: m.id || undefined,
+      const { data, error: fetchErr } = await supabase
+        .from("fixed_messages")
+        .select("*")
+        .eq("shop_id", selectedShopId)
+        .order("created_at", { ascending: true });
+      if (fetchErr) throw fetchErr;
+      if (data && data.length > 0) {
+        setFields(data.map((m: any) => ({
+          id: m.id,
           title: String(m.title || ""),
           message: String(m.message || ""),
         })));
@@ -37,11 +40,7 @@ export default function FixedMessagePage() {
         setFields([]);
       }
     } catch (e: any) {
-      if (e?.response?.status === 404 || e?.response?.status === 400) {
-        setFields([]);
-      } else {
-        setError(e?.userMessage || "差し込み文字列の取得に失敗しました");
-      }
+      setError("差し込み文字列の取得に失敗しました: " + (e?.message || ""));
     } finally {
       setLoading(false);
     }
@@ -73,17 +72,22 @@ export default function FixedMessagePage() {
     setSaving(true);
     setMsg("");
     try {
-      // POST + { messages: [...] } 形式（旧システムと同じ形式）
-      const messages = fields.filter(f => f.title.trim()).map(f => ({
-        ...(f.id ? { id: f.id } : {}),
+      // 既存データを全削除して再挿入（upsert的動作）
+      await supabase.from("fixed_messages").delete().eq("shop_id", selectedShopId);
+      const rows = fields.filter(f => f.title.trim()).map(f => ({
+        id: f.id || crypto.randomUUID(),
+        shop_id: selectedShopId,
         title: f.title.trim(),
         message: f.message,
       }));
-      await api.post(`/api/shop/${selectedShopId}/fixed_message`, { messages });
+      if (rows.length > 0) {
+        const { error: insertErr } = await supabase.from("fixed_messages").insert(rows);
+        if (insertErr) throw insertErr;
+      }
       setMsg("保存しました");
       await fetchData();
     } catch (e: any) {
-      setMsg(`保存失敗: ${e?.response?.data?.message || e?.userMessage || e?.message || "不明なエラー"}`);
+      setMsg(`保存失敗: ${e?.message || "不明なエラー"}`);
     } finally {
       setSaving(false);
     }
