@@ -435,17 +435,26 @@ export async function POST(request: NextRequest) {
 
       if (res.ok) {
         const result = await res.json();
-        // post_logsに記録
-        await supabase.from("post_logs").insert({
-          id: crypto.randomUUID(), shop_id: shop.id, shop_name: shop.name,
-          summary: match.summary, topic_type: "STANDARD",
-          media_url: match.photoUrl || null, search_url: result.searchUrl || null,
-        });
-        results.push({ shopName: match.shopName, status: "投稿成功", summary: match.summary.slice(0, 30) });
-        posted++;
+        // GBPレスポンスにname（投稿ID）があるか検証
+        if (result.name) {
+          await supabase.from("post_logs").insert({
+            id: crypto.randomUUID(), shop_id: shop.id, shop_name: shop.name,
+            summary: match.summary, topic_type: "STANDARD",
+            media_url: match.photoUrl || null, search_url: result.searchUrl || null,
+            gbp_post_name: result.name,
+          });
+          results.push({ shopName: match.shopName, status: "投稿成功", summary: match.summary.slice(0, 30), gbpPostName: result.name, searchUrl: result.searchUrl });
+          posted++;
+        } else {
+          // HTTP 200だがGBP投稿が作成されていない
+          console.error(`[auto-post] GBP returned 200 but no post name:`, JSON.stringify(result).slice(0, 500));
+          results.push({ shopName: match.shopName, status: "GBP応答異常（投稿ID無し）", detail: JSON.stringify(result).slice(0, 300), summary: match.summary.slice(0, 30), locationName });
+          errors++;
+        }
       } else {
         const err = await res.text().catch(() => "");
-        results.push({ shopName: match.shopName, status: `エラー(${res.status})`, detail: err.slice(0, 200), summary: match.summary.slice(0, 30), photoUrl: match.photoUrl });
+        console.error(`[auto-post] GBP API error: ${res.status}`, err.slice(0, 500));
+        results.push({ shopName: match.shopName, status: `GBPエラー(${res.status})`, detail: err.slice(0, 300), summary: match.summary.slice(0, 30), photoUrl: match.photoUrl, locationName });
         errors++;
       }
     } catch (e: any) {

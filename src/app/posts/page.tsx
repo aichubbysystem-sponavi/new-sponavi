@@ -629,6 +629,8 @@ export default function PostsPage() {
                               <span className={`text-[10px] px-1.5 py-0.5 rounded ${r.status.includes("成功") ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>{r.status}</span>
                             </div>
                             {r.detail && <p className="text-[9px] text-red-400 mt-0.5 break-all">{r.detail}</p>}
+                            {r.locationName && <p className="text-[9px] text-slate-400 mt-0.5">Location: {r.locationName}</p>}
+                            {r.gbpPostName && <p className="text-[9px] text-emerald-500 mt-0.5">Post ID: {r.gbpPostName}</p>}
                           </div>
                         ))}
                       </>
