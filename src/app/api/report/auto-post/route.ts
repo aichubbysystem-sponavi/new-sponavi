@@ -96,63 +96,41 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
     let files: { name: string; path: string }[] = [];
     let debugSteps: string[] = [];
 
-    // 方法1: 共有リンク経由でlist_folder（shared_linkパラメータ使用）
-    try {
-      const listRes = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
-        body: JSON.stringify({ path: "", shared_link: { url: shareUrl }, recursive: true, limit: 2000 }),
-        signal: AbortSignal.timeout(15000),
-      });
-      if (listRes.ok) {
-        const listData = await listRes.json();
-        files = (listData.entries || [])
-          .filter((e: any) => e[".tag"] === "file")
-          .map((e: any) => ({ name: e.name || "", path: e.path_display || e.path_lower || "" }));
-        debugSteps.push(`方法1: ${files.length}件`);
-      } else {
-        debugSteps.push(`方法1: HTTP ${listRes.status}`);
-      }
-    } catch (e: any) {
-      debugSteps.push(`方法1: ${e?.message}`);
-    }
+    // 共有リンク経由でフォルダ内ファイル一覧（サブフォルダも展開）
+    const listSharedFolder = async (url: string, token: string): Promise<{ name: string; path: string }[]> => {
+      const allFiles: { name: string; path: string }[] = [];
+      const foldersToProcess: string[] = [""];
 
-    // 方法2: get_shared_link_metadata → フォルダパス取得 → list_folder
-    if (files.length === 0) {
-      try {
-        const metaRes = await fetch("https://api.dropboxapi.com/2/sharing/get_shared_link_metadata", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
-          body: JSON.stringify({ url: shareUrl }),
-          signal: AbortSignal.timeout(15000),
-        });
-        if (metaRes.ok) {
-          const meta = await metaRes.json();
-          const folderPath = meta.path_lower || meta.path_display || "";
-          debugSteps.push(`方法2meta: tag=${meta[".tag"]}, path=${folderPath}`);
-          if (folderPath && meta[".tag"] === "folder") {
-            const listRes = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
-              method: "POST",
-              headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
-              body: JSON.stringify({ path: folderPath, recursive: true, limit: 2000 }),
-              signal: AbortSignal.timeout(15000),
-            });
-            if (listRes.ok) {
-              const listData = await listRes.json();
-              files = (listData.entries || [])
-                .filter((e: any) => e[".tag"] === "file")
-                .map((e: any) => ({ name: e.name || "", path: e.path_display || e.path_lower || "" }));
-              debugSteps.push(`方法2list: ${files.length}件`);
-            } else {
-              debugSteps.push(`方法2list: HTTP ${listRes.status}`);
+      while (foldersToProcess.length > 0) {
+        const subPath = foldersToProcess.pop()!;
+        try {
+          const res = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ path: subPath, shared_link: { url }, limit: 200 }),
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!res.ok) continue;
+          const data = await res.json();
+          for (const entry of data.entries || []) {
+            if (entry[".tag"] === "file") {
+              allFiles.push({ name: entry.name || "", path: entry.path_display || entry.path_lower || "" });
+            } else if (entry[".tag"] === "folder") {
+              // サブフォルダのパスは共有リンクルートからの相対パス
+              const folderRelPath = entry.path_display || entry.path_lower || "";
+              foldersToProcess.push(folderRelPath);
             }
           }
-        } else {
-          debugSteps.push(`方法2meta: HTTP ${metaRes.status}`);
-        }
-      } catch (e: any) {
-        debugSteps.push(`方法2: ${e?.message}`);
+        } catch {}
       }
+      return allFiles;
+    }
+
+    try {
+      files = await listSharedFolder(shareUrl, dbxToken);
+      debugSteps.push(`共有リンク展開: ${files.length}件`);
+    } catch (e: any) {
+      debugSteps.push(`共有リンク展開: ${e?.message}`);
     }
 
     if (files.length === 0) return { urls: [], debug: `フォルダ内にファイルが0件 [${debugSteps.join(" → ")}] URL: ${shareUrl.slice(0, 80)}` };
