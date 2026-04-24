@@ -88,60 +88,74 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
   if (!dbxToken) return { urls: [], debug: "Dropboxトークン取得失敗" };
 
   try {
-    // 共有リンクURL正規化（rlkeyパラメータ保持）
+    // 共有リンクURL正規化
     let shareUrl = folderUrl.trim();
-    // dl=0/1を除去
-    shareUrl = shareUrl.replace(/[&?]dl=\d/, "");
+    // dl=0/1, st=セッショントークンを除去（API認識を妨げる）
+    shareUrl = shareUrl.replace(/[&?]dl=\d/g, "").replace(/[&?]st=[^&]*/g, "").replace(/[?&]$/, "");
 
     let files: { name: string; path: string }[] = [];
+    let debugSteps: string[] = [];
 
-    // 方法1: get_shared_link_metadata でフォルダパスを取得 → list_folder
+    // 方法1: 共有リンク経由でlist_folder（shared_linkパラメータ使用）
     try {
-      const metaRes = await fetch("https://api.dropboxapi.com/2/sharing/get_shared_link_metadata", {
+      const listRes = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
-        body: JSON.stringify({ url: shareUrl }),
+        body: JSON.stringify({ path: "", shared_link: { url: shareUrl }, limit: 200 }),
         signal: AbortSignal.timeout(15000),
       });
-      if (metaRes.ok) {
-        const meta = await metaRes.json();
-        const folderPath = meta.path_lower || meta.path_display || "";
-        if (folderPath && meta[".tag"] === "folder") {
-          const listRes = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
-            body: JSON.stringify({ path: folderPath, limit: 200 }),
-            signal: AbortSignal.timeout(15000),
-          });
-          if (listRes.ok) {
-            const listData = await listRes.json();
-            files = (listData.entries || [])
-              .filter((e: any) => e[".tag"] === "file")
-              .map((e: any) => ({ name: e.name || "", path: e.path_display || e.path_lower || "" }));
-          }
-        }
+      if (listRes.ok) {
+        const listData = await listRes.json();
+        files = (listData.entries || [])
+          .filter((e: any) => e[".tag"] === "file")
+          .map((e: any) => ({ name: e.name || "", path: e.path_display || e.path_lower || "" }));
+        debugSteps.push(`方法1: ${files.length}件`);
+      } else {
+        debugSteps.push(`方法1: HTTP ${listRes.status}`);
       }
-    } catch {}
-
-    // 方法2: 方法1失敗時、共有リンクからファイル一覧を取得
-    if (files.length === 0) {
-      try {
-        const listRes2 = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
-          body: JSON.stringify({ path: "", shared_link: { url: shareUrl }, limit: 200 }),
-          signal: AbortSignal.timeout(15000),
-        });
-        if (listRes2.ok) {
-          const listData2 = await listRes2.json();
-          files = (listData2.entries || [])
-            .filter((e: any) => e[".tag"] === "file")
-            .map((e: any) => ({ name: e.name || "", path: e.path_display || e.path_lower || "" }));
-        }
-      } catch {}
+    } catch (e: any) {
+      debugSteps.push(`方法1: ${e?.message}`);
     }
 
-    if (files.length === 0) return { urls: [], debug: "フォルダ内にファイルが0件" };
+    // 方法2: get_shared_link_metadata → フォルダパス取得 → list_folder
+    if (files.length === 0) {
+      try {
+        const metaRes = await fetch("https://api.dropboxapi.com/2/sharing/get_shared_link_metadata", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
+          body: JSON.stringify({ url: shareUrl }),
+          signal: AbortSignal.timeout(15000),
+        });
+        if (metaRes.ok) {
+          const meta = await metaRes.json();
+          const folderPath = meta.path_lower || meta.path_display || "";
+          debugSteps.push(`方法2meta: tag=${meta[".tag"]}, path=${folderPath}`);
+          if (folderPath && meta[".tag"] === "folder") {
+            const listRes = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
+              body: JSON.stringify({ path: folderPath, limit: 200 }),
+              signal: AbortSignal.timeout(15000),
+            });
+            if (listRes.ok) {
+              const listData = await listRes.json();
+              files = (listData.entries || [])
+                .filter((e: any) => e[".tag"] === "file")
+                .map((e: any) => ({ name: e.name || "", path: e.path_display || e.path_lower || "" }));
+              debugSteps.push(`方法2list: ${files.length}件`);
+            } else {
+              debugSteps.push(`方法2list: HTTP ${listRes.status}`);
+            }
+          }
+        } else {
+          debugSteps.push(`方法2meta: HTTP ${metaRes.status}`);
+        }
+      } catch (e: any) {
+        debugSteps.push(`方法2: ${e?.message}`);
+      }
+    }
+
+    if (files.length === 0) return { urls: [], debug: `フォルダ内にファイルが0件 [${debugSteps.join(" → ")}] URL: ${shareUrl.slice(0, 80)}` };
 
     // 日付を含む画像ファイルをフィルタ
     const dateMatches = files.filter(f => {
