@@ -397,9 +397,12 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Dropbox写真検索を並列実行（実行時のみ）
+  // Dropbox写真検索を5件ずつバッチ実行（レート制限対策）
   if (!dryRun && pendingPhotoSearch.length > 0) {
-    await Promise.all(pendingPhotoSearch.map(async (p) => {
+    const PHOTO_BATCH = 5;
+    for (let bi = 0; bi < pendingPhotoSearch.length; bi += PHOTO_BATCH) {
+      const batch = pendingPhotoSearch.slice(bi, bi + PHOTO_BATCH);
+      await Promise.all(batch.map(async (p) => {
       const match = allMatches[p.index];
       if (!p.photoCell) { match.photoDebug = "F列が空"; return; }
 
@@ -437,6 +440,7 @@ export async function POST(request: NextRequest) {
         }
       }
     }));
+    }
   }
 
   if (allMatches.length === 0) {
