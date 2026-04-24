@@ -231,14 +231,19 @@ export default function PostsPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // 予約投稿を取得
+  // 予約投稿を取得（Supabase直接、shop_name でフィルタ）
   useEffect(() => {
-    if (!selectedShopId && !isAllMode) return;
-    const params = selectedShopId && !isAllMode ? `?shopId=${selectedShopId}` : "";
-    api.get(`/api/report/scheduled-posts${params}`)
-      .then((res) => setScheduledPosts(Array.isArray(res.data) ? res.data : []))
-      .catch(() => setScheduledPosts([]));
-  }, [selectedShopId, isAllMode]);
+    (async () => {
+      try {
+        let query = supabase.from("scheduled_posts").select("*").order("scheduled_at", { ascending: true }).limit(200);
+        if (!isAllMode && selectedShop) {
+          query = query.eq("shop_name", selectedShop.name);
+        }
+        const { data } = await query;
+        setScheduledPosts(data || []);
+      } catch { setScheduledPosts([]); }
+    })();
+  }, [selectedShop, isAllMode]);
 
   // 全店舗の投稿状況
   useEffect(() => {
