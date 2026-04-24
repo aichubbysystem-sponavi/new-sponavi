@@ -109,29 +109,22 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
       }
     } catch {}
 
-    // 方法2: 方法1失敗時、Search APIでフォールバック
+    // 方法2: 方法1失敗時、共有リンクからファイル一覧を取得
     if (files.length === 0) {
-      const searchRes = await fetch("https://api.dropboxapi.com/2/files/search_v2", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
-        body: JSON.stringify({ query: dateCompact, options: { max_results: 50 } }),
-        signal: AbortSignal.timeout(15000),
-      });
-      if (searchRes.ok) {
-        const searchData = await searchRes.json();
-        // 店舗名の一部がパスに含まれるファイルをフィルタ
-        const shopParts = shopName.split(/[\s　]+/).filter((p) => p.length >= 2);
-        const allMatches = (searchData.matches || []);
-        const shopFiltered = allMatches.filter((m: any) => {
-          const path = (m.metadata?.metadata?.path_display || "").toLowerCase();
-          return shopParts.some((part: string) => path.includes(part.toLowerCase()));
+      try {
+        const listRes2 = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
+          body: JSON.stringify({ path: "", shared_link: { url: shareUrl }, limit: 200 }),
+          signal: AbortSignal.timeout(15000),
         });
-        const targets = shopFiltered.length > 0 ? shopFiltered : allMatches;
-        files = targets.map((m: any) => ({
-          name: m.metadata?.metadata?.name || "",
-          path: m.metadata?.metadata?.path_display || m.metadata?.metadata?.path_lower || "",
-        }));
-      }
+        if (listRes2.ok) {
+          const listData2 = await listRes2.json();
+          files = (listData2.entries || [])
+            .filter((e: any) => e[".tag"] === "file")
+            .map((e: any) => ({ name: e.name || "", path: e.path_display || e.path_lower || "" }));
+        }
+      } catch {}
     }
 
     if (files.length === 0) return { urls: [], debug: "フォルダ内にファイルが0件" };
