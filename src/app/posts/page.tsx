@@ -715,7 +715,7 @@ export default function PostsPage() {
           {showCreate && (
             <div className="flex items-center justify-between mb-3 bg-blue-50 rounded-lg px-4 py-2 border border-blue-200">
               <p className="text-xs text-blue-700 font-medium">
-                対象: {postTargetMode === "all" ? `全${shops.length}店舗` : postTargetMode === "selected" ? `${postTargetShopIds.length}店舗` : selectedShop?.name || ""} / {TOPIC_STYLES[newPost.topicType]?.label || "通常投稿"}
+                対象: {postTargetMode === "all" ? `全${shops.length}店舗` : postTargetMode === "selected" ? `${postTargetShopIds.length}店舗` : selectedShop?.name || ""} / {postSelectedType === "PHOTO" ? "写真投稿" : TOPIC_STYLES[newPost.topicType]?.label || "通常投稿"}
               </p>
               <button onClick={() => { setShowCreate(false); setPostSelectedType(""); setPostStep(2); }}
                 className="text-xs text-blue-500 hover:text-blue-700 font-semibold">← 種類選択に戻る</button>

@@ -260,7 +260,8 @@ export async function POST(request: NextRequest) {
         const dateCell = (row[4] || "").trim(); // E列（index 4）
         const photoCell = (row[5] || "").trim(); // F列（index 5）
 
-        if (!shopName || !postText) continue;
+        if (!shopName) continue;
+        if (!isPhotoOnly && !postText) continue; // 写真のみ投稿ではテキスト不要
 
         // 日付マッチ（複数フォーマット対応）
         const dateMatch = dateCell.includes(dateCompact)
@@ -273,13 +274,13 @@ export async function POST(request: NextRequest) {
         // dryRun（プレビュー）時はDropbox写真検索をスキップ → 高速化
         if (dryRun) {
           const hasPhoto = !!photoCell;
-          allMatches.push({ shopName, summary: postText, photoUrl: "", tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: hasPhoto ? "写真あり（確認時はスキップ）" : "F列が空" });
+          allMatches.push({ shopName, summary: postText || (isPhotoOnly ? "（写真のみ）" : ""), photoUrl: "", tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: hasPhoto ? "写真あり（確認時はスキップ）" : "F列が空" });
           continue;
         }
 
         // 実行時: 一旦写真なしでマッチを記録（後で並列検索）
         pendingPhotoSearch.push({ index: allMatches.length, photoCell, shopName });
-        allMatches.push({ shopName, summary: postText, photoUrl: "", tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: "" });
+        allMatches.push({ shopName, summary: postText || "", photoUrl: "", tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: "" });
       }
     } catch (e) {
       console.error(`[auto-post] Tab "${tab}" error:`, e);
