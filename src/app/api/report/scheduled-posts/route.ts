@@ -151,8 +151,40 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ message: "実行対象なし", executed: 0 });
   }
 
-  const accessToken = await getOAuthToken();
-  if (!accessToken) {
+  // Go APIを先に叩いてOAuthトークンリフレッシュを発火
+  const goApiUrl = process.env.NEXT_PUBLIC_API_URL || "";
+  try { await fetch(`${goApiUrl}/api/gbp/account`, { signal: AbortSignal.timeout(15000) }); } catch {}
+
+  // 全トークンを取得（リフレッシュ含む）
+  const { data: tokenRows } = await supabase.from("system_oauth_tokens")
+    .select("access_token, refresh_token, expiry").order("expiry", { ascending: false });
+  const validTokens: string[] = [];
+  for (const row of (tokenRows || [])) {
+    if (new Date(row.expiry).getTime() - Date.now() > 60000) {
+      validTokens.push(row.access_token);
+    } else if (row.refresh_token) {
+      try {
+        const res = await fetch("https://oauth2.googleapis.com/token", {
+          method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET, refresh_token: row.refresh_token, grant_type: "refresh_token" }),
+        });
+        if (res.ok) {
+          const t = await res.json();
+          if (t.access_token) {
+            await supabase.from("system_oauth_tokens").update({
+              access_token: t.access_token, expiry: new Date(Date.now() + (t.expires_in || 3600) * 1000).toISOString(),
+            }).eq("refresh_token", row.refresh_token);
+            validTokens.push(t.access_token);
+            continue;
+          }
+        }
+      } catch {}
+      validTokens.push(row.access_token);
+    } else {
+      validTokens.push(row.access_token);
+    }
+  }
+  if (validTokens.length === 0) {
     return NextResponse.json({ error: "OAuthトークンなし" }, { status: 500 });
   }
 
@@ -205,14 +237,19 @@ export async function PUT(request: NextRequest) {
       }
 
       // 4. GBP API投稿
-      const res = await fetch(`${GBP_API_BASE}/${locationName}/localPosts`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify(postBody),
-        signal: AbortSignal.timeout(30000),
-      });
+      // 全トークンを順次試行（401/403なら次のトークンで再試行）
+      let res: Response | null = null;
+      for (const token of validTokens) {
+        res = await fetch(`${GBP_API_BASE}/${locationName}/localPosts`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify(postBody),
+          signal: AbortSignal.timeout(30000),
+        });
+        if (res.ok || (res.status !== 401 && res.status !== 403)) break;
+      }
 
-      if (res.ok) {
+      if (res && res.ok) {
         const result = await res.json();
         await supabase.from("scheduled_posts").update({
           status: "published",
@@ -234,8 +271,9 @@ export async function PUT(request: NextRequest) {
 
         executed++;
       } else {
-        const err = await res.text().catch(() => "");
-        await supabase.from("scheduled_posts").update({ status: "error", error_detail: `GBP API ${res.status}: ${err.slice(0, 200)}` }).eq("id", post.id);
+        const err = res ? await res.text().catch(() => "") : "レスポンスなし";
+        const statusCode = res ? res.status : 0;
+        await supabase.from("scheduled_posts").update({ status: "error", error_detail: `GBP API ${statusCode}: ${err.slice(0, 200)}` }).eq("id", post.id);
         errors++;
       }
     } catch (e: any) {
