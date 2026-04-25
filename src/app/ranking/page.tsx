@@ -80,6 +80,18 @@ export default function RankingPage() {
   const [bulkProgress, setBulkProgress] = useState("");
   const [bulkResult, setBulkResult] = useState<any>(null);
 
+  // 店舗ごとの保存済みキーワードをDBから読み込み
+  useEffect(() => {
+    if (!selectedShopId) return;
+    api.get(`/api/report/shop-keywords?shopId=${selectedShopId}`)
+      .then((res) => {
+        if (res.data?.keywords?.length > 0) {
+          setKeywords(res.data.keywords.join("\n"));
+        }
+      })
+      .catch(() => {});
+  }, [selectedShopId]);
+
   // 店舗ごとの計測地点をlocalStorageから読み込み/保存
   useEffect(() => {
     if (!selectedShopId) return;
@@ -383,6 +395,14 @@ export default function RankingPage() {
                       const res = await api.get(`/api/report/ranking-keywords?shopName=${encodeURIComponent(selectedShop.name)}`);
                       if (res.data.found && res.data.keywords.length > 0) {
                         setKeywords(res.data.keywords.join("\n"));
+                        // DBに保存
+                        try {
+                          await api.put("/api/report/shop-keywords", {
+                            shopId: selectedShopId,
+                            keywords: res.data.keywords,
+                            source: "sheet",
+                          });
+                        } catch {}
                         // 計測地点も自動設定（AR/AS/AT列から）
                         if (res.data.points && res.data.points.length > 0) {
                           setPoints(res.data.points);

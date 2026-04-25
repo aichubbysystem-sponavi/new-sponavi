@@ -84,6 +84,7 @@ function generateGrid(
 export default function GridRankingPage() {
   const { selectedShopId, selectedShop } = useShop();
   const [keyword, setKeyword] = useState("");
+  const [savedKeywords, setSavedKeywords] = useState<string[]>([]);
   const [gridSize, setGridSize] = useState<number>(7);
   const [interval, setInterval] = useState(1000);
   const [measuring, setMeasuring] = useState(false);
@@ -93,6 +94,7 @@ export default function GridRankingPage() {
   const [selectedHistory, setSelectedHistory] = useState<GridLog | null>(null);
   const [error, setError] = useState("");
   const [aborted, setAborted] = useState(false);
+  const [sheetLoading, setSheetLoading] = useState(false);
   const abortRef = useRef(false);
   const mapRef = useRef<HTMLDivElement>(null);
   const googleMapRef = useRef<any>(null);
@@ -100,6 +102,47 @@ export default function GridRankingPage() {
 
   const shopLat = (selectedShop as any)?.gbp_latitude || 0;
   const shopLng = (selectedShop as any)?.gbp_longitude || 0;
+
+  // 保存済みキーワードをDBから読み込み
+  useEffect(() => {
+    if (!selectedShopId) return;
+    api.get(`/api/report/shop-keywords?shopId=${selectedShopId}`)
+      .then((res) => {
+        if (res.data?.keywords?.length > 0) {
+          setSavedKeywords(res.data.keywords);
+          if (!keyword) setKeyword(res.data.keywords[0]);
+        } else {
+          setSavedKeywords([]);
+        }
+      })
+      .catch(() => setSavedKeywords([]));
+  }, [selectedShopId]);
+
+  // シートからキーワード取得してDBに保存
+  const fetchFromSheet = async () => {
+    if (!selectedShop) return;
+    setSheetLoading(true);
+    setError("");
+    try {
+      const res = await api.get(`/api/report/ranking-keywords?shopName=${encodeURIComponent((selectedShop as any).name)}`);
+      if (res.data.found && res.data.keywords.length > 0) {
+        setSavedKeywords(res.data.keywords);
+        setKeyword(res.data.keywords[0]);
+        // DBに保存
+        await api.put("/api/report/shop-keywords", {
+          shopId: selectedShopId,
+          keywords: res.data.keywords,
+          source: "sheet",
+        });
+      } else {
+        setError("シートにキーワードが見つかりません");
+      }
+    } catch (e: any) {
+      setError(e?.response?.data?.error || "シート取得に失敗しました");
+    } finally {
+      setSheetLoading(false);
+    }
+  };
 
   // 履歴取得
   const fetchHistory = useCallback(async () => {
@@ -371,14 +414,34 @@ export default function GridRankingPage() {
           {/* キーワード */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">キーワード</label>
-            <input
-              type="text"
-              value={keyword}
-              onChange={(e) => setKeyword(e.target.value)}
-              placeholder="例: 美容室 渋谷"
-              className="w-full border rounded-lg px-3 py-2 text-sm"
-              disabled={measuring}
-            />
+            {savedKeywords.length > 0 ? (
+              <select
+                value={keyword}
+                onChange={(e) => setKeyword(e.target.value)}
+                disabled={measuring}
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+              >
+                {savedKeywords.map((kw) => (
+                  <option key={kw} value={kw}>{kw}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                value={keyword}
+                onChange={(e) => setKeyword(e.target.value)}
+                placeholder="例: 美容室 渋谷"
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+                disabled={measuring}
+              />
+            )}
+            <button
+              onClick={fetchFromSheet}
+              disabled={sheetLoading || measuring}
+              className="mt-2 px-3 py-1.5 rounded-lg text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white disabled:opacity-50 transition"
+            >
+              {sheetLoading ? "取得中..." : "シートから反映"}
+            </button>
           </div>
 
           {/* グリッドサイズ */}
