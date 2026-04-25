@@ -9,16 +9,36 @@ const api = axios.create({
   },
 });
 
-// リクエスト時にSupabaseのトークンを自動付与
-api.interceptors.request.use(async (config) => {
+// トークンキャッシュ（getSession()の呼びすぎ防止）
+let cachedToken: string | null = null;
+let tokenExpiresAt = 0;
+
+// Supabase認証状態変更時にキャッシュ更新
+supabase.auth.onAuthStateChange((_event, session) => {
+  cachedToken = session?.access_token || null;
+  tokenExpiresAt = session?.expires_at ? session.expires_at * 1000 : 0;
+});
+
+async function getToken(): Promise<string | null> {
+  // キャッシュが有効なら即返す（期限の60秒前までOK）
+  if (cachedToken && Date.now() < tokenExpiresAt - 60000) {
+    return cachedToken;
+  }
   try {
     const { data } = await supabase.auth.getSession();
-    const token = data?.session?.access_token;
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
+    cachedToken = data?.session?.access_token || null;
+    tokenExpiresAt = data?.session?.expires_at ? data.session.expires_at * 1000 : 0;
+    return cachedToken;
   } catch {
-    // セッション取得に失敗してもリクエストは続行
+    return cachedToken; // 取得失敗時もキャッシュがあれば使う
+  }
+}
+
+// リクエスト時にSupabaseのトークンを自動付与
+api.interceptors.request.use(async (config) => {
+  const token = await getToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
 });
