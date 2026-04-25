@@ -166,8 +166,10 @@ export async function PUT(request: NextRequest) {
   let goShops: any[] = [];
   try {
     const goShopRes = await fetch(`${goApiUrl}/api/shop`, { signal: AbortSignal.timeout(15000) });
-    if (goShopRes.ok) goShops = await goShopRes.json();
-    if (!Array.isArray(goShops)) goShops = [];
+    if (goShopRes.ok) {
+      const goShopData = await goShopRes.json();
+      goShops = Array.isArray(goShopData) ? goShopData : goShopData?.shops || goShopData?.data || [];
+    }
   } catch {}
 
   for (const post of posts) {
@@ -202,11 +204,14 @@ export async function PUT(request: NextRequest) {
       });
 
       if (res.ok) {
-        const result = await res.json();
+        let result: any = null;
+        try { result = await res.json(); } catch {}
+        const searchUrl = result?.searchUrl || result?.search_url || null;
+
         await supabase.from("scheduled_posts").update({
           status: "published",
           published_at: new Date().toISOString(),
-          search_url: result.searchUrl || null,
+          search_url: searchUrl,
         }).eq("id", post.id);
 
         await supabase.from("post_logs").insert({
@@ -218,7 +223,7 @@ export async function PUT(request: NextRequest) {
           media_url: post.photo_url,
           action_type: post.action_type,
           action_url: post.action_url,
-          search_url: result.searchUrl || null,
+          search_url: searchUrl,
         });
         executed++;
       } else {
