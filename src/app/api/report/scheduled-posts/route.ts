@@ -160,34 +160,56 @@ export async function PUT(request: NextRequest) {
   let errors = 0;
 
   for (const post of posts) {
-    const { data: shop } = await supabase.from("shops")
-      .select("gbp_location_name").eq("id", post.shop_id).single();
-
-    if (!shop?.gbp_location_name) {
-      await supabase.from("scheduled_posts").update({ status: "error", error_detail: "GBP未接続" }).eq("id", post.id);
-      errors++;
-      continue;
-    }
-
-    const { resolveLocationName } = await import("@/lib/gbp-location");
-    const locationName = await resolveLocationName(shop.gbp_location_name);
-    if (!locationName) { errors++; continue; }
-
-    const postBody: any = { summary: post.summary, topicType: post.topic_type, languageCode: "ja" };
-    if (post.action_type && post.action_url) {
-      postBody.callToAction = { actionType: post.action_type, url: post.action_url };
-    }
-    if (post.photo_url) {
-      let url = post.photo_url;
-      if (url.includes("dropbox.com")) url = url.replace("dl=0", "raw=1");
-      postBody.media = [{ mediaFormat: "PHOTO", sourceUrl: url }];
-    }
-
     try {
+      // 1. 店舗検索（shop_idで見つからなければshop_nameで検索）
+      let shopLocName = "";
+      const { data: shop } = await supabase.from("shops")
+        .select("gbp_location_name").eq("id", post.shop_id).maybeSingle();
+      if (shop?.gbp_location_name) {
+        shopLocName = shop.gbp_location_name;
+      } else if (post.shop_name) {
+        // shop_id不一致時はshop_nameでフォールバック検索
+        const { data: shopByName } = await supabase.from("shops")
+          .select("gbp_location_name")
+          .eq("name", post.shop_name)
+          .not("gbp_location_name", "is", null)
+          .limit(1)
+          .maybeSingle();
+        if (shopByName?.gbp_location_name) shopLocName = shopByName.gbp_location_name;
+      }
+
+      if (!shopLocName) {
+        await supabase.from("scheduled_posts").update({ status: "error", error_detail: `GBP未接続（shopId=${post.shop_id?.slice(0,8)}, name=${post.shop_name}）` }).eq("id", post.id);
+        errors++;
+        continue;
+      }
+
+      // 2. ロケーション名解決
+      const { resolveLocationName } = await import("@/lib/gbp-location");
+      const locationName = await resolveLocationName(shopLocName);
+      if (!locationName) {
+        await supabase.from("scheduled_posts").update({ status: "error", error_detail: `ロケーション解決失敗: ${shopLocName}` }).eq("id", post.id);
+        errors++;
+        continue;
+      }
+
+      // 3. GBP投稿データ構築
+      const postBody: any = { summary: post.summary, topicType: post.topic_type || "STANDARD", languageCode: "ja" };
+      if (post.action_type && post.action_url) {
+        postBody.callToAction = { actionType: post.action_type, url: post.action_url };
+      }
+      if (post.photo_url) {
+        let url = post.photo_url;
+        if (url.includes("dropbox.com")) url = url.replace("dl=0", "raw=1");
+        postBody.media = [{ mediaFormat: "PHOTO", sourceUrl: url }];
+      }
+
+      // 4. GBP API投稿
       const res = await fetch(`${GBP_API_BASE}/${locationName}/localPosts`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
         body: JSON.stringify(postBody),
+        signal: AbortSignal.timeout(30000),
       });
 
       if (res.ok) {
@@ -198,7 +220,6 @@ export async function PUT(request: NextRequest) {
           search_url: result.searchUrl || null,
         }).eq("id", post.id);
 
-        // post_logsにも記録
         await supabase.from("post_logs").insert({
           id: crypto.randomUUID(),
           shop_id: post.shop_id,
@@ -214,11 +235,12 @@ export async function PUT(request: NextRequest) {
         executed++;
       } else {
         const err = await res.text().catch(() => "");
-        await supabase.from("scheduled_posts").update({ status: "error", error_detail: `API ${res.status}: ${err.slice(0, 100)}` }).eq("id", post.id);
+        await supabase.from("scheduled_posts").update({ status: "error", error_detail: `GBP API ${res.status}: ${err.slice(0, 200)}` }).eq("id", post.id);
         errors++;
       }
     } catch (e: any) {
-      await supabase.from("scheduled_posts").update({ status: "error", error_detail: e?.message || "不明" }).eq("id", post.id);
+      const detail = e?.message || e?.toString?.() || "不明な例外";
+      await supabase.from("scheduled_posts").update({ status: "error", error_detail: detail.slice(0, 300) }).eq("id", post.id);
       errors++;
     }
   }
