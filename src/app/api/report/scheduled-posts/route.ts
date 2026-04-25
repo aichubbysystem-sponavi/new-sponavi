@@ -151,18 +151,36 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ message: "実行対象なし", executed: 0 });
   }
 
-  // Go APIを先に叩いてOAuthトークンリフレッシュを発火
+  // Go APIを叩いてトークンリフレッシュ発火 + 全トークン取得
   const goApiUrl = process.env.NEXT_PUBLIC_API_URL || "";
   try { await fetch(`${goApiUrl}/api/gbp/account`, { signal: AbortSignal.timeout(15000) }); } catch {}
 
-  // 全トークンを取得（リフレッシュ含む）
+  // 3段階でトークン取得（system_oauth_tokens → system.tokens直接 → 自前リフレッシュ）
+  const validTokens: string[] = [];
+
+  // 1. system_oauth_tokensビュー
   const { data: tokenRows } = await supabase.from("system_oauth_tokens")
     .select("access_token, refresh_token, expiry").order("expiry", { ascending: false });
-  const validTokens: string[] = [];
   for (const row of (tokenRows || [])) {
-    if (new Date(row.expiry).getTime() - Date.now() > 60000) {
-      validTokens.push(row.access_token);
-    } else if (row.refresh_token) {
+    if (new Date(row.expiry).getTime() - Date.now() > 60000) validTokens.push(row.access_token);
+  }
+
+  // 2. system.tokens直接（ビューで取れない場合のフォールバック）
+  if (validTokens.length === 0) {
+    try {
+      const { data: sysTokens } = await supabase.schema("system").from("tokens")
+        .select("access_token, refresh_token, expiry").order("expiry", { ascending: false });
+      for (const row of (sysTokens || [])) {
+        if (new Date(row.expiry).getTime() - Date.now() > 60000) validTokens.push(row.access_token);
+      }
+    } catch {}
+  }
+
+  // 3. まだ有効なトークンがなければ自前リフレッシュ
+  if (validTokens.length === 0) {
+    const allRows = tokenRows || [];
+    for (const row of allRows) {
+      if (!row.refresh_token) continue;
       try {
         const res = await fetch("https://oauth2.googleapis.com/token", {
           method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -170,22 +188,14 @@ export async function PUT(request: NextRequest) {
         });
         if (res.ok) {
           const t = await res.json();
-          if (t.access_token) {
-            await supabase.from("system_oauth_tokens").update({
-              access_token: t.access_token, expiry: new Date(Date.now() + (t.expires_in || 3600) * 1000).toISOString(),
-            }).eq("refresh_token", row.refresh_token);
-            validTokens.push(t.access_token);
-            continue;
-          }
+          if (t.access_token) { validTokens.push(t.access_token); break; }
         }
       } catch {}
-      validTokens.push(row.access_token);
-    } else {
-      validTokens.push(row.access_token);
     }
   }
+
   if (validTokens.length === 0) {
-    return NextResponse.json({ error: "OAuthトークンなし" }, { status: 500 });
+    return NextResponse.json({ error: "OAuthトークンなし（3段階すべて失敗）" }, { status: 500 });
   }
 
   let executed = 0;
