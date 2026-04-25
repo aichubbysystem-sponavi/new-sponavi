@@ -67,7 +67,7 @@ function generateGrid(
 
   for (let row = 0; row < gridSize; row++) {
     for (let col = 0; col < gridSize; col++) {
-      const dRow = row - half;
+      const dRow = half - row; // row=0が北端（緯度が大きい）
       const dCol = col - half;
       points.push({
         row,
