@@ -162,17 +162,24 @@ export async function PUT(request: NextRequest) {
   let executed = 0;
   let errors = 0;
 
+  // Go APIの店舗一覧を取得（Go APIが認識するshop_idを取得するため）
+  let goShops: any[] = [];
+  try {
+    const goShopRes = await fetch(`${goApiUrl}/api/shop`, { signal: AbortSignal.timeout(15000) });
+    if (goShopRes.ok) goShops = await goShopRes.json();
+    if (!Array.isArray(goShops)) goShops = [];
+  } catch {}
+
   for (const post of posts) {
     try {
-      // shop_idで検索、見つからなければshop_nameで検索
+      // Go APIが認識するshop_idを店舗名で検索
       let shopId = post.shop_id;
-      const { data: shop } = await supabase.from("shops")
-        .select("id").eq("id", post.shop_id).maybeSingle();
-      if (!shop && post.shop_name) {
-        const { data: byName } = await supabase.from("shops")
-          .select("id").eq("name", post.shop_name)
-          .not("gbp_location_name", "is", null).limit(1).maybeSingle();
-        if (byName) shopId = byName.id;
+      if (post.shop_name && goShops.length > 0) {
+        const goShop = goShops.find((s: any) =>
+          s.name === post.shop_name || s.gbp_shop_name === post.shop_name
+          || s.name?.includes(post.shop_name) || post.shop_name.includes(s.name || "")
+        );
+        if (goShop) shopId = goShop.id;
       }
 
       // Go API経由でGBP投稿（OAuth管理はGo API側）
