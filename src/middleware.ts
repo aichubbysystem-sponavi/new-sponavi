@@ -124,11 +124,11 @@ function addHeaders(response: NextResponse, request: NextRequest, isReport: bool
 
   const csp = [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline'",  // unsafe-eval削除（Chart.js v4はeval不要）
+    "script-src 'self' 'unsafe-inline' https://maps.googleapis.com https://maps.gstatic.com",
     styleSrc,
     "img-src 'self' data: blob: https:",
     fontSrc,
-    `connect-src 'self' ${supabaseUrl} ${supabaseWs} https://api.anthropic.com ${apiUrl}`,
+    `connect-src 'self' ${supabaseUrl} ${supabaseWs} https://api.anthropic.com ${apiUrl} https://maps.googleapis.com https://maps.gstatic.com`,
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",
