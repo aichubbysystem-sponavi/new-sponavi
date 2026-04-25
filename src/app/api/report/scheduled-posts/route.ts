@@ -151,52 +151,27 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ message: "実行対象なし", executed: 0 });
   }
 
-  // Go APIを叩いてトークンリフレッシュ発火 + 全トークン取得
+  // Go APIを叩いてトークンリフレッシュ発火 → 直後にDBから最新トークン取得
   const goApiUrl = process.env.NEXT_PUBLIC_API_URL || "";
   try { await fetch(`${goApiUrl}/api/gbp/account`, { signal: AbortSignal.timeout(15000) }); } catch {}
+  // リフレッシュ反映を少し待つ
+  await new Promise(r => setTimeout(r, 2000));
 
-  // 3段階でトークン取得（system_oauth_tokens → system.tokens直接 → 自前リフレッシュ）
-  const validTokens: string[] = [];
+  // トークン取得デバッグ
+  const dbgSupabase = getSupabase();
+  const { data: dbgTokens, error: dbgErr } = await dbgSupabase.from("system_oauth_tokens")
+    .select("access_token, expiry").order("expiry", { ascending: false }).limit(3);
+  const tokenDebug = dbgErr
+    ? `ビューエラー: ${dbgErr.message}`
+    : dbgTokens
+      ? `${dbgTokens.length}件, 最新expiry: ${dbgTokens[0]?.expiry || "なし"}, now: ${new Date().toISOString()}`
+      : "データなし";
 
-  // 1. system_oauth_tokensビュー
-  const { data: tokenRows } = await supabase.from("system_oauth_tokens")
-    .select("access_token, refresh_token, expiry").order("expiry", { ascending: false });
-  for (const row of (tokenRows || [])) {
-    if (new Date(row.expiry).getTime() - Date.now() > 60000) validTokens.push(row.access_token);
+  const accessToken = await getOAuthToken();
+  if (!accessToken) {
+    return NextResponse.json({ error: `OAuthトークンなし [${tokenDebug}]` }, { status: 500 });
   }
-
-  // 2. system.tokens直接（ビューで取れない場合のフォールバック）
-  if (validTokens.length === 0) {
-    try {
-      const { data: sysTokens } = await supabase.schema("system").from("tokens")
-        .select("access_token, refresh_token, expiry").order("expiry", { ascending: false });
-      for (const row of (sysTokens || [])) {
-        if (new Date(row.expiry).getTime() - Date.now() > 60000) validTokens.push(row.access_token);
-      }
-    } catch {}
-  }
-
-  // 3. まだ有効なトークンがなければ自前リフレッシュ
-  if (validTokens.length === 0) {
-    const allRows = tokenRows || [];
-    for (const row of allRows) {
-      if (!row.refresh_token) continue;
-      try {
-        const res = await fetch("https://oauth2.googleapis.com/token", {
-          method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET, refresh_token: row.refresh_token, grant_type: "refresh_token" }),
-        });
-        if (res.ok) {
-          const t = await res.json();
-          if (t.access_token) { validTokens.push(t.access_token); break; }
-        }
-      } catch {}
-    }
-  }
-
-  if (validTokens.length === 0) {
-    return NextResponse.json({ error: "OAuthトークンなし（3段階すべて失敗）" }, { status: 500 });
-  }
+  const validTokens = [accessToken];
 
   let executed = 0;
   let errors = 0;
@@ -283,7 +258,7 @@ export async function PUT(request: NextRequest) {
       } else {
         const err = res ? await res.text().catch(() => "") : "レスポンスなし";
         const statusCode = res ? res.status : 0;
-        await supabase.from("scheduled_posts").update({ status: "error", error_detail: `GBP API ${statusCode}: ${err.slice(0, 200)}` }).eq("id", post.id);
+        await supabase.from("scheduled_posts").update({ status: "error", error_detail: `GBP API ${statusCode}: ${err.slice(0, 150)} [token: ${accessToken?.slice(0,15)}..., ${tokenDebug}]` }).eq("id", post.id);
         errors++;
       }
     } catch (e: any) {
