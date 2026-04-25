@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { resolveLocationName } from "@/lib/gbp-location";
+import { getValidTokens } from "@/lib/gbp-token";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -8,80 +9,10 @@ export const maxDuration = 300;
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
-const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
-const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
-const DB_PASSWORD = process.env.SUPABASE_DB_PASSWORD || "";
-const SUPABASE_PROJECT_ID = (SUPABASE_URL.match(/https:\/\/([^.]+)/) || [])[1] || "";
 
 function getSupabase() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
-}
-
-async function refreshToken(rt: string): Promise<string | null> {
-  if (!rt || !GBP_CLIENT_ID || !GBP_CLIENT_SECRET) return null;
-  try {
-    const res = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET, refresh_token: rt, grant_type: "refresh_token" }),
-    });
-    if (res.ok) { const d = await res.json(); return d.access_token || null; }
-  } catch {}
-  return null;
-}
-
-async function getAllValidTokens(): Promise<string[]> {
-  // Go APIにGBP APIを叩かせてトークンリフレッシュ発火
-  try {
-    await fetch(`${GO_API_URL}/api/gbp/account`, { signal: AbortSignal.timeout(15000) });
-  } catch {}
-
-  interface TokenRow { access_token: string; refresh_token: string; expiry: string; }
-  let allRows: TokenRow[] = [];
-
-  // 1. Supabase client (system_oauth_tokens) — 全トークン取得
-  try {
-    const supabase = getSupabase();
-    const { data } = await supabase.from("system_oauth_tokens")
-      .select("access_token, refresh_token, expiry")
-      .order("expiry", { ascending: false });
-    if (data && data.length > 0) allRows = data as TokenRow[];
-  } catch {}
-
-  // 2. フォールバック: PostgreSQL直接接続
-  if (allRows.length === 0) {
-    try {
-      if (DB_PASSWORD && SUPABASE_PROJECT_ID) {
-        const { Client } = await import("pg");
-        const client = new Client({
-          host: `db.${SUPABASE_PROJECT_ID}.supabase.co`, port: 5432,
-          database: "postgres", user: "postgres", password: DB_PASSWORD,
-          ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 10000,
-        });
-        await client.connect();
-        const result = await client.query("SELECT access_token, refresh_token, expiry FROM system.tokens ORDER BY expiry DESC");
-        await client.end();
-        if (result.rows.length > 0) allRows = result.rows;
-      }
-    } catch (e: any) {
-      console.log("[cron/execute-posts] PostgreSQL error:", e?.message);
-    }
-  }
-
-  // 全トークンをリフレッシュして返す
-  const validTokens: string[] = [];
-  for (const row of allRows) {
-    if (new Date(row.expiry).getTime() - Date.now() > 60000) {
-      validTokens.push(row.access_token);
-    } else if (row.refresh_token) {
-      const refreshed = await refreshToken(row.refresh_token);
-      validTokens.push(refreshed || row.access_token);
-    } else {
-      validTokens.push(row.access_token);
-    }
-  }
-  return validTokens;
 }
 
 /**
@@ -112,7 +43,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: true, message: "実行対象なし", count: 0 });
   }
 
-  const allTokens = await getAllValidTokens();
+  const allTokens = await getValidTokens();
   if (allTokens.length === 0) {
     return NextResponse.json({ error: "OAuthトークンなし" }, { status: 500 });
   }

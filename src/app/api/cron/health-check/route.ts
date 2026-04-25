@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getValidTokens } from "@/lib/gbp-token";
 
 export const dynamic = "force-dynamic";
 
@@ -49,23 +50,29 @@ export async function GET(request: NextRequest) {
     checks.push({ name: "Go API", status: "error", detail: e.message, ms: Date.now() - apiStart });
   }
 
-  // 3. OAuthトークン有効性
+  // 3. OAuthトークン有効性（期限切れなら自動リフレッシュ）
   const oauthStart = Date.now();
   try {
-    const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-    const { data } = await supabase.from("system_oauth_tokens")
-      .select("expiry").limit(1).maybeSingle();
-    if (data) {
-      const remaining = new Date(data.expiry).getTime() - Date.now();
-      const hours = Math.round(remaining / 3600000);
+    // getValidTokens()が自動的にリフレッシュ+DB書き戻しを行う
+    const tokens = await getValidTokens();
+    if (tokens.length > 0) {
+      // リフレッシュ後のDB状態を確認
+      const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+      const { data } = await supabase.from("system_oauth_tokens")
+        .select("expiry, account_id").order("expiry", { ascending: false });
+      const details = (data || []).map(t => {
+        const remaining = new Date(t.expiry).getTime() - Date.now();
+        const hours = Math.round(remaining / 3600000);
+        return `${t.account_id}: 残${hours}h`;
+      }).join(", ");
       checks.push({
         name: "OAuth Token",
-        status: remaining > 0 ? "ok" : "error",
-        detail: remaining > 0 ? `有効（残${hours}時間）` : "期限切れ",
+        status: "ok",
+        detail: `${tokens.length}件有効（${details || "自動リフレッシュ済み"}）`,
         ms: Date.now() - oauthStart,
       });
     } else {
-      checks.push({ name: "OAuth Token", status: "error", detail: "トークンなし", ms: Date.now() - oauthStart });
+      checks.push({ name: "OAuth Token", status: "error", detail: "トークンなし（リフレッシュ失敗）", ms: Date.now() - oauthStart });
     }
   } catch (e: any) {
     checks.push({ name: "OAuth Token", status: "error", detail: e.message, ms: Date.now() - oauthStart });
