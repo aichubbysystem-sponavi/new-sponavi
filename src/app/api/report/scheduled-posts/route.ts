@@ -162,73 +162,95 @@ export async function PUT(request: NextRequest) {
   let executed = 0;
   let errors = 0;
 
-  // Go APIの店舗一覧を取得（Go APIが認識するshop_idを取得するため）
-  let goShops: any[] = [];
-  try {
-    const goShopRes = await fetch(`${goApiUrl}/api/shop`, { signal: AbortSignal.timeout(15000) });
-    if (goShopRes.ok) {
-      const goShopData = await goShopRes.json();
-      goShops = Array.isArray(goShopData) ? goShopData : goShopData?.shops || goShopData?.data || [];
-    }
-  } catch {}
+  // Go APIを叩いてトークンリフレッシュ発火
+  try { await fetch(`${goApiUrl}/api/gbp/account`, { signal: AbortSignal.timeout(15000) }); } catch {}
+
+  // auto-postと同じ方式でOAuthトークン取得
+  const accessToken = await getOAuthToken();
+  if (!accessToken) {
+    return NextResponse.json({ error: "OAuthトークンなし" }, { status: 500 });
+  }
 
   for (const post of posts) {
     try {
-      // Go APIが認識するshop_idを店舗名で検索
-      let shopId = post.shop_id;
-      if (post.shop_name && goShops.length > 0) {
-        const goShop = goShops.find((s: any) =>
-          s.name === post.shop_name || s.gbp_shop_name === post.shop_name
-          || s.name?.includes(post.shop_name) || post.shop_name.includes(s.name || "")
-        );
-        if (goShop) shopId = goShop.id;
+      // shop_nameでSupabaseからgbp_location_nameを取得
+      let shopLocName = "";
+      const { data: shop } = await supabase.from("shops")
+        .select("gbp_location_name").eq("id", post.shop_id).maybeSingle();
+      if (shop?.gbp_location_name) {
+        shopLocName = shop.gbp_location_name;
+      } else if (post.shop_name) {
+        const { data: byName } = await supabase.from("shops")
+          .select("gbp_location_name")
+          .eq("name", post.shop_name)
+          .not("gbp_location_name", "is", null)
+          .limit(1).maybeSingle();
+        if (byName?.gbp_location_name) shopLocName = byName.gbp_location_name;
+      }
+      if (!shopLocName) {
+        await supabase.from("scheduled_posts").update({ status: "error", error_detail: `GBP未接続: ${post.shop_name}` }).eq("id", post.id);
+        errors++; continue;
       }
 
-      // Go API経由でGBP投稿（OAuth管理はGo API側）
-      const goBody: any = {
+      // ロケーション名解決（auto-postと同じ）
+      const { resolveLocationName } = await import("@/lib/gbp-location");
+      const locationName = await resolveLocationName(shopLocName);
+      if (!locationName) {
+        await supabase.from("scheduled_posts").update({ status: "error", error_detail: `ロケーション解決失敗: ${shopLocName}` }).eq("id", post.id);
+        errors++; continue;
+      }
+
+      // GBP API直接投稿（auto-postと完全に同じ方式）
+      const postBody: any = {
         summary: (post.summary || "").slice(0, 1500),
         topicType: post.topic_type || "STANDARD",
+        languageCode: "ja",
       };
       if (post.action_type && post.action_url) {
-        goBody.callToAction = { actionType: post.action_type, url: post.action_url };
+        postBody.callToAction = { actionType: post.action_type, url: post.action_url };
       }
       if (post.topic_type === "OFFER" && post.offer_title) {
-        goBody.event = { title: post.offer_title, schedule: { startDate: post.offer_start_date, endDate: post.offer_end_date } };
+        postBody.event = { title: post.offer_title, schedule: { startDate: post.offer_start_date, endDate: post.offer_end_date } };
+      }
+      if (post.photo_url) {
+        let url = post.photo_url;
+        if (url.includes("dropbox.com") && !url.includes("dropboxusercontent")) {
+          url = url.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace(/[&?]dl=\d/g, "");
+        }
+        postBody.media = [{ mediaFormat: "PHOTO", sourceUrl: url }];
       }
 
-      const res = await fetch(`${goApiUrl}/api/shop/${shopId}/local_post`, {
+      const res = await fetch(`${GBP_API_BASE}/${locationName}/localPosts`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(goBody),
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(postBody),
         signal: AbortSignal.timeout(30000),
       });
 
       if (res.ok) {
         let result: any = null;
         try { result = await res.json(); } catch {}
-        const searchUrl = result?.searchUrl || result?.search_url || null;
 
-        await supabase.from("scheduled_posts").update({
-          status: "published",
-          published_at: new Date().toISOString(),
-          search_url: searchUrl,
-        }).eq("id", post.id);
+        if (result?.name) {
+          await supabase.from("scheduled_posts").update({
+            status: "published", published_at: new Date().toISOString(),
+            search_url: result.searchUrl || null,
+          }).eq("id", post.id);
 
-        await supabase.from("post_logs").insert({
-          id: crypto.randomUUID(),
-          shop_id: post.shop_id,
-          shop_name: post.shop_name,
-          summary: post.summary,
-          topic_type: post.topic_type,
-          media_url: post.photo_url,
-          action_type: post.action_type,
-          action_url: post.action_url,
-          search_url: searchUrl,
-        });
-        executed++;
+          await supabase.from("post_logs").insert({
+            id: crypto.randomUUID(), shop_id: post.shop_id, shop_name: post.shop_name,
+            summary: post.summary, topic_type: post.topic_type,
+            media_url: post.photo_url, search_url: result.searchUrl || null,
+            gbp_post_name: result.name,
+          });
+          executed++;
+        } else {
+          await supabase.from("scheduled_posts").update({ status: "error", error_detail: `GBP 200だが投稿ID無し: ${JSON.stringify(result).slice(0, 150)}` }).eq("id", post.id);
+          errors++;
+        }
       } else {
         const err = await res.text().catch(() => "");
-        await supabase.from("scheduled_posts").update({ status: "error", error_detail: `Go API ${res.status}: ${err.slice(0, 200)}` }).eq("id", post.id);
+        await supabase.from("scheduled_posts").update({ status: "error", error_detail: `GBP API ${res.status}: ${err.slice(0, 200)}` }).eq("id", post.id);
         errors++;
       }
     } catch (e: any) {
