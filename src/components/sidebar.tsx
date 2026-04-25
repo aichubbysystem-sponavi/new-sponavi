@@ -31,6 +31,7 @@ const navSections = [
     children: [
       { href: "/customer-master", label: "店舗一覧" },
       { href: "/ranking", label: "店舗検索ランキング" },
+      { href: "/grid-ranking", label: "多地点順位チェック" },
       { href: "/reports", label: "店舗パフォーマンス" },
       { href: "/basic-info", label: "基礎情報管理" },
       { href: "/basic-info/fixed-message", label: "差し込み文字列設定" },
