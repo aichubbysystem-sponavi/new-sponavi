@@ -142,10 +142,18 @@ export async function PUT(request: NextRequest) {
   const now = new Date().toISOString();
   const goApiUrl = process.env.NEXT_PUBLIC_API_URL || "";
 
-  const { data: posts } = await supabase.from("scheduled_posts")
-    .select("*")
-    .eq("status", "pending")
-    .lte("scheduled_at", now);
+  // force=trueの場合、pending/on_hold両方を時刻制限なしで実行（「今すぐ実行」ボタン用）
+  let body: any = {};
+  try { body = await request.json(); } catch {}
+  const force = body?.force === true;
+
+  let query = supabase.from("scheduled_posts").select("*");
+  if (force) {
+    query = query.in("status", ["pending", "on_hold"]);
+  } else {
+    query = query.eq("status", "pending").lte("scheduled_at", now);
+  }
+  const { data: posts } = await query;
 
   if (!posts || posts.length === 0) {
     return NextResponse.json({ message: "実行対象なし", executed: 0 });

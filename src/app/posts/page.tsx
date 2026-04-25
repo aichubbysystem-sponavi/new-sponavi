@@ -1173,10 +1173,12 @@ export default function PostsPage() {
               </div>
               <button onClick={async () => {
                 try {
-                  const res = await api.put("/api/report/scheduled-posts", {}, { timeout: 120000 });
+                  const res = await api.put("/api/report/scheduled-posts", { force: true }, { timeout: 120000 });
                   setMsg(`${res.data.executed}件の予約投稿を実行しました${res.data.errors > 0 ? `（エラー${res.data.errors}件）` : ""}`);
-                  const sRes = await api.get(`/api/report/scheduled-posts${selectedShopId ? `?shopId=${selectedShopId}` : ""}`);
-                  setScheduledPosts(Array.isArray(sRes.data) ? sRes.data : []);
+                  // 一覧を再取得（Supabase直接）
+                  const { data: refreshed } = await supabase.from("scheduled_posts").select("*")
+                    .order("scheduled_at", { ascending: true }).limit(200);
+                  setScheduledPosts(refreshed || []);
                   await fetchData();
                 } catch (e: any) { setMsg(`実行失敗: ${e?.message}`); }
               }} className="mt-3 px-4 py-1.5 rounded-lg text-xs font-semibold bg-purple-600 hover:bg-purple-700" style={{ color: "#fff" }}>
