@@ -129,36 +129,57 @@ export async function GET(request: NextRequest) {
   let errors = 0;
 
   for (const post of posts) {
-    const shop = shopMap.get(post.shop_id);
-    if (!shop || !shop.gbp_location_name) {
-      await supabase.from("scheduled_posts").update({ status: "error" }).eq("id", post.id);
-      errors++;
-      continue;
-    }
-
-    const locationName = await resolveLocationName(shop.gbp_location_name);
-    if (!locationName) {
-      await supabase.from("scheduled_posts").update({ status: "error" }).eq("id", post.id);
-      errors++;
-      continue;
-    }
-
-    const postBody: any = {
-      summary: (post.summary || "").slice(0, 1500),
-      topicType: post.topic_type || "STANDARD",
-      languageCode: "ja",
-    };
-    if (post.media_url) {
-      postBody.media = [{ mediaFormat: "PHOTO", sourceUrl: post.media_url }];
-    }
-
     try {
+      // shop_idで検索、見つからなければshop_nameでフォールバック
+      let shop = shopMap.get(post.shop_id);
+      if (!shop?.gbp_location_name && post.shop_name) {
+        const { data: byName } = await supabase.from("shops")
+          .select("id, name, gbp_location_name")
+          .eq("name", post.shop_name)
+          .not("gbp_location_name", "is", null)
+          .limit(1).maybeSingle();
+        if (byName) shop = byName;
+      }
+      if (!shop?.gbp_location_name) {
+        await supabase.from("scheduled_posts").update({ status: "error", error_detail: `GBP未接続: ${post.shop_name}` }).eq("id", post.id);
+        errors++;
+        continue;
+      }
+
+      const locationName = await resolveLocationName(shop.gbp_location_name);
+      if (!locationName) {
+        await supabase.from("scheduled_posts").update({ status: "error", error_detail: `ロケーション解決失敗: ${shop.gbp_location_name}` }).eq("id", post.id);
+        errors++;
+        continue;
+      }
+
+      const postBody: any = {
+        summary: (post.summary || "").slice(0, 1500),
+        topicType: post.topic_type || "STANDARD",
+        languageCode: "ja",
+      };
+      // 特典投稿（OFFER）対応
+      if (post.topic_type === "OFFER" && post.offer_title) {
+        postBody.event = {
+          title: post.offer_title,
+          schedule: { startDate: post.offer_start_date, endDate: post.offer_end_date },
+        };
+      }
+      if (post.action_type && post.action_url) {
+        postBody.callToAction = { actionType: post.action_type, url: post.action_url };
+      }
+      if (post.media_url || post.photo_url) {
+        const url = post.media_url || post.photo_url;
+        postBody.media = [{ mediaFormat: "PHOTO", sourceUrl: url }];
+      }
+
       let res: Response | null = null;
       for (const token of allTokens) {
         res = await fetch(`${GBP_API_BASE}/${locationName}/localPosts`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify(postBody),
+          signal: AbortSignal.timeout(30000),
         });
         if (res.ok || (res.status !== 401 && res.status !== 403)) break;
       }
@@ -170,22 +191,22 @@ export async function GET(request: NextRequest) {
           posted_at: new Date().toISOString(),
         }).eq("id", post.id);
 
-        // post_logsにも記録
         await supabase.from("post_logs").insert({
           id: crypto.randomUUID(),
           shop_id: post.shop_id,
-          shop_name: shop.name,
+          shop_name: post.shop_name || shop.name,
           summary: post.summary,
           topic_type: post.topic_type || "STANDARD",
           search_url: result.searchUrl || null,
         });
         posted++;
       } else {
-        await supabase.from("scheduled_posts").update({ status: "error" }).eq("id", post.id);
+        const err = res ? await res.text().catch(() => "") : "レスポンスなし";
+        await supabase.from("scheduled_posts").update({ status: "error", error_detail: `GBP API ${res?.status}: ${err.slice(0, 200)}` }).eq("id", post.id);
         errors++;
       }
-    } catch {
-      await supabase.from("scheduled_posts").update({ status: "error" }).eq("id", post.id);
+    } catch (e: any) {
+      await supabase.from("scheduled_posts").update({ status: "error", error_detail: (e?.message || "不明な例外").slice(0, 300) }).eq("id", post.id);
       errors++;
     }
   }

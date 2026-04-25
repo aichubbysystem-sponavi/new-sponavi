@@ -349,7 +349,7 @@ export async function POST(request: NextRequest) {
 
   // 対象タブを読み込み
   const tabs = ["投稿用シート", "報告必須店舗 投稿用シート", "WHITE 系列 投稿用シート"];
-  const allMatches: { shopName: string; summary: string; photoUrl: string; ctaUrl: string; tab: string; rawPhotoCell: string; rawDateCell: string; photoDebug: string }[] = [];
+  const allMatches: { shopName: string; summary: string; photoUrl: string; ctaUrl: string; tab: string; rawPhotoCell: string; rawDateCell: string; photoDebug: string; topicType: string; offerTitle: string; offerStartDate: any; offerEndDate: any }[] = [];
   const pendingPhotoSearch: { index: number; photoCell: string; shopName: string }[] = [];
 
   for (const tab of tabs) {
@@ -368,11 +368,21 @@ export async function POST(request: NextRequest) {
 
       for (let r = 1; r < rows.length; r++) {
         const row = rows[r];
+        const aCell = (row[0] || "").trim(); // A列（index 0）投稿タイプ判定
         const shopName = (row[1] || "").trim(); // B列（index 1）
         const postText = (row[2] || "").trim(); // C列（index 2）
         const dateCell = (row[4] || "").trim(); // E列（index 4）
         const photoCell = (row[5] || "").trim(); // F列（index 5）
+        const offerTitle = (row[7] || "").trim(); // H列（index 7）特典用の題名
         const ctaUrl = (row[9] || "").trim(); // J列（index 9）CTAボタンURL
+
+        // WHITE系列タブ: A列に「特典投稿」→OFFER、それ以外→STANDARD
+        const isOffer = tab === "WHITE 系列 投稿用シート" && aCell.includes("特典投稿");
+        const rowTopicType = isPhotoOnly ? "PHOTO" : isOffer ? "OFFER" : "STANDARD";
+
+        // OFFER: 開始日=投稿日、終了日=月末
+        const offerStartDate = isOffer ? { year: dateObj.getFullYear(), month: dateObj.getMonth() + 1, day: dateObj.getDate() } : null;
+        const offerEndDate = isOffer ? { year: dateObj.getFullYear(), month: dateObj.getMonth() + 1, day: new Date(dateObj.getFullYear(), dateObj.getMonth() + 1, 0).getDate() } : null;
 
         if (!shopName) continue;
         if (!isPhotoOnly && !postText) continue; // 写真のみ投稿ではテキスト不要
@@ -395,13 +405,13 @@ export async function POST(request: NextRequest) {
         // dryRun（プレビュー）時はDropbox写真検索をスキップ → 高速化
         if (dryRun) {
           const hasPhoto = !!photoCell;
-          allMatches.push({ shopName, summary: postText || (isPhotoOnly ? "（写真のみ）" : ""), photoUrl: "", ctaUrl, tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: hasPhoto ? "写真あり（確認時はスキップ）" : "F列が空" });
+          allMatches.push({ shopName, summary: postText || (isPhotoOnly ? "（写真のみ）" : ""), photoUrl: "", ctaUrl, tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: hasPhoto ? "写真あり（確認時はスキップ）" : "F列が空", topicType: rowTopicType, offerTitle: isOffer ? offerTitle : "", offerStartDate, offerEndDate });
           continue;
         }
 
         // 実行時: 一旦写真なしでマッチを記録（後で並列検索）
         pendingPhotoSearch.push({ index: allMatches.length, photoCell, shopName });
-        allMatches.push({ shopName, summary: postText || "", photoUrl: "", ctaUrl, tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: "" });
+        allMatches.push({ shopName, summary: postText || "", photoUrl: "", ctaUrl, tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: "", topicType: rowTopicType, offerTitle: isOffer ? offerTitle : "", offerStartDate, offerEndDate });
       }
     } catch (e) {
       console.error(`[auto-post] Tab "${tab}" error:`, e);
@@ -586,12 +596,15 @@ export async function POST(request: NextRequest) {
           shop_id: shop.id,
           shop_name: shop.name,
           summary: match.summary || "",
-          topic_type: isPhotoOnly ? "PHOTO" : "STANDARD",
+          topic_type: match.topicType || "STANDARD",
           photo_url: match.photoUrl || null,
           action_type: match.ctaUrl ? "LEARN_MORE" : null,
           action_url: match.ctaUrl || null,
           scheduled_at: scheduledTime,
           status: postStatus,
+          offer_title: match.offerTitle || null,
+          offer_start_date: match.offerStartDate || null,
+          offer_end_date: match.offerEndDate || null,
         });
         if (insertErr) {
           schedResults.push({ shopName: match.shopName, status: `DB保存エラー: ${insertErr.message}` });
@@ -707,7 +720,14 @@ export async function POST(request: NextRequest) {
 
     // 本文を1500文字に制限
     const trimmedSummary = match.summary.slice(0, 1500);
-    const postBody: any = { summary: trimmedSummary, topicType: "STANDARD", languageCode: "ja" };
+    const postBody: any = { summary: trimmedSummary, topicType: match.topicType || "STANDARD", languageCode: "ja" };
+    // 特典投稿（OFFER）: 題名+開始日+終了日
+    if (match.topicType === "OFFER" && match.offerTitle) {
+      postBody.event = {
+        title: match.offerTitle,
+        schedule: { startDate: match.offerStartDate, endDate: match.offerEndDate },
+      };
+    }
     // J列にURLがあれば「詳細」CTAボタンを設定
     if (match.ctaUrl) {
       postBody.callToAction = { actionType: "LEARN_MORE", url: match.ctaUrl };

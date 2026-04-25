@@ -519,7 +519,6 @@ export default function PostsPage() {
                     {[
                       { type: "STANDARD", label: "最新情報を追加", desc: "通常の投稿", color: "border-blue-200 hover:bg-blue-50" },
                       { type: "OFFER", label: "特典を追加", desc: "クーポン・割引", color: "border-amber-200 hover:bg-amber-50" },
-                      { type: "EVENT", label: "イベントを追加", desc: "イベント告知", color: "border-purple-200 hover:bg-purple-50" },
                       { type: "PHOTO", label: "写真", desc: "写真のみ投稿", color: "border-emerald-200 hover:bg-emerald-50" },
                     ].map((item) => (
                       <button key={item.type} onClick={() => {
