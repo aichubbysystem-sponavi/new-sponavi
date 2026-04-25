@@ -100,8 +100,34 @@ export default function GridRankingPage() {
   const googleMapRef = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
 
-  const shopLat = (selectedShop as any)?.gbp_latitude || 0;
-  const shopLng = (selectedShop as any)?.gbp_longitude || 0;
+  const [shopLat, setShopLat] = useState(0);
+  const [shopLng, setShopLng] = useState(0);
+
+  // 店舗座標を取得（Go API → Supabase fallback）
+  useEffect(() => {
+    if (!selectedShopId) return;
+    const goLat = (selectedShop as any)?.gbp_latitude;
+    const goLng = (selectedShop as any)?.gbp_longitude;
+    if (goLat && goLat !== 0) {
+      setShopLat(goLat);
+      setShopLng(goLng);
+      return;
+    }
+    // Go APIに座標がない場合、Supabaseから取得
+    import("@/lib/supabase").then(({ supabase }) => {
+      supabase
+        .from("shops")
+        .select("gbp_latitude, gbp_longitude")
+        .eq("id", selectedShopId)
+        .single()
+        .then(({ data }) => {
+          if (data?.gbp_latitude) {
+            setShopLat(data.gbp_latitude);
+            setShopLng(data.gbp_longitude);
+          }
+        });
+    });
+  }, [selectedShopId, selectedShop]);
 
   // 保存済みキーワードをDBから読み込み
   useEffect(() => {
