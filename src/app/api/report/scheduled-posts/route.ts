@@ -140,8 +140,8 @@ export async function PATCH(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   const supabase = getSupabase();
   const now = new Date().toISOString();
+  const goApiUrl = process.env.NEXT_PUBLIC_API_URL || "";
 
-  // 実行予定時刻を過ぎた未実行の投稿を取得
   const { data: posts } = await supabase.from("scheduled_posts")
     .select("*")
     .eq("status", "pending")
@@ -151,90 +151,42 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ message: "実行対象なし", executed: 0 });
   }
 
-  // Go APIを叩いてトークンリフレッシュ発火 → 直後にDBから最新トークン取得
-  const goApiUrl = process.env.NEXT_PUBLIC_API_URL || "";
-  try { await fetch(`${goApiUrl}/api/gbp/account`, { signal: AbortSignal.timeout(15000) }); } catch {}
-  // リフレッシュ反映を少し待つ
-  await new Promise(r => setTimeout(r, 2000));
-
-  // トークン取得デバッグ
-  const dbgSupabase = getSupabase();
-  const { data: dbgTokens, error: dbgErr } = await dbgSupabase.from("system_oauth_tokens")
-    .select("access_token, expiry").order("expiry", { ascending: false }).limit(3);
-  const tokenDebug = dbgErr
-    ? `ビューエラー: ${dbgErr.message}`
-    : dbgTokens
-      ? `${dbgTokens.length}件, 最新expiry: ${dbgTokens[0]?.expiry || "なし"}, now: ${new Date().toISOString()}`
-      : "データなし";
-
-  const accessToken = await getOAuthToken();
-  if (!accessToken) {
-    return NextResponse.json({ error: `OAuthトークンなし [${tokenDebug}]` }, { status: 500 });
-  }
-  const validTokens = [accessToken];
-
   let executed = 0;
   let errors = 0;
 
   for (const post of posts) {
     try {
-      // 1. 店舗検索（shop_idで見つからなければshop_nameで検索）
-      let shopLocName = "";
+      // shop_idで検索、見つからなければshop_nameで検索
+      let shopId = post.shop_id;
       const { data: shop } = await supabase.from("shops")
-        .select("gbp_location_name").eq("id", post.shop_id).maybeSingle();
-      if (shop?.gbp_location_name) {
-        shopLocName = shop.gbp_location_name;
-      } else if (post.shop_name) {
-        // shop_id不一致時はshop_nameでフォールバック検索
-        const { data: shopByName } = await supabase.from("shops")
-          .select("gbp_location_name")
-          .eq("name", post.shop_name)
-          .not("gbp_location_name", "is", null)
-          .limit(1)
-          .maybeSingle();
-        if (shopByName?.gbp_location_name) shopLocName = shopByName.gbp_location_name;
+        .select("id").eq("id", post.shop_id).maybeSingle();
+      if (!shop && post.shop_name) {
+        const { data: byName } = await supabase.from("shops")
+          .select("id").eq("name", post.shop_name)
+          .not("gbp_location_name", "is", null).limit(1).maybeSingle();
+        if (byName) shopId = byName.id;
       }
 
-      if (!shopLocName) {
-        await supabase.from("scheduled_posts").update({ status: "error", error_detail: `GBP未接続（shopId=${post.shop_id?.slice(0,8)}, name=${post.shop_name}）` }).eq("id", post.id);
-        errors++;
-        continue;
-      }
-
-      // 2. ロケーション名解決
-      const { resolveLocationName } = await import("@/lib/gbp-location");
-      const locationName = await resolveLocationName(shopLocName);
-      if (!locationName) {
-        await supabase.from("scheduled_posts").update({ status: "error", error_detail: `ロケーション解決失敗: ${shopLocName}` }).eq("id", post.id);
-        errors++;
-        continue;
-      }
-
-      // 3. GBP投稿データ構築
-      const postBody: any = { summary: post.summary, topicType: post.topic_type || "STANDARD", languageCode: "ja" };
+      // Go API経由でGBP投稿（OAuth管理はGo API側）
+      const goBody: any = {
+        summary: (post.summary || "").slice(0, 1500),
+        topicType: post.topic_type || "STANDARD",
+      };
       if (post.action_type && post.action_url) {
-        postBody.callToAction = { actionType: post.action_type, url: post.action_url };
+        goBody.callToAction = { actionType: post.action_type, url: post.action_url };
       }
-      if (post.photo_url) {
-        let url = post.photo_url;
-        if (url.includes("dropbox.com")) url = url.replace("dl=0", "raw=1");
-        postBody.media = [{ mediaFormat: "PHOTO", sourceUrl: url }];
+      if (post.topic_type === "OFFER" && post.offer_title) {
+        goBody.event = { title: post.offer_title, schedule: { startDate: post.offer_start_date, endDate: post.offer_end_date } };
       }
 
-      // 4. GBP API投稿
-      // 全トークンを順次試行（401/403なら次のトークンで再試行）
-      let res: Response | null = null;
-      for (const token of validTokens) {
-        res = await fetch(`${GBP_API_BASE}/${locationName}/localPosts`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify(postBody),
-          signal: AbortSignal.timeout(30000),
-        });
-        if (res.ok || (res.status !== 401 && res.status !== 403)) break;
-      }
+      const res = await fetch(`${goApiUrl}/api/shop/${shopId}/local_post`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(goBody),
+        signal: AbortSignal.timeout(30000),
+      });
 
-      if (res && res.ok) {
+      if (res.ok) {
         const result = await res.json();
         await supabase.from("scheduled_posts").update({
           status: "published",
@@ -253,17 +205,14 @@ export async function PUT(request: NextRequest) {
           action_url: post.action_url,
           search_url: result.searchUrl || null,
         });
-
         executed++;
       } else {
-        const err = res ? await res.text().catch(() => "") : "レスポンスなし";
-        const statusCode = res ? res.status : 0;
-        await supabase.from("scheduled_posts").update({ status: "error", error_detail: `GBP API ${statusCode}: ${err.slice(0, 150)} [token: ${accessToken?.slice(0,15)}..., ${tokenDebug}]` }).eq("id", post.id);
+        const err = await res.text().catch(() => "");
+        await supabase.from("scheduled_posts").update({ status: "error", error_detail: `Go API ${res.status}: ${err.slice(0, 200)}` }).eq("id", post.id);
         errors++;
       }
     } catch (e: any) {
-      const detail = e?.message || e?.toString?.() || "不明な例外";
-      await supabase.from("scheduled_posts").update({ status: "error", error_detail: detail.slice(0, 300) }).eq("id", post.id);
+      await supabase.from("scheduled_posts").update({ status: "error", error_detail: (e?.message || "不明な例外").slice(0, 300) }).eq("id", post.id);
       errors++;
     }
   }
