@@ -170,19 +170,28 @@ export default function GridRankingPage() {
     }
   };
 
-  // 履歴取得
+  // 履歴取得（最新結果を自動表示）
   const fetchHistory = useCallback(async () => {
     if (!selectedShopId) return;
     try {
       const res = await api.get(`/api/report/grid-ranking?shopId=${selectedShopId}`);
-      setHistory(res.data || []);
+      const logs: GridLog[] = res.data || [];
+      setHistory(logs);
+      // 最新の計測結果を自動表示
+      if (logs.length > 0) {
+        const latest = logs[0];
+        setSelectedHistory(latest);
+        setKeyword(latest.keyword);
+        setGridResults(latest.results || []);
+      } else {
+        setGridResults([]);
+        setSelectedHistory(null);
+      }
     } catch {}
   }, [selectedShopId]);
 
   useEffect(() => {
     fetchHistory();
-    setGridResults([]);
-    setSelectedHistory(null);
   }, [selectedShopId, fetchHistory]);
 
   // Google Maps初期化
@@ -294,6 +303,13 @@ export default function GridRankingPage() {
     },
     [shopLat, shopLng]
   );
+
+  // 履歴読み込み後 or 計測完了後にマップにマーカーを描画
+  useEffect(() => {
+    if (gridResults.length > 0 && googleMapRef.current) {
+      renderMarkers(gridResults);
+    }
+  }, [gridResults, renderMarkers]);
 
   // グリッド計測実行
   const startMeasure = async () => {
