@@ -138,6 +138,15 @@ export async function PATCH(request: NextRequest) {
  * 予約投稿を実行（cronから呼ばれる or 手動実行）
  */
 export async function PUT(request: NextRequest) {
+  // 認証: JWT or Cron Secret
+  const cronSecret = process.env.CRON_SECRET;
+  const isCron = cronSecret && request.headers.get("x-cron-secret") === cronSecret;
+  if (!isCron) {
+    const { verifyAuth } = await import("@/lib/auth-verify");
+    const auth = await verifyAuth(request.headers.get("authorization"));
+    if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  }
+
   const supabase = getSupabase();
   const now = new Date().toISOString();
   const goApiUrl = process.env.NEXT_PUBLIC_API_URL || "";
