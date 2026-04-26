@@ -80,6 +80,7 @@ export default function PostsPage() {
   const [showAutoPost, setShowAutoPost] = useState(false);
   const [creating, setCreating] = useState(false);
   const [msg, setMsg] = useState("");
+  const [executeLoading, setExecuteLoading] = useState(false);
   const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
   const [viewMode, setViewMode] = useState<"list" | "calendar" | "shops" | "plan">("list");
   const [confirmMap, setConfirmMap] = useState<Record<string, ConfirmStatus>>({});
@@ -1171,18 +1172,25 @@ export default function PostsPage() {
                   </div>
                 ))}
               </div>
-              <button onClick={async () => {
-                try {
-                  const res = await api.put("/api/report/scheduled-posts", { force: true }, { timeout: 120000 });
-                  setMsg(`${res.data.executed}件の予約投稿を実行しました${res.data.errors > 0 ? `（エラー${res.data.errors}件）` : ""}`);
-                  // 一覧を再取得（Supabase直接）
-                  const { data: refreshed } = await supabase.from("scheduled_posts").select("*")
-                    .order("scheduled_at", { ascending: true }).limit(200);
-                  setScheduledPosts(refreshed || []);
-                  await fetchData();
-                } catch (e: any) { setMsg(`実行失敗: ${e?.message}`); }
-              }} className="mt-3 px-4 py-1.5 rounded-lg text-xs font-semibold bg-purple-600 hover:bg-purple-700" style={{ color: "#fff" }}>
-                予約投稿を今すぐ実行
+              <button
+                disabled={executeLoading}
+                onClick={async () => {
+                  if (executeLoading) return;
+                  setExecuteLoading(true);
+                  try {
+                    const res = await api.put("/api/report/scheduled-posts", { force: true }, { timeout: 120000 });
+                    setMsg(`${res.data.executed}件の予約投稿を実行しました${res.data.errors > 0 ? `（エラー${res.data.errors}件）` : ""}`);
+                    const { data: refreshed } = await supabase.from("scheduled_posts").select("*")
+                      .order("scheduled_at", { ascending: true }).limit(200);
+                    setScheduledPosts(refreshed || []);
+                    await fetchData();
+                  } catch (e: any) { setMsg(`実行失敗: ${e?.message}`); }
+                  finally { setExecuteLoading(false); }
+                }}
+                className="mt-3 px-4 py-1.5 rounded-lg text-xs font-semibold bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ color: "#fff" }}
+              >
+                {executeLoading ? "実行中..." : "予約投稿を今すぐ実行"}
               </button>
             </div>
           )}
