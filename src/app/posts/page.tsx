@@ -587,20 +587,17 @@ export default function PostsPage() {
                     <button onClick={async () => {
                       setAutoPosting(true); setAutoPostResult(null);
                       const currentAttempt = autoPostAttempt;
-                      // postTargetModeに応じたフィルタ
-                      let filterName: string | undefined;
-                      let filterNames: string[] | undefined;
+                      // プレビューボタンと完全に同じフィルタ構築
+                      const execFilter: any = {};
                       if (currentAttempt > 1 && autoPostFailedShops.length > 0) {
-                        // リトライ: 失敗店舗のみ
-                        filterNames = autoPostFailedShops;
+                        execFilter.filterShopNames = autoPostFailedShops;
                       } else if (postTargetMode === "selected" && postTargetShopIds.length > 0) {
-                        filterNames = shops.filter(s => postTargetShopIds.includes(s.id)).map(s => s.name);
+                        execFilter.filterShopNames = shops.filter(s => postTargetShopIds.includes(s.id)).map(s => s.name);
                       } else if (postTargetMode === "current" && selectedShop) {
-                        filterName = selectedShop.name;
+                        execFilter.filterShopName = selectedShop.name;
                       }
-                      const retryShops = filterNames;
                       try {
-                        const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, filterShopName: filterName, filterShopNames: retryShops }, { timeout: 60000 });
+                        const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, ...execFilter }, { timeout: 60000 });
                         const total = previewRes.data.matches || 0;
                         if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません` }); setAutoPosting(false); return; }
                         if (!confirm(`【${currentAttempt}回目実行】${autoPostDate}の投稿を実行しますか？\n\n${total}件を10件ずつバッチ処理します（${Math.ceil(total / 10)}回）`)) { setAutoPosting(false); return; }
@@ -615,7 +612,7 @@ export default function PostsPage() {
                               sheetId: autoPostSheet, targetDate: autoPostDate,
                               topicType: postSelectedType || newPost.topicType,
                               batchOffset: offset, batchSize: bs,
-                              filterShopName: filterName, filterShopNames: retryShops,
+                              ...execFilter,
                             }, { timeout: 180000 });
                             totalPosted += res.data.posted || 0;
                             totalErrors += res.data.errors || 0;
@@ -655,11 +652,18 @@ export default function PostsPage() {
                   </select>
                   <button onClick={async () => {
                     setAutoPosting(true); setAutoPostResult(null);
-                    const filterName = !isAllMode && selectedShop ? selectedShop.name : undefined;
-                    const retryShops = autoPostAttempt > 1 && autoPostFailedShops.length > 0 ? autoPostFailedShops : undefined;
+                    // プレビュー・実行と同じフィルタ構築
+                    const schedFilter: any = {};
+                    if (autoPostAttempt > 1 && autoPostFailedShops.length > 0) {
+                      schedFilter.filterShopNames = autoPostFailedShops;
+                    } else if (postTargetMode === "selected" && postTargetShopIds.length > 0) {
+                      schedFilter.filterShopNames = shops.filter(s => postTargetShopIds.includes(s.id)).map(s => s.name);
+                    } else if (postTargetMode === "current" && selectedShop) {
+                      schedFilter.filterShopName = selectedShop.name;
+                    }
                     const scheduledAt = `${scheduleDate}T${scheduleHour.padStart(2, "0")}:00:00+09:00`;
                     try {
-                      const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, filterShopName: filterName, filterShopNames: retryShops }, { timeout: 60000 });
+                      const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, ...schedFilter }, { timeout: 60000 });
                       const total = previewRes.data.matches || 0;
                       if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません` }); setAutoPosting(false); return; }
                       if (!confirm(`${scheduleDate} ${scheduleHour}時 に予約投稿しますか？\n\n${total}件を予約登録します`)) { setAutoPosting(false); return; }
@@ -674,7 +678,7 @@ export default function PostsPage() {
                             sheetId: autoPostSheet, targetDate: autoPostDate,
                             topicType: postSelectedType || newPost.topicType,
                             batchOffset: off, batchSize: bs,
-                            filterShopName: filterName, filterShopNames: retryShops,
+                            ...schedFilter,
                             scheduleMode: true, scheduleAt: scheduledAt,
                           }, { timeout: 180000 });
                           totalPosted += res.data.posted || 0;
