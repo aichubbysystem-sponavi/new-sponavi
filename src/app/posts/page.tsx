@@ -568,7 +568,15 @@ export default function PostsPage() {
                     <button onClick={async () => {
                       setAutoPosting(true); setAutoPostResult(null);
                       try {
-                        const res = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, filterShopName: !isAllMode && selectedShop ? selectedShop.name : undefined }, { timeout: 60000 });
+                        // postTargetModeに応じたフィルタ
+                        const previewFilter: any = {};
+                        if (postTargetMode === "selected" && postTargetShopIds.length > 0) {
+                          previewFilter.filterShopNames = shops.filter(s => postTargetShopIds.includes(s.id)).map(s => s.name);
+                        } else if (postTargetMode === "current" && selectedShop) {
+                          previewFilter.filterShopName = selectedShop.name;
+                        }
+                        // isAllMode（全店舗表示ヘッダー）の場合もフィルタなし
+                        const res = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, ...previewFilter }, { timeout: 60000 });
                         setAutoPostResult({ ...res.data, mode: "preview" });
                       } catch (e: any) { setAutoPostResult({ error: e?.response?.data?.error || e?.message }); }
                       finally { setAutoPosting(false); }
@@ -579,9 +587,18 @@ export default function PostsPage() {
                     <button onClick={async () => {
                       setAutoPosting(true); setAutoPostResult(null);
                       const currentAttempt = autoPostAttempt;
-                      // 2回目以降は失敗店舗のみ対象、1回目は選択店舗フィルタ
-                      const filterName = !isAllMode && selectedShop ? selectedShop.name : undefined;
-                      const retryShops = currentAttempt > 1 && autoPostFailedShops.length > 0 ? autoPostFailedShops : undefined;
+                      // postTargetModeに応じたフィルタ
+                      let filterName: string | undefined;
+                      let filterNames: string[] | undefined;
+                      if (currentAttempt > 1 && autoPostFailedShops.length > 0) {
+                        // リトライ: 失敗店舗のみ
+                        filterNames = autoPostFailedShops;
+                      } else if (postTargetMode === "selected" && postTargetShopIds.length > 0) {
+                        filterNames = shops.filter(s => postTargetShopIds.includes(s.id)).map(s => s.name);
+                      } else if (postTargetMode === "current" && selectedShop) {
+                        filterName = selectedShop.name;
+                      }
+                      const retryShops = filterNames;
                       try {
                         const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, filterShopName: filterName, filterShopNames: retryShops }, { timeout: 60000 });
                         const total = previewRes.data.matches || 0;
