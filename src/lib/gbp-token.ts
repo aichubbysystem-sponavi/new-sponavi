@@ -56,16 +56,7 @@ async function refreshAndSave(token: TokenInfo): Promise<string | null> {
 
     if (!newAccessToken) return null;
 
-    // DBに書き戻し（system_oauth_tokensビュー経由ではなくsystem.tokensに直接）
-    const supabase = getSupabase();
-
-    // system_oauth_tokensビュー経由で更新を試行
-    await supabase.from("system_oauth_tokens").update({
-      access_token: newAccessToken,
-      expiry: newExpiry,
-    }).eq("account_id", token.account_id);
-
-    // PostgreSQL直接更新（ビューが更新不可の場合のフォールバック）
+    // DBに書き戻し（system.tokensに直接PostgreSQLで更新）
     try {
       const DB_PASSWORD = process.env.SUPABASE_DB_PASSWORD || "";
       const PROJECT_ID = (SUPABASE_URL.match(/https:\/\/([^.]+)/) || [])[1] || "";
@@ -109,45 +100,57 @@ export async function getValidTokens(): Promise<string[]> {
     await fetch(`${GO_API_URL}/api/gbp/account`, { signal: AbortSignal.timeout(15000) });
   } catch {}
 
-  // Step 2: DBからトークン一覧を取得
+  // Step 2: DBからトークン一覧を取得（PostgreSQL直接 → system.tokens を優先）
   let allTokens: TokenInfo[] = [];
 
-  const supabase = getSupabase();
+  // 方法1: PostgreSQL直接接続（system.tokensに直接アクセス — 最も確実）
   try {
-    const { data } = await supabase.from("system_oauth_tokens")
-      .select("account_id, access_token, refresh_token, expiry")
-      .order("expiry", { ascending: false });
-    if (data && data.length > 0) allTokens = data;
-  } catch {}
+    const DB_PASSWORD = process.env.SUPABASE_DB_PASSWORD || "";
+    const PROJECT_ID = (SUPABASE_URL.match(/https:\/\/([^.]+)/) || [])[1] || "";
+    if (DB_PASSWORD && PROJECT_ID) {
+      const { Client } = await import("pg");
+      const client = new Client({
+        host: `db.${PROJECT_ID}.supabase.co`,
+        port: 5432,
+        database: "postgres",
+        user: "postgres",
+        password: DB_PASSWORD,
+        ssl: { rejectUnauthorized: false },
+        connectionTimeoutMillis: 10000,
+      });
+      await client.connect();
+      const result = await client.query(
+        "SELECT account_id, access_token, refresh_token, expiry FROM system.tokens ORDER BY expiry DESC"
+      );
+      await client.end();
+      if (result.rows.length > 0) allTokens = result.rows;
+    }
+  } catch (e: any) {
+    console.log("[gbp-token] PostgreSQL direct error:", e?.message);
+  }
 
-  // フォールバック: PostgreSQL直接
+  // 方法2: Supabaseビュー経由（PostgreSQL直接が失敗した場合のフォールバック）
   if (allTokens.length === 0) {
+    const supabase = getSupabase();
     try {
-      const DB_PASSWORD = process.env.SUPABASE_DB_PASSWORD || "";
-      const PROJECT_ID = (SUPABASE_URL.match(/https:\/\/([^.]+)/) || [])[1] || "";
-      if (DB_PASSWORD && PROJECT_ID) {
-        const { Client } = await import("pg");
-        const client = new Client({
-          host: `db.${PROJECT_ID}.supabase.co`,
-          port: 5432,
-          database: "postgres",
-          user: "postgres",
-          password: DB_PASSWORD,
-          ssl: { rejectUnauthorized: false },
-          connectionTimeoutMillis: 10000,
-        });
-        await client.connect();
-        const result = await client.query(
-          "SELECT account_id, access_token, refresh_token, expiry FROM system.tokens ORDER BY expiry DESC"
-        );
-        await client.end();
-        if (result.rows.length > 0) allTokens = result.rows;
+      const { data } = await supabase.from("system_oauth_tokens")
+        .select("access_token, refresh_token, expiry")
+        .order("expiry", { ascending: false });
+      if (data && data.length > 0) {
+        allTokens = data.map((d, i) => ({
+          account_id: `account-${i}`,
+          access_token: d.access_token,
+          refresh_token: d.refresh_token,
+          expiry: d.expiry,
+        }));
       }
-    } catch {}
+    } catch (e: any) {
+      console.log("[gbp-token] Supabase view error:", e?.message);
+    }
   }
 
   if (allTokens.length === 0) {
-    console.error("[gbp-token] No tokens found in DB");
+    console.error("[gbp-token] No tokens found in any source");
     return [];
   }
 
