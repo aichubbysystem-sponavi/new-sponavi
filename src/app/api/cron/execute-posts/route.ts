@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { resolveLocationName } from "@/lib/gbp-location";
-import { callGbpApi } from "@/lib/gbp-token";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -10,10 +9,66 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
+const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
+const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
 const MAX_RETRY = 3;
 
 function getSupabase() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
+}
+
+/** scheduled-postsと同一方式: Supabaseビューから取得+refresh_tokenで自動更新 */
+async function getOAuthToken(): Promise<string | null> {
+  // Go APIでトークンリフレッシュ発火
+  try {
+    const GO_API = process.env.NEXT_PUBLIC_API_URL || "";
+    if (GO_API) await fetch(`${GO_API}/api/gbp/account`, { signal: AbortSignal.timeout(10000) });
+  } catch {}
+
+  const supabase = getSupabase();
+  const { data } = await supabase.from("system_oauth_tokens")
+    .select("access_token, refresh_token, expiry").limit(1).maybeSingle();
+  if (!data) {
+    console.error("[cron/execute-posts] No token in system_oauth_tokens");
+    return null;
+  }
+  // まだ有効なら即返す
+  if (new Date(data.expiry).getTime() - Date.now() > 5 * 60 * 1000) {
+    return data.access_token;
+  }
+  // 期限切れ → リフレッシュ
+  if (!data.refresh_token || !GBP_CLIENT_ID || !GBP_CLIENT_SECRET) {
+    console.error("[cron/execute-posts] Cannot refresh: missing credentials");
+    return data.access_token;
+  }
+  try {
+    const res = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: GBP_CLIENT_ID,
+        client_secret: GBP_CLIENT_SECRET,
+        refresh_token: data.refresh_token,
+        grant_type: "refresh_token",
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) {
+      console.error("[cron/execute-posts] Token refresh failed:", res.status);
+      return data.access_token;
+    }
+    const t = await res.json();
+    // DB書き戻し
+    await supabase.from("system_oauth_tokens").update({
+      access_token: t.access_token,
+      expiry: new Date(Date.now() + (t.expires_in || 3600) * 1000).toISOString(),
+    }).not("account_id", "is", null);
+    console.log("[cron/execute-posts] Token refreshed successfully");
+    return t.access_token;
+  } catch (e: any) {
+    console.error("[cron/execute-posts] Token refresh error:", e?.message);
+    return data.access_token;
+  }
 }
 
 /**
@@ -104,13 +159,24 @@ export async function GET(request: NextRequest) {
         postBody.media = [{ mediaFormat: "PHOTO", sourceUrl: url }];
       }
 
-      // callGbpApi: 自動リフレッシュ+401リトライ付き
-      const result = await callGbpApi(
-        `${GBP_API_BASE}/${locationName}/localPosts`,
-        { method: "POST", body: postBody, timeout: 30000 }
-      );
+      // トークン取得（scheduled-postsと同一方式）
+      const accessToken = await getOAuthToken();
+      if (!accessToken) {
+        await markFailed(supabase, post, retryCount, "OAuthトークン取得失敗");
+        if (retryCount + 1 < MAX_RETRY) retried++;
+        else errors++;
+        continue;
+      }
 
-      if (result.ok) {
+      const res = await fetch(`${GBP_API_BASE}/${locationName}/localPosts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(postBody),
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (res.ok) {
+        const result = await res.json().catch(() => ({}));
         await supabase.from("scheduled_posts").update({
           status: "published",
           posted_at: new Date().toISOString(),
@@ -123,14 +189,12 @@ export async function GET(request: NextRequest) {
           shop_name: post.shop_name || shop.name,
           summary: post.summary,
           topic_type: post.topic_type || "STANDARD",
-          search_url: result.data?.searchUrl || null,
+          search_url: result?.searchUrl || null,
         });
         posted++;
       } else {
-        const errDetail = typeof result.data === "string"
-          ? result.data.slice(0, 200)
-          : JSON.stringify(result.data).slice(0, 200);
-        await markFailed(supabase, post, retryCount, `GBP API ${result.status}: ${errDetail}`);
+        const errText = await res.text().catch(() => "");
+        await markFailed(supabase, post, retryCount, `GBP API ${res.status}: ${errText.slice(0, 200)}`);
         if (retryCount + 1 < MAX_RETRY) retried++;
         else errors++;
       }
