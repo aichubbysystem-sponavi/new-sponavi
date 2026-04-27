@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getOAuthToken } from "@/lib/gbp-token";
+import { resolveLocationName } from "@/lib/gbp-location";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -8,113 +10,9 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
-const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
-const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
 
 function getSupabase() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
-}
-
-/** トークン取得+リフレッシュ+PostgreSQL直接書き戻し */
-async function getOAuthToken(): Promise<string | null> {
-  // Go APIでトークンリフレッシュ発火（Cloud Run cold start対応で20秒）
-  try {
-    const GO_API = process.env.NEXT_PUBLIC_API_URL || "";
-    if (GO_API) await fetch(`${GO_API}/api/gbp/account`, { signal: AbortSignal.timeout(20000) });
-  } catch {}
-
-  // PostgreSQL直接接続でsystem.tokensからトークン取得
-  const DB_PASSWORD = process.env.SUPABASE_DB_PASSWORD || "";
-  const PROJECT_ID = (SUPABASE_URL.match(/https:\/\/([^.]+)/) || [])[1] || "";
-  let tokenData: { account_id: string; access_token: string; refresh_token: string; expiry: string } | null = null;
-
-  if (DB_PASSWORD && PROJECT_ID) {
-    try {
-      const { Client } = await import("pg");
-      const client = new Client({
-        host: `db.${PROJECT_ID}.supabase.co`, port: 5432,
-        database: "postgres", user: "postgres", password: DB_PASSWORD,
-        ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 10000,
-      });
-      await client.connect();
-      const result = await client.query(
-        "SELECT account_id, access_token, refresh_token, expiry FROM system.tokens ORDER BY expiry DESC LIMIT 1"
-      );
-      await client.end();
-      if (result.rows.length > 0) tokenData = result.rows[0];
-    } catch (e: any) {
-      console.error("[cron/execute-posts] PostgreSQL read error:", e?.message);
-    }
-  }
-
-  // フォールバック: Supabaseビュー
-  if (!tokenData) {
-    const supabase = getSupabase();
-    const { data } = await supabase.from("system_oauth_tokens")
-      .select("access_token, refresh_token, expiry").limit(1).maybeSingle();
-    if (data) tokenData = { account_id: "", ...data };
-  }
-
-  if (!tokenData) {
-    console.error("[cron/execute-posts] トークンがDBにありません");
-    return null;
-  }
-
-  // トークンがまだ有効ならそのまま返す
-  if (new Date(tokenData.expiry).getTime() - Date.now() > 5 * 60 * 1000) {
-    console.log("[cron/execute-posts] トークン有効（残り" + Math.round((new Date(tokenData.expiry).getTime() - Date.now()) / 60000) + "分）");
-    return tokenData.access_token;
-  }
-
-  // 期限切れ → refresh_tokenでリフレッシュ
-  if (!tokenData.refresh_token || !GBP_CLIENT_ID || !GBP_CLIENT_SECRET) {
-    console.error("[cron/execute-posts] リフレッシュ不可（credentials不足）");
-    return tokenData.access_token;
-  }
-
-  try {
-    const res = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET,
-        refresh_token: tokenData.refresh_token, grant_type: "refresh_token",
-      }),
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!res.ok) {
-      console.error("[cron/execute-posts] Google OAuth refresh failed:", res.status);
-      return tokenData.access_token;
-    }
-    const t = await res.json();
-    const newExpiry = new Date(Date.now() + (t.expires_in || 3600) * 1000).toISOString();
-
-    // PostgreSQL直接書き戻し（ビュー更新は失敗するためPG直接）
-    if (DB_PASSWORD && PROJECT_ID && tokenData.account_id) {
-      try {
-        const { Client } = await import("pg");
-        const client = new Client({
-          host: `db.${PROJECT_ID}.supabase.co`, port: 5432,
-          database: "postgres", user: "postgres", password: DB_PASSWORD,
-          ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 10000,
-        });
-        await client.connect();
-        await client.query(
-          "UPDATE system.tokens SET access_token = $1, expiry = $2 WHERE account_id = $3",
-          [t.access_token, newExpiry, tokenData.account_id]
-        );
-        await client.end();
-        console.log("[cron/execute-posts] トークンリフレッシュ+DB書き戻し成功");
-      } catch (e: any) {
-        console.error("[cron/execute-posts] PostgreSQL write error:", e?.message);
-      }
-    }
-
-    return t.access_token;
-  } catch (e: any) {
-    console.error("[cron/execute-posts] Token refresh error:", e?.message);
-    return tokenData.access_token;
-  }
 }
 
 /** GBP投稿を試行。400エラー時は写真/CTA除外で自動リトライ */
@@ -205,6 +103,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: true, message: "実行対象なし", posted: 0 });
   }
 
+  // 共通モジュールでトークン取得（自動リフレッシュ+DB書き戻し済み）
   const accessToken = await getOAuthToken();
   if (!accessToken) {
     console.error("[cron/execute-posts] OAuthトークン取得失敗");
@@ -231,7 +130,6 @@ export async function GET(request: NextRequest) {
         errors++; continue;
       }
 
-      const { resolveLocationName } = await import("@/lib/gbp-location");
       const locationName = await resolveLocationName(shopLocName);
       if (!locationName) {
         await supabase.from("scheduled_posts").update({ status: "error", error_detail: `ロケーション解決失敗: ${shopLocName}` }).eq("id", post.id);
