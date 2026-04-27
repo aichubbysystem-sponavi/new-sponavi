@@ -113,7 +113,7 @@ export async function GET(request: NextRequest) {
 
       if (result.ok) {
         await supabase.from("scheduled_posts").update({
-          status: "published", posted_at: new Date().toISOString(),
+          status: "published", published_at: new Date().toISOString(),
         }).eq("id", post.id);
         await supabase.from("post_logs").insert({
           id: crypto.randomUUID(), shop_id: post.shop_id, shop_name: post.shop_name,
