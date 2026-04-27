@@ -46,9 +46,9 @@ function rankBg(rank: number): string {
 }
 
 function avgRank(results: GridPoint[]): string {
-  const ranked = results.filter((r) => r.rank > 0);
-  if (ranked.length === 0) return "-";
-  return (ranked.reduce((a, b) => a + b.rank, 0) / ranked.length).toFixed(1);
+  if (results.length === 0) return "-";
+  const total = results.reduce((a, b) => a + (b.rank > 0 ? b.rank : 101), 0);
+  return (total / results.length).toFixed(1);
 }
 
 /** 中心座標からグリッド地点を生成 */
