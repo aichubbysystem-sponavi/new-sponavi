@@ -26,36 +26,17 @@ interface TokenInfo {
 }
 
 /**
- * Supabase REST API経由でsystem.tokensのトークンを書き戻す
+ * Supabase RPC経由でsystem.tokensのトークンを書き戻す
  */
 async function saveTokenToDb(accountId: string, accessToken: string, expiry: string): Promise<void> {
   const supabase = getSupabase();
-  // RPC関数経由で書き戻し（ビューのUPDATEは不可のため）
-  const { error: rpcError } = await supabase.rpc("update_system_token", {
+  const { error } = await supabase.rpc("update_system_token", {
     p_account_id: accountId,
     p_access_token: accessToken,
     p_expiry: expiry,
   });
-  if (rpcError) {
-    // RPC未定義の場合はSQL直接実行（service_role keyで）
-    console.log("[gbp-token] RPC fallback, trying direct REST...", rpcError.message);
-    // Supabase REST APIで直接system.tokensを更新
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/update_system_token`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY,
-        Authorization: `Bearer ${SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY}`,
-      },
-      body: JSON.stringify({
-        p_account_id: accountId,
-        p_access_token: accessToken,
-        p_expiry: expiry,
-      }),
-    });
-    if (!res.ok) {
-      console.error("[gbp-token] Token save failed:", await res.text().catch(() => ""));
-    }
+  if (error) {
+    console.error("[gbp-token] Token save failed:", error.message);
   }
 }
 
@@ -104,10 +85,27 @@ async function refreshToken(token: TokenInfo): Promise<string | null> {
 }
 
 /**
- * DBからトークンを取得
+ * DBからトークンを取得（RPC関数 → ビューのフォールバック）
  */
 async function getTokensFromDb(): Promise<TokenInfo[]> {
   const supabase = getSupabase();
+
+  // 方法1: RPC関数（system.tokensを直接読む — ビューのJOIN問題を回避）
+  try {
+    const { data: rpcData, error: rpcError } = await supabase.rpc("get_valid_tokens");
+    if (!rpcError && rpcData && rpcData.length > 0) {
+      console.log(`[gbp-token] RPC: ${rpcData.length}件のトークン取得`);
+      return rpcData.map((d: any) => ({
+        account_id: d.account_id,
+        access_token: d.access_token,
+        refresh_token: d.refresh_token,
+        expiry: d.expiry,
+      }));
+    }
+    if (rpcError) console.log("[gbp-token] RPC error:", rpcError.message);
+  } catch {}
+
+  // 方法2: ビュー経由（フォールバック）
   const { data, error } = await supabase
     .from("system_oauth_tokens")
     .select("access_token, refresh_token, expiry")
