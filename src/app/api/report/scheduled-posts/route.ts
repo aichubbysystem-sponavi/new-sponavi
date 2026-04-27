@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { getOAuthToken } from "@/lib/gbp-token";
-import { resolveLocationName } from "@/lib/gbp-location";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -9,7 +7,7 @@ export const maxDuration = 300;
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
+const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
 function getSupabase() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
@@ -148,59 +146,50 @@ export async function PUT(request: NextRequest) {
   let executed = 0;
   let errors = 0;
 
-  // 共通モジュールでトークン取得（自動リフレッシュ+DB書き戻し済み）
-  const accessToken = await getOAuthToken();
-  if (!accessToken) {
-    return NextResponse.json({ error: "OAuthトークンなし" }, { status: 500 });
-  }
-
   for (const post of posts) {
     try {
-      // shop_nameでSupabaseからgbp_location_nameを取得
-      let shopLocName = "";
-      const { data: shop } = await supabase.from("shops")
-        .select("gbp_location_name").eq("id", post.shop_id).maybeSingle();
-      if (shop?.gbp_location_name) {
-        shopLocName = shop.gbp_location_name;
-      } else if (post.shop_name) {
-        const { data: byName } = await supabase.from("shops")
-          .select("gbp_location_name")
-          .eq("name", post.shop_name)
-          .not("gbp_location_name", "is", null)
-          .limit(1).maybeSingle();
-        if (byName?.gbp_location_name) shopLocName = byName.gbp_location_name;
-      }
-      if (!shopLocName) {
-        await supabase.from("scheduled_posts").update({ status: "error", error_detail: `GBP未接続: ${post.shop_name}` }).eq("id", post.id);
+      if (!post.shop_id) {
+        await supabase.from("scheduled_posts").update({ status: "error", error_detail: "shop_idなし" }).eq("id", post.id);
         errors++; continue;
       }
 
-      const locationName = await resolveLocationName(shopLocName);
-      if (!locationName) {
-        await supabase.from("scheduled_posts").update({ status: "error", error_detail: `ロケーション解決失敗: ${shopLocName}` }).eq("id", post.id);
-        errors++; continue;
+      // Go API経由でGBP投稿（Go APIのOAuth設定で確実に動く）
+      const goBody: any = {
+        summary: (post.summary || "").slice(0, 1500),
+        topicType: post.topic_type || "STANDARD",
+      };
+      if (post.action_type && post.action_url) {
+        const u = post.action_url;
+        if (!u.includes("dropbox.com/scl/fo/") && !u.includes("dropbox.com/sh/")) {
+          goBody.callToAction = { actionType: post.action_type, url: u };
+        }
+      }
+      if (post.topic_type === "OFFER" && post.offer_title) {
+        goBody.event = { title: post.offer_title, schedule: { startDate: post.offer_start_date, endDate: post.offer_end_date } };
       }
 
-      // GBP API投稿（400エラー時は写真/CTAを外して自動リトライ）
-      const postResult = await tryPostToGbp(locationName, post, accessToken);
+      const res = await fetch(`${GO_API_URL}/api/shop/${post.shop_id}/local_post`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(goBody),
+        signal: AbortSignal.timeout(30000),
+      });
 
-      if (postResult.ok && postResult.name) {
+      if (res.ok) {
+        const result = await res.json().catch(() => ({}));
         await supabase.from("scheduled_posts").update({
           status: "published", published_at: new Date().toISOString(),
-          search_url: postResult.searchUrl || null,
         }).eq("id", post.id);
-
         await supabase.from("post_logs").insert({
           id: crypto.randomUUID(), shop_id: post.shop_id, shop_name: post.shop_name,
           summary: post.summary, topic_type: post.topic_type,
-          media_url: post.photo_url, search_url: postResult.searchUrl || null,
-          gbp_post_name: postResult.name,
+          media_url: post.photo_url, gbp_post_name: result?.name || "unknown",
         });
         executed++;
       } else {
+        const errText = await res.text().catch(() => "");
         await supabase.from("scheduled_posts").update({
-          status: "error",
-          error_detail: postResult.error?.slice(0, 300) || "不明なエラー",
+          status: "error", error_detail: `Go API ${res.status}: ${errText.slice(0, 200)}`,
         }).eq("id", post.id);
         errors++;
       }
@@ -211,98 +200,4 @@ export async function PUT(request: NextRequest) {
   }
 
   return NextResponse.json({ executed, errors, total: posts.length });
-}
-
-/**
- * GBP投稿を試行。400エラー時は写真→CTA→両方の順で外して自動リトライ
- */
-async function tryPostToGbp(
-  locationName: string,
-  post: any,
-  accessToken: string
-): Promise<{ ok: boolean; name?: string; searchUrl?: string; error?: string }> {
-  // 写真URL変換
-  let photoUrl = post.photo_url || "";
-  if (photoUrl && photoUrl.includes("dropbox.com") && !photoUrl.includes("dropboxusercontent")) {
-    photoUrl = photoUrl.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace(/[&?]dl=\d/g, "");
-  }
-
-  // CTA URLバリデーション（Dropboxフォルダ等は除外）
-  let ctaType = post.action_type || "";
-  let ctaUrl = post.action_url || "";
-  if (ctaUrl && (ctaUrl.includes("dropbox.com/scl/fo/") || ctaUrl.includes("dropbox.com/sh/"))) {
-    ctaType = "";
-    ctaUrl = "";
-  }
-
-  // 試行パターン: 1. フル → 2. 写真なし → 3. CTAなし → 4. テキストのみ
-  const attempts = [
-    { photo: photoUrl, cta: ctaUrl, ctaType, label: "フル" },
-    ...(photoUrl ? [{ photo: "", cta: ctaUrl, ctaType, label: "写真なし" }] : []),
-    ...(ctaUrl ? [{ photo: photoUrl, cta: "", ctaType: "", label: "CTAなし" }] : []),
-    ...(photoUrl || ctaUrl ? [{ photo: "", cta: "", ctaType: "", label: "テキストのみ" }] : []),
-  ];
-
-  let lastError = "";
-
-  for (const attempt of attempts) {
-    const postBody: any = {
-      summary: (post.summary || "").slice(0, 1500),
-      topicType: post.topic_type || "STANDARD",
-      languageCode: "ja",
-    };
-
-    if (attempt.ctaType && attempt.cta) {
-      postBody.callToAction = { actionType: attempt.ctaType, url: attempt.cta };
-    }
-
-    if (post.topic_type === "OFFER" && post.offer_title) {
-      postBody.event = {
-        title: post.offer_title,
-        schedule: { startDate: post.offer_start_date, endDate: post.offer_end_date },
-      };
-    }
-
-    if (attempt.photo) {
-      postBody.media = [{ mediaFormat: "PHOTO", sourceUrl: attempt.photo }];
-    }
-
-    try {
-      const res = await fetch(`${GBP_API_BASE}/${locationName}/localPosts`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify(postBody),
-        signal: AbortSignal.timeout(30000),
-      });
-
-      if (res.ok) {
-        const result = await res.json().catch(() => ({}));
-        if (result?.name) {
-          if (attempt.label !== "フル") {
-            console.log(`[scheduled-posts] ${post.shop_name}: ${attempt.label}で投稿成功`);
-          }
-          return { ok: true, name: result.name, searchUrl: result.searchUrl };
-        }
-        return { ok: true, name: "unknown" };
-      }
-
-      const errText = await res.text().catch(() => "");
-      lastError = `GBP API ${res.status}: ${errText.slice(0, 200)}`;
-
-      // 400/422はリクエスト内容の問題 → 次のパターンで再試行
-      if (res.status === 400 || res.status === 422) {
-        console.log(`[scheduled-posts] ${post.shop_name}: ${attempt.label}で${res.status} → 次を試行`);
-        continue;
-      }
-
-      // 401/403はトークンの問題 → リトライしても無駄
-      // 500はサーバーエラー → リトライしても無駄
-      return { ok: false, error: lastError };
-    } catch (e: any) {
-      lastError = e?.message || "通信エラー";
-      return { ok: false, error: lastError };
-    }
-  }
-
-  return { ok: false, error: `全パターン失敗: ${lastError}` };
 }
