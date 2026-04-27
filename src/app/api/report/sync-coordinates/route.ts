@@ -1,21 +1,71 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getOAuthToken } from "@/lib/gbp-token";
+import { getLocationMap, resolveLocationName } from "@/lib/gbp-location";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
 function getSupabase() {
   return createClient(SUPABASE_URL, SUPABASE_KEY);
 }
 
 /**
+ * 店舗名でGBPロケーションを名前マッチング
+ * - 完全一致 → 即返却
+ * - 部分一致（店舗名がtitleに含まれる or titleが店舗名に含まれる）→ 最長一致を返却
+ */
+function matchShopToLocation(
+  shopName: string,
+  locationMap: Map<string, { fullPath: string; title: string }>
+): { locName: string; fullPath: string; title: string } | null {
+  if (!shopName) return null;
+
+  const normalizedShopName = shopName.trim();
+
+  // locationMap の全エントリからtitle付きのものを抽出
+  // (mapにはlocName, fullPath, titleキーで重複登録されているので、fullPath形式のみ使う)
+  const candidates: { locName: string; fullPath: string; title: string }[] = [];
+  locationMap.forEach((val, key) => {
+    // fullPath形式（accounts/xxx/locations/yyy）のエントリだけ使う（重複回避）
+    if (key.startsWith("accounts/") && val.title) {
+      // locName = locations/yyy 部分を抽出
+      const locPart = key.replace(/^accounts\/[^/]+\//, "");
+      candidates.push({ locName: locPart, fullPath: val.fullPath, title: val.title });
+    }
+  });
+
+  // 1. 完全一致
+  for (const c of candidates) {
+    if (c.title === normalizedShopName) {
+      return c;
+    }
+  }
+
+  // 2. 部分一致（最長一致を優先）
+  let bestMatch: typeof candidates[number] | null = null;
+  let bestLen = 0;
+  for (const c of candidates) {
+    const t = c.title;
+    if (normalizedShopName.includes(t) || t.includes(normalizedShopName)) {
+      const matchLen = Math.min(normalizedShopName.length, t.length);
+      if (matchLen > bestLen) {
+        bestLen = matchLen;
+        bestMatch = c;
+      }
+    }
+  }
+
+  return bestMatch;
+}
+
+/**
  * POST /api/report/sync-coordinates
  * GBP座標が未登録の全店舗に座標を自動設定
+ * - gbp_location_name が NULL の店舗は店舗名で自動マッチングして紐付け
  * - Go APIのBusiness Information経由でlatlng取得
  * - shopId指定時はその店舗のみ
  */
@@ -37,7 +87,47 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "OAuthトークンなし" }, { status: 500 });
   }
 
-  // 座標未設定の店舗を取得
+  // Go APIからロケーションマップを取得（名前マッチング + パス解決に使用）
+  const locationMap = await getLocationMap();
+
+  // ── Step 1: gbp_location_name が NULL の店舗を名前マッチングで紐付け ──
+  let autoLinked = 0;
+  const autoLinkDetails: { shop: string; matched: string; locName: string }[] = [];
+
+  {
+    let unmappedQuery = supabase
+      .from("shops")
+      .select("id, name, gbp_location_name")
+      .is("gbp_location_name", null);
+
+    if (targetShopId) {
+      unmappedQuery = unmappedQuery.eq("id", targetShopId);
+    }
+
+    const { data: unmappedShops } = await unmappedQuery.limit(500);
+
+    if (unmappedShops && unmappedShops.length > 0 && locationMap.size > 0) {
+      for (const shop of unmappedShops) {
+        const match = matchShopToLocation(shop.name, locationMap);
+        if (match) {
+          const { error } = await supabase
+            .from("shops")
+            .update({ gbp_location_name: match.locName })
+            .eq("id", shop.id);
+          if (!error) {
+            autoLinked++;
+            autoLinkDetails.push({
+              shop: shop.name,
+              matched: match.title,
+              locName: match.locName,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // ── Step 2: 座標未設定の店舗を取得（紐付け後に再取得） ──
   let query = supabase
     .from("shops")
     .select("id, name, gbp_location_name, gbp_latitude, gbp_longitude")
@@ -52,45 +142,29 @@ export async function POST(request: NextRequest) {
 
   const { data: shops } = await query.limit(100);
   if (!shops || shops.length === 0) {
-    return NextResponse.json({ message: "座標未設定の店舗なし", updated: 0 });
+    return NextResponse.json({
+      message: "座標未設定の店舗なし",
+      updated: 0,
+      autoLinked,
+      autoLinkDetails: autoLinkDetails.slice(0, 20),
+    });
   }
 
-  // Go APIからアカウント一覧を取得（ロケーション→アカウントのマッピング用）
-  let locationToAccount: Map<string, string> = new Map();
-  try {
-    const accRes = await fetch(`${GO_API_URL}/api/gbp/account`, {
-      signal: AbortSignal.timeout(20000),
-    });
-    if (accRes.ok) {
-      const accounts = await accRes.json();
-      for (const acc of accounts || []) {
-        const accName = acc.name || "";
-        for (const loc of acc.locations || []) {
-          locationToAccount.set(loc.name, accName);
-        }
-      }
-    }
-  } catch {}
-
+  // ── Step 3: Business Information APIで座標取得 ──
   let updated = 0;
   let errors = 0;
-  const details: any[] = [];
+  const details: { shop: string; lat?: number; lng?: number; error?: string }[] = [];
 
   for (const shop of shops) {
     const locName = shop.gbp_location_name;
     if (!locName) continue;
 
-    // フルパスを構築（accounts/xxx/locations/yyy）
-    let fullPath = locName;
-    if (locName.startsWith("locations/")) {
-      const accName = locationToAccount.get(locName);
-      if (accName) {
-        fullPath = `${accName}/${locName}`;
-      } else {
-        details.push({ shop: shop.name, error: "アカウント不明" });
-        errors++;
-        continue;
-      }
+    // resolveLocationName でフルパスに解決
+    const fullPath = await resolveLocationName(locName);
+    if (!fullPath) {
+      details.push({ shop: shop.name, error: "ロケーションパス解決失敗" });
+      errors++;
+      continue;
     }
 
     // Business Information APIで座標取得
@@ -122,8 +196,9 @@ export async function POST(request: NextRequest) {
         details.push({ shop: shop.name, error: "latlngなし" });
         errors++;
       }
-    } catch (e: any) {
-      details.push({ shop: shop.name, error: e?.message });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      details.push({ shop: shop.name, error: msg });
       errors++;
     }
   }
@@ -133,6 +208,8 @@ export async function POST(request: NextRequest) {
     updated,
     errors,
     total: shops.length,
+    autoLinked,
+    autoLinkDetails: autoLinkDetails.slice(0, 20),
     details: details.slice(0, 20),
   });
 }

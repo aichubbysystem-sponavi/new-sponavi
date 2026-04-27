@@ -13,7 +13,7 @@ const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
 const DB_PASSWORD = process.env.SUPABASE_DB_PASSWORD || "";
 const SUPABASE_PROJECT_ID = (SUPABASE_URL.match(/https:\/\/([^.]+)/) || [])[1] || "";
 const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
-const BATCH_SIZE = 50; // 1回のCron実行で処理する店舗数
+const BATCH_SIZE = 100; // 1回のCron実行で処理する店舗数
 
 function getSupabase() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
