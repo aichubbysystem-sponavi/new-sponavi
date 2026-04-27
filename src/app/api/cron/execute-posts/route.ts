@@ -42,8 +42,14 @@ async function postViaGoApi(
     };
   }
 
-  // 注: Go APIのLocalPostCreateはpost_file_idsベースの写真対応
-  // 直接URLの写真はGo API経由では非対応のため、テキスト投稿のみ
+  // 写真URL対応（Dropbox URLは直リンクに変換）
+  if (post.photo_url) {
+    let url = post.photo_url;
+    if (url.includes("dropbox.com") && !url.includes("dropboxusercontent")) {
+      url = url.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace(/[&?]dl=\d/g, "");
+    }
+    body.media_urls = [url];
+  }
 
   try {
     const res = await fetch(`${GO_API_URL}/api/shop/${shopId}/local_post`, {

@@ -167,6 +167,14 @@ export async function PUT(request: NextRequest) {
       if (post.topic_type === "OFFER" && post.offer_title) {
         goBody.event = { title: post.offer_title, schedule: { startDate: post.offer_start_date, endDate: post.offer_end_date } };
       }
+      // 写真URL対応
+      if (post.photo_url) {
+        let url = post.photo_url;
+        if (url.includes("dropbox.com") && !url.includes("dropboxusercontent")) {
+          url = url.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace(/[&?]dl=\d/g, "");
+        }
+        goBody.media_urls = [url];
+      }
 
       const res = await fetch(`${GO_API_URL}/api/shop/${post.shop_id}/local_post`, {
         method: "POST",
