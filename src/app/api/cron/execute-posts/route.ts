@@ -155,7 +155,7 @@ export async function GET(request: NextRequest) {
     .eq("status", "pending")
     .lte("scheduled_at", now)
     .order("scheduled_at", { ascending: true })
-    .limit(10);
+    .limit(50);
 
   if (!posts || posts.length === 0) {
     console.log("[cron/execute-posts] 実行対象なし");
@@ -164,10 +164,18 @@ export async function GET(request: NextRequest) {
 
   // Go APIトークンを事前取得（フォールバック用）
   let goToken: string | null = null;
+  const startTime = Date.now();
+  const MAX_DURATION_MS = 270_000; // 270秒（maxDuration 300秒の90%）
 
-  let posted = 0, errors = 0;
+  let posted = 0, errors = 0, skipped = 0;
 
   for (const post of posts) {
+    // タイムアウト管理: 残り時間が少ない場合は次のCron実行に任せる
+    if (Date.now() - startTime > MAX_DURATION_MS) {
+      skipped = posts.length - posted - errors;
+      console.log(`[cron/execute-posts] タイムアウト: ${skipped}件を次回に持ち越し`);
+      break;
+    }
     try {
       if (!post.shop_id) {
         await supabase.from("scheduled_posts").update({
@@ -212,6 +220,6 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  console.log(`[cron/execute-posts] posted: ${posted}, errors: ${errors}`);
-  return NextResponse.json({ success: true, posted, errors, total: posts.length });
+  console.log(`[cron/execute-posts] posted: ${posted}, errors: ${errors}, skipped: ${skipped}, elapsed: ${Math.round((Date.now() - startTime) / 1000)}s`);
+  return NextResponse.json({ success: true, posted, errors, skipped, total: posts.length });
 }

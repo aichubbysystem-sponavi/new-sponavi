@@ -9,7 +9,7 @@
     },
     {
       "path": "/api/cron/execute-posts",
-      "schedule": "5 * * * *"
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/cron/auto-reply",
