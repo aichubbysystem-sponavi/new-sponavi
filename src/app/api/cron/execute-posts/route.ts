@@ -16,9 +16,7 @@ function getSupabase() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
 }
 
-/**
- * Go API経由でGBP投稿を作成
- */
+/** Go API経由でGBP投稿を作成 */
 async function postViaGoApi(
   shopId: string, post: any
 ): Promise<{ ok: boolean; name?: string; error?: string }> {
@@ -28,17 +26,14 @@ async function postViaGoApi(
   };
 
   if (post.action_type && post.action_url) {
-    let ctaUrl = post.action_url;
-    if (!ctaUrl.includes("dropbox.com/scl/fo/") && !ctaUrl.includes("dropbox.com/sh/")) {
-      body.callToAction = { actionType: post.action_type, url: ctaUrl };
+    const u = post.action_url;
+    if (!u.includes("dropbox.com/scl/fo/") && !u.includes("dropbox.com/sh/")) {
+      body.callToAction = { actionType: post.action_type, url: u };
     }
   }
 
   if (post.topic_type === "OFFER" && post.offer_title) {
-    body.event = {
-      title: post.offer_title,
-      schedule: { startDate: post.offer_start_date, endDate: post.offer_end_date },
-    };
+    body.event = { title: post.offer_title, schedule: { startDate: post.offer_start_date, endDate: post.offer_end_date } };
   }
 
   if (post.photo_url) {
@@ -56,12 +51,10 @@ async function postViaGoApi(
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(30000),
     });
-
     if (res.ok) {
       const result = await res.json().catch(() => ({}));
       return { ok: true, name: result?.name || "unknown" };
     }
-
     const errText = await res.text().catch(() => "");
     return { ok: false, error: `Go API ${res.status}: ${errText.slice(0, 200)}` };
   } catch (e: any) {
@@ -69,13 +62,10 @@ async function postViaGoApi(
   }
 }
 
-/**
- * Go APIトークンで直接GBP APIに投稿（Go APIにshopが無い場合のフォールバック）
- */
+/** Go APIトークンで直接GBP APIに投稿（フォールバック） */
 async function postDirectWithGoToken(
   post: any, accessToken: string, supabase: any
 ): Promise<{ ok: boolean; name?: string; error?: string }> {
-  // shop_idからgbp_location_nameを取得
   let shopLocName = "";
   const { data: shop } = await supabase.from("shops")
     .select("gbp_location_name").eq("id", post.shop_id).maybeSingle();
@@ -92,20 +82,17 @@ async function postDirectWithGoToken(
   const locationName = await resolveLocationName(shopLocName);
   if (!locationName) return { ok: false, error: `ロケーション解決失敗: ${shopLocName}` };
 
-  // 投稿ボディ構築
   const postBody: any = {
     summary: (post.summary || "").slice(0, 1500),
     topicType: post.topic_type || "STANDARD",
     languageCode: "ja",
   };
-
   if (post.action_type && post.action_url) {
     const u = post.action_url;
     if (!u.includes("dropbox.com/scl/fo/") && !u.includes("dropbox.com/sh/")) {
       postBody.callToAction = { actionType: post.action_type, url: u };
     }
   }
-
   if (post.photo_url) {
     let url = post.photo_url;
     if (url.includes("dropbox.com") && !url.includes("dropboxusercontent")) {
@@ -121,12 +108,10 @@ async function postDirectWithGoToken(
       body: JSON.stringify(postBody),
       signal: AbortSignal.timeout(30000),
     });
-
     if (res.ok) {
       const result = await res.json().catch(() => ({}));
       return { ok: true, name: result?.name || "unknown" };
     }
-
     const errText = await res.text().catch(() => "");
     return { ok: false, error: `GBP API ${res.status}: ${errText.slice(0, 200)}` };
   } catch (e: any) {
@@ -136,8 +121,8 @@ async function postDirectWithGoToken(
 
 /**
  * GET /api/cron/execute-posts
- * 予約投稿の自動実行（毎時5分）
- * 1. Go API経由 → 2. Go APIトークンで直接GBP API
+ * 予約投稿の自動実行（5分ごと）
+ * 10件同時並列処理 → 500件を約4分で処理
  */
 export async function GET(request: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
@@ -155,45 +140,32 @@ export async function GET(request: NextRequest) {
     .eq("status", "pending")
     .lte("scheduled_at", now)
     .order("scheduled_at", { ascending: true })
-    .limit(50);
+    .limit(500);
 
   if (!posts || posts.length === 0) {
     console.log("[cron/execute-posts] 実行対象なし");
     return NextResponse.json({ success: true, message: "実行対象なし", posted: 0 });
   }
 
-  // Go APIトークンを事前取得（フォールバック用）
-  let goToken: string | null = null;
+  const goToken = await getOAuthToken();
   const startTime = Date.now();
-  const MAX_DURATION_MS = 270_000; // 270秒（maxDuration 300秒の90%）
+  const CONCURRENCY = 10;
+  let posted = 0, errors = 0;
 
-  let posted = 0, errors = 0, skipped = 0;
-
-  for (const post of posts) {
-    // タイムアウト管理: 残り時間が少ない場合は次のCron実行に任せる
-    if (Date.now() - startTime > MAX_DURATION_MS) {
-      skipped = posts.length - posted - errors;
-      console.log(`[cron/execute-posts] タイムアウト: ${skipped}件を次回に持ち越し`);
-      break;
-    }
+  /** 1件の投稿を処理 */
+  async function processPost(post: any): Promise<void> {
     try {
       if (!post.shop_id) {
         await supabase.from("scheduled_posts").update({
           status: "error", error_detail: "shop_idなし",
         }).eq("id", post.id);
-        errors++; continue;
+        errors++; return;
       }
 
-      // 方法1: Go API経由
       let result = await postViaGoApi(post.shop_id, post);
 
-      // 方法2: Go APIでshop not found → Go APIトークンで直接GBP API
-      if (!result.ok && result.error?.includes("not found")) {
-        console.log(`[cron/execute-posts] ${post.shop_name}: Go APIにshopなし、直接投稿にフォールバック`);
-        if (!goToken) goToken = await getOAuthToken();
-        if (goToken) {
-          result = await postDirectWithGoToken(post, goToken, supabase);
-        }
+      if (!result.ok && result.error?.includes("not found") && goToken) {
+        result = await postDirectWithGoToken(post, goToken, supabase);
       }
 
       if (result.ok) {
@@ -220,6 +192,17 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  console.log(`[cron/execute-posts] posted: ${posted}, errors: ${errors}, skipped: ${skipped}, elapsed: ${Math.round((Date.now() - startTime) / 1000)}s`);
-  return NextResponse.json({ success: true, posted, errors, skipped, total: posts.length });
+  // 並列バッチ処理（10件ずつ同時実行）
+  for (let i = 0; i < posts.length; i += CONCURRENCY) {
+    if (Date.now() - startTime > 270_000) {
+      console.log(`[cron/execute-posts] タイムアウト: ${posts.length - i}件を次回に持ち越し`);
+      break;
+    }
+    const batch = posts.slice(i, i + CONCURRENCY);
+    await Promise.allSettled(batch.map(processPost));
+  }
+
+  const elapsed = Math.round((Date.now() - startTime) / 1000);
+  console.log(`[cron/execute-posts] posted: ${posted}, errors: ${errors}, elapsed: ${elapsed}s`);
+  return NextResponse.json({ success: true, posted, errors, total: posts.length, elapsed });
 }
