@@ -16,25 +16,70 @@ function getSupabase() {
 }
 
 async function getOAuthToken(): Promise<string | null> {
-  const supabase = getSupabase();
-  const { data } = await supabase.from("system_oauth_tokens")
-    .select("access_token, refresh_token, expiry").limit(1).maybeSingle();
-  if (!data) return null;
-  if (new Date(data.expiry).getTime() - Date.now() > 5 * 60 * 1000) return data.access_token;
+  const DB_PASSWORD = process.env.SUPABASE_DB_PASSWORD || "";
+  const PROJECT_ID = (SUPABASE_URL.match(/https:\/\/([^.]+)/) || [])[1] || "";
+  let tokenData: { account_id: string; access_token: string; refresh_token: string; expiry: string } | null = null;
+
+  // PostgreSQL直接接続でsystem.tokensから取得
+  if (DB_PASSWORD && PROJECT_ID) {
+    try {
+      const { Client } = await import("pg");
+      const client = new Client({
+        host: `db.${PROJECT_ID}.supabase.co`, port: 5432,
+        database: "postgres", user: "postgres", password: DB_PASSWORD,
+        ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 10000,
+      });
+      await client.connect();
+      const result = await client.query(
+        "SELECT account_id, access_token, refresh_token, expiry FROM system.tokens ORDER BY expiry DESC LIMIT 1"
+      );
+      await client.end();
+      if (result.rows.length > 0) tokenData = result.rows[0];
+    } catch {}
+  }
+
+  // フォールバック: Supabaseビュー
+  if (!tokenData) {
+    const supabase = getSupabase();
+    const { data } = await supabase.from("system_oauth_tokens")
+      .select("access_token, refresh_token, expiry").limit(1).maybeSingle();
+    if (data) tokenData = { account_id: "", ...data };
+  }
+
+  if (!tokenData) return null;
+  if (new Date(tokenData.expiry).getTime() - Date.now() > 5 * 60 * 1000) return tokenData.access_token;
+  if (!tokenData.refresh_token || !GBP_CLIENT_ID || !GBP_CLIENT_SECRET) return tokenData.access_token;
+
   try {
     const res = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET,
-        refresh_token: data.refresh_token, grant_type: "refresh_token" }),
+        refresh_token: tokenData.refresh_token, grant_type: "refresh_token" }),
+      signal: AbortSignal.timeout(10000),
     });
-    if (!res.ok) return data.access_token;
+    if (!res.ok) return tokenData.access_token;
     const t = await res.json();
-    await getSupabase().from("system_oauth_tokens").update({
-      access_token: t.access_token,
-      expiry: new Date(Date.now() + (t.expires_in || 3600) * 1000).toISOString(),
-    }).not("account_id", "is", null);
+    const newExpiry = new Date(Date.now() + (t.expires_in || 3600) * 1000).toISOString();
+
+    // PostgreSQL直接書き戻し
+    if (DB_PASSWORD && PROJECT_ID && tokenData.account_id) {
+      try {
+        const { Client } = await import("pg");
+        const client = new Client({
+          host: `db.${PROJECT_ID}.supabase.co`, port: 5432,
+          database: "postgres", user: "postgres", password: DB_PASSWORD,
+          ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 10000,
+        });
+        await client.connect();
+        await client.query(
+          "UPDATE system.tokens SET access_token = $1, expiry = $2 WHERE account_id = $3",
+          [t.access_token, newExpiry, tokenData.account_id]
+        );
+        await client.end();
+      } catch {}
+    }
     return t.access_token;
-  } catch { return data.access_token; }
+  } catch { return tokenData.access_token; }
 }
 
 /**
