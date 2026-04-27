@@ -102,12 +102,27 @@ async function postDirectWithGoToken(
   }
 
   try {
-    const res = await fetch(`${GBP_API_BASE}/${locationName}/localPosts`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify(postBody),
-      signal: AbortSignal.timeout(30000),
-    });
+    const doPost = async (token: string) => {
+      const res = await fetch(`${GBP_API_BASE}/${locationName}/localPosts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(postBody),
+        signal: AbortSignal.timeout(30000),
+      });
+      return res;
+    };
+
+    let res = await doPost(accessToken);
+
+    // 401の場合、トークンを再取得してリトライ
+    if (res.status === 401) {
+      console.log(`[postDirect] 401 for ${post.shop_name}, refreshing token...`);
+      const newToken = await getOAuthToken();
+      if (newToken && newToken !== accessToken) {
+        res = await doPost(newToken);
+      }
+    }
+
     if (res.ok) {
       const result = await res.json().catch(() => ({}));
       return { ok: true, name: result?.name || "unknown" };
@@ -164,7 +179,9 @@ export async function GET(request: NextRequest) {
 
       let result = await postViaGoApi(post.shop_id, post);
 
-      if (!result.ok && result.error?.includes("not found") && goToken) {
+      // Go API失敗（shop not found / 500等）→ Go APIトークンで直接GBP APIにフォールバック
+      if (!result.ok && goToken) {
+        console.log(`[cron/execute-posts] ${post.shop_name}: Go API失敗(${result.error?.slice(0, 80)})、直接GBP APIにフォールバック`);
         result = await postDirectWithGoToken(post, goToken, supabase);
       }
 
