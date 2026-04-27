@@ -22,7 +22,7 @@ async function postViaGoApi(
 ): Promise<{ ok: boolean; name?: string; error?: string }> {
   const body: any = {
     summary: (post.summary || "").slice(0, 1500),
-    topicType: post.topic_type || "STANDARD",
+    topicType: (post.topic_type === "PHOTO" ? "STANDARD" : post.topic_type) || "STANDARD",
   };
 
   if (post.action_type && post.action_url) {
@@ -84,7 +84,7 @@ async function postDirectWithGoToken(
 
   const postBody: any = {
     summary: (post.summary || "").slice(0, 1500),
-    topicType: post.topic_type || "STANDARD",
+    topicType: (post.topic_type === "PHOTO" ? "STANDARD" : post.topic_type) || "STANDARD",
     languageCode: "ja",
   };
   if (post.action_type && post.action_url) {
