@@ -1,8 +1,7 @@
 /**
  * GBP OAuthトークン管理（一元化）
+ * - Supabase REST API経由でトークン取得・書き戻し
  * - refresh_tokenで自動リフレッシュ
- * - リフレッシュ後にDBに書き戻し
- * - 複数アカウント対応
  * - GBP API呼び出し時の401リトライ
  */
 
@@ -27,9 +26,43 @@ interface TokenInfo {
 }
 
 /**
- * refresh_tokenでaccess_tokenを更新し、DBに書き戻す
+ * Supabase REST API経由でsystem.tokensのトークンを書き戻す
  */
-async function refreshAndSave(token: TokenInfo): Promise<string | null> {
+async function saveTokenToDb(accountId: string, accessToken: string, expiry: string): Promise<void> {
+  const supabase = getSupabase();
+  // RPC関数経由で書き戻し（ビューのUPDATEは不可のため）
+  const { error: rpcError } = await supabase.rpc("update_system_token", {
+    p_account_id: accountId,
+    p_access_token: accessToken,
+    p_expiry: expiry,
+  });
+  if (rpcError) {
+    // RPC未定義の場合はSQL直接実行（service_role keyで）
+    console.log("[gbp-token] RPC fallback, trying direct REST...", rpcError.message);
+    // Supabase REST APIで直接system.tokensを更新
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/update_system_token`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify({
+        p_account_id: accountId,
+        p_access_token: accessToken,
+        p_expiry: expiry,
+      }),
+    });
+    if (!res.ok) {
+      console.error("[gbp-token] Token save failed:", await res.text().catch(() => ""));
+    }
+  }
+}
+
+/**
+ * refresh_tokenでaccess_tokenを更新
+ */
+async function refreshToken(token: TokenInfo): Promise<string | null> {
   if (!token.refresh_token || !GBP_CLIENT_ID || !GBP_CLIENT_SECRET) return null;
 
   try {
@@ -46,134 +79,82 @@ async function refreshAndSave(token: TokenInfo): Promise<string | null> {
     });
 
     if (!res.ok) {
-      console.error(`[gbp-token] Refresh failed for ${token.account_id}: HTTP ${res.status}`);
+      console.error(`[gbp-token] Refresh failed: HTTP ${res.status}`);
       return null;
     }
 
     const data = await res.json();
-    const newAccessToken = data.access_token;
+    if (!data.access_token) return null;
+
     const newExpiry = new Date(Date.now() + (data.expires_in || 3600) * 1000).toISOString();
+    console.log(`[gbp-token] Refreshed token, expires ${newExpiry}`);
 
-    if (!newAccessToken) return null;
-
-    // DBに書き戻し（system.tokensに直接PostgreSQLで更新）
+    // DB書き戻し（非同期、失敗しても新しいトークンは返す）
     try {
-      const DB_PASSWORD = process.env.SUPABASE_DB_PASSWORD || "";
-      const PROJECT_ID = (SUPABASE_URL.match(/https:\/\/([^.]+)/) || [])[1] || "";
-      if (DB_PASSWORD && PROJECT_ID) {
-        const { Client } = await import("pg");
-        const client = new Client({
-          host: `db.${PROJECT_ID}.supabase.co`,
-          port: 5432,
-          database: "postgres",
-          user: "postgres",
-          password: DB_PASSWORD,
-          ssl: { rejectUnauthorized: false },
-          connectionTimeoutMillis: 10000,
-        });
-        await client.connect();
-        await client.query(
-          "UPDATE system.tokens SET access_token = $1, expiry = $2 WHERE account_id = $3",
-          [newAccessToken, newExpiry, token.account_id]
-        );
-        await client.end();
-      }
+      await saveTokenToDb(token.account_id, data.access_token, newExpiry);
     } catch (e: any) {
-      console.log("[gbp-token] PostgreSQL update fallback error:", e?.message);
+      console.error("[gbp-token] Token save error:", e?.message);
     }
 
-    console.log(`[gbp-token] Refreshed token for ${token.account_id}, expires ${newExpiry}`);
-    return newAccessToken;
+    return data.access_token;
   } catch (e: any) {
-    console.error(`[gbp-token] Refresh error for ${token.account_id}:`, e?.message);
+    console.error(`[gbp-token] Refresh error:`, e?.message);
     return null;
   }
 }
 
 /**
- * 有効なOAuthトークンを取得（自動リフレッシュ+DB書き戻し付き）
- * 返り値: 有効なaccess_tokenの配列（複数アカウント対応）
+ * DBからトークンを取得
+ */
+async function getTokensFromDb(): Promise<TokenInfo[]> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("system_oauth_tokens")
+    .select("access_token, refresh_token, expiry")
+    .order("expiry", { ascending: false });
+
+  if (error || !data || data.length === 0) {
+    if (error) console.error("[gbp-token] DB read error:", error.message);
+    return [];
+  }
+
+  return data.map((d, i) => ({
+    account_id: `account-${i}`,
+    access_token: d.access_token,
+    refresh_token: d.refresh_token,
+    expiry: d.expiry,
+  }));
+}
+
+/**
+ * 有効なOAuthトークンを取得（自動リフレッシュ付き）
+ * 常にリフレッシュを試みて最新のトークンを返す
  */
 export async function getValidTokens(): Promise<string[]> {
-  // Step 1: Go APIでトークンリフレッシュを発火（Go API側のリフレッシュ機構も活用）
+  // Step 1: Go APIにトークンリフレッシュを発火させる
   try {
     await fetch(`${GO_API_URL}/api/gbp/account`, { signal: AbortSignal.timeout(15000) });
   } catch {}
 
-  // Step 2: DBからトークン一覧を取得（PostgreSQL直接 → system.tokens を優先）
-  let allTokens: TokenInfo[] = [];
-
-  // 方法1: PostgreSQL直接接続（system.tokensに直接アクセス — 最も確実）
-  try {
-    const DB_PASSWORD = process.env.SUPABASE_DB_PASSWORD || "";
-    const PROJECT_ID = (SUPABASE_URL.match(/https:\/\/([^.]+)/) || [])[1] || "";
-    if (DB_PASSWORD && PROJECT_ID) {
-      const { Client } = await import("pg");
-      const client = new Client({
-        host: `db.${PROJECT_ID}.supabase.co`,
-        port: 5432,
-        database: "postgres",
-        user: "postgres",
-        password: DB_PASSWORD,
-        ssl: { rejectUnauthorized: false },
-        connectionTimeoutMillis: 10000,
-      });
-      await client.connect();
-      const result = await client.query(
-        "SELECT account_id, access_token, refresh_token, expiry FROM system.tokens ORDER BY expiry DESC"
-      );
-      await client.end();
-      if (result.rows.length > 0) allTokens = result.rows;
-    }
-  } catch (e: any) {
-    console.log("[gbp-token] PostgreSQL direct error:", e?.message);
-  }
-
-  // 方法2: Supabaseビュー経由（PostgreSQL直接が失敗した場合のフォールバック）
+  // Step 2: DBからトークン取得
+  const allTokens = await getTokensFromDb();
   if (allTokens.length === 0) {
-    const supabase = getSupabase();
-    try {
-      const { data } = await supabase.from("system_oauth_tokens")
-        .select("access_token, refresh_token, expiry")
-        .order("expiry", { ascending: false });
-      if (data && data.length > 0) {
-        allTokens = data.map((d, i) => ({
-          account_id: `account-${i}`,
-          access_token: d.access_token,
-          refresh_token: d.refresh_token,
-          expiry: d.expiry,
-        }));
-      }
-    } catch (e: any) {
-      console.log("[gbp-token] Supabase view error:", e?.message);
-    }
-  }
-
-  if (allTokens.length === 0) {
-    console.error("[gbp-token] No tokens found in any source");
+    console.error("[gbp-token] No tokens found");
     return [];
   }
 
-  // Step 3: 各トークンの有効性を確認、期限切れならリフレッシュ
+  // Step 3: 常にrefresh_tokenでリフレッシュ（DB内のaccess_tokenは信用しない）
   const validTokens: string[] = [];
   for (const token of allTokens) {
-    const remaining = new Date(token.expiry).getTime() - Date.now();
-
-    if (remaining > 5 * 60 * 1000) {
-      // 5分以上残っている → そのまま使用
-      validTokens.push(token.access_token);
-    } else if (token.refresh_token) {
-      // 期限切れ or 5分以内 → リフレッシュ
-      const refreshed = await refreshAndSave(token);
+    if (token.refresh_token) {
+      const refreshed = await refreshToken(token);
       if (refreshed) {
         validTokens.push(refreshed);
-      } else {
-        // リフレッシュ失敗でも古いトークンを試す
-        validTokens.push(token.access_token);
+        continue;
       }
-    } else {
-      validTokens.push(token.access_token);
     }
+    // リフレッシュ失敗 or refresh_tokenなし → DBのトークンをそのまま使う
+    validTokens.push(token.access_token);
   }
 
   return validTokens;
@@ -188,7 +169,7 @@ export async function getOAuthToken(): Promise<string | null> {
 }
 
 /**
- * GBP APIを呼び出す（401時にトークンリフレッシュして自動リトライ）
+ * GBP APIを呼び出す（401時に次のトークンを試す）
  */
 export async function callGbpApi(
   url: string,
@@ -214,10 +195,7 @@ export async function callGbpApi(
         signal: AbortSignal.timeout(timeout),
       });
 
-      if (res.status === 401 || res.status === 403) {
-        // このトークンは無効 → 次のトークンを試す
-        continue;
-      }
+      if (res.status === 401 || res.status === 403) continue;
 
       const data = res.ok ? await res.json().catch(() => ({})) : await res.text().catch(() => "");
       return { ok: res.ok, status: res.status, data };
