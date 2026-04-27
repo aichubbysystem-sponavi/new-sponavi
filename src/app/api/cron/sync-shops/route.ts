@@ -112,7 +112,7 @@ export async function GET(request: NextRequest) {
       let nextPageToken = "";
       do {
         const url = new URL(`https://mybusinessbusinessinformation.googleapis.com/v1/${accName}/locations`);
-        url.searchParams.set("readMask", "name,title,storefrontAddress,phoneNumbers");
+        url.searchParams.set("readMask", "name,title,storefrontAddress,phoneNumbers,latlng");
         url.searchParams.set("pageSize", "100");
         if (nextPageToken) url.searchParams.set("pageToken", nextPageToken);
 

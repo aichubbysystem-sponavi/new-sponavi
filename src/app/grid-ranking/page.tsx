@@ -538,7 +538,31 @@ export default function GridRankingPage() {
             計測範囲: 約{((gridSize - 1) * interval) / 1000}km四方
           </p>
         ) : (
-          <p className="text-xs text-red-400">店舗にGBP座標が登録されていません</p>
+          <div className="flex items-center gap-2">
+            <p className="text-xs text-red-400">店舗にGBP座標が登録されていません</p>
+            {selectedShopId && (
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await api.post("/api/report/sync-coordinates", { shopId: selectedShopId });
+                    if (res.data?.updated > 0 && res.data?.details?.[0]) {
+                      const d = res.data.details[0];
+                      setShopLat(d.lat);
+                      setShopLng(d.lng);
+                      alert(`座標を取得しました: ${d.lat.toFixed(6)}, ${d.lng.toFixed(6)}`);
+                    } else {
+                      alert(res.data?.details?.[0]?.error || "座標を取得できませんでした");
+                    }
+                  } catch (e: any) {
+                    alert("座標取得エラー: " + (e?.message || "不明"));
+                  }
+                }}
+                className="text-xs bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 transition"
+              >
+                GBPから自動取得
+              </button>
+            )}
+          </div>
         )}
 
         {/* 実行ボタン */}
