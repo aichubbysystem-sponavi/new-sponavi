@@ -93,8 +93,11 @@ async function uploadPhotoViaMediaApi(
 ): Promise<{ ok: boolean; name?: string; error?: string }> {
   if (!post.photo_url) return { ok: false, error: "写真URLなし" };
 
+  const mediaUrl = `${GBP_API_BASE}/${locationName}/media`;
+  console.log(`[uploadPhoto] ${post.shop_name}: URL=${mediaUrl}, photo=${post.photo_url?.slice(0, 80)}, token=${accessToken?.slice(0, 20)}...`);
+
   try {
-    const res = await fetch(`${GBP_API_BASE}/${locationName}/media`, {
+    const res = await fetch(mediaUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
       body: JSON.stringify({ mediaFormat: "PHOTO", sourceUrl: post.photo_url, locationAssociation: { category: "ADDITIONAL" } }),
@@ -182,6 +185,7 @@ export async function GET(request: NextRequest) {
       let result: { ok: boolean; name?: string; error?: string };
 
       const loc = locationName!;
+      console.log(`[cron/execute-posts] ${post.shop_name}: topic_type=${post.topic_type}, location=${loc}, photo_url=${post.photo_url ? 'あり' : 'なし'}`);
       // 写真投稿（topic_type === "PHOTO"）→ Media APIで「写真と動画」にアップロード
       if (post.topic_type === "PHOTO") {
         result = await uploadPhotoViaMediaApi(post, accessToken, loc);
