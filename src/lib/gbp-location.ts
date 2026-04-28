@@ -1,7 +1,11 @@
 /**
  * GBP Location Name Resolution
- * Go APIのロケーションマップを使って locations/xxx → accounts/yyy/locations/xxx に変換
+ * locations/xxx → accounts/yyy/locations/xxx に変換
+ * 1. Go APIのロケーションマップで解決を試みる
+ * 2. 失敗時はGBP APIで全アカウントを検索してフルパスを見つける
  */
+
+import { getOAuthToken } from "@/lib/gbp-token";
 
 const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -54,10 +58,53 @@ export async function getLocationMap(): Promise<Map<string, LocMapping>> {
 }
 
 /**
+ * GBP APIで全アカウントを検索してlocation IDからフルパスを見つける
+ * Go APIのマップにPERSONALアカウントが含まれない問題を回避
+ */
+async function resolveViaGbpApi(locationId: string): Promise<string | null> {
+  const token = await getOAuthToken();
+  if (!token) return null;
+
+  try {
+    // 全アカウント一覧を取得
+    const accRes = await fetch(
+      "https://mybusinessaccountmanagement.googleapis.com/v1/accounts",
+      { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000) }
+    );
+    if (!accRes.ok) return null;
+    const accData = await accRes.json();
+    const accounts = accData.accounts || [];
+
+    // 各アカウントのロケーションを検索
+    for (const acc of accounts) {
+      try {
+        const locRes = await fetch(
+          `https://mybusinessbusinessinformation.googleapis.com/v1/${acc.name}/locations?readMask=name&pageSize=100`,
+          { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10000) }
+        );
+        if (!locRes.ok) continue;
+        const locData = await locRes.json();
+        for (const loc of locData.locations || []) {
+          if (loc.name === locationId) {
+            const fullPath = `${acc.name}/${loc.name}`;
+            // キャッシュに追加
+            if (cachedLocMap) {
+              cachedLocMap.set(locationId, { fullPath, title: "" });
+            }
+            console.log(`[gbp-location] Resolved "${locationId}" → "${fullPath}" via GBP API`);
+            return fullPath;
+          }
+        }
+      } catch {}
+    }
+  } catch (e: any) {
+    console.error("[gbp-location] GBP API search failed:", e?.message);
+  }
+  return null;
+}
+
+/**
  * gbp_location_name を accounts/xxx/locations/yyy 形式のフルパスに解決
- * - "accounts/..." で始まる場合はそのまま返す
- * - "locations/..." で始まる場合は Go API のロケーションマップで解決
- * - 解決できない場合は null を返す
  */
 export async function resolveLocationName(
   gbpLocationName: string
@@ -69,18 +116,20 @@ export async function resolveLocationName(
   }
 
   if (gbpLocationName.startsWith("locations/")) {
+    // 1. Go APIのマップで解決を試みる
     const locMap = await getLocationMap();
     const mapping = locMap.get(gbpLocationName);
     if (mapping) return mapping.fullPath;
-    console.warn(
-      `[gbp-location] Could not resolve "${gbpLocationName}" via Go API location map`
-    );
+
+    // 2. マップになければGBP APIで全アカウントを検索
+    console.log(`[gbp-location] "${gbpLocationName}" not in Go API map, searching via GBP API...`);
+    const resolved = await resolveViaGbpApi(gbpLocationName);
+    if (resolved) return resolved;
+
+    console.warn(`[gbp-location] Could not resolve "${gbpLocationName}"`);
     return null;
   }
 
-  // Neither accounts/ nor locations/ prefix
-  console.warn(
-    `[gbp-location] Unrecognized location format: "${gbpLocationName}"`
-  );
+  console.warn(`[gbp-location] Unrecognized location format: "${gbpLocationName}"`);
   return null;
 }
