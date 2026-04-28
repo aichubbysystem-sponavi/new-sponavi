@@ -124,23 +124,19 @@ async function postDirectGbpApi(
   }
 }
 
-/** 写真投稿: Go API経由でMedia APIアップロード */
+/** 写真投稿: Go API media_direct 経由でMedia APIアップロード（「写真と動画」セクションに投稿） */
 async function uploadPhotoViaGoApi(
   shopId: string, post: any
 ): Promise<{ ok: boolean; name?: string; error?: string }> {
   if (!post.photo_url) return { ok: false, error: "写真URLなし" };
 
-  // Go APIにmedia_urlsを渡してlocalPostとして作成（写真付き投稿）
-  // Go APIがMedia APIを直接サポートしていないため、localPostとして作成
-  // ただしこれは「投稿」セクションに行く — 後でMedia API直接呼び出しに変更する必要あり
-  const body: any = {
-    summary: "",
-    topicType: "STANDARD",
-    media_urls: [post.photo_url],
+  const body = {
+    source_url: post.photo_url,
+    category: "ADDITIONAL",
   };
 
   try {
-    const res = await fetch(`${GO_API_URL}/api/shop/${shopId}/local_post`, {
+    const res = await fetch(`${GO_API_URL}/api/shop/${shopId}/media_direct`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -148,11 +144,10 @@ async function uploadPhotoViaGoApi(
     });
     if (res.ok) {
       const result = await res.json().catch(() => ({}));
-      if (result?.name) return { ok: true, name: result.name };
-      return { ok: false, error: "Go API: 投稿名なし" };
+      return { ok: true, name: result?.name || "media-uploaded" };
     }
     const errText = await res.text().catch(() => "");
-    return { ok: false, error: `Go API ${res.status}: ${errText.slice(0, 200)}` };
+    return { ok: false, error: `Go API media_direct ${res.status}: ${errText.slice(0, 200)}` };
   } catch (e: any) {
     return { ok: false, error: `Go API通信エラー: ${e?.message}` };
   }
