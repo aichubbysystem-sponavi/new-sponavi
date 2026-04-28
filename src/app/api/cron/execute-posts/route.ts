@@ -56,24 +56,32 @@ async function postViaGbpApi(
     postBody.media = [{ mediaFormat: "PHOTO", sourceUrl: post.photo_url }];
   }
 
-  try {
-    let res = await fetch(`${GBP_API_BASE}/${locationName}/localPosts`, {
+  const doPost = async (token: string, body: any) => {
+    return fetch(`${GBP_API_BASE}/${locationName}/localPosts`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify(postBody),
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(30000),
     });
+  };
+
+  try {
+    let res = await doPost(accessToken, postBody);
+
+    // 401の場合、トークン再取得してリトライ
+    if (res.status === 401) {
+      console.log(`[postViaGbpApi] 401 for ${post.shop_name}, retrying with new token...`);
+      const newToken = await getOAuthToken();
+      if (newToken && newToken !== accessToken) {
+        res = await doPost(newToken, postBody);
+      }
+    }
 
     // 写真付きで失敗したら写真なしでリトライ（即時投稿と同じ）
     if (!res.ok && post.photo_url) {
       const retryBody: any = { summary: postBody.summary, topicType: "STANDARD", languageCode: "ja" };
       if (postBody.callToAction) retryBody.callToAction = postBody.callToAction;
-      res = await fetch(`${GBP_API_BASE}/${locationName}/localPosts`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify(retryBody),
-        signal: AbortSignal.timeout(30000),
-      });
+      res = await doPost(accessToken, retryBody);
     }
 
     if (res.ok) {
@@ -87,22 +95,43 @@ async function postViaGbpApi(
   }
 }
 
-/** 写真投稿: Media APIで「写真と動画」セクションにアップロード */
+/** 写真投稿: Media APIで「写真と動画」セクションにアップロード（401時リトライ付き） */
 async function uploadPhotoViaMediaApi(
   post: any, accessToken: string, locationName: string
 ): Promise<{ ok: boolean; name?: string; error?: string }> {
   if (!post.photo_url) return { ok: false, error: "写真URLなし" };
 
   const mediaUrl = `${GBP_API_BASE}/${locationName}/media`;
-  console.log(`[uploadPhoto] ${post.shop_name}: URL=${mediaUrl}, photo=${post.photo_url?.slice(0, 80)}, token=${accessToken?.slice(0, 20)}...`);
+  const body = JSON.stringify({ mediaFormat: "PHOTO", sourceUrl: post.photo_url, locationAssociation: { category: "ADDITIONAL" } });
 
-  try {
-    const res = await fetch(mediaUrl, {
+  const doUpload = async (token: string) => {
+    console.log(`[uploadPhoto] ${post.shop_name}: URL=${mediaUrl}, token=${token?.slice(0, 20)}...`);
+    return fetch(mediaUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify({ mediaFormat: "PHOTO", sourceUrl: post.photo_url, locationAssociation: { category: "ADDITIONAL" } }),
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body,
       signal: AbortSignal.timeout(30000),
     });
+  };
+
+  try {
+    let res = await doUpload(accessToken);
+
+    // 401の場合、別のトークンで最大3回リトライ
+    if (res.status === 401) {
+      for (let i = 0; i < 3; i++) {
+        console.log(`[uploadPhoto] 401 retry ${i + 1} for ${post.shop_name}`);
+        const newToken = await getOAuthToken();
+        if (newToken && newToken !== accessToken) {
+          res = await doUpload(newToken);
+          if (res.status !== 401) break;
+          accessToken = newToken; // 次のリトライで同じトークンを避ける
+        } else {
+          break; // 同じトークンしか取れない場合はリトライしない
+        }
+      }
+    }
+
     if (res.ok) {
       const result = await res.json().catch(() => ({}));
       return { ok: true, name: result?.name || "media-uploaded" };
