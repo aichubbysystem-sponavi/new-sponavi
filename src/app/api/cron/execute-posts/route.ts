@@ -59,6 +59,54 @@ async function postViaGoApi(
   }
 }
 
+/** 写真投稿: Media APIで「写真と動画」セクションにアップロード */
+async function uploadPhotoViaMediaApi(
+  post: any, accessToken: string, supabase: any
+): Promise<{ ok: boolean; name?: string; error?: string }> {
+  let shopLocName = "";
+  const { data: shop } = await supabase.from("shops")
+    .select("gbp_location_name").eq("id", post.shop_id).maybeSingle();
+  if (shop?.gbp_location_name) {
+    shopLocName = shop.gbp_location_name;
+  } else if (post.shop_name) {
+    const { data: byName } = await supabase.from("shops")
+      .select("gbp_location_name").eq("name", post.shop_name)
+      .not("gbp_location_name", "is", null).limit(1).maybeSingle();
+    if (byName?.gbp_location_name) shopLocName = byName.gbp_location_name;
+  }
+  if (!shopLocName) return { ok: false, error: `GBP未接続: ${post.shop_name}` };
+
+  const locationName = await resolveLocationName(shopLocName);
+  if (!locationName) return { ok: false, error: `ロケーション解決失敗: ${shopLocName}` };
+
+  if (!post.photo_url) return { ok: false, error: "写真URLなし" };
+
+  const doUpload = async (token: string) => {
+    return fetch(`${GBP_API_BASE}/${locationName}/media`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ mediaFormat: "PHOTO", sourceUrl: post.photo_url, locationAssociation: { category: "ADDITIONAL" } }),
+      signal: AbortSignal.timeout(30000),
+    });
+  };
+
+  try {
+    let res = await doUpload(accessToken);
+    if (res.status === 401) {
+      const newToken = await getOAuthToken();
+      if (newToken && newToken !== accessToken) res = await doUpload(newToken);
+    }
+    if (res.ok) {
+      const result = await res.json().catch(() => ({}));
+      return { ok: true, name: result?.name || "media-uploaded" };
+    }
+    const errText = await res.text().catch(() => "");
+    return { ok: false, error: `GBP Media API ${res.status}: ${errText.slice(0, 200)}` };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || "通信エラー" };
+  }
+}
+
 /** Go APIトークンで直接GBP APIに投稿（フォールバック） */
 async function postDirectWithGoToken(
   post: any, accessToken: string, supabase: any
@@ -181,12 +229,24 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      let result = await postViaGoApi(post.shop_id, post);
+      let result: { ok: boolean; name?: string; error?: string };
 
-      // Go API失敗（shop not found / 500等）→ Go APIトークンで直接GBP APIにフォールバック
-      if (!result.ok && goToken) {
-        console.log(`[cron/execute-posts] ${post.shop_name}: Go API失敗(${result.error?.slice(0, 80)})、直接GBP APIにフォールバック`);
-        result = await postDirectWithGoToken(post, goToken, supabase);
+      // 写真投稿（topic_type === "PHOTO"）→ Media APIで「写真と動画」にアップロード
+      if (post.topic_type === "PHOTO") {
+        if (!goToken) {
+          result = { ok: false, error: "トークン取得失敗" };
+        } else {
+          result = await uploadPhotoViaMediaApi(post, goToken, supabase);
+        }
+      } else {
+        // 通常投稿 → Go API経由
+        result = await postViaGoApi(post.shop_id, post);
+
+        // Go API失敗 → Go APIトークンで直接GBP APIにフォールバック
+        if (!result.ok && goToken) {
+          console.log(`[cron/execute-posts] ${post.shop_name}: Go API失敗(${result.error?.slice(0, 80)})、直接GBP APIにフォールバック`);
+          result = await postDirectWithGoToken(post, goToken, supabase);
+        }
       }
 
       if (result.ok) {
