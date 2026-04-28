@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getOAuthToken } from "@/lib/gbp-token";
 import { resolveLocationName } from "@/lib/gbp-location";
+import { resolveImageUrl, cleanupImage } from "@/lib/image-proxy";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -37,11 +38,7 @@ async function postViaGoApi(
   }
 
   if (post.photo_url) {
-    let url = post.photo_url;
-    if (url.includes("dropbox.com") && !url.includes("dropboxusercontent")) {
-      url = url.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace(/[&?]dl=\d/g, "");
-    }
-    body.media_urls = [url];
+    body.media_urls = [post.photo_url];
   }
 
   try {
@@ -94,11 +91,7 @@ async function postDirectWithGoToken(
     }
   }
   if (post.photo_url) {
-    let url = post.photo_url;
-    if (url.includes("dropbox.com") && !url.includes("dropboxusercontent")) {
-      url = url.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace(/[&?]dl=\d/g, "");
-    }
-    postBody.media = [{ mediaFormat: "PHOTO", sourceUrl: url }];
+    postBody.media = [{ mediaFormat: "PHOTO", sourceUrl: post.photo_url }];
   }
 
   try {
@@ -177,6 +170,17 @@ export async function GET(request: NextRequest) {
         errors++; return;
       }
 
+      // Dropbox一時URLを安定した公開URLに変換
+      if (post.photo_url) {
+        const resolvedUrl = await resolveImageUrl(post.photo_url, post.id);
+        if (resolvedUrl) {
+          post.photo_url = resolvedUrl;
+        } else {
+          console.log(`[cron/execute-posts] ${post.shop_name}: 画像URL解決失敗、写真なしで投稿`);
+          post.photo_url = null;
+        }
+      }
+
       let result = await postViaGoApi(post.shop_id, post);
 
       // Go API失敗（shop not found / 500等）→ Go APIトークンで直接GBP APIにフォールバック
@@ -194,6 +198,8 @@ export async function GET(request: NextRequest) {
           summary: post.summary, topic_type: post.topic_type,
           media_url: post.photo_url, gbp_post_name: result.name,
         });
+        // 一時画像をクリーンアップ
+        cleanupImage(post.id).catch(() => {});
         posted++;
       } else {
         await supabase.from("scheduled_posts").update({
