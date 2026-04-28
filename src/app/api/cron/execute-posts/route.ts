@@ -76,7 +76,7 @@ async function getAllOAuthTokens(): Promise<string[]> {
   }
 
   console.log(`[cron] 取得トークン数: ${tokenSet.size}`);
-  return [...tokenSet];
+  return Array.from(tokenSet);
 }
 
 /** Go API経由でGBP投稿を作成（通常投稿） */
