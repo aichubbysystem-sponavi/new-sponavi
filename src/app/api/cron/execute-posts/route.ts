@@ -19,33 +19,64 @@ function getSupabase() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
 }
 
-/** system_oauth_tokensから全トークンを取得（auto-postと同じ方式） */
+/** 全OAuthトークンを取得（system_oauth_tokens + system.tokens両方から） */
 async function getAllOAuthTokens(): Promise<string[]> {
   const supabase = getSupabase();
-  const { data } = await supabase.from("system_oauth_tokens")
-    .select("access_token, refresh_token, expiry");
-  if (!data || data.length === 0) return [];
+  const tokenSet = new Set<string>();
 
-  const tokens: string[] = [];
-  for (const row of data) {
-    if (new Date(row.expiry).getTime() - Date.now() > 5 * 60 * 1000) {
-      tokens.push(row.access_token);
-    } else if (row.refresh_token && GBP_CLIENT_ID && GBP_CLIENT_SECRET) {
-      try {
-        const res = await fetch("https://oauth2.googleapis.com/token", {
-          method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET,
-            refresh_token: row.refresh_token, grant_type: "refresh_token" }),
-          signal: AbortSignal.timeout(10000),
-        });
-        if (res.ok) {
-          const t = await res.json();
-          if (t.access_token) tokens.push(t.access_token);
-        }
-      } catch {}
+  // ソース1: system_oauth_tokens（Next.js用テーブル）
+  const { data: oauthTokens } = await supabase.from("system_oauth_tokens")
+    .select("access_token, refresh_token, expiry");
+  if (oauthTokens) {
+    for (const row of oauthTokens) {
+      if (new Date(row.expiry).getTime() - Date.now() > 5 * 60 * 1000) {
+        tokenSet.add(row.access_token);
+      } else if (row.refresh_token && GBP_CLIENT_ID && GBP_CLIENT_SECRET) {
+        try {
+          const res = await fetch("https://oauth2.googleapis.com/token", {
+            method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET,
+              refresh_token: row.refresh_token, grant_type: "refresh_token" }),
+            signal: AbortSignal.timeout(10000),
+          });
+          if (res.ok) {
+            const t = await res.json();
+            if (t.access_token) tokenSet.add(t.access_token);
+          }
+        } catch {}
+      }
     }
   }
-  return tokens;
+
+  // ソース2: system.tokens（Go API用テーブル — PERSONALアカウント含む）
+  try {
+    const { data: sysTokens } = await supabase.rpc("get_valid_tokens");
+    if (sysTokens) {
+      for (const row of sysTokens) {
+        if (row.refresh_token && GBP_CLIENT_ID && GBP_CLIENT_SECRET) {
+          try {
+            const res = await fetch("https://oauth2.googleapis.com/token", {
+              method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET,
+                refresh_token: row.refresh_token, grant_type: "refresh_token" }),
+              signal: AbortSignal.timeout(10000),
+            });
+            if (res.ok) {
+              const t = await res.json();
+              if (t.access_token) tokenSet.add(t.access_token);
+            }
+          } catch {}
+        } else if (row.access_token) {
+          tokenSet.add(row.access_token);
+        }
+      }
+    }
+  } catch (e: any) {
+    console.log(`[cron] get_valid_tokens RPC失敗: ${e?.message}`);
+  }
+
+  console.log(`[cron] 取得トークン数: ${tokenSet.size}`);
+  return [...tokenSet];
 }
 
 /** Go API経由でGBP投稿を作成（通常投稿） */
