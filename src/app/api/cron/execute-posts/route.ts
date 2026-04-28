@@ -12,9 +12,40 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
+const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
+const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
 
 function getSupabase() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
+}
+
+/** system_oauth_tokensから全トークンを取得（auto-postと同じ方式） */
+async function getAllOAuthTokens(): Promise<string[]> {
+  const supabase = getSupabase();
+  const { data } = await supabase.from("system_oauth_tokens")
+    .select("access_token, refresh_token, expiry");
+  if (!data || data.length === 0) return [];
+
+  const tokens: string[] = [];
+  for (const row of data) {
+    if (new Date(row.expiry).getTime() - Date.now() > 5 * 60 * 1000) {
+      tokens.push(row.access_token);
+    } else if (row.refresh_token && GBP_CLIENT_ID && GBP_CLIENT_SECRET) {
+      try {
+        const res = await fetch("https://oauth2.googleapis.com/token", {
+          method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET,
+            refresh_token: row.refresh_token, grant_type: "refresh_token" }),
+          signal: AbortSignal.timeout(10000),
+        });
+        if (res.ok) {
+          const t = await res.json();
+          if (t.access_token) tokens.push(t.access_token);
+        }
+      } catch {}
+    }
+  }
+  return tokens;
 }
 
 /** Go API経由でGBP投稿を作成（通常投稿） */
@@ -234,15 +265,19 @@ export async function GET(request: NextRequest) {
 
       if (post.topic_type === "PHOTO") {
         // === 写真投稿 ===
-        // 1. Go API経由（localPostとして写真付き投稿）
+        // 1. Go API media_direct 経由（店舗別トークンで「写真と動画」セクションに投稿）
         result = await uploadPhotoViaGoApi(post.shop_id, post);
 
-        // 2. Go API失敗 → 直接Media API
-        if (!result.ok && goToken) {
+        // 2. Go API失敗 → 直接Media API（全トークンを順番に試す）
+        if (!result.ok) {
           const locationName = await getLocationName(post, supabase);
           if (locationName) {
-            console.log(`[cron] ${post.shop_name}: Go API失敗、直接Media APIにフォールバック`);
-            result = await uploadPhotoDirectMediaApi(post, goToken, locationName);
+            console.log(`[cron] ${post.shop_name}: Go API失敗(${result.error?.slice(0, 60)})、直接Media APIにフォールバック`);
+            const allTokens = await getAllOAuthTokens();
+            for (const token of allTokens) {
+              result = await uploadPhotoDirectMediaApi(post, token, locationName);
+              if (result.ok) break;
+            }
           }
         }
       } else {
