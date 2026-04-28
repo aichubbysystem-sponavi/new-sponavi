@@ -596,7 +596,7 @@ export async function POST(request: NextRequest) {
           shop_id: shop.id,
           shop_name: shop.name,
           summary: match.summary || "",
-          topic_type: (match.topicType === "PHOTO" ? "STANDARD" : match.topicType) || "STANDARD",
+          topic_type: match.topicType || "STANDARD",
           photo_url: match.photoUrl || null,
           action_type: match.ctaUrl ? "LEARN_MORE" : null,
           action_url: match.ctaUrl || null,
