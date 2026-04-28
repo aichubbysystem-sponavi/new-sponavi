@@ -8,9 +8,61 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
+const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
+const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
+const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
 
 function getSupabase() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
+}
+
+/** 全OAuthトークンを取得 */
+async function getAllOAuthTokens(): Promise<string[]> {
+  const supabase = getSupabase();
+  const tokens: string[] = [];
+  // system_oauth_tokens
+  const { data: oauthTokens } = await supabase.from("system_oauth_tokens")
+    .select("access_token, refresh_token, expiry");
+  if (oauthTokens) {
+    for (const row of oauthTokens) {
+      if (new Date(row.expiry).getTime() - Date.now() > 5 * 60 * 1000) {
+        tokens.push(row.access_token);
+      } else if (row.refresh_token && GBP_CLIENT_ID) {
+        try {
+          const res = await fetch("https://oauth2.googleapis.com/token", {
+            method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET,
+              refresh_token: row.refresh_token, grant_type: "refresh_token" }),
+            signal: AbortSignal.timeout(10000),
+          });
+          if (res.ok) { const t = await res.json(); if (t.access_token) tokens.push(t.access_token); }
+        } catch {}
+      }
+    }
+  }
+  // system.tokens (PERSONALアカウント含む)
+  try {
+    const { data: sysTokens } = await supabase.rpc("get_valid_tokens");
+    if (sysTokens) {
+      for (const row of sysTokens) {
+        if (row.refresh_token && GBP_CLIENT_ID) {
+          try {
+            const res = await fetch("https://oauth2.googleapis.com/token", {
+              method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET,
+                refresh_token: row.refresh_token, grant_type: "refresh_token" }),
+              signal: AbortSignal.timeout(10000),
+            });
+            if (res.ok) { const t = await res.json(); if (t.access_token) tokens.push(t.access_token); }
+          } catch {}
+        } else if (row.access_token) {
+          tokens.push(row.access_token);
+        }
+      }
+    }
+  } catch {}
+  // 重複排除
+  return tokens.filter((v, i, a) => a.indexOf(v) === i);
 }
 
 /**
@@ -153,51 +205,109 @@ export async function PUT(request: NextRequest) {
         errors++; continue;
       }
 
-      // Go API経由でGBP投稿（Go APIのOAuth設定で確実に動く）
-      const goBody: any = {
-        summary: (post.summary || "").slice(0, 1500),
-        topicType: post.topic_type || "STANDARD",
-      };
-      if (post.action_type && post.action_url) {
-        const u = post.action_url;
-        if (!u.includes("dropbox.com/scl/fo/") && !u.includes("dropbox.com/sh/")) {
-          goBody.callToAction = { actionType: post.action_type, url: u };
+      let postOk = false;
+      let postName = "unknown";
+      let postError = "";
+
+      if (post.topic_type === "PHOTO") {
+        // === 写真投稿: Media API経由で「写真と動画」セクションに投稿 ===
+        if (!post.photo_url) {
+          await supabase.from("scheduled_posts").update({ status: "error", error_detail: "写真URLなし" }).eq("id", post.id);
+          errors++; continue;
         }
-      }
-      if (post.topic_type === "OFFER" && post.offer_title) {
-        goBody.event = { title: post.offer_title, schedule: { startDate: post.offer_start_date, endDate: post.offer_end_date } };
-      }
-      // 写真URL対応
-      if (post.photo_url) {
-        let url = post.photo_url;
-        if (url.includes("dropbox.com") && !url.includes("dropboxusercontent")) {
-          url = url.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace(/[&?]dl=\d/g, "");
+
+        // 1. Go API media_direct を試す
+        try {
+          const mdRes = await fetch(`${GO_API_URL}/api/shop/${post.shop_id}/media_direct`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ source_url: post.photo_url, category: "ADDITIONAL" }),
+            signal: AbortSignal.timeout(30000),
+          });
+          if (mdRes.ok) {
+            const r = await mdRes.json().catch(() => ({}));
+            postOk = true; postName = r?.name || "media-uploaded";
+          } else {
+            postError = await mdRes.text().catch(() => "");
+          }
+        } catch (e: any) { postError = e?.message || "通信エラー"; }
+
+        // 2. Go API失敗 → 全トークンで直接Media API
+        if (!postOk) {
+          const { resolveLocationName } = await import("@/lib/gbp-location");
+          const { data: shop } = await supabase.from("shops")
+            .select("gbp_location_name").eq("id", post.shop_id).maybeSingle();
+          const locName = shop?.gbp_location_name ? await resolveLocationName(shop.gbp_location_name) : null;
+          if (locName) {
+            const allTokens = await getAllOAuthTokens();
+            for (const token of allTokens) {
+              try {
+                const mediaRes = await fetch(`${GBP_API_BASE}/${locName}/media`, {
+                  method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                  body: JSON.stringify({ mediaFormat: "PHOTO", sourceUrl: post.photo_url, locationAssociation: { category: "ADDITIONAL" } }),
+                  signal: AbortSignal.timeout(30000),
+                });
+                if (mediaRes.ok) {
+                  const r = await mediaRes.json().catch(() => ({}));
+                  postOk = true; postName = r?.name || "media-uploaded";
+                  break;
+                }
+              } catch {}
+            }
+            if (!postOk) postError = `全トークン(${allTokens.length}件)でMedia API失敗`;
+          } else {
+            postError = "ロケーション解決失敗";
+          }
         }
-        goBody.media_urls = [url];
+      } else {
+        // === 通常投稿: Go API local_post ===
+        const goBody: any = {
+          summary: (post.summary || "").slice(0, 1500),
+          topicType: post.topic_type || "STANDARD",
+        };
+        if (post.action_type && post.action_url) {
+          const u = post.action_url;
+          if (!u.includes("dropbox.com/scl/fo/") && !u.includes("dropbox.com/sh/")) {
+            goBody.callToAction = { actionType: post.action_type, url: u };
+          }
+        }
+        if (post.topic_type === "OFFER" && post.offer_title) {
+          goBody.event = { title: post.offer_title, schedule: { startDate: post.offer_start_date, endDate: post.offer_end_date } };
+        }
+        if (post.photo_url) {
+          let url = post.photo_url;
+          if (url.includes("dropbox.com") && !url.includes("dropboxusercontent")) {
+            url = url.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace(/[&?]dl=\d/g, "");
+          }
+          goBody.media_urls = [url];
+        }
+
+        try {
+          const res = await fetch(`${GO_API_URL}/api/shop/${post.shop_id}/local_post`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(goBody), signal: AbortSignal.timeout(30000),
+          });
+          if (res.ok) {
+            const result = await res.json().catch(() => ({}));
+            postOk = true; postName = result?.name || "unknown";
+          } else {
+            postError = `Go API ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`;
+          }
+        } catch (e: any) { postError = e?.message || "通信エラー"; }
       }
 
-      const res = await fetch(`${GO_API_URL}/api/shop/${post.shop_id}/local_post`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(goBody),
-        signal: AbortSignal.timeout(30000),
-      });
-
-      if (res.ok) {
-        const result = await res.json().catch(() => ({}));
+      if (postOk) {
         await supabase.from("scheduled_posts").update({
           status: "published", published_at: new Date().toISOString(),
         }).eq("id", post.id);
         await supabase.from("post_logs").insert({
           id: crypto.randomUUID(), shop_id: post.shop_id, shop_name: post.shop_name,
           summary: post.summary, topic_type: post.topic_type,
-          media_url: post.photo_url, gbp_post_name: result?.name || "unknown",
+          media_url: post.photo_url, gbp_post_name: postName,
         });
         executed++;
       } else {
-        const errText = await res.text().catch(() => "");
         await supabase.from("scheduled_posts").update({
-          status: "error", error_detail: `Go API ${res.status}: ${errText.slice(0, 200)}`,
+          status: "error", error_detail: postError.slice(0, 300),
         }).eq("id", post.id);
         errors++;
       }
