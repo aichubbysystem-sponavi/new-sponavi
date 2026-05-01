@@ -190,98 +190,59 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
       }
     } catch {}
 
+    // Supabase Storage用クライアント（写真保存用）
+    const { createClient: createSbClient } = await import("@supabase/supabase-js");
+    const sbStorage = createSbClient(process.env.NEXT_PUBLIC_SUPABASE_URL || "", process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "");
+
     for (const file of dateMatches.slice(0, 10)) {
       let got = false;
 
-      // 方法1: get_temporary_link（パスをそのまま試行）
+      // 主方式: 共有リンク経由で直接ダウンロード → Supabase Storage → 安定URL
       try {
-        const linkRes = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
+        const filePath = file.path.startsWith("/") ? file.path : `/${file.path}`;
+        const dlRes = await fetch("https://content.dropboxapi.com/2/sharing/get_shared_link_file", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
-          body: JSON.stringify({ path: file.path }),
-          signal: AbortSignal.timeout(10000),
+          headers: {
+            Authorization: `Bearer ${dbxToken}`,
+            "Dropbox-API-Arg": JSON.stringify({ url: shareUrl, path: filePath }),
+          },
+          signal: AbortSignal.timeout(20000),
         });
-        if (linkRes.ok) {
-          const linkData = await linkRes.json();
-          if (linkData.link) { urls.push(linkData.link); got = true; }
+        if (dlRes.ok) {
+          const buffer = Buffer.from(await dlRes.arrayBuffer());
+          if (buffer.length > 1000) {
+            const fname = `photo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+            const { error: upErr } = await sbStorage.storage.from("post-images").upload(fname, buffer, { contentType: "image/jpeg", upsert: true });
+            if (!upErr) {
+              const { data: urlData } = sbStorage.storage.from("post-images").getPublicUrl(fname);
+              if (urlData?.publicUrl) { urls.push(urlData.publicUrl); got = true; }
+            } else { dlDebug.push(`Storage保存失敗: ${file.name}: ${upErr.message}`); }
+          } else { dlDebug.push(`サイズ不正(${buffer.length}B): ${file.name}`); }
         } else {
-          dlDebug.push(`方法1失敗(${linkRes.status}): ${file.name}`);
+          dlDebug.push(`DL失敗(${dlRes.status}): ${file.name} path=${filePath.slice(0, 40)}`);
         }
-      } catch (e: any) { dlDebug.push(`方法1例外: ${file.name}: ${e?.message}`); }
+      } catch (e: any) { dlDebug.push(`DL例外: ${file.name}: ${e?.message?.slice(0, 50)}`); }
 
-      // 方法2: 共有ルートパス + 相対パスで再試行
-      if (!got && sharedRootPath) {
-        const absPath = file.path.startsWith(sharedRootPath)
-          ? file.path
-          : `${sharedRootPath}${file.path.startsWith("/") ? "" : "/"}${file.path}`;
+      // フォールバック: get_temporary_link
+      if (!got) {
         try {
-          const linkRes2 = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
+          const absPath = sharedRootPath
+            ? `${sharedRootPath}${file.path.startsWith("/") ? "" : "/"}${file.path}`
+            : file.path;
+          const linkRes = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
             body: JSON.stringify({ path: absPath }),
             signal: AbortSignal.timeout(10000),
           });
-          if (linkRes2.ok) {
-            const linkData2 = await linkRes2.json();
-            if (linkData2.link) { urls.push(linkData2.link); got = true; }
-          } else {
-            dlDebug.push(`方法2失敗(${linkRes2.status}): ${absPath.slice(0, 60)}`);
+          if (linkRes.ok) {
+            const linkData = await linkRes.json();
+            if (linkData.link) { urls.push(linkData.link); got = true; }
           }
         } catch {}
       }
 
-      // 方法3: ファイル単体の共有リンクを新規作成
-      if (!got) {
-        const tryPath = sharedRootPath
-          ? `${sharedRootPath}${file.path.startsWith("/") ? "" : "/"}${file.path}`
-          : file.path;
-        try {
-          const shareRes = await fetch("https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
-            body: JSON.stringify({ path: tryPath, settings: { requested_visibility: "public", access: "viewer" } }),
-            signal: AbortSignal.timeout(10000),
-          });
-          const shareBody = await shareRes.json();
-          const fileShareUrl = shareBody?.url || shareBody?.error?.shared_link_already_exists?.metadata?.url;
-          if (fileShareUrl) {
-            urls.push(fileShareUrl.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace(/\?dl=0/, "?dl=1"));
-            got = true;
-          } else {
-            dlDebug.push(`方法3失敗: ${JSON.stringify(shareBody).slice(0, 100)}`);
-          }
-        } catch {}
-      }
-
-      // 方法4: 共有リンク経由で直接ダウンロード（content API）
-      if (!got) {
-        try {
-          const dlRes = await fetch("https://content.dropboxapi.com/2/sharing/get_shared_link_file", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${dbxToken}`,
-              "Dropbox-API-Arg": JSON.stringify({ url: shareUrl, path: file.path.startsWith("/") ? file.path : `/${file.path}` }),
-            },
-            signal: AbortSignal.timeout(15000),
-          });
-          if (dlRes.ok) {
-            // バイナリデータが返る → Supabase Storageに保存して公開URL化
-            const buffer = Buffer.from(await dlRes.arrayBuffer());
-            if (buffer.length > 1000) {
-              const { createClient } = await import("@supabase/supabase-js");
-              const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL || "", process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "");
-              const fname = `dropbox-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
-              await sb.storage.from("post-images").upload(fname, buffer, { contentType: "image/jpeg", upsert: true });
-              const { data: urlData } = sb.storage.from("post-images").getPublicUrl(fname);
-              if (urlData?.publicUrl) { urls.push(urlData.publicUrl); got = true; dlDebug.push(`方法4成功: ${file.name}`); }
-            }
-          } else {
-            dlDebug.push(`方法4失敗(${dlRes.status}): ${file.name}`);
-          }
-        } catch (e: any) { dlDebug.push(`方法4例外: ${file.name}: ${e?.message?.slice(0, 50)}`); }
-      }
-
-      if (!got) dlDebug.push(`全方法失敗: ${file.name} path=${file.path.slice(0, 60)}`);
+      if (!got) dlDebug.push(`取得失敗: ${file.name}`);
     }
 
     const debugExtra = dlDebug.length > 0 ? ` [${dlDebug.join("; ")}]` : "";
@@ -705,6 +666,7 @@ export async function POST(request: NextRequest) {
   const results: any[] = [];
 
   for (const match of batchMatches) {
+   try {
     // 店舗名でマッチ
     const shop = (shops || []).find((s) =>
       s.name === match.shopName || s.gbp_shop_name === match.shopName
@@ -883,6 +845,10 @@ export async function POST(request: NextRequest) {
       results.push({ shopName: match.shopName, status: `エラー: ${e?.message}`, summary: match.summary.slice(0, 30) });
       errors++;
     }
+   } catch (outerErr: any) {
+     results.push({ shopName: match.shopName || "不明", status: `予期しないエラー: ${outerErr?.message?.slice(0, 100)}` });
+     errors++;
+   }
   }
 
   const photoFilePattern = isPhotoOnly
