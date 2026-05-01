@@ -190,61 +190,59 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
       }
     } catch {}
 
-    // Supabase Storage用クライアント（写真保存用）
-    const { createClient: createSbClient } = await import("@supabase/supabase-js");
-    const sbStorage = createSbClient(process.env.NEXT_PUBLIC_SUPABASE_URL || "", process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "");
-
     for (const file of dateMatches.slice(0, 10)) {
       let got = false;
 
-      // 主方式: 共有リンク経由で直接ダウンロード → Supabase Storage → 安定URL
+      // 方法1: get_temporary_link（パスをそのまま試行）
       try {
-        // 共有ルートからの相対パスに変換（get_shared_link_fileは相対パスが必要）
-        let relativePath = file.path;
-        if (sharedRootPath && relativePath.toLowerCase().startsWith(sharedRootPath.toLowerCase())) {
-          relativePath = relativePath.slice(sharedRootPath.length);
-        }
-        if (!relativePath.startsWith("/")) relativePath = `/${relativePath}`;
-        // Dropbox-API-Argヘッダーは非ASCII文字をUnicodeエスケープ(\uXXXX)に変換する必要がある
-        const apiArg = JSON.stringify({ url: shareUrl, path: relativePath }).replace(/[\u0080-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
-        const dlRes = await fetch("https://content.dropboxapi.com/2/sharing/get_shared_link_file", {
+        const linkRes = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${dbxToken}`,
-            "Dropbox-API-Arg": apiArg,
-          },
-          signal: AbortSignal.timeout(20000),
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
+          body: JSON.stringify({ path: file.path }),
+          signal: AbortSignal.timeout(10000),
         });
-        if (dlRes.ok) {
-          const buffer = Buffer.from(await dlRes.arrayBuffer());
-          if (buffer.length > 1000) {
-            const fname = `photo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
-            const { error: upErr } = await sbStorage.storage.from("post-images").upload(fname, buffer, { contentType: "image/jpeg", upsert: true });
-            if (!upErr) {
-              const { data: urlData } = sbStorage.storage.from("post-images").getPublicUrl(fname);
-              if (urlData?.publicUrl) { urls.push(urlData.publicUrl); got = true; }
-            } else { dlDebug.push(`Storage保存失敗: ${file.name}: ${upErr.message}`); }
-          } else { dlDebug.push(`サイズ不正(${buffer.length}B): ${file.name}`); }
-        } else {
-          dlDebug.push(`DL失敗(${dlRes.status}): ${file.name} rel=${relativePath.slice(0, 50)}`);
+        if (linkRes.ok) {
+          const linkData = await linkRes.json();
+          if (linkData.link) { urls.push(linkData.link); got = true; }
         }
-      } catch (e: any) { dlDebug.push(`DL例外: ${file.name}: ${e?.message?.slice(0, 50)}`); }
+      } catch {}
 
-      // フォールバック: get_temporary_link
-      if (!got) {
+      // 方法2: 共有ルートパス + 相対パスで再試行
+      if (!got && sharedRootPath) {
+        const absPath = file.path.startsWith(sharedRootPath)
+          ? file.path
+          : `${sharedRootPath}${file.path.startsWith("/") ? "" : "/"}${file.path}`;
         try {
-          const absPath = sharedRootPath
-            ? `${sharedRootPath}${file.path.startsWith("/") ? "" : "/"}${file.path}`
-            : file.path;
-          const linkRes = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
+          const linkRes2 = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
             body: JSON.stringify({ path: absPath }),
             signal: AbortSignal.timeout(10000),
           });
-          if (linkRes.ok) {
-            const linkData = await linkRes.json();
-            if (linkData.link) { urls.push(linkData.link); got = true; }
+          if (linkRes2.ok) {
+            const linkData2 = await linkRes2.json();
+            if (linkData2.link) { urls.push(linkData2.link); got = true; }
+          }
+        } catch {}
+      }
+
+      // 方法3: ファイル単体の共有リンクを新規作成
+      if (!got) {
+        const tryPath = sharedRootPath
+          ? `${sharedRootPath}${file.path.startsWith("/") ? "" : "/"}${file.path}`
+          : file.path;
+        try {
+          const shareRes = await fetch("https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
+            body: JSON.stringify({ path: tryPath, settings: { requested_visibility: "public", access: "viewer" } }),
+            signal: AbortSignal.timeout(10000),
+          });
+          const shareBody = await shareRes.json();
+          const fileShareUrl = shareBody?.url || shareBody?.error?.shared_link_already_exists?.metadata?.url;
+          if (fileShareUrl) {
+            urls.push(fileShareUrl.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace(/\?dl=0/, "?dl=1"));
+            got = true;
           }
         } catch {}
       }
