@@ -352,6 +352,9 @@ export async function POST(request: NextRequest) {
   // ファイル名: "写真投稿26-5-1 (1).jpg" = 2026年5月の1投稿目の1枚目
   const photoPostNumber = dateObj.getDate();
 
+  // スプレッドシート読み取り用のOAuthトークンを取得
+  const sheetAccessToken = await getOAuthToken();
+
   // 対象タブを読み込み
   const tabs = ["投稿用シート", "報告必須店舗 投稿用シート", "WHITE 系列 投稿用シート"];
   const allMatches: { shopName: string; summary: string; photoUrl: string; ctaUrl: string; tab: string; rawPhotoCell: string; rawDateCell: string; photoDebug: string; topicType: string; offerTitle: string; offerStartDate: any; offerEndDate: any }[] = [];
@@ -360,10 +363,9 @@ export async function POST(request: NextRequest) {
   for (const tab of tabs) {
     try {
       const gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
-      const res = await fetch(gvizUrl, {
-        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-        redirect: "follow",
-      });
+      const headers: Record<string, string> = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" };
+      if (sheetAccessToken) headers["Authorization"] = `Bearer ${sheetAccessToken}`;
+      const res = await fetch(gvizUrl, { headers, redirect: "follow" });
       if (!res.ok) continue;
 
       const csvText = await res.text();
@@ -484,10 +486,9 @@ export async function POST(request: NextRequest) {
     for (const tab of tabs) {
       try {
         const gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
-        const res = await fetch(gvizUrl, {
-          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-          redirect: "follow",
-        });
+        const dbgHeaders: Record<string, string> = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" };
+        if (sheetAccessToken) dbgHeaders["Authorization"] = `Bearer ${sheetAccessToken}`;
+        const res = await fetch(gvizUrl, { headers: dbgHeaders, redirect: "follow" });
         if (!res.ok) { tabResults.push(`${tab}: HTTP${res.status}`); continue; }
         const csvText = await res.text();
         if (csvText.includes("<!DOCTYPE") || csvText.includes("<html")) { tabResults.push(`${tab}: HTMLが返された`); continue; }
