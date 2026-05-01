@@ -479,7 +479,29 @@ export async function POST(request: NextRequest) {
   }
 
   if (allMatches.length === 0) {
-    return NextResponse.json({ matches: 0, message: `${targetDate}に該当する投稿データがありません`, dateCompact });
+    // デバッグ: なぜ0件か情報を返す
+    const tabResults: string[] = [];
+    for (const tab of tabs) {
+      try {
+        const gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
+        const res = await fetch(gvizUrl, {
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+          redirect: "follow",
+        });
+        if (!res.ok) { tabResults.push(`${tab}: HTTP${res.status}`); continue; }
+        const csvText = await res.text();
+        if (csvText.includes("<!DOCTYPE") || csvText.includes("<html")) { tabResults.push(`${tab}: HTMLが返された`); continue; }
+        const rows = parseCSV(csvText);
+        const shopNames = rows.slice(1, 6).map(r => (r[1] || "").trim()).filter(Boolean);
+        const photoCells = rows.slice(1, 6).map(r => (r[5] || "").slice(0, 30)).filter(Boolean);
+        tabResults.push(`${tab}: ${rows.length}行, B列例:[${shopNames.join(",")}], F列例:[${photoCells.join(",")}]`);
+      } catch (e: any) { tabResults.push(`${tab}: エラー ${e?.message}`); }
+    }
+    return NextResponse.json({
+      matches: 0,
+      message: `${targetDate}に該当する投稿データがありません`,
+      debug: { isPhotoOnly, topicType, dateCompact, photoPostNumber, tabResults, filterShopName, filterShopNames },
+    });
   }
 
   if (dryRun) {
