@@ -418,6 +418,54 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // 写真投稿番号の算出: 月内の何投稿目かを計算
+  // ファイル名は "写真投稿26-5-1 (1).jpg" = 2026年5月の1投稿目の1枚目
+  let photoPostNumber = 0;
+  if (isPhotoOnly) {
+    // スプレッドシートの全タブから同月のPHOTO日付を収集
+    const targetMonth = dateObj.getMonth();
+    const targetYear = dateObj.getFullYear();
+    const allPhotoDates = new Set<string>();
+
+    for (const tab of tabs) {
+      try {
+        const gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
+        const res = await fetch(gvizUrl, {
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+          redirect: "follow",
+        });
+        if (!res.ok) continue;
+        const csvText = await res.text();
+        if (csvText.includes("<!DOCTYPE") || csvText.includes("<html")) continue;
+        const rows = parseCSV(csvText);
+        for (let r = 1; r < rows.length; r++) {
+          const dateCell = (rows[r][4] || "").trim();
+          if (!dateCell) continue;
+          // 日付をパースして同月か判定
+          const parsed = dateCell.match(/(\d{4})\D?(\d{1,2})\D?(\d{1,2})/);
+          if (parsed) {
+            const y = parseInt(parsed[1]);
+            const m = parseInt(parsed[2]) - 1;
+            if (y === targetYear && m === targetMonth) {
+              allPhotoDates.add(`${y}-${m + 1}-${parseInt(parsed[3])}`);
+            }
+          }
+        }
+      } catch {}
+    }
+
+    // 日付をソートして投稿番号を決定
+    const sortedDates = Array.from(allPhotoDates).sort((a, b) => {
+      const [ay, am, ad] = a.split("-").map(Number);
+      const [by, bm, bd] = b.split("-").map(Number);
+      return (ay - by) || (am - bm) || (ad - bd);
+    });
+    const targetKey = `${targetYear}-${targetMonth + 1}-${dateObj.getDate()}`;
+    photoPostNumber = sortedDates.indexOf(targetKey) + 1;
+    if (photoPostNumber === 0) photoPostNumber = 1; // 見つからない場合は1
+    console.log(`[auto-post] 写真投稿番号: ${photoPostNumber} (${targetKey}, 月内日付: ${sortedDates.join(", ")})`);
+  }
+
   // Dropbox写真検索を5件ずつバッチ実行（レート制限対策）
   if (!dryRun && pendingPhotoSearch.length > 0) {
     const PHOTO_BATCH = 5;
@@ -429,8 +477,10 @@ export async function POST(request: NextRequest) {
 
       let photoUrls: string[] = [];
       let photoDebug = "";
-      // 写真投稿は "26-4-12" 形式、それ以外は "260412" 形式でファイル名マッチ
-      const fileNameDate = isPhotoOnly ? dateCompact : dateYymmdd;
+      // 写真投稿: "26-5-1" = 月内の投稿番号、通常投稿: "260412" = 日付
+      const fileNameDate = isPhotoOnly
+        ? `${String(dateObj.getFullYear()).slice(2)}-${dateObj.getMonth() + 1}-${photoPostNumber}`
+        : dateYymmdd;
       if (p.photoCell.includes("dropbox.com")) {
         const result = await searchDropboxPhotosMultiple(p.photoCell.trim(), fileNameDate, p.shopName);
         photoUrls = result.urls;
@@ -472,14 +522,21 @@ export async function POST(request: NextRequest) {
     // プレビュー時はバッチ情報も返す
     const bs = batchSize || 10;
     const totalBatches = Math.ceil(allMatches.length / bs);
+    const photoFilePattern = isPhotoOnly
+      ? `写真投稿${String(dateObj.getFullYear()).slice(2)}-${dateObj.getMonth() + 1}-${photoPostNumber}`
+      : undefined;
     return NextResponse.json({
       matches: allMatches.length,
       data: allMatches,
       totalBatches,
       batchSize: bs,
-      message: allMatches.length > bs
-        ? `プレビュー: ${allMatches.length}件を${bs}件ずつ${totalBatches}回に分けて実行します`
-        : "プレビュー（実際の投稿はしません）",
+      photoPostNumber: isPhotoOnly ? photoPostNumber : undefined,
+      photoFilePattern,
+      message: isPhotoOnly
+        ? `プレビュー: ${allMatches.length}件（${photoFilePattern} を検索）`
+        : allMatches.length > bs
+          ? `プレビュー: ${allMatches.length}件を${bs}件ずつ${totalBatches}回に分けて実行します`
+          : "プレビュー（実際の投稿はしません）",
     });
   }
 
@@ -797,6 +854,10 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  const photoFilePattern = isPhotoOnly
+    ? `写真投稿${String(dateObj.getFullYear()).slice(2)}-${dateObj.getMonth() + 1}-${photoPostNumber}`
+    : undefined;
+
   return NextResponse.json({
     matches: allMatches.length,
     posted, errors, results,
@@ -805,5 +866,7 @@ export async function POST(request: NextRequest) {
     batchProcessed: batchMatches.length,
     hasMore: offset + size < allMatches.length,
     nextOffset: offset + size,
+    photoPostNumber: isPhotoOnly ? photoPostNumber : undefined,
+    photoFilePattern,
   });
 }
