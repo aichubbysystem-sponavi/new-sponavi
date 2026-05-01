@@ -16,26 +16,9 @@ function getSupabase() {
 }
 
 async function getOAuthToken(): Promise<string | null> {
-  const supabase = getSupabase();
-  const { data } = await supabase.from("system_oauth_tokens")
-    .select("access_token, refresh_token, expiry").limit(1).maybeSingle();
-  if (!data) return null;
-  if (new Date(data.expiry).getTime() - Date.now() > 5 * 60 * 1000) return data.access_token;
-  try {
-    const res = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET,
-        refresh_token: data.refresh_token, grant_type: "refresh_token" }),
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!res.ok) return data.access_token;
-    const t = await res.json();
-    await getSupabase().from("system_oauth_tokens").update({
-      access_token: t.access_token,
-      expiry: new Date(Date.now() + (t.expires_in || 3600) * 1000).toISOString(),
-    }).not("account_id", "is", null);
-    return t.access_token;
-  } catch { return data.access_token; }
+  // Go API経由で有効なトークンを取得（複数アカウント対応）
+  const { getOAuthToken: getSharedToken } = await import("@/lib/gbp-token");
+  return getSharedToken();
 }
 
 const DROPBOX_APP_KEY = process.env.DROPBOX_APP_KEY || "";
@@ -352,9 +335,8 @@ export async function POST(request: NextRequest) {
   // ファイル名: "写真投稿26-5-1 (1).jpg" = 2026年5月の1投稿目の1枚目
   const photoPostNumber = dateObj.getDate();
 
-  // スプレッドシート読み取り用のOAuthトークンを取得（Go API経由 — 複数アカウント対応）
-  const { getOAuthToken: getSharedToken } = await import("@/lib/gbp-token");
-  const sheetAccessToken = await getSharedToken();
+  // スプレッドシート読み取り用のOAuthトークンを取得
+  const sheetAccessToken = await getOAuthToken();
 
   // 対象タブを読み込み
   const tabs = ["投稿用シート", "報告必須店舗 投稿用シート", "WHITE 系列 投稿用シート"];
