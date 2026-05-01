@@ -387,14 +387,18 @@ export async function POST(request: NextRequest) {
         if (!shopName) continue;
         if (!isPhotoOnly && !postText) continue; // 写真のみ投稿ではテキスト不要
 
-        // 日付マッチ（複数フォーマット対応）
-        const dateMatch = dateCell.includes(dateYmd)
-          || dateCell.includes(dateCompact)
-          || dateCell.includes(dateSlash)
-          || dateCell.includes(dateSlashPad)
-          || dateCell.includes(targetDate);
-
-        if (!dateMatch) continue;
+        if (isPhotoOnly) {
+          // 写真投稿: E列日付は見ない。B列店舗名 + F列DropboxURLのみ
+          if (!photoCell) continue; // F列が空ならスキップ
+        } else {
+          // 通常投稿: 日付マッチ（複数フォーマット対応）
+          const dateMatch = dateCell.includes(dateYmd)
+            || dateCell.includes(dateCompact)
+            || dateCell.includes(dateSlash)
+            || dateCell.includes(dateSlashPad)
+            || dateCell.includes(targetDate);
+          if (!dateMatch) continue;
+        }
 
         // 店舗フィルタ（特定店舗が指定されている場合、その店舗のみ対象）
         if (filterShopNames && filterShopNames.length > 0) {
@@ -402,10 +406,13 @@ export async function POST(request: NextRequest) {
           if (!match) continue;
         } else if (filterShopName && shopName !== filterShopName && !shopName.includes(filterShopName) && !filterShopName.includes(shopName)) continue;
 
+        // 写真投稿: 同じ店舗が複数行にある場合は最初の1行のみ使用
+        if (isPhotoOnly && allMatches.some(m => m.shopName === shopName)) continue;
+
         // dryRun（プレビュー）時はDropbox写真検索をスキップ → 高速化
         if (dryRun) {
           const hasPhoto = !!photoCell;
-          allMatches.push({ shopName, summary: postText || (isPhotoOnly ? "（写真のみ）" : ""), photoUrl: "", ctaUrl, tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: hasPhoto ? "写真あり（確認時はスキップ）" : "F列が空", topicType: rowTopicType, offerTitle: isOffer ? offerTitle : "", offerStartDate, offerEndDate });
+          allMatches.push({ shopName, summary: postText || (isPhotoOnly ? "（写真のみ）" : ""), photoUrl: "", ctaUrl, tab, rawPhotoCell: photoCell, rawDateCell: dateCell, photoDebug: hasPhoto ? `写真あり（投稿番号: ${photoPostNumber}）` : "F列が空", topicType: rowTopicType, offerTitle: isOffer ? offerTitle : "", offerStartDate, offerEndDate });
           continue;
         }
 
@@ -418,53 +425,10 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // 写真投稿番号の算出: 月内の何投稿目かを計算
-  // ファイル名は "写真投稿26-5-1 (1).jpg" = 2026年5月の1投稿目の1枚目
-  let photoPostNumber = 0;
-  if (isPhotoOnly) {
-    // スプレッドシートの全タブから同月のPHOTO日付を収集
-    const targetMonth = dateObj.getMonth();
-    const targetYear = dateObj.getFullYear();
-    const allPhotoDates = new Set<string>();
-
-    for (const tab of tabs) {
-      try {
-        const gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
-        const res = await fetch(gvizUrl, {
-          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-          redirect: "follow",
-        });
-        if (!res.ok) continue;
-        const csvText = await res.text();
-        if (csvText.includes("<!DOCTYPE") || csvText.includes("<html")) continue;
-        const rows = parseCSV(csvText);
-        for (let r = 1; r < rows.length; r++) {
-          const dateCell = (rows[r][4] || "").trim();
-          if (!dateCell) continue;
-          // 日付をパースして同月か判定
-          const parsed = dateCell.match(/(\d{4})\D?(\d{1,2})\D?(\d{1,2})/);
-          if (parsed) {
-            const y = parseInt(parsed[1]);
-            const m = parseInt(parsed[2]) - 1;
-            if (y === targetYear && m === targetMonth) {
-              allPhotoDates.add(`${y}-${m + 1}-${parseInt(parsed[3])}`);
-            }
-          }
-        }
-      } catch {}
-    }
-
-    // 日付をソートして投稿番号を決定
-    const sortedDates = Array.from(allPhotoDates).sort((a, b) => {
-      const [ay, am, ad] = a.split("-").map(Number);
-      const [by, bm, bd] = b.split("-").map(Number);
-      return (ay - by) || (am - bm) || (ad - bd);
-    });
-    const targetKey = `${targetYear}-${targetMonth + 1}-${dateObj.getDate()}`;
-    photoPostNumber = sortedDates.indexOf(targetKey) + 1;
-    if (photoPostNumber === 0) photoPostNumber = 1; // 見つからない場合は1
-    console.log(`[auto-post] 写真投稿番号: ${photoPostNumber} (${targetKey}, 月内日付: ${sortedDates.join(", ")})`);
-  }
+  // 写真投稿番号: 対象日付の「日」= 月内の投稿番号
+  // 例: 5/1→1投稿目, 5/2→2投稿目, 5/3→3投稿目
+  // ファイル名: "写真投稿26-5-1 (1).jpg" = 2026年5月の1投稿目の1枚目
+  const photoPostNumber = dateObj.getDate();
 
   // Dropbox写真検索を5件ずつバッチ実行（レート制限対策）
   if (!dryRun && pendingPhotoSearch.length > 0) {
