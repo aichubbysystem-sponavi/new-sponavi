@@ -154,10 +154,16 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
 
     if (files.length === 0) return { urls: [], debug: `フォルダ内にファイルが0件 [${debugSteps.join(" → ")}] URL: ${shareUrl.slice(0, 80)}` };
 
-    // 日付を含む画像ファイルをフィルタ（ファイル名に dateCompact "26-4-12" 形式で部分一致）
+    // ファイル名にdateCompactを含む画像をフィルタ
+    // "26-5-1"が"26-5-10"等にマッチしないよう、後続文字が数字でないことを確認
     const dateMatches = files.filter(f => {
       if (!/\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(f.name)) return false;
-      return f.name.includes(dateCompact);
+      const idx = f.name.indexOf(dateCompact);
+      if (idx === -1) return false;
+      // dateCompactの直後の文字が数字ならfalse（"26-5-1"が"26-5-10"にマッチしないように）
+      const nextChar = f.name[idx + dateCompact.length];
+      if (nextChar && /\d/.test(nextChar)) return false;
+      return true;
     });
 
     if (dateMatches.length === 0) {
@@ -198,8 +204,10 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
         if (linkRes.ok) {
           const linkData = await linkRes.json();
           if (linkData.link) { urls.push(linkData.link); got = true; }
+        } else {
+          dlDebug.push(`方法1失敗(${linkRes.status}): ${file.name}`);
         }
-      } catch {}
+      } catch (e: any) { dlDebug.push(`方法1例外: ${file.name}: ${e?.message}`); }
 
       // 方法2: 共有ルートパス + 相対パスで再試行
       if (!got && sharedRootPath) {
@@ -244,6 +252,36 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
           }
         } catch {}
       }
+
+      // 方法4: 共有リンク経由で直接ダウンロード（content API）
+      if (!got) {
+        try {
+          const dlRes = await fetch("https://content.dropboxapi.com/2/sharing/get_shared_link_file", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${dbxToken}`,
+              "Dropbox-API-Arg": JSON.stringify({ url: shareUrl, path: file.path.startsWith("/") ? file.path : `/${file.path}` }),
+            },
+            signal: AbortSignal.timeout(15000),
+          });
+          if (dlRes.ok) {
+            // バイナリデータが返る → Supabase Storageに保存して公開URL化
+            const buffer = Buffer.from(await dlRes.arrayBuffer());
+            if (buffer.length > 1000) {
+              const { createClient } = await import("@supabase/supabase-js");
+              const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL || "", process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "");
+              const fname = `dropbox-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+              await sb.storage.from("post-images").upload(fname, buffer, { contentType: "image/jpeg", upsert: true });
+              const { data: urlData } = sb.storage.from("post-images").getPublicUrl(fname);
+              if (urlData?.publicUrl) { urls.push(urlData.publicUrl); got = true; dlDebug.push(`方法4成功: ${file.name}`); }
+            }
+          } else {
+            dlDebug.push(`方法4失敗(${dlRes.status}): ${file.name}`);
+          }
+        } catch (e: any) { dlDebug.push(`方法4例外: ${file.name}: ${e?.message?.slice(0, 50)}`); }
+      }
+
+      if (!got) dlDebug.push(`全方法失敗: ${file.name} path=${file.path.slice(0, 60)}`);
     }
 
     const debugExtra = dlDebug.length > 0 ? ` [${dlDebug.join("; ")}]` : "";
