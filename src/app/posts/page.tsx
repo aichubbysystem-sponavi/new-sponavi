@@ -25,7 +25,50 @@ const TOPIC_STYLES: Record<string, { bg: string; text: string; label: string }> 
   EVENT: { bg: "bg-purple-50", text: "text-purple-600", label: "イベント" },
   OFFER: { bg: "bg-amber-50", text: "text-amber-600", label: "特典" },
   ALERT: { bg: "bg-red-50", text: "text-red-600", label: "お知らせ" },
+  PHOTO: { bg: "bg-emerald-50", text: "text-emerald-600", label: "写真投稿" },
 };
+
+/** PHOTO投稿を同日・同店舗でグループ化（複数写真を1エントリにまとめる） */
+function groupPhotoLogs(logs: any[], shopId?: string): LocalPost[] {
+  const result: LocalPost[] = [];
+  const photoGroups = new Map<string, any[]>();
+
+  for (const log of logs) {
+    if (log.topic_type === "PHOTO" && log.media_url) {
+      const date = (log.created_at || "").slice(0, 10);
+      const key = `${log.shop_id || log.shop_name}_${date}`;
+      if (!photoGroups.has(key)) photoGroups.set(key, []);
+      photoGroups.get(key)!.push(log);
+    } else {
+      result.push({
+        summary: log.summary, topicType: log.topic_type, createTime: log.created_at,
+        callToAction: log.action_type ? { actionType: log.action_type, url: log.action_url } : undefined,
+        media: log.media_url ? [{ sourceUrl: log.media_url, mediaFormat: "PHOTO" }] : undefined,
+        searchUrl: log.search_url || undefined,
+        name: log.gbp_post_name || undefined,
+        _fromLog: true, _shopName: log.shop_name,
+      });
+    }
+  }
+
+  // グループ化されたPHOTO投稿を1エントリにまとめる
+  photoGroups.forEach((groupLogs) => {
+    const first = groupLogs[0];
+    result.push({
+      summary: `写真 ${groupLogs.length}枚投稿`,
+      topicType: "PHOTO",
+      createTime: first.created_at,
+      media: groupLogs.map((l) => ({ sourceUrl: l.media_url, mediaFormat: "PHOTO" as const })),
+      name: first.gbp_post_name || undefined,
+      _fromLog: true,
+      _shopName: first.shop_name,
+    });
+  });
+
+  // 日付降順でソート
+  result.sort((a, b) => (b.createTime || "").localeCompare(a.createTime || ""));
+  return result;
+}
 
 type ConfirmStatus = "unconfirmed" | "confirmed" | "needs_fix";
 const STATUS_STYLES: Record<ConfirmStatus, { label: string; bg: string; text: string }> = {
@@ -191,15 +234,10 @@ export default function PostsPage() {
       if (isAllMode) {
         // 全店舗モード: post_logsから取得
         const { data: logs } = await supabase.from("post_logs")
-          .select("*").order("created_at", { ascending: false }).limit(100);
-        setLocalPosts((logs || []).map((log) => ({
-          summary: log.summary, topicType: log.topic_type, createTime: log.created_at,
-          callToAction: log.action_type ? { actionType: log.action_type, url: log.action_url } : undefined,
-          media: log.media_url ? [{ sourceUrl: log.media_url, mediaFormat: "PHOTO" }] : undefined,
-          searchUrl: log.search_url || undefined,
-          name: log.gbp_post_name || undefined,
-          _fromLog: true, _shopName: log.shop_name,
-        })));
+          .select("*").order("created_at", { ascending: false }).limit(200);
+        // PHOTO投稿を同日・同店舗でグループ化
+        const grouped = groupPhotoLogs(logs || []);
+        setLocalPosts(grouped);
       } else {
         // 単一店舗: GBP API + post_logs
         const gbpRes = await api.get(`/api/shop/${selectedShopId}/local_post`).catch(() => ({ data: { localPosts: [] } }));
@@ -209,14 +247,8 @@ export default function PostsPage() {
           .select("summary, topic_type, media_url, action_type, action_url, created_at, search_url, gbp_post_name")
           .eq("shop_id", selectedShopId).order("created_at", { ascending: false });
 
-        const logPosts: LocalPost[] = (logs || []).map((log) => ({
-          summary: log.summary, topicType: log.topic_type, createTime: log.created_at,
-          callToAction: log.action_type ? { actionType: log.action_type, url: log.action_url } : undefined,
-          media: log.media_url ? [{ sourceUrl: log.media_url, mediaFormat: "PHOTO" }] : undefined,
-          searchUrl: log.search_url || undefined,
-          name: log.gbp_post_name || undefined,
-          _fromLog: true,
-        }));
+        // PHOTO投稿を同日・同店舗でグループ化
+        const logPosts: LocalPost[] = groupPhotoLogs(logs || [], selectedShopId);
 
         const gbpSummaries = new Set(gbpPosts.map((p) => p.summary?.slice(0, 30)));
         const unique = logPosts.filter((p) => !gbpSummaries.has(p.summary?.slice(0, 30)));
