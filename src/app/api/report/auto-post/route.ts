@@ -352,8 +352,9 @@ export async function POST(request: NextRequest) {
   // ファイル名: "写真投稿26-5-1 (1).jpg" = 2026年5月の1投稿目の1枚目
   const photoPostNumber = dateObj.getDate();
 
-  // スプレッドシート読み取り用のOAuthトークンを取得
-  const sheetAccessToken = await getOAuthToken();
+  // スプレッドシート読み取り用のOAuthトークンを取得（Go API経由 — 複数アカウント対応）
+  const { getOAuthToken: getSharedToken } = await import("@/lib/gbp-token");
+  const sheetAccessToken = await getSharedToken();
 
   // 対象タブを読み込み
   const tabs = ["投稿用シート", "報告必須店舗 投稿用シート", "WHITE 系列 投稿用シート"];
