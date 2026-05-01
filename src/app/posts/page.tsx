@@ -1559,12 +1559,23 @@ export default function PostsPage() {
                 return (
                   <div key={i} className={`bg-white rounded-xl shadow-sm border overflow-hidden ${status === "needs_fix" ? "border-red-200" : status === "confirmed" ? "border-emerald-200" : "border-slate-100"}`}>
                     <div className="flex">
-                      {/* 写真プレビュー */}
-                      {photoUrl && (
+                      {/* 写真プレビュー（PHOTO投稿は全写真を横並び表示） */}
+                      {post.topicType === "PHOTO" && post.media && post.media.length > 1 ? (
+                        <div className="flex flex-shrink-0 bg-slate-100 gap-0.5">
+                          {post.media.map((m, mi) => {
+                            let mUrl = m.googleUrl || m.sourceUrl || "";
+                            if (mUrl.includes("dropbox.com")) {
+                              mUrl = mUrl.replace("dl=0", "raw=1");
+                              if (!mUrl.includes("raw=1") && !mUrl.includes("dl=1")) mUrl += (mUrl.includes("?") ? "&" : "?") + "raw=1";
+                            }
+                            return mUrl ? <img key={mi} src={mUrl} alt={`写真${mi + 1}`} className="w-24 h-24 object-cover" loading="lazy" /> : null;
+                          })}
+                        </div>
+                      ) : photoUrl ? (
                         <div className="w-32 flex-shrink-0 bg-slate-100">
                           <img src={photoUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
                         </div>
-                      )}
+                      ) : null}
                       <div className="flex-1 p-4">
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
