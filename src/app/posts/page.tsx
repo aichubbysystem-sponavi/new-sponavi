@@ -118,6 +118,7 @@ export default function PostsPage() {
   const [autoPostResult, setAutoPostResult] = useState<any>(null);
   const [autoPostAttempt, setAutoPostAttempt] = useState(1); // 実行回数
   const [autoPostFailedShops, setAutoPostFailedShops] = useState<string[]>([]); // 失敗店舗名一覧（再実行用）
+  const [photoPopup, setPhotoPopup] = useState<string | null>(null); // 写真ポップアップURL
   const [scheduleDate, setScheduleDate] = useState(new Date().toISOString().slice(0, 10)); // 予約日付
   const [scheduleHour, setScheduleHour] = useState("9"); // 予約時（0-23）
   const [showAutoPost, setShowAutoPost] = useState(false);
@@ -433,6 +434,7 @@ export default function PostsPage() {
   });
 
   return (
+    <>
     <div className="animate-fade-in">
       <div className="mb-4 mt-2 flex items-center justify-between">
         <div>
@@ -1559,7 +1561,7 @@ export default function PostsPage() {
                 return (
                   <div key={i} className={`bg-white rounded-xl shadow-sm border overflow-hidden ${status === "needs_fix" ? "border-red-200" : status === "confirmed" ? "border-emerald-200" : "border-slate-100"}`}>
                     <div className="flex">
-                      {/* 写真プレビュー（PHOTO投稿は全写真を横並び表示） */}
+                      {/* 写真プレビュー（PHOTO投稿は全写真を横並び表示、クリックでポップアップ） */}
                       {post.topicType === "PHOTO" && post.media && post.media.length > 1 ? (
                         <div className="flex flex-shrink-0 bg-slate-100 gap-0.5">
                           {post.media.map((m, mi) => {
@@ -1568,12 +1570,12 @@ export default function PostsPage() {
                               mUrl = mUrl.replace("dl=0", "raw=1");
                               if (!mUrl.includes("raw=1") && !mUrl.includes("dl=1")) mUrl += (mUrl.includes("?") ? "&" : "?") + "raw=1";
                             }
-                            return mUrl ? <img key={mi} src={mUrl} alt={`写真${mi + 1}`} className="w-24 h-24 object-cover" loading="lazy" /> : null;
+                            return mUrl ? <img key={mi} src={mUrl} alt={`写真${mi + 1}`} className="w-24 h-24 object-cover cursor-pointer hover:opacity-80 transition" loading="lazy" onClick={() => setPhotoPopup(mUrl)} /> : null;
                           })}
                         </div>
                       ) : photoUrl ? (
-                        <div className="w-32 flex-shrink-0 bg-slate-100">
-                          <img src={photoUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
+                        <div className="w-32 flex-shrink-0 bg-slate-100 cursor-pointer" onClick={() => setPhotoPopup(photoUrl)}>
+                          <img src={photoUrl} alt="" className="w-full h-full object-cover hover:opacity-80 transition" loading="lazy" />
                         </div>
                       ) : null}
                       <div className="flex-1 p-4">
@@ -1613,10 +1615,10 @@ export default function PostsPage() {
                                 投稿を見る →
                               </a>
                             ) : (
-                              <a href={`https://www.google.com/search?q=${encodeURIComponent((isAllMode ? post._shopName : selectedShop?.name) || "")}`}
+                              <a href={`https://www.google.com/maps/search/${encodeURIComponent((isAllMode ? post._shopName : selectedShop?.name) || "")}`}
                                 target="_blank" rel="noopener noreferrer"
                                 className="px-2 py-1 rounded text-[10px] font-semibold bg-slate-50 text-slate-500 hover:bg-slate-100">
-                                Google検索 →
+                                GBP →
                               </a>
                             )}
                             {post.name && (
@@ -1637,5 +1639,15 @@ export default function PostsPage() {
         </>
       )}
     </div>
+    {/* 写真ポップアップ */}
+    {photoPopup && (
+      <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setPhotoPopup(null)}>
+        <div className="relative max-w-4xl max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+          <img src={photoPopup} alt="" className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl" />
+          <button onClick={() => setPhotoPopup(null)} className="absolute -top-3 -right-3 w-8 h-8 bg-white rounded-full shadow-lg flex items-center justify-center text-slate-600 hover:bg-slate-100 text-lg font-bold">&times;</button>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
