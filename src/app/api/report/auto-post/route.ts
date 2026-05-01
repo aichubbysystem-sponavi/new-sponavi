@@ -200,11 +200,13 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
       // 主方式: 共有リンク経由で直接ダウンロード → Supabase Storage → 安定URL
       try {
         const filePath = file.path.startsWith("/") ? file.path : `/${file.path}`;
+        // Dropbox-API-Argヘッダーは非ASCII文字をUnicodeエスケープ(\uXXXX)に変換する必要がある
+        const apiArg = JSON.stringify({ url: shareUrl, path: filePath }).replace(/[\u0080-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
         const dlRes = await fetch("https://content.dropboxapi.com/2/sharing/get_shared_link_file", {
           method: "POST",
           headers: {
             Authorization: `Bearer ${dbxToken}`,
-            "Dropbox-API-Arg": JSON.stringify({ url: shareUrl, path: filePath }),
+            "Dropbox-API-Arg": apiArg,
           },
           signal: AbortSignal.timeout(20000),
         });
