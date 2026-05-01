@@ -697,20 +697,35 @@ export async function POST(request: NextRequest) {
         continue;
       }
       try {
-        const directUrl = match.photoUrl.includes("dropboxusercontent.com") || match.photoUrl.includes("dl.dropbox")
-          ? match.photoUrl : convertDropboxUrl(match.photoUrl);
+        // Dropbox一時URLをSupabase Storage経由の安定URLに変換
+        const { resolveImageUrl, cleanupImage } = await import("@/lib/image-proxy");
+        const postId = `auto-${shop.id}-${photoPostNumber}-${Date.now()}`;
+        let stableUrl = match.photoUrl;
+        if (match.photoUrl.includes("dropbox")) {
+          const resolved = await resolveImageUrl(match.photoUrl, postId);
+          if (resolved) {
+            stableUrl = resolved;
+          } else {
+            results.push({ shopName: match.shopName, status: "写真URL変換失敗", detail: `元URL: ${match.photoUrl.slice(0, 80)}`, summary: match.photoDebug });
+            errors++;
+            continue;
+          }
+        }
+
         const mediaRes = await fetch(`${GBP_API_BASE}/${locationName}/media`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-          body: JSON.stringify({ mediaFormat: "PHOTO", sourceUrl: directUrl, locationAssociation: { category: "ADDITIONAL" } }),
+          body: JSON.stringify({ mediaFormat: "PHOTO", sourceUrl: stableUrl, locationAssociation: { category: "ADDITIONAL" } }),
           signal: AbortSignal.timeout(30000),
         });
-        if (mediaRes.ok) {
-          results.push({ shopName: match.shopName, status: "写真投稿成功", summary: `写真: ${match.photoDebug}` });
+        const mediaBody = await mediaRes.json().catch(() => ({}));
+        if (mediaRes.ok && mediaBody.name) {
+          results.push({ shopName: match.shopName, status: "写真投稿成功", gbpMediaName: mediaBody.name, googleUrl: mediaBody.googleUrl, summary: `写真: ${match.photoDebug}`, sourceUrl: stableUrl });
           posted++;
+          cleanupImage(postId).catch(() => {});
         } else {
-          const err = await mediaRes.text().catch(() => "");
-          results.push({ shopName: match.shopName, status: `写真エラー(${mediaRes.status})`, detail: err.slice(0, 200), summary: match.photoDebug });
+          const errDetail = mediaBody?.error?.message || JSON.stringify(mediaBody).slice(0, 200);
+          results.push({ shopName: match.shopName, status: `写真エラー(${mediaRes.status})`, detail: errDetail, summary: match.photoDebug, sourceUrl: stableUrl });
           errors++;
         }
       } catch (e: any) {
