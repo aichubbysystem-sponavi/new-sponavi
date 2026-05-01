@@ -114,9 +114,8 @@ export default function RankingPage() {
               } else {
                 setPoints([]);
               }
-            })
-            .catch(() => setPoints([]));
-        }).catch(() => setPoints([]));
+            }, () => setPoints([]));
+        }, () => setPoints([]));
       }
     }
   }, [selectedShopId, selectedShop]);

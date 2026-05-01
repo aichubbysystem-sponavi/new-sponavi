@@ -347,6 +347,11 @@ export async function POST(request: NextRequest) {
   const dateSlash = `${dateObj.getFullYear()}/${dateObj.getMonth() + 1}/${dateObj.getDate()}`;
   const dateSlashPad = `${dateObj.getFullYear()}/${String(dateObj.getMonth() + 1).padStart(2, "0")}/${String(dateObj.getDate()).padStart(2, "0")}`;
 
+  // 写真投稿番号: 対象日付の「日」= 月内の投稿番号
+  // 例: 5/1→1投稿目, 5/2→2投稿目, 5/3→3投稿目
+  // ファイル名: "写真投稿26-5-1 (1).jpg" = 2026年5月の1投稿目の1枚目
+  const photoPostNumber = dateObj.getDate();
+
   // 対象タブを読み込み
   const tabs = ["投稿用シート", "報告必須店舗 投稿用シート", "WHITE 系列 投稿用シート"];
   const allMatches: { shopName: string; summary: string; photoUrl: string; ctaUrl: string; tab: string; rawPhotoCell: string; rawDateCell: string; photoDebug: string; topicType: string; offerTitle: string; offerStartDate: any; offerEndDate: any }[] = [];
@@ -424,11 +429,6 @@ export async function POST(request: NextRequest) {
       console.error(`[auto-post] Tab "${tab}" error:`, e);
     }
   }
-
-  // 写真投稿番号: 対象日付の「日」= 月内の投稿番号
-  // 例: 5/1→1投稿目, 5/2→2投稿目, 5/3→3投稿目
-  // ファイル名: "写真投稿26-5-1 (1).jpg" = 2026年5月の1投稿目の1枚目
-  const photoPostNumber = dateObj.getDate();
 
   // Dropbox写真検索を5件ずつバッチ実行（レート制限対策）
   if (!dryRun && pendingPhotoSearch.length > 0) {

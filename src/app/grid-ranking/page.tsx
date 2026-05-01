@@ -129,9 +129,8 @@ export default function GridRankingPage() {
             setShopLat(data.gbp_latitude);
             setShopLng(data.gbp_longitude);
           }
-        })
-        .catch(() => {});
-    }).catch(() => {});
+        }, () => {});
+    }, () => {});
   }, [selectedShopId, selectedShop]);
 
   // 保存済みキーワードをDBから読み込み
