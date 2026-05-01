@@ -104,7 +104,27 @@ export default function RankingPage() {
       if (lat && lng && lat !== 0) {
         setPoints([{ label: "店舗周辺", lat, lng }]);
       } else {
-        setPoints([]);
+        // Go APIに座標がない場合、Supabase → GBP自動取得
+        import("@/lib/supabase").then(({ supabase }) => {
+          supabase.from("shops").select("gbp_latitude, gbp_longitude")
+            .eq("id", selectedShopId).single()
+            .then(async ({ data }) => {
+              if (data?.gbp_latitude && data.gbp_latitude !== 0) {
+                setPoints([{ label: "店舗周辺", lat: data.gbp_latitude, lng: data.gbp_longitude }]);
+              } else {
+                // GBPから自動取得
+                try {
+                  const res = await api.post("/api/report/sync-coordinates", { shopId: selectedShopId });
+                  if (res.data?.updated > 0 && res.data?.details?.[0]) {
+                    const d = res.data.details[0];
+                    if (d.lat && d.lng) {
+                      setPoints([{ label: "店舗周辺", lat: d.lat, lng: d.lng }]);
+                    } else { setPoints([]); }
+                  } else { setPoints([]); }
+                } catch { setPoints([]); }
+              }
+            });
+        });
       }
     }
   }, [selectedShopId, selectedShop]);
