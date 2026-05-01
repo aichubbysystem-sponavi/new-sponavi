@@ -199,9 +199,14 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
 
       // 主方式: 共有リンク経由で直接ダウンロード → Supabase Storage → 安定URL
       try {
-        const filePath = file.path.startsWith("/") ? file.path : `/${file.path}`;
+        // 共有ルートからの相対パスに変換（get_shared_link_fileは相対パスが必要）
+        let relativePath = file.path;
+        if (sharedRootPath && relativePath.toLowerCase().startsWith(sharedRootPath.toLowerCase())) {
+          relativePath = relativePath.slice(sharedRootPath.length);
+        }
+        if (!relativePath.startsWith("/")) relativePath = `/${relativePath}`;
         // Dropbox-API-Argヘッダーは非ASCII文字をUnicodeエスケープ(\uXXXX)に変換する必要がある
-        const apiArg = JSON.stringify({ url: shareUrl, path: filePath }).replace(/[\u0080-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+        const apiArg = JSON.stringify({ url: shareUrl, path: relativePath }).replace(/[\u0080-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
         const dlRes = await fetch("https://content.dropboxapi.com/2/sharing/get_shared_link_file", {
           method: "POST",
           headers: {
@@ -221,7 +226,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
             } else { dlDebug.push(`Storage保存失敗: ${file.name}: ${upErr.message}`); }
           } else { dlDebug.push(`サイズ不正(${buffer.length}B): ${file.name}`); }
         } else {
-          dlDebug.push(`DL失敗(${dlRes.status}): ${file.name} path=${filePath.slice(0, 40)}`);
+          dlDebug.push(`DL失敗(${dlRes.status}): ${file.name} rel=${relativePath.slice(0, 50)}`);
         }
       } catch (e: any) { dlDebug.push(`DL例外: ${file.name}: ${e?.message?.slice(0, 50)}`); }
 
