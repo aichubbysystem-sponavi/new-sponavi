@@ -103,7 +103,7 @@ export default function GridRankingPage() {
   const [shopLat, setShopLat] = useState(0);
   const [shopLng, setShopLng] = useState(0);
 
-  // 店舗座標を取得（Go API → Supabase fallback → GBP自動取得）
+  // 店舗座標を取得（Go API → Supabase fallback）
   useEffect(() => {
     if (!selectedShopId) return;
     // 店舗切替時に座標をリセット
@@ -124,25 +124,14 @@ export default function GridRankingPage() {
         .select("gbp_latitude, gbp_longitude")
         .eq("id", selectedShopId)
         .single()
-        .then(async ({ data }) => {
+        .then(({ data }) => {
           if (data?.gbp_latitude) {
             setShopLat(data.gbp_latitude);
             setShopLng(data.gbp_longitude);
-          } else {
-            // Supabaseにも座標がない場合、GBPから自動取得
-            try {
-              const res = await api.post("/api/report/sync-coordinates", { shopId: selectedShopId });
-              if (res.data?.updated > 0 && res.data?.details?.[0]) {
-                const d = res.data.details[0];
-                if (d.lat && d.lng) {
-                  setShopLat(d.lat);
-                  setShopLng(d.lng);
-                }
-              }
-            } catch {}
           }
-        });
-    });
+        })
+        .catch(() => {});
+    }).catch(() => {});
   }, [selectedShopId, selectedShop]);
 
   // 保存済みキーワードをDBから読み込み
