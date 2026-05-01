@@ -676,8 +676,12 @@ export default function PostsPage() {
                         const bs = 10;
                         let totalPosted = 0, totalErrors = 0;
                         const allResults: any[] = [];
-                        for (let offset = 0; offset < total; offset += bs) {
-                          setMsg(`${currentAttempt}回目実行中... ${offset}/${total}件完了（${totalPosted}件投稿済み）`);
+                        let offset = 0;
+                        let hasMore = true;
+                        let batchNum = 0;
+                        while (hasMore) {
+                          batchNum++;
+                          setMsg(`${currentAttempt}回目実行中... バッチ${batchNum}（${totalPosted}件投稿済み）`);
                           try {
                             const res = await api.post("/api/report/auto-post", {
                               sheetId: autoPostSheet, targetDate: autoPostDate,
@@ -688,9 +692,12 @@ export default function PostsPage() {
                             totalPosted += res.data.posted || 0;
                             totalErrors += res.data.errors || 0;
                             if (res.data.results) allResults.push(...res.data.results);
+                            hasMore = res.data.hasMore === true;
+                            offset = res.data.nextOffset || (offset + bs);
                           } catch (e: any) {
                             totalErrors++;
-                            allResults.push({ shopName: `バッチ${Math.floor(offset / bs) + 1}`, status: `通信エラー: ${e?.message}` });
+                            allResults.push({ shopName: `バッチ${batchNum}`, status: `通信エラー: ${e?.message}` });
+                            hasMore = false; // エラー時はループ中断
                           }
                         }
                         // 失敗店舗を抽出（再実行用）
@@ -742,8 +749,12 @@ export default function PostsPage() {
                       const bs = 10;
                       let totalPosted = 0, totalErrors = 0;
                       const allResults: any[] = [];
-                      for (let off = 0; off < total; off += bs) {
-                        setMsg(`予約登録中... ${off}/${total}件`);
+                      let off = 0;
+                      let hasMore = true;
+                      let batchNum = 0;
+                      while (hasMore) {
+                        batchNum++;
+                        setMsg(`予約登録中... バッチ${batchNum}（${totalPosted}件登録済み）`);
                         try {
                           const res = await api.post("/api/report/auto-post", {
                             sheetId: autoPostSheet, targetDate: autoPostDate,
@@ -755,9 +766,12 @@ export default function PostsPage() {
                           totalPosted += res.data.posted || 0;
                           totalErrors += res.data.errors || 0;
                           if (res.data.results) allResults.push(...res.data.results);
+                          hasMore = res.data.hasMore === true;
+                          off = res.data.nextOffset || (off + bs);
                         } catch (e: any) {
                           totalErrors++;
-                          allResults.push({ shopName: `バッチ${Math.floor(off / bs) + 1}`, status: `エラー: ${e?.message}` });
+                          allResults.push({ shopName: `バッチ${batchNum}`, status: `エラー: ${e?.message}` });
+                          hasMore = false;
                         }
                       }
                       const failed = allResults.filter((r: any) => !r.status?.includes("成功")).map((r: any) => r.shopName);
