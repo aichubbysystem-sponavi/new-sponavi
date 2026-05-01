@@ -722,6 +722,14 @@ export async function POST(request: NextRequest) {
         if (mediaRes.ok && mediaBody.name) {
           results.push({ shopName: match.shopName, status: "写真投稿成功", gbpMediaName: mediaBody.name, googleUrl: mediaBody.googleUrl, summary: `写真: ${match.photoDebug}`, sourceUrl: stableUrl });
           posted++;
+          // 投稿ログに保存（管理画面に表示するため）
+          try {
+            await supabase.from("post_logs").insert({
+              id: crypto.randomUUID(), shop_id: shop.id, shop_name: shop.name,
+              summary: "", topic_type: "PHOTO",
+              media_url: mediaBody.googleUrl || stableUrl, gbp_post_name: mediaBody.name,
+            });
+          } catch {}
           cleanupImage(postId).catch(() => {});
         } else {
           const errDetail = mediaBody?.error?.message || JSON.stringify(mediaBody).slice(0, 200);
