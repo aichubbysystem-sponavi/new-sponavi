@@ -18,6 +18,7 @@ interface LocalPost {
   // ログ由来
   _fromLog?: boolean;
   _shopName?: string;
+  _allMediaNames?: string[]; // グループ化されたPHOTO投稿の全メディア名
 }
 
 const TOPIC_STYLES: Record<string, { bg: string; text: string; label: string }> = {
@@ -62,6 +63,7 @@ function groupPhotoLogs(logs: any[], shopId?: string): LocalPost[] {
       name: first.gbp_post_name || undefined,
       _fromLog: true,
       _shopName: first.shop_name,
+      _allMediaNames: groupLogs.map((l) => l.gbp_post_name).filter(Boolean),
     });
   });
 
@@ -367,12 +369,19 @@ export default function PostsPage() {
     } finally { setCreating(false); }
   };
 
-  const handleDelete = async (postName: string) => {
-    if (!confirm("この投稿をGBPから削除しますか？")) return;
+  const handleDelete = async (postName: string, allNames?: string[]) => {
+    const names = allNames && allNames.length > 1 ? allNames : [postName];
+    if (!confirm(`${names.length > 1 ? `${names.length}枚の写真` : "この投稿"}をGBPから削除しますか？`)) return;
     try {
-      await api.post("/api/report/delete-post", { postName }, { timeout: 15000 });
-      setMsg("投稿を削除しました");
-      logAudit("GBP投稿削除", `投稿を削除`);
+      let deleted = 0;
+      for (const name of names) {
+        try {
+          await api.post("/api/report/delete-post", { postName: name }, { timeout: 15000 });
+          deleted++;
+        } catch {}
+      }
+      setMsg(`${deleted}件削除しました`);
+      logAudit("GBP投稿削除", `${deleted}件削除`);
       await fetchData();
     } catch (e: any) {
       setMsg(`削除失敗: ${e?.response?.data?.error || e?.message}`);
@@ -1631,10 +1640,10 @@ export default function PostsPage() {
                                 GBP →
                               </a>
                             )}
-                            {post.name && (
-                              <button onClick={() => handleDelete(post.name!)}
+                            {(post.name || (post._allMediaNames && post._allMediaNames.length > 0)) && (
+                              <button onClick={() => handleDelete(post.name!, post._allMediaNames)}
                                 className="px-2 py-1 rounded text-[10px] font-semibold bg-red-50 text-red-500 hover:bg-red-100">
-                                削除
+                                削除{post._allMediaNames && post._allMediaNames.length > 1 ? ` (${post._allMediaNames.length}枚)` : ""}
                               </button>
                             )}
                           </div>
