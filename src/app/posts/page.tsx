@@ -559,10 +559,30 @@ export default function PostsPage() {
                       className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono" />
                   </div>
                   <div>
-                    <label className="text-xs text-slate-500 block mb-1">対象日付</label>
-                    <input type="date" value={autoPostDate}
-                      onChange={(e) => { setAutoPostDate(e.target.value); setAutoPostAttempt(1); setAutoPostFailedShops([]); setAutoPostResult(null); }}
-                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+                    {postSelectedType === "PHOTO" ? (
+                      <>
+                        <label className="text-xs text-slate-500 block mb-1">投稿番号（月内の何回目か）</label>
+                        <select value={autoPostDate ? new Date(autoPostDate).getDate() : 1}
+                          onChange={(e) => {
+                            const now = new Date();
+                            const day = parseInt(e.target.value);
+                            const d = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+                            setAutoPostDate(d); setAutoPostAttempt(1); setAutoPostFailedShops([]); setAutoPostResult(null);
+                          }}
+                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+                          {[1,2,3,4,5,6,7,8,9,10].map(n => (
+                            <option key={n} value={n}>第{n}回目</option>
+                          ))}
+                        </select>
+                      </>
+                    ) : (
+                      <>
+                        <label className="text-xs text-slate-500 block mb-1">対象日付</label>
+                        <input type="date" value={autoPostDate}
+                          onChange={(e) => { setAutoPostDate(e.target.value); setAutoPostAttempt(1); setAutoPostFailedShops([]); setAutoPostResult(null); }}
+                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+                      </>
+                    )}
                   </div>
                   <div className="flex items-end gap-2">
                     <button onClick={async () => {
