@@ -548,7 +548,7 @@ export default function GridRankingPage() {
               <button
                 onClick={async () => {
                   try {
-                    const res = await api.post("/api/report/sync-coordinates", { shopId: selectedShopId });
+                    const res = await api.post("/api/report/sync-coordinates", { shopId: selectedShopId }, { timeout: 60000 });
                     if (res.data?.updated > 0 && res.data?.details?.[0]) {
                       const d = res.data.details[0];
                       setShopLat(d.lat);
