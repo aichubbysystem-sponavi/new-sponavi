@@ -26,9 +26,9 @@ export async function POST(request: NextRequest) {
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-  // 店舗情報取得
+  // 店舗情報取得（座標も含む）
   const { data: shops } = await supabase
-    .from("shops").select("id, name, gbp_shop_name, gbp_location_name")
+    .from("shops").select("id, name, gbp_shop_name, gbp_location_name, gbp_latitude, gbp_longitude")
     .in("id", shopIds);
 
   if (!shops || shops.length === 0) {
@@ -75,10 +75,14 @@ export async function POST(request: NextRequest) {
             const kws = kwIndices.map(i => cells[i] || "").filter(k => k && !k.includes("前月比"));
             // AR=43 地点, AS=44 緯度, AT=45 経度
             const arCell = (cells[43] || "").toLowerCase().trim();
-            let lat = 35.68, lng = 139.77; // デフォルト東京
+            // 店舗DB座標をデフォルトに（東京ハードコードを廃止）
+            const dbLat = shop.gbp_latitude || 0;
+            const dbLng = shop.gbp_longitude || 0;
+            let lat = dbLat;
+            let lng = dbLng;
             if (arCell === "local") {
-              lat = parseFloat(cells[44] || "") || 35.68;
-              lng = parseFloat(cells[45] || "") || 139.77;
+              lat = parseFloat(cells[44] || "") || dbLat;
+              lng = parseFloat(cells[45] || "") || dbLng;
             } else if (CITY_COORDS[arCell]) {
               lat = CITY_COORDS[arCell].lat;
               lng = CITY_COORDS[arCell].lng;
@@ -123,6 +127,14 @@ export async function POST(request: NextRequest) {
 
       keywords.push(kw);
 
+      // 座標チェック: 設定座標 → 店舗DB座標 → どちらもなければスキップ
+      const useLat = setting.gbp_latitude || shop.gbp_latitude || 0;
+      const useLng = setting.gbp_longitude || shop.gbp_longitude || 0;
+      if (!useLat || !useLng) {
+        // 座標なしの店舗は計測スキップ（東京で代替しない）
+        continue;
+      }
+
       // Google Places API Text Search
       try {
         const searchRes = await fetch("https://places.googleapis.com/v1/places:searchText", {
@@ -136,7 +148,7 @@ export async function POST(request: NextRequest) {
             textQuery: kw,
             locationBias: {
               circle: {
-                center: { latitude: setting.gbp_latitude || 35.68, longitude: setting.gbp_longitude || 139.76 },
+                center: { latitude: useLat, longitude: useLng },
                 radius: 5000,
               },
             },
@@ -161,8 +173,8 @@ export async function POST(request: NextRequest) {
             search_words: setting.search_words,
             rank: rank || 0,
             is_display: true,
-            gbp_latitude: setting.gbp_latitude,
-            gbp_longitude: setting.gbp_longitude,
+            gbp_latitude: useLat,
+            gbp_longitude: useLng,
             point_label: "一括計測",
             searched_at: new Date().toISOString(),
           });

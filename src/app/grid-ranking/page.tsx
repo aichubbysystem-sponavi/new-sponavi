@@ -205,7 +205,7 @@ export default function GridRankingPage() {
 
     const initMap = () => {
       if (!window.google?.maps) return;
-      const lat = shopLat || 35.6812;
+      const lat = shopLat || 35.6812; // マップ初期表示用（計測時は店舗座標必須）
       const lng = shopLng || 139.7671;
       googleMapRef.current = new window.google.maps.Map(mapRef.current!, {
         center: { lat, lng },

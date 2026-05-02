@@ -56,8 +56,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "店舗が見つかりません" }, { status: 404 });
   }
 
-  const lat = reqLat || shop.gbp_latitude || 35.6812;
-  const lng = reqLng || shop.gbp_longitude || 139.7671;
+  const lat = reqLat || shop.gbp_latitude;
+  const lng = reqLng || shop.gbp_longitude;
+  if (!lat || !lng || lat === 0) {
+    return NextResponse.json({ error: "店舗の座標が未登録です。多地点順位チェックの「GBPから自動取得」で座標を設定してください。", noCoords: true }, { status: 400 });
+  }
   const targetName = shop.gbp_shop_name || shop.name;
 
   // Google Places API v1 検索
