@@ -20,6 +20,7 @@ const CACHE_TTL = 5 * 60 * 1000; // 5分
 
 /**
  * Go API /api/gbp/account からロケーションマップを取得（キャッシュ付き）
+ * Go API失敗時はGBP APIから直接取得（フォールバック）
  */
 export async function getLocationMap(): Promise<Map<string, LocMapping>> {
   if (cachedLocMap && Date.now() - cachedAt < CACHE_TTL) {
@@ -27,9 +28,11 @@ export async function getLocationMap(): Promise<Map<string, LocMapping>> {
   }
 
   const map = new Map<string, LocMapping>();
+
+  // 1. Go APIから取得を試みる
   try {
     const res = await fetch(`${GO_API_URL}/api/gbp/account`, {
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(10000),
     });
     if (res.ok) {
       const accounts = await res.json();
@@ -46,7 +49,47 @@ export async function getLocationMap(): Promise<Map<string, LocMapping>> {
       }
     }
   } catch (e: any) {
-    console.error("[gbp-location] Failed to fetch location map:", e?.message);
+    console.error("[gbp-location] Go API failed, will fallback to GBP API:", e?.message);
+  }
+
+  // 2. Go APIから取得できなかった場合、GBP APIから直接取得
+  if (map.size === 0) {
+    console.log("[gbp-location] Falling back to GBP API direct...");
+    try {
+      const token = await getOAuthToken();
+      if (token) {
+        const accRes = await fetch(
+          "https://mybusinessaccountmanagement.googleapis.com/v1/accounts",
+          { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000) }
+        );
+        if (accRes.ok) {
+          const accData = await accRes.json();
+          const accounts = accData.accounts || [];
+          for (const acc of accounts) {
+            try {
+              const locRes = await fetch(
+                `https://mybusinessbusinessinformation.googleapis.com/v1/${acc.name}/locations?readMask=name,title&pageSize=100`,
+                { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000) }
+              );
+              if (!locRes.ok) continue;
+              const locData = await locRes.json();
+              for (const loc of locData.locations || []) {
+                const locName = loc.name || "";
+                const fullPath = `${acc.name}/${locName}`;
+                const title = loc.title || "";
+                const m: LocMapping = { fullPath, title };
+                map.set(locName, m);
+                map.set(fullPath, m);
+                if (title) map.set(title, m);
+              }
+            } catch {}
+          }
+          console.log(`[gbp-location] GBP API fallback: ${map.size} entries loaded`);
+        }
+      }
+    } catch (e: any) {
+      console.error("[gbp-location] GBP API fallback failed:", e?.message);
+    }
   }
 
   if (map.size > 0) {
