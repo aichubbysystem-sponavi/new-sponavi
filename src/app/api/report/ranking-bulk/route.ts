@@ -127,9 +127,14 @@ export async function POST(request: NextRequest) {
 
       keywords.push(kw);
 
-      // 座標チェック: 設定座標 → 店舗DB座標 → どちらもなければスキップ
-      const useLat = setting.gbp_latitude || shop.gbp_latitude || 0;
-      const useLng = setting.gbp_longitude || shop.gbp_longitude || 0;
+      // 座標チェック: 店舗DB座標を優先（設定に過去のデフォルト東京座標が残っている可能性）
+      // 設定座標が東京デフォルト(35.68付近)かつDB座標がある場合はDB座標を使用
+      const settingLat = setting.gbp_latitude || 0;
+      const settingLng = setting.gbp_longitude || 0;
+      const isDefaultTokyo = settingLat > 35.67 && settingLat < 35.69 && settingLng > 139.76 && settingLng < 139.78;
+      const hasDbCoords = shop.gbp_latitude && shop.gbp_latitude !== 0;
+      const useLat = (hasDbCoords && (isDefaultTokyo || !settingLat)) ? shop.gbp_latitude : settingLat || shop.gbp_latitude || 0;
+      const useLng = (hasDbCoords && (isDefaultTokyo || !settingLng)) ? shop.gbp_longitude : settingLng || shop.gbp_longitude || 0;
       if (!useLat || !useLng) {
         // 座標なしの店舗は計測スキップ（東京で代替しない）
         continue;
@@ -149,7 +154,7 @@ export async function POST(request: NextRequest) {
             locationBias: {
               circle: {
                 center: { latitude: useLat, longitude: useLng },
-                radius: 5000,
+                radius: 2000,
               },
             },
             maxResultCount: 20,
