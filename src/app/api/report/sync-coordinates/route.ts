@@ -127,11 +127,11 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // ── Step 2: 座標未設定の店舗を取得（紐付け後に再取得） ──
+  // ── Step 2: 座標取得対象の店舗を取得 ──
+  // Places APIフォールバックがあるのでgbp_location_nameの有無を問わない
   let query = supabase
     .from("shops")
-    .select("id, name, gbp_location_name, gbp_latitude, gbp_longitude")
-    .not("gbp_location_name", "is", null);
+    .select("id, name, gbp_location_name, gbp_latitude, gbp_longitude, gbp_shop_name");
 
   if (targetShopId) {
     query = query.eq("id", targetShopId);
@@ -150,55 +150,82 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  // ── Step 3: Business Information APIで座標取得 ──
+  // ── Step 3: 座標取得（Business Information API → Places APIフォールバック） ──
+  const GCP_API_KEY = process.env.GCP_API_KEY || "";
   let updated = 0;
   let errors = 0;
-  const details: { shop: string; lat?: number; lng?: number; error?: string }[] = [];
+  const details: { shop: string; lat?: number; lng?: number; error?: string; method?: string }[] = [];
 
   for (const shop of shops) {
-    const locName = shop.gbp_location_name;
-    if (!locName) continue;
+    let lat: number | null = null;
+    let lng: number | null = null;
+    let method = "";
 
-    // resolveLocationName でフルパスに解決
-    const fullPath = await resolveLocationName(locName);
-    if (!fullPath) {
-      details.push({ shop: shop.name, error: "ロケーションパス解決失敗" });
-      errors++;
-      continue;
+    // 方法1: Business Information APIで座標取得（gbp_location_nameがある場合）
+    const locName = shop.gbp_location_name;
+    if (locName) {
+      const fullPath = await resolveLocationName(locName);
+      if (fullPath) {
+        try {
+          const url = `https://mybusinessbusinessinformation.googleapis.com/v1/${fullPath}?readMask=latlng`;
+          const res = await fetch(url, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+            signal: AbortSignal.timeout(10000),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            lat = data?.latlng?.latitude || null;
+            lng = data?.latlng?.longitude || null;
+            if (lat && lng) method = "GBP API";
+          }
+        } catch {}
+      }
     }
 
-    // Business Information APIで座標取得
-    try {
-      const url = `https://mybusinessbusinessinformation.googleapis.com/v1/${fullPath}?readMask=latlng`;
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-        signal: AbortSignal.timeout(10000),
-      });
+    // 方法2: Google Places APIで店舗名から座標取得（フォールバック）
+    if (!lat && GCP_API_KEY) {
+      try {
+        const gbpShopName = (shop as any).gbp_shop_name || shop.name;
+        const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": GCP_API_KEY,
+            "X-Goog-FieldMask": "places.displayName,places.location",
+          },
+          body: JSON.stringify({
+            textQuery: gbpShopName,
+            languageCode: "ja",
+            pageSize: 5,
+          }),
+          signal: AbortSignal.timeout(10000),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const places = data.places || [];
+          // 店舗名に一致する結果を優先
+          const match = places.find((p: any) => {
+            const name = p.displayName?.text || "";
+            return name === gbpShopName || name.includes(gbpShopName) || gbpShopName.includes(name);
+          }) || places[0];
+          if (match?.location) {
+            lat = match.location.latitude;
+            lng = match.location.longitude;
+            method = "Places API";
+          }
+        }
+      } catch {}
+    }
 
-      if (!res.ok) {
-        details.push({ shop: shop.name, error: `HTTP ${res.status}` });
-        errors++;
-        continue;
-      }
-
-      const data = await res.json();
-      const lat = data?.latlng?.latitude;
-      const lng = data?.latlng?.longitude;
-
-      if (lat && lng) {
-        await supabase.from("shops").update({
-          gbp_latitude: lat,
-          gbp_longitude: lng,
-        }).eq("id", shop.id);
-        updated++;
-        details.push({ shop: shop.name, lat, lng });
-      } else {
-        details.push({ shop: shop.name, error: "latlngなし" });
-        errors++;
-      }
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      details.push({ shop: shop.name, error: msg });
+    if (lat && lng) {
+      await supabase.from("shops").update({
+        gbp_latitude: lat,
+        gbp_longitude: lng,
+      }).eq("id", shop.id);
+      updated++;
+      details.push({ shop: shop.name, lat, lng, method });
+    } else {
+      details.push({ shop: shop.name, error: "座標取得失敗（GBP/Places両方）" });
       errors++;
     }
   }
