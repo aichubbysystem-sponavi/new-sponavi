@@ -161,40 +161,54 @@ export async function POST(request: NextRequest) {
     let lng: number | null = null;
     let method = "";
 
+    // 方法0: ロケーションマップに座標がキャッシュされている場合（GBP APIフォールバック時に取得済み）
+    const shopTitle = (shop as any).gbp_shop_name || shop.name;
+    const cachedByTitle = locationMap.get(shopTitle);
+    const cachedByLoc = shop.gbp_location_name ? locationMap.get(shop.gbp_location_name) : null;
+    const cached = cachedByLoc || cachedByTitle;
+    if (cached?.lat && cached?.lng) {
+      lat = cached.lat;
+      lng = cached.lng;
+      method = "GBP Map Cache";
+    }
+
     // 方法1: Business Information APIで座標取得（gbp_location_nameがある場合）
-    const locName = shop.gbp_location_name;
-    if (locName) {
-      const fullPath = await resolveLocationName(locName);
-      if (fullPath) {
-        try {
-          const url = `https://mybusinessbusinessinformation.googleapis.com/v1/${fullPath}?readMask=latlng`;
-          const res = await fetch(url, {
-            headers: { Authorization: `Bearer ${accessToken}` },
-            signal: AbortSignal.timeout(10000),
-          });
-          if (res.ok) {
-            const data = await res.json();
-            lat = data?.latlng?.latitude || null;
-            lng = data?.latlng?.longitude || null;
-            if (lat && lng) method = "GBP API";
-          }
-        } catch {}
+    if (!lat) {
+      const locName = shop.gbp_location_name;
+      if (locName) {
+        const fullPath = await resolveLocationName(locName);
+        if (fullPath) {
+          try {
+            const url = `https://mybusinessbusinessinformation.googleapis.com/v1/${fullPath}?readMask=latlng`;
+            const res = await fetch(url, {
+              headers: { Authorization: `Bearer ${accessToken}` },
+              signal: AbortSignal.timeout(10000),
+            });
+            if (res.ok) {
+              const data = await res.json();
+              lat = data?.latlng?.latitude || null;
+              lng = data?.latlng?.longitude || null;
+              if (lat && lng) method = "GBP API";
+            }
+          } catch {}
+        }
       }
     }
 
-    // 方法2: Google Places APIで店舗名から座標取得（フォールバック）
+    // 方法2: Google Places APIで店舗名+住所から座標取得（最終手段）
+    // ※ 店舗名だけでは同名の別店舗にマッチする恐れがあるため、住所情報も含めて検索
     if (!lat && GCP_API_KEY) {
       try {
-        const gbpShopName = (shop as any).gbp_shop_name || shop.name;
+        // locationMapから住所のヒントを探す（マッチしたロケーションの近辺情報）
         const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             "X-Goog-Api-Key": GCP_API_KEY,
-            "X-Goog-FieldMask": "places.displayName,places.location",
+            "X-Goog-FieldMask": "places.displayName,places.location,places.formattedAddress",
           },
           body: JSON.stringify({
-            textQuery: gbpShopName,
+            textQuery: shopTitle,
             languageCode: "ja",
             pageSize: 5,
           }),
@@ -203,15 +217,29 @@ export async function POST(request: NextRequest) {
         if (res.ok) {
           const data = await res.json();
           const places = data.places || [];
-          // 店舗名に一致する結果を優先
-          const match = places.find((p: any) => {
+          // 完全一致のみ使用（同名別店舗の誤マッチ防止）
+          const exactMatch = places.find((p: any) => {
             const name = p.displayName?.text || "";
-            return name === gbpShopName || name.includes(gbpShopName) || gbpShopName.includes(name);
-          }) || places[0];
-          if (match?.location) {
-            lat = match.location.latitude;
-            lng = match.location.longitude;
-            method = "Places API";
+            return name === shopTitle;
+          });
+          if (exactMatch?.location && places.length === 1) {
+            // 検索結果が1件のみの場合は信頼できる
+            lat = exactMatch.location.latitude;
+            lng = exactMatch.location.longitude;
+            method = "Places API (唯一)";
+          } else if (exactMatch?.location && places.length > 1) {
+            // 複数件ある場合はスキップ（間違った店舗の可能性）
+            details.push({ shop: shop.name, error: `Places API: 同名${places.length}件ヒット（特定不可）` });
+            errors++;
+            continue;
+          } else if (places.length === 1 && places[0]?.location) {
+            lat = places[0].location.latitude;
+            lng = places[0].location.longitude;
+            method = "Places API (唯一)";
+          } else {
+            details.push({ shop: shop.name, error: places.length > 0 ? `Places API: ${places.length}件ヒット（特定不可）` : "Places API: 0件" });
+            errors++;
+            continue;
           }
         }
       } catch {}
@@ -225,7 +253,7 @@ export async function POST(request: NextRequest) {
       updated++;
       details.push({ shop: shop.name, lat, lng, method });
     } else {
-      details.push({ shop: shop.name, error: "座標取得失敗（GBP/Places両方）" });
+      details.push({ shop: shop.name, error: "座標取得失敗" });
       errors++;
     }
   }

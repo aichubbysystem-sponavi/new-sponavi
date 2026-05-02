@@ -12,6 +12,8 @@ const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 interface LocMapping {
   fullPath: string;
   title: string;
+  lat?: number;
+  lng?: number;
 }
 
 let cachedLocMap: Map<string, LocMapping> | null = null;
@@ -68,7 +70,7 @@ export async function getLocationMap(): Promise<Map<string, LocMapping>> {
           for (const acc of accounts) {
             try {
               const locRes = await fetch(
-                `https://mybusinessbusinessinformation.googleapis.com/v1/${acc.name}/locations?readMask=name,title&pageSize=100`,
+                `https://mybusinessbusinessinformation.googleapis.com/v1/${acc.name}/locations?readMask=name,title,latlng&pageSize=100`,
                 { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000) }
               );
               if (!locRes.ok) continue;
@@ -77,7 +79,9 @@ export async function getLocationMap(): Promise<Map<string, LocMapping>> {
                 const locName = loc.name || "";
                 const fullPath = `${acc.name}/${locName}`;
                 const title = loc.title || "";
-                const m: LocMapping = { fullPath, title };
+                const lat = loc.latlng?.latitude || undefined;
+                const lng = loc.latlng?.longitude || undefined;
+                const m: LocMapping = { fullPath, title, lat, lng };
                 map.set(locName, m);
                 map.set(fullPath, m);
                 if (title) map.set(title, m);
