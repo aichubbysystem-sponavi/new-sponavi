@@ -32,7 +32,7 @@ function Stars({ rating }: { rating: number }) {
 }
 
 // 前月比バッジ
-function MomBadge({ cur, prev, label }: { cur: number; prev: number; label: string }) {
+function MomBadge({ cur, prev, label, showLabel = false }: { cur: number; prev: number; label: string; showLabel?: boolean }) {
   if (prev === 0 && cur === 0) return null;
   const pct = prev > 0 ? ((cur - prev) / prev) * 100 : 100;
   const isUp = pct >= 0;
@@ -42,8 +42,9 @@ function MomBadge({ cur, prev, label }: { cur: number; prev: number; label: stri
       className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
         isAlert ? "bg-red-100 text-red-700" : isUp ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"
       }`}
-      title={`${label}: ${prev.toLocaleString()}→${cur.toLocaleString()}`}
+      title={`${label}前月比: ${prev.toLocaleString()}→${cur.toLocaleString()}`}
     >
+      {showLabel && <span className="text-[9px] opacity-70 mr-0.5">{label}</span>}
       {isUp ? "↑" : "↓"}{Math.abs(pct).toFixed(0)}%
     </span>
   );
@@ -420,9 +421,9 @@ export default function ReportListClient({
                   <th className="text-left p-2 font-semibold text-slate-600 hidden xl:table-cell">住所</th>
                   <th className="p-2 font-semibold text-slate-600 text-center">評価</th>
                   <th className="p-2 font-semibold text-slate-600 text-center">口コミ</th>
-                  <th className="p-2 font-semibold text-slate-600 text-center hidden md:table-cell">口コミ比</th>
-                  <th className="p-2 font-semibold text-slate-600 text-center hidden lg:table-cell">検索比</th>
-                  <th className="p-2 font-semibold text-slate-600 text-center hidden lg:table-cell">マップ比</th>
+                  <th className="p-2 font-semibold text-slate-600 text-center hidden md:table-cell" title="前月との口コミ数の比較">口コミ前月比</th>
+                  <th className="p-2 font-semibold text-slate-600 text-center hidden lg:table-cell" title="前月との検索数の比較">検索前月比</th>
+                  <th className="p-2 font-semibold text-slate-600 text-center hidden lg:table-cell" title="前月とのマップ表示数の比較">マップ前月比</th>
                   <th className="p-2 font-semibold text-slate-600 text-center">対象月</th>
                   <th className="p-2 font-semibold text-slate-600 text-center">AI</th>
                   <th className="w-8"></th>
@@ -534,13 +535,13 @@ function ShopCard({ shop, checked, onToggle, isFavorite, onToggleFav, isAlert }:
           </span>
         )}
         {shop.prevTotalReviews !== undefined && shop.prevTotalReviews > 0 && (
-          <MomBadge cur={shop.totalReviews} prev={shop.prevTotalReviews} label="口コミ" />
+          <MomBadge cur={shop.totalReviews} prev={shop.prevTotalReviews} label="口コミ" showLabel />
         )}
         {shop.prevSearchTotal !== undefined && shop.prevSearchTotal > 0 && (
-          <MomBadge cur={shop.searchTotal || 0} prev={shop.prevSearchTotal} label="検索" />
+          <MomBadge cur={shop.searchTotal || 0} prev={shop.prevSearchTotal} label="検索" showLabel />
         )}
         {shop.prevMapTotal !== undefined && shop.prevMapTotal > 0 && (
-          <MomBadge cur={shop.mapTotal || 0} prev={shop.prevMapTotal} label="マップ" />
+          <MomBadge cur={shop.mapTotal || 0} prev={shop.prevMapTotal} label="マップ" showLabel />
         )}
         {shop.analyzed && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-50 text-purple-500 border border-purple-100">AI済</span>}
         <span className="px-2 py-0.5 rounded-full text-[10px] text-slate-400 bg-slate-50 ml-auto">{shop.period}</span>

@@ -16,7 +16,7 @@ import {
   Filler,
 } from "chart.js";
 import { Bar, Line } from "react-chartjs-2";
-import type { ReportData } from "@/lib/report-data";
+import type { ReportData, NegativeWordSource } from "@/lib/report-data";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, Filler);
 
@@ -120,6 +120,7 @@ export default function ReportClient({
   const [memoEditing, setMemoEditing] = useState(false);
   const [memoLoading, setMemoLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [negativeModal, setNegativeModal] = useState<{ word: string; reviews: { reviewer: string; comment: string; date: string; starRating: string }[] } | null>(null);
 
   // セクション表示ON/OFF（店舗ごとにlocalStorage保存）
   const visKey = `report-visibility-${shopId}`;
@@ -698,11 +699,17 @@ export default function ReportClient({
           <div style={slideBarStyle}><span>{shop.name} — 月間口コミ増加数</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={{ ...slideBodyStyle, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <div style={{ width: "95%", maxHeight: 600 }}>
-              <Bar data={{ labels: reviewLabels.slice(1), datasets: [{
-                label: "月間増加数", data: reviewDelta.slice(1),
-                backgroundColor: (reviewDelta.slice(1) as number[]).map(v => v >= 20 ? "rgba(39,174,96,.75)" : v >= 10 ? "rgba(251,192,45,.75)" : "rgba(229,115,115,.75)"),
-                borderRadius: 3,
-              }]}} options={{ responsive: true, maintainAspectRatio: true, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true, grid: { color: "#f0f0f0" } } } }} />
+              {(() => {
+                const deltaData = reviewDelta.slice(1).map(v => Math.max(v ?? 0, 0));
+                const deltaColors = deltaData.map(v => v >= 20 ? "rgba(39,174,96,.75)" : v >= 10 ? "rgba(251,192,45,.75)" : v > 0 ? "rgba(229,115,115,.75)" : "rgba(200,200,200,.4)");
+                return (
+                  <Bar data={{ labels: reviewLabels.slice(1), datasets: [{
+                    label: "月間増加数", data: deltaData,
+                    backgroundColor: deltaColors,
+                    borderRadius: 3,
+                  }]}} options={{ responsive: true, maintainAspectRatio: true, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true, min: 0, grid: { color: "#f0f0f0" }, ticks: { stepSize: 1 } } } }} />
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -711,9 +718,9 @@ export default function ReportClient({
       {/* ════ P10: 口コミ分析 ════ */}
       {(() => { pageNum++; return null; })()}
       <div style={slideStyle} className="slide">
-        <div style={slideBarStyle}><span>{shop.name} — 口コミ分析</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBarStyle}><span>{shop.name} — AIによる口コミ分析</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
-          <div style={stitleStyle}>口コミ分析</div>
+          <div style={stitleStyle}>口コミ分析（直近2ヶ月）</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "auto 1fr", gap: 16, flex: 1 }}>
             <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", justifyContent: "center" }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, color: "#27ae60", marginBottom: 14 }}>ポジティブワード（推定）</h3>
@@ -723,9 +730,18 @@ export default function ReportClient({
             </div>
             <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", justifyContent: "center" }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, color: "#c0392b", marginBottom: 14 }}>ネガティブワード（推定）</h3>
-              <div>{reviewAnalysis.negativeWords.length > 0 ? reviewAnalysis.negativeWords.map((w, i) => (
-                <span key={i} style={{ display: "inline-block", padding: "6px 16px", borderRadius: 16, fontSize: 13, margin: 5, fontWeight: 500, background: "#fde8e8", color: "#c0392b" }}>{w}</span>
-              )) : <span style={{ color: "#bbb", fontSize: 14, fontStyle: "italic" }}>データ準備中</span>}</div>
+              <div>{reviewAnalysis.negativeWords.length > 0 ? reviewAnalysis.negativeWords.map((w, i) => {
+                const source = reviewAnalysis.negativeWordSources?.find(s => s.word === w);
+                return (
+                  <span key={i} onClick={() => { if (source && source.reviews.length > 0) setNegativeModal(source); }}
+                    style={{ display: "inline-block", padding: "6px 16px", borderRadius: 16, fontSize: 13, margin: 5, fontWeight: 500, background: "#fde8e8", color: "#c0392b", cursor: source && source.reviews.length > 0 ? "pointer" : "default", transition: "opacity 0.2s" }}
+                    title={source && source.reviews.length > 0 ? "クリックで元の口コミを表示" : ""}
+                  >{w}{source && source.reviews.length > 0 && <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.6 }}>({source.reviews.length}件)</span>}</span>
+                );
+              }) : <span style={{ color: "#bbb", fontSize: 14, fontStyle: "italic" }}>データ準備中</span>}</div>
+              {reviewAnalysis.negativeWordSources && reviewAnalysis.negativeWordSources.length > 0 && (
+                <p style={{ fontSize: 10, color: "#aaa", marginTop: 8, margin: "8px 0 0" }}>※ クリックで該当口コミを確認できます</p>
+              )}
             </div>
             <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", gridColumn: "1/-1", display: "flex", flexDirection: "column", justifyContent: "center" }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>口コミ総評</h3>
@@ -745,7 +761,7 @@ export default function ReportClient({
       {/* ════ P11: 担当者コメント ════ */}
       {(() => { pageNum++; return null; })()}
       <div style={slideStyle} className="slide">
-        <div style={slideBarStyle}><span>{shop.name} — 担当者コメント</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBarStyle}><span>{shop.name} — AIによる担当者コメント</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={stitleStyle}>担当者コメント</div>
           <div style={{ background: "linear-gradient(135deg,#f0f4ff,#fff)", border: "2px solid #0f3460", borderRadius: 14, padding: "28px 32px", flex: 1, display: "flex", flexDirection: "column" }}>
@@ -785,6 +801,41 @@ export default function ReportClient({
           </div>
         </div>
       </div>
+
+      {/* ネガティブワード詳細モーダル */}
+      {negativeModal && (
+        <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={() => setNegativeModal(null)}>
+          <div style={{ background: "#fff", borderRadius: 16, padding: "28px 32px", maxWidth: 600, width: "90%", maxHeight: "80vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}
+            onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#c0392b" }}>
+                「{negativeModal.word}」に関する口コミ
+              </h3>
+              <button onClick={() => setNegativeModal(null)}
+                style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: "#999", padding: "0 4px" }}>×</button>
+            </div>
+            {negativeModal.reviews.length > 0 ? negativeModal.reviews.map((r, i) => {
+              const ratingMap: Record<string, number> = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5 };
+              const stars = ratingMap[r.starRating] || 0;
+              return (
+                <div key={i} style={{ borderBottom: i < negativeModal.reviews.length - 1 ? "1px solid #f0f0f0" : "none", padding: "16px 0" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontWeight: 600, fontSize: 14, color: "#333" }}>{r.reviewer}</span>
+                      {stars > 0 && <span style={{ color: "#fbc02d", fontSize: 13 }}>{"★".repeat(stars)}{"☆".repeat(5 - stars)}</span>}
+                    </div>
+                    <span style={{ fontSize: 12, color: "#999" }}>{r.date}</span>
+                  </div>
+                  <p style={{ fontSize: 13, lineHeight: 1.8, color: "#555", margin: 0 }}>{r.comment}</p>
+                </div>
+              );
+            }) : (
+              <p style={{ color: "#999", textAlign: "center", padding: 20 }}>該当する口コミが見つかりませんでした</p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

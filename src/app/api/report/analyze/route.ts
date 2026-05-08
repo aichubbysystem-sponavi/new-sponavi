@@ -30,16 +30,23 @@ interface ReviewListResponse {
   totalReviewCount: number;
 }
 
-// Supabase DBから口コミ取得（Go API不要）
+// Supabase DBから口コミ取得（Go API不要）- 直近2ヶ月のみ
 async function fetchReviews(shopId: string): Promise<ReviewListResponse | null> {
   try {
     const supabase = getSupabaseAdmin();
+    // 直近2ヶ月の口コミのみ取得
+    const twoMonthsAgo = new Date();
+    twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
+    twoMonthsAgo.setDate(1);
+    twoMonthsAgo.setHours(0, 0, 0, 0);
+
     const { data: reviews, count } = await supabase
       .from("reviews")
       .select("review_id, reviewer_name, star_rating, comment, create_time", { count: "exact" })
       .eq("shop_id", shopId)
+      .gte("create_time", twoMonthsAgo.toISOString())
       .order("create_time", { ascending: false })
-      .limit(20);
+      .limit(50);
 
     if (!reviews || reviews.length === 0) return null;
 
@@ -79,31 +86,40 @@ async function analyzeWithClaude(
 ): Promise<{
   positiveWords: string[];
   negativeWords: string[];
+  negativeWordSources: { word: string; reviews: { reviewer: string; comment: string; date: string; starRating: string }[] }[];
   summary: string;
   comments: string[];
 } | null> {
   if (!ANTHROPIC_API_KEY) return null;
 
-  const reviewTexts = reviews
+  const filteredReviews = reviews
     .filter((r) => r.comment && r.comment.trim())
-    .slice(0, 50)
-    .map((r) => `[${r.starRating}] ${r.comment}`)
+    .slice(0, 50);
+
+  const reviewTexts = filteredReviews
+    .map((r, i) => `[#${i + 1}][${r.starRating}][${r.reviewer.displayName}][${r.createTime?.slice(0, 10) || "不明"}] ${r.comment}`)
     .join("\n");
 
   if (!reviewTexts) return null;
 
-  const prompt = `あなたはMEO対策の専門家です。以下の店舗の口コミを分析し、JSON形式で結果を返してください。
+  const prompt = `あなたはMEO対策の専門家です。以下の店舗の直近2ヶ月の口コミを分析し、JSON形式で結果を返してください。
 
 店舗名: ${shopName}
 評価: ${averageRating} / 5.0（${totalReviewCount}件）
 
-【口コミテキスト（最新50件）】
+【口コミテキスト（直近2ヶ月）】
 ${reviewTexts}
 
 【出力形式】以下のJSON形式のみ出力してください。
 {
   "positiveWords": ["ポジティブワード1", "ポジティブワード2", "ポジティブワード3", "ポジティブワード4", "ポジティブワード5", "ポジティブワード6"],
   "negativeWords": ["ネガティブワード1", "ネガティブワード2", "ネガティブワード3"],
+  "negativeWordSources": [
+    {
+      "word": "ネガティブワード1",
+      "reviewNumbers": [3, 7]
+    }
+  ],
   "summary": "口コミ総評（3行程度。評価の傾向、特筆すべき点、改善点を含む）",
   "comments": [
     "担当者コメント1（数値データに基づく分析。strongタグで強調箇所を囲む）",
@@ -112,7 +128,9 @@ ${reviewTexts}
     "担当者コメント4",
     "担当者コメント5（来月の施策提案）"
   ]
-}`;
+}
+
+negativeWordSourcesの各reviewNumbersは、口コミテキストの[#番号]に対応する番号の配列です。そのネガティブワードが含まれる口コミの番号を全て列挙してください。`;
 
   try {
     const controller = new AbortController();
@@ -144,7 +162,30 @@ ${reviewTexts}
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
 
-    try { return JSON.parse(jsonMatch[0]); } catch { return null; }
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      // reviewNumbersを実際の口コミデータに変換
+      if (parsed.negativeWordSources && Array.isArray(parsed.negativeWordSources)) {
+        parsed.negativeWordSources = parsed.negativeWordSources.map((src: any) => ({
+          word: src.word,
+          reviews: (src.reviewNumbers || [])
+            .map((num: number) => {
+              const r = filteredReviews[num - 1];
+              if (!r) return null;
+              return {
+                reviewer: r.reviewer.displayName,
+                comment: r.comment,
+                date: r.createTime?.slice(0, 10) || "不明",
+                starRating: r.starRating,
+              };
+            })
+            .filter(Boolean),
+        }));
+      } else {
+        parsed.negativeWordSources = [];
+      }
+      return parsed;
+    } catch { return null; }
   } catch (err) {
     console.error("[analyze] Claude error:", err);
     return null;
@@ -219,6 +260,7 @@ export async function POST(request: NextRequest) {
             shop_id: shop.id,
             positive_words: analysis.positiveWords,
             negative_words: analysis.negativeWords,
+            negative_word_sources: analysis.negativeWordSources || [],
             summary: analysis.summary,
             comments: analysis.comments,
             review_count: reviewData.totalReviewCount,
