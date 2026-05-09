@@ -5,12 +5,54 @@
  * API優先 → Supabaseキャッシュ → スプレッドシートフォールバック
  */
 
-import { getOAuthToken } from "@/lib/gbp-token";
 import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
+const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
+
+/**
+ * RPAchubbyプロジェクトのOAuthクライアントでトークン取得（Performance API用）
+ * Go APIトークンはnew-spotlight-navigatorプロジェクト（Quota 0）のため使えない
+ */
+async function getPerformanceApiToken(): Promise<string | null> {
+  if (!GBP_CLIENT_ID || !GBP_CLIENT_SECRET) return null;
+
+  const supabase = getSupabase();
+  let refreshToken = "";
+
+  try {
+    const { data } = await supabase
+      .from("system_oauth_tokens")
+      .select("refresh_token")
+      .limit(1)
+      .maybeSingle();
+    if (data) refreshToken = data.refresh_token;
+  } catch {}
+
+  if (!refreshToken) return null;
+
+  try {
+    const res = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: GBP_CLIENT_ID,
+        client_secret: GBP_CLIENT_SECRET,
+        refresh_token: refreshToken,
+        grant_type: "refresh_token",
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.access_token || null;
+  } catch {
+    return null;
+  }
+}
 
 function getSupabase() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
@@ -59,13 +101,11 @@ async function fetchKeywordsFromAPI(
 
   for (const item of data.searchKeywordsCounts || []) {
     const keyword = item.searchKeyword || "";
-    // insightsValue の中に月次データがある
-    const monthlyValue = item.insightsValue?.threshold
-      ? item.insightsValue.value || 0
-      : item.insightsValue?.value || 0;
+    const rawValue = item.insightsValue?.value;
+    const impressions = typeof rawValue === "string" ? parseInt(rawValue, 10) || 0 : rawValue || 0;
 
-    if (keyword) {
-      results.push({ keyword, impressions: monthlyValue });
+    if (keyword && impressions > 0) {
+      results.push({ keyword, impressions });
     }
   }
 
@@ -79,9 +119,10 @@ export async function fetchSearchKeywordsFromGBP(
   locationFullPath: string,
   months: number = 12
 ): Promise<MonthlyKeywords[]> {
-  const token = await getOAuthToken();
+  // RPAchubbyプロジェクトのトークンを使用（Performance API Quota: 300/min）
+  const token = await getPerformanceApiToken();
   if (!token) {
-    console.log("[gbp-keywords] OAuthトークン取得失敗");
+    console.log("[gbp-keywords] Performance API用トークン取得失敗");
     return [];
   }
 
