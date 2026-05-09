@@ -702,15 +702,40 @@ export async function getReportFromSpreadsheet(
       process.env.NEXT_PUBLIC_SUPABASE_URL || "",
       process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
     );
-    const { data: shop } = await supabase
+    // 完全一致 → 部分一致の順で検索（スプレッドシート名とDB名の表記揺れ対応）
+    let shop: any = null;
+    const { data: exact } = await supabase
       .from("shops")
       .select("id, gbp_location_name")
       .eq("name", shopName)
       .maybeSingle();
-    if (shop) {
-      opts = { shopId: shop.id, locationFullPath: shop.gbp_location_name || undefined };
+    shop = exact;
+    if (!shop) {
+      // 【】→スペースに変換して部分一致
+      const simpleName = shopName.replace(/[【】\[\]（）()]/g, " ").replace(/\s+/g, " ").trim();
+      const { data: fuzzy } = await supabase
+        .from("shops")
+        .select("id, gbp_location_name, name")
+        .ilike("name", `%${simpleName.split(" ")[0]}%`)
+        .limit(10);
+      if (fuzzy && fuzzy.length > 0) {
+        // 最も名前が近いものを選択
+        const normalize = (s: string) => s.replace(/[【】\[\]（）()_\s]/g, "").toLowerCase();
+        const target = normalize(shopName);
+        shop = fuzzy.find(s => normalize(s.name) === target)
+          || fuzzy.find(s => target.includes(normalize(s.name)) || normalize(s.name).includes(target))
+          || null;
+      }
     }
-  } catch {}
+    if (shop) {
+      console.log(`[spreadsheet] shop matched: "${shopName}" → DB id=${shop.id}, loc=${shop.gbp_location_name}`);
+      opts = { shopId: shop.id, locationFullPath: shop.gbp_location_name || undefined };
+    } else {
+      console.log(`[spreadsheet] shop not found in DB: "${shopName}"`);
+    }
+  } catch (e) {
+    console.error("[spreadsheet] shop lookup error:", e);
+  }
 
   return await buildReportData(shopName, perfRows, reviewData, opts);
 }
