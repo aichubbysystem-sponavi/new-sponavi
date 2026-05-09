@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
       try {
         const tokenInfoRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${token}`);
         const tokenInfo = await tokenInfoRes.json();
-        results.steps.push({ step: "token_info", scope: tokenInfo.scope, expires_in: tokenInfo.expires_in, audience: tokenInfo.aud });
+        results.steps.push({ step: "token_info", full: tokenInfo });
       } catch (e: any) {
         results.steps.push({ step: "token_info", error: e?.message });
       }
@@ -113,22 +113,28 @@ export async function GET(request: NextRequest) {
             const refreshData = await refreshRes.json();
             const dbToken = refreshData.access_token;
 
-            if (dbToken && dbToken !== token) {
-              const testPath = fullPath || locName;
-              const apiUrl2 = `https://businessprofileperformance.googleapis.com/v1/${testPath}/searchkeywords/impressions/monthly?monthlyRange.startMonth.year=${y}&monthlyRange.startMonth.month=${m}&monthlyRange.endMonth.year=${y}&monthlyRange.endMonth.month=${m}&pageSize=5`;
+            if (dbToken) {
+              // DBトークンのスコープ確認
+              try {
+                const dbTokenInfoRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${dbToken}`);
+                const dbTokenInfo = await dbTokenInfoRes.json();
+                results.steps.push({ step: "db_token_info", full: dbTokenInfo });
+              } catch {}
+
+              // DBトークン × locations/XXX形式でテスト
+              const apiUrl2 = `https://businessprofileperformance.googleapis.com/v1/${locName}/searchkeywords/impressions/monthly?monthlyRange.startMonth.year=${y}&monthlyRange.startMonth.month=${m}&monthlyRange.endMonth.year=${y}&monthlyRange.endMonth.month=${m}&pageSize=5`;
               const apiRes2 = await fetch(apiUrl2, {
                 headers: { Authorization: `Bearer ${dbToken}` },
                 signal: AbortSignal.timeout(15000),
               });
               const apiText2 = await apiRes2.text();
               results.steps.push({
-                step: "api_test_db_token",
-                tokenDifferent: true,
+                step: "api_test_db_token_locationsXXX",
+                tokenDifferent: dbToken !== token,
+                url: apiUrl2,
                 status: apiRes2.status,
                 body: apiText2.slice(0, 500),
               });
-            } else {
-              results.steps.push({ step: "api_test_db_token", tokenDifferent: false, note: "same token as Go API" });
             }
           }
         } catch (e: any) {
