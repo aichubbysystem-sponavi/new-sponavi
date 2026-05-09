@@ -14,6 +14,7 @@ import type {
   ChartData,
   ReviewAnalysis,
 } from "./report-data";
+import { createClient } from "@supabase/supabase-js";
 
 // ── スプレッドシート設定 ──
 
@@ -377,8 +378,12 @@ function generateReviewAnalysis(
 
 /**
  * 順位・順位履歴・検索語句を並列取得（パフォーマンス最適化）
+ * shopId/locationFullPath指定時はGBP Performance APIから検索語句を優先取得
  */
-async function fetchAllExternalData(shopName: string): Promise<{
+async function fetchAllExternalData(
+  shopName: string,
+  opts?: { shopId?: string; locationFullPath?: string }
+): Promise<{
   keywords: Keyword[];
   rankingHistory: import("./report-data").RankingHistory;
   searchQueries: import("./report-data").ReportData["searchQueries"];
@@ -401,9 +406,15 @@ async function fetchAllExternalData(shopName: string): Promise<{
         return { keywords: [] as Keyword[], history: { labels: [], datasets: [] } };
       }
     })(),
-    // 検索語句を並列取得
+    // 検索語句: API優先 → スプレッドシートフォールバック
     (async () => {
       try {
+        if (opts?.shopId) {
+          const { getSearchKeywords } = await import("./gbp-search-keywords");
+          const data = await getSearchKeywords(opts.shopId, shopName, opts.locationFullPath || null);
+          return { latest: data.latest, latestMonth: data.latestMonth, history: data.history };
+        }
+        // shopId未指定時はスプレッドシートから取得
         const { fetchSearchQueries } = await import("./search-query-fetch");
         const data = await fetchSearchQueries(shopName);
         return { latest: data.latestKeywords, latestMonth: data.latestMonth, history: data.months };
@@ -423,7 +434,8 @@ async function fetchAllExternalData(shopName: string): Promise<{
 export async function buildReportData(
   shopName: string,
   perfRows: PerfRow[],
-  reviewData: ShopReviewData | undefined
+  reviewData: ShopReviewData | undefined,
+  opts?: { shopId?: string; locationFullPath?: string }
 ): Promise<ReportData> {
   // 直近13ヶ月に絞り込み（前年比表示のため13ヶ月必要）
   const recent = perfRows.slice(-13);
@@ -544,7 +556,7 @@ export async function buildReportData(
     kpis,
     monthlyLabels,
     charts,
-    ...await fetchAllExternalData(shopName),
+    ...await fetchAllExternalData(shopName, opts),
     reviewLabels,
     reviewCounts,
     reviewDelta,
@@ -683,5 +695,22 @@ export async function getReportFromSpreadsheet(
 
   const reviewData = data.reviews.get(shopName);
 
-  return await buildReportData(shopName, perfRows, reviewData);
+  // Supabaseから店舗ID・GBPロケーション名を取得（検索語句API用）
+  let opts: { shopId?: string; locationFullPath?: string } | undefined;
+  try {
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+    );
+    const { data: shop } = await supabase
+      .from("shops")
+      .select("id, gbp_location_name")
+      .eq("name", shopName)
+      .maybeSingle();
+    if (shop) {
+      opts = { shopId: shop.id, locationFullPath: shop.gbp_location_name || undefined };
+    }
+  } catch {}
+
+  return await buildReportData(shopName, perfRows, reviewData, opts);
 }
