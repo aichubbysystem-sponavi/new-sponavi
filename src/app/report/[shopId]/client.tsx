@@ -702,12 +702,30 @@ export default function ReportClient({
               {(() => {
                 const deltaData = reviewDelta.slice(1).map(v => Math.max(v ?? 0, 0));
                 const deltaColors = deltaData.map(v => v >= 20 ? "rgba(39,174,96,.75)" : v >= 10 ? "rgba(251,192,45,.75)" : v > 0 ? "rgba(229,115,115,.75)" : "rgba(200,200,200,.4)");
+                const datalabelPlugin = {
+                  id: "reviewDeltaLabels",
+                  afterDatasetsDraw(chart: any) {
+                    const { ctx } = chart;
+                    chart.data.datasets[0]?.data?.forEach((value: number, index: number) => {
+                      const meta = chart.getDatasetMeta(0);
+                      const bar = meta.data[index];
+                      if (!bar) return;
+                      ctx.save();
+                      ctx.fillStyle = "#333";
+                      ctx.font = "bold 12px 'Noto Sans JP', sans-serif";
+                      ctx.textAlign = "center";
+                      ctx.textBaseline = "bottom";
+                      ctx.fillText(value > 0 ? `+${value}` : String(value), bar.x, bar.y - 4);
+                      ctx.restore();
+                    });
+                  },
+                };
                 return (
                   <Bar data={{ labels: reviewLabels.slice(1), datasets: [{
                     label: "月間増加数", data: deltaData,
                     backgroundColor: deltaColors,
                     borderRadius: 3,
-                  }]}} options={{ responsive: true, maintainAspectRatio: true, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true, min: 0, grid: { color: "#f0f0f0" }, ticks: { stepSize: 1 } } } }} />
+                  }]}} plugins={[datalabelPlugin]} options={{ responsive: true, maintainAspectRatio: true, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true, min: 0, grid: { color: "#f0f0f0" }, ticks: { stepSize: 1 } } } }} />
                 );
               })()}
             </div>
