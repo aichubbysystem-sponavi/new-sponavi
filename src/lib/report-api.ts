@@ -44,16 +44,21 @@ export async function getReportData(shopId: string): Promise<{
   try {
     const cached = await readReportDataFromCache(shopName);
     if (cached) {
+      // searchQueriesが空または古い場合でも一旦キャッシュを返す
+      // (反映ボタンでキャッシュ更新される)
       return { data: cached, source: "cache" };
     }
   } catch {}
 
-  // 2. フォールバック: スプレッドシートから取得 → 自動キャッシュ
-  const data = await getReportFromSpreadsheet(shopName);
-  if (data) {
-    // 次回から高速読み取りできるようキャッシュに保存
-    try { await writeReportDataToCache(shopName, data); } catch {}
-    return { data, source: "spreadsheet" };
+  // 2. フォールバック: スプレッドシート+API取得 → 自動キャッシュ
+  try {
+    const data = await getReportFromSpreadsheet(shopName);
+    if (data) {
+      try { await writeReportDataToCache(shopName, data); } catch {}
+      return { data, source: "spreadsheet" };
+    }
+  } catch (e) {
+    console.error("[report-api] getReportFromSpreadsheet error:", e);
   }
 
   return { data: null, source: "mock" };

@@ -1,8 +1,10 @@
 /**
  * GBP Business Profile Performance API — 検索語句取得
- * https://developers.google.com/my-business/reference/performance/rest/v1/locations.searchkeywords.impressions.monthly/list
  *
- * API優先 → Supabaseキャッシュ → スプレッドシートフォールバック
+ * 優先順序: search_query_cache → Performance API → スプレッドシート
+ * トークン: RPAchubbyプロジェクトのDBリフレッシュトークン（Quota 300/min）
+ *
+ * 修正: 並列フェッチ + タイムアウト対策 + ログ強化
  */
 
 import { createClient } from "@supabase/supabase-js";
@@ -13,12 +15,23 @@ const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
 const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
 
+function getSupabase() {
+  return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
+}
+
+interface MonthlyKeywords {
+  month: string; // "2026/4"
+  keywords: { word: string; count: number }[];
+}
+
 /**
  * RPAchubbyプロジェクトのOAuthクライアントでトークン取得（Performance API用）
- * Go APIトークンはnew-spotlight-navigatorプロジェクト（Quota 0）のため使えない
  */
 async function getPerformanceApiToken(): Promise<string | null> {
-  if (!GBP_CLIENT_ID || !GBP_CLIENT_SECRET) return null;
+  if (!GBP_CLIENT_ID || !GBP_CLIENT_SECRET) {
+    console.log("[gbp-keywords] GBP_CLIENT_ID or GBP_CLIENT_SECRET not set");
+    return null;
+  }
 
   const supabase = getSupabase();
   let refreshToken = "";
@@ -30,9 +43,14 @@ async function getPerformanceApiToken(): Promise<string | null> {
       .limit(1)
       .maybeSingle();
     if (data) refreshToken = data.refresh_token;
-  } catch {}
+  } catch (e) {
+    console.error("[gbp-keywords] Failed to get refresh token from DB:", e);
+  }
 
-  if (!refreshToken) return null;
+  if (!refreshToken) {
+    console.log("[gbp-keywords] No refresh_token in system_oauth_tokens");
+    return null;
+  }
 
   try {
     const res = await fetch("https://oauth2.googleapis.com/token", {
@@ -44,142 +62,130 @@ async function getPerformanceApiToken(): Promise<string | null> {
         refresh_token: refreshToken,
         grant_type: "refresh_token",
       }),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(10000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.error("[gbp-keywords] Token refresh failed:", res.status);
+      return null;
+    }
     const data = await res.json();
     return data.access_token || null;
-  } catch {
+  } catch (e) {
+    console.error("[gbp-keywords] Token refresh error:", e);
     return null;
   }
-}
-
-function getSupabase() {
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
-}
-
-interface SearchKeywordResult {
-  keyword: string;
-  impressions: number;
-}
-
-interface MonthlyKeywords {
-  month: string; // "2026/4"
-  keywords: { word: string; count: number }[];
 }
 
 /**
  * Performance APIから検索語句を取得（1ロケーション・1ヶ月分）
  */
-async function fetchKeywordsFromAPI(
-  locationFullPath: string,
+async function fetchOneMonth(
+  locPart: string,
   year: number,
   month: number,
   token: string
-): Promise<SearchKeywordResult[]> {
-  // locationFullPath = "accounts/XXX/locations/YYY"
-  // API endpoint: locations/YYY を使う
-  const locPart = locationFullPath.includes("/")
-    ? locationFullPath.split("/").slice(-2).join("/")
-    : locationFullPath;
-
+): Promise<MonthlyKeywords | null> {
   const url = `https://businessprofileperformance.googleapis.com/v1/${locPart}/searchkeywords/impressions/monthly?monthlyRange.startMonth.year=${year}&monthlyRange.startMonth.month=${month}&monthlyRange.endMonth.year=${year}&monthlyRange.endMonth.month=${month}&pageSize=300`;
 
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-    signal: AbortSignal.timeout(30000),
-  });
+  try {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(15000),
+    });
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    console.error(`[gbp-keywords] API error ${res.status} for ${locPart} ${year}/${month}:`, text.slice(0, 200));
-    return [];
-  }
-
-  const data = await res.json();
-  const results: SearchKeywordResult[] = [];
-
-  for (const item of data.searchKeywordsCounts || []) {
-    const keyword = item.searchKeyword || "";
-    const rawValue = item.insightsValue?.value;
-    const impressions = typeof rawValue === "string" ? parseInt(rawValue, 10) || 0 : rawValue || 0;
-
-    if (keyword && impressions > 0) {
-      results.push({ keyword, impressions });
+    if (!res.ok) {
+      console.error(`[gbp-keywords] API ${res.status} for ${year}/${month}`);
+      return null;
     }
-  }
 
-  return results;
+    const data = await res.json();
+    const keywords: { word: string; count: number }[] = [];
+
+    for (const item of data.searchKeywordsCounts || []) {
+      const word = item.searchKeyword || "";
+      const raw = item.insightsValue?.value;
+      const count = typeof raw === "string" ? parseInt(raw, 10) || 0 : raw || 0;
+      if (word && count > 0) {
+        keywords.push({ word, count });
+      }
+    }
+
+    if (keywords.length === 0) return null;
+    return {
+      month: `${year}/${month}`,
+      keywords: keywords.sort((a, b) => b.count - a.count),
+    };
+  } catch (e) {
+    console.error(`[gbp-keywords] Fetch error ${year}/${month}:`, e);
+    return null;
+  }
 }
 
 /**
- * 指定店舗の検索語句を複数月分API取得
+ * 指定店舗の検索語句を複数月分API取得（4並列バッチ）
  */
 export async function fetchSearchKeywordsFromGBP(
-  locationFullPath: string,
+  locationPath: string,
   months: number = 12
 ): Promise<MonthlyKeywords[]> {
-  // RPAchubbyプロジェクトのトークンを使用（Performance API Quota: 300/min）
   const token = await getPerformanceApiToken();
-  if (!token) {
-    console.log("[gbp-keywords] Performance API用トークン取得失敗");
-    return [];
-  }
+  if (!token) return [];
 
-  const results: MonthlyKeywords[] = [];
+  // locations/XXX 形式に正規化
+  const locPart = locationPath.includes("/")
+    ? locationPath.split("/").slice(-2).join("/")
+    : locationPath;
+
   const now = new Date();
-
-  // 直近N月分を取得（当月は未確定なので前月から）
+  const monthTargets: { year: number; month: number }[] = [];
   for (let i = 1; i <= months; i++) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const year = d.getFullYear();
-    const month = d.getMonth() + 1;
+    monthTargets.push({ year: d.getFullYear(), month: d.getMonth() + 1 });
+  }
 
-    try {
-      const keywords = await fetchKeywordsFromAPI(locationFullPath, year, month, token);
-      if (keywords.length > 0) {
-        results.push({
-          month: `${year}/${month}`,
-          keywords: keywords
-            .map((k) => ({ word: k.keyword, count: k.impressions }))
-            .sort((a, b) => b.count - a.count),
-        });
-      }
-    } catch (err) {
-      console.error(`[gbp-keywords] Error fetching ${year}/${month}:`, err);
+  // 4並列バッチで取得（レート制限回避しつつ高速化）
+  const results: MonthlyKeywords[] = [];
+  for (let i = 0; i < monthTargets.length; i += 4) {
+    const batch = monthTargets.slice(i, i + 4);
+    const batchResults = await Promise.all(
+      batch.map((t) => fetchOneMonth(locPart, t.year, t.month, token))
+    );
+    for (const r of batchResults) {
+      if (r) results.push(r);
     }
   }
 
-  // 古い順にソート
   results.sort((a, b) => a.month.localeCompare(b.month));
+  console.log(`[gbp-keywords] Fetched ${results.length}/${months} months for ${locPart}`);
   return results;
 }
 
 /**
- * Supabaseキャッシュに保存
+ * Supabaseキャッシュに保存（バッチ）
  */
 export async function cacheSearchKeywords(
   shopId: string,
   shopName: string,
   monthlyData: MonthlyKeywords[]
 ): Promise<void> {
-  if (!SUPABASE_URL) return;
+  if (!SUPABASE_URL || monthlyData.length === 0) return;
   const supabase = getSupabase();
 
-  for (const m of monthlyData) {
-    await supabase
-      .from("search_query_cache")
-      .upsert(
-        {
-          shop_id: shopId,
-          shop_name: shopName,
-          month: m.month,
-          keywords: m.keywords,
-          source: "api",
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "shop_id,month" }
-      );
+  const rows = monthlyData.map((m) => ({
+    shop_id: shopId,
+    shop_name: shopName,
+    month: m.month,
+    keywords: m.keywords,
+    source: "api",
+    updated_at: new Date().toISOString(),
+  }));
+
+  const { error } = await supabase
+    .from("search_query_cache")
+    .upsert(rows, { onConflict: "shop_id,month" });
+
+  if (error) {
+    console.error("[gbp-keywords] Cache write error:", error.message);
   }
 }
 
@@ -207,7 +213,10 @@ export async function getCachedSearchKeywords(
 }
 
 /**
- * 検索語句取得（統合）: APIキャッシュ → スプレッドシートフォールバック
+ * 検索語句取得（統合）
+ * 1. search_query_cache (Supabase) — 即時返却
+ * 2. GBP Performance API — 取得+キャッシュ保存
+ * 3. スプレッドシート — フォールバック
  */
 export async function getSearchKeywords(
   shopId: string,
@@ -219,26 +228,35 @@ export async function getSearchKeywords(
   history: MonthlyKeywords[];
   source: "api" | "cache" | "spreadsheet";
 }> {
-  // 1. Supabaseキャッシュから取得
-  const cached = await getCachedSearchKeywords(shopId);
-  if (cached.length > 0) {
-    const latest = cached[cached.length - 1];
-    return {
-      latest: latest.keywords.slice(0, 30),
-      latestMonth: latest.month,
-      history: cached,
-      source: "cache",
-    };
+  const empty = { latest: [], latestMonth: "", history: [], source: "spreadsheet" as const };
+
+  // 1. Supabaseキャッシュ
+  try {
+    const cached = await getCachedSearchKeywords(shopId);
+    if (cached.length > 0) {
+      const latest = cached[cached.length - 1];
+      console.log(`[gbp-keywords] Cache hit: ${shopName} → ${latest.month} (${cached.length} months)`);
+      return {
+        latest: latest.keywords.slice(0, 30),
+        latestMonth: latest.month,
+        history: cached,
+        source: "cache",
+      };
+    }
+  } catch (e) {
+    console.error("[gbp-keywords] Cache read error:", e);
   }
 
-  // 2. APIから取得（locationFullPathがある場合）
+  // 2. GBP Performance API
   if (locationFullPath) {
     try {
+      console.log(`[gbp-keywords] API fetch start: ${shopName} (${locationFullPath})`);
       const apiData = await fetchSearchKeywordsFromGBP(locationFullPath, 12);
       if (apiData.length > 0) {
-        // キャッシュに保存
-        await cacheSearchKeywords(shopId, shopName, apiData);
+        // キャッシュに保存（失敗しても続行）
+        try { await cacheSearchKeywords(shopId, shopName, apiData); } catch {}
         const latest = apiData[apiData.length - 1];
+        console.log(`[gbp-keywords] API success: ${shopName} → ${latest.month}`);
         return {
           latest: latest.keywords.slice(0, 30),
           latestMonth: latest.month,
@@ -246,22 +264,29 @@ export async function getSearchKeywords(
           source: "api",
         };
       }
+      console.log(`[gbp-keywords] API returned 0 months for ${shopName}`);
     } catch (err) {
-      console.error("[gbp-keywords] API fetch failed, falling back:", err);
+      console.error(`[gbp-keywords] API error for ${shopName}:`, err);
     }
+  } else {
+    console.log(`[gbp-keywords] No locationFullPath for ${shopName}, skipping API`);
   }
 
   // 3. スプレッドシートフォールバック
   try {
     const { fetchSearchQueries } = await import("./search-query-fetch");
     const ssData = await fetchSearchQueries(shopName);
-    return {
-      latest: ssData.latestKeywords,
-      latestMonth: ssData.latestMonth,
-      history: ssData.months,
-      source: "spreadsheet",
-    };
-  } catch {
-    return { latest: [], latestMonth: "", history: [], source: "spreadsheet" };
-  }
+    if (ssData.latestKeywords.length > 0) {
+      console.log(`[gbp-keywords] Spreadsheet fallback: ${shopName} → ${ssData.latestMonth}`);
+      return {
+        latest: ssData.latestKeywords,
+        latestMonth: ssData.latestMonth,
+        history: ssData.months,
+        source: "spreadsheet",
+      };
+    }
+  } catch {}
+
+  console.log(`[gbp-keywords] No data found for ${shopName}`);
+  return empty;
 }

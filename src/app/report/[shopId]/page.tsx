@@ -2,7 +2,7 @@ import { getReportData } from "@/lib/report-api";
 import { notFound } from "next/navigation";
 import ReportClient from "./client";
 
-export const revalidate = 3600; // 1時間キャッシュ（反映ボタンで即時更新）
+export const revalidate = 0; // 常に最新データを取得（Supabaseキャッシュで高速）
 
 export default async function ReportPage({
   params,
