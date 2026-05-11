@@ -69,7 +69,12 @@ async function getPerformanceApiToken(): Promise<string | null> {
       return null;
     }
     const data = await res.json();
-    return data.access_token || null;
+    if (data.access_token) {
+      console.log("[gbp-keywords] Performance API token obtained (RPAchubby DB)");
+      return data.access_token;
+    }
+    console.error("[gbp-keywords] Token refresh response has no access_token");
+    return null;
   } catch (e) {
     console.error("[gbp-keywords] Token refresh error:", e);
     return null;
@@ -85,7 +90,7 @@ async function fetchOneMonth(
   month: number,
   token: string
 ): Promise<MonthlyKeywords | null> {
-  const url = `https://businessprofileperformance.googleapis.com/v1/${locPart}/searchkeywords/impressions/monthly?monthlyRange.startMonth.year=${year}&monthlyRange.startMonth.month=${month}&monthlyRange.endMonth.year=${year}&monthlyRange.endMonth.month=${month}&pageSize=300`;
+  const url = `https://businessprofileperformance.googleapis.com/v1/${locPart}/searchkeywords/impressions/monthly?monthlyRange.startMonth.year=${year}&monthlyRange.startMonth.month=${month}&monthlyRange.endMonth.year=${year}&monthlyRange.endMonth.month=${month}`;
 
   try {
     const res = await fetch(url, {
@@ -94,7 +99,9 @@ async function fetchOneMonth(
     });
 
     if (!res.ok) {
-      console.error(`[gbp-keywords] API ${res.status} for ${year}/${month}`);
+      const errText = await res.text().catch(() => "");
+      console.error(`[gbp-keywords] API ${res.status} for ${year}/${month}: ${errText.slice(0, 500)}`);
+      console.error(`[gbp-keywords] URL: ${url}`);
       return null;
     }
 
