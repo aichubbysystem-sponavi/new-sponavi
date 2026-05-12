@@ -113,6 +113,7 @@ export default function ReportClient({
   const hasRankingHistory = rankingHistory && rankingHistory.labels.length > 0;
   const hasReviews = reviewCounts.length > 0;
   const hasSearchQueries = searchQueries && searchQueries.latest.length > 0;
+  const [sqMonthIdx, setSqMonthIdx] = useState(-1); // -1 = 最新月
   const curLabel = monthlyLabels[monthlyLabels.length - 1] || "";
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const [memo, setMemo] = useState("");
@@ -630,17 +631,36 @@ export default function ReportClient({
         </div>
       ); })()}
 
-      {/* ════ 検索語句 ════ */}
+      {/* ════ 検索語句（月切り替え対応） ════ */}
       {showSearchQueries && (() => { pageNum++;
-        // 最新月と前月の比較データを作成
-        const sqLatest = searchQueries.history[searchQueries.history.length - 1];
-        const sqPrev = searchQueries.history.length >= 2 ? searchQueries.history[searchQueries.history.length - 2] : null;
+        const sqHistory = searchQueries.history || [];
+        const activeIdx = sqMonthIdx < 0 ? sqHistory.length - 1 : Math.min(sqMonthIdx, sqHistory.length - 1);
+        const sqCurrent = sqHistory[activeIdx];
+        const sqPrev = activeIdx > 0 ? sqHistory[activeIdx - 1] : null;
+        if (!sqCurrent) return null;
         const prevMap = new Map(sqPrev?.keywords.map(k => [k.word, k.count]) || []);
+        const canPrev = activeIdx > 0;
+        const canNext = activeIdx < sqHistory.length - 1;
+        const navBtn = (label: string, onClick: () => void, disabled: boolean): React.CSSProperties => ({
+          background: disabled ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.25)",
+          color: disabled ? "rgba(255,255,255,0.3)" : "#fff",
+          border: "none", borderRadius: 6, padding: "4px 12px", fontSize: 12, fontWeight: 600,
+          cursor: disabled ? "default" : "pointer",
+        });
         return (
         <div style={slideStyle} className="slide">
-          <div style={slideBarStyle}><span>{shop.name} — 検索語句</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+          <div style={slideBarStyle}>
+            <span>{shop.name} — 検索語句</span>
+            <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <button onClick={() => canPrev && setSqMonthIdx(activeIdx - 1)} disabled={!canPrev} style={navBtn("◀", () => {}, !canPrev)}>◀</button>
+              <span style={{ fontSize: 12, minWidth: 60, textAlign: "center" }}>{sqCurrent.month}</span>
+              <button onClick={() => { if (canNext) setSqMonthIdx(activeIdx + 1); else setSqMonthIdx(-1); }} disabled={!canNext} style={navBtn("▶", () => {}, !canNext)}>▶</button>
+              <span style={{ fontSize: 10, opacity: 0.4, marginLeft: 4 }}>{activeIdx + 1}/{sqHistory.length}</span>
+            </div>
+            <span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
+          </div>
           <div style={{ ...slideBodyStyle, display: "flex", flexDirection: "column" }}>
-            <div style={stitleStyle}>検索語句ランキング（{searchQueries.latestMonth}）</div>
+            <div style={stitleStyle}>検索語句ランキング（{sqCurrent.month}）</div>
             <div style={{ overflow: "hidden", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", flex: 1 }}>
                 <thead>
@@ -653,7 +673,7 @@ export default function ReportClient({
                   </tr>
                 </thead>
                 <tbody>
-                  {searchQueries.latest.slice(0, 30).map((kw, i) => {
+                  {sqCurrent.keywords.slice(0, 30).map((kw, i) => {
                     const prev = prevMap.get(kw.word);
                     const diff = prev !== undefined ? kw.count - prev : null;
                     return (
