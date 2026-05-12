@@ -5,7 +5,7 @@ import ReportClient from "./client";
 
 export const revalidate = 0;
 
-async function getPlaceId(shopName: string): Promise<string | null> {
+async function getGoogleReviewUrl(shopName: string): Promise<string> {
   try {
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || "",
@@ -16,10 +16,12 @@ async function getPlaceId(shopName: string): Promise<string | null> {
       .select("gbp_place_id")
       .eq("name", shopName)
       .maybeSingle();
-    return data?.gbp_place_id || null;
-  } catch {
-    return null;
-  }
+    if (data?.gbp_place_id) {
+      return `https://search.google.com/local/reviews?placeid=${data.gbp_place_id}`;
+    }
+  } catch {}
+  // フォールバック: 店舗名でGoogleマップ検索
+  return `https://www.google.com/maps/search/${encodeURIComponent(shopName + " 口コミ")}`;
 }
 
 export default async function ReportPage({
@@ -28,14 +30,14 @@ export default async function ReportPage({
   params: { shopId: string };
 }) {
   const shopName = decodeURIComponent(params.shopId);
-  const [{ data, source }, placeId] = await Promise.all([
+  const [{ data, source }, reviewUrl] = await Promise.all([
     getReportData(params.shopId),
-    getPlaceId(shopName),
+    getGoogleReviewUrl(shopName),
   ]);
 
   if (!data) {
     notFound();
   }
 
-  return <ReportClient data={data} shopId={params.shopId} dataSource={source} googleReviewUrl={placeId ? `https://search.google.com/local/reviews?placeid=${placeId}` : null} />;
+  return <ReportClient data={data} shopId={params.shopId} dataSource={source} googleReviewUrl={reviewUrl} />;
 }
