@@ -28,10 +28,16 @@ function formatReview(r: any) {
 export async function GET(request: NextRequest) {
   const shopName = request.nextUrl.searchParams.get("shop") || "";
   const keyword = request.nextUrl.searchParams.get("keyword") || "";
+  const type = request.nextUrl.searchParams.get("type") || ""; // "positive" or "negative"
 
   if (!shopName || !keyword) {
     return NextResponse.json({ reviews: [], matched: false });
   }
+
+  // 星評価フィルタ: ネガティブ→★1-3、ポジティブ→★4-5
+  const negativeRatings = new Set(["ONE", "TWO", "THREE", "ONE_STAR", "TWO_STARS", "THREE_STARS"]);
+  const positiveRatings = new Set(["FOUR", "FIVE", "FOUR_STARS", "FIVE_STARS"]);
+  const ratingFilter = type === "negative" ? negativeRatings : type === "positive" ? positiveRatings : null;
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
@@ -74,10 +80,17 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ reviews: [], matched: false });
   }
 
-  // キーワードマッチ（全期間）
+  // キーワードマッチ + 星評価フィルタ（全期間）
   const matched = allReviews.filter((r: any) => {
     const text = r.comment || "";
-    return words.some(w => text.includes(w));
+    const hasKeyword = words.some(w => text.includes(w));
+    if (!hasKeyword) return false;
+    // 星評価フィルタ（ネガティブワード→低評価のみ、ポジティブ→高評価のみ）
+    if (ratingFilter) {
+      const rating = ((r.star_rating || "") as string).toUpperCase();
+      return ratingFilter.has(rating);
+    }
+    return true;
   });
 
   if (matched.length > 0) {
@@ -88,9 +101,26 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  // 完全に0件 → 直近の口コミ10件（分析対象の参考として）
+  // 星評価フィルタなしでキーワードマッチを再試行（フィルタ厳しすぎた場合）
+  const keywordOnly = allReviews.filter((r: any) => {
+    const text = r.comment || "";
+    return words.some(w => text.includes(w));
+  });
+
+  if (keywordOnly.length > 0) {
+    return NextResponse.json({
+      reviews: keywordOnly.slice(0, 20).map(formatReview),
+      matched: true,
+      matchedCount: keywordOnly.length,
+    });
+  }
+
+  // 完全に0件 → 同じ評価帯の口コミ10件を参考表示
+  const fallback = ratingFilter
+    ? allReviews.filter((r: any) => ratingFilter.has(((r.star_rating || "") as string).toUpperCase()))
+    : allReviews;
   return NextResponse.json({
-    reviews: allReviews.slice(0, 10).map(formatReview),
+    reviews: fallback.slice(0, 10).map(formatReview),
     matched: false,
   });
 }

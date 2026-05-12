@@ -179,7 +179,7 @@ export default function ReportClient({
       return;
     }
     try {
-      const res = await fetch(`/api/report/search-reviews?shop=${encodeURIComponent(shop.name)}&keyword=${encodeURIComponent(word)}`);
+      const res = await fetch(`/api/report/search-reviews?shop=${encodeURIComponent(shop.name)}&keyword=${encodeURIComponent(word)}&type=${type}`);
       const data = await res.json();
       setNegativeModal({ word, reviews: data.reviews || [], type, matched: data.matched });
     } catch {
