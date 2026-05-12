@@ -49,6 +49,10 @@ export default function CustomerMasterPage() {
   const [editShop, setEditShop] = useState<MasterRow | null>(null);
   const [saving, setSaving] = useState(false);
 
+  // ── 座標一括取得 ──
+  const [coordSyncing, setCoordSyncing] = useState(false);
+  const [coordResult, setCoordResult] = useState<string | null>(null);
+
   // ── GBPインポート ──
   const [showImport, setShowImport] = useState(false);
   const [gbpLocations, setGbpLocations] = useState<{ name: string; title: string }[]>([]);
@@ -291,10 +295,34 @@ export default function CustomerMasterPage() {
           {searchQuery && <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-lg">×</button>}
         </div>
         <button onClick={openImport} className="bg-emerald-600 text-xs px-4 py-2 rounded-lg hover:bg-emerald-700 text-white whitespace-nowrap">GBPインポート</button>
+        <button
+          disabled={coordSyncing}
+          onClick={async () => {
+            setCoordSyncing(true);
+            setCoordResult(null);
+            try {
+              const res = await api.post("/api/report/sync-coordinates", {}, { timeout: 300000 });
+              const d = res.data;
+              setCoordResult(`${d.updated || 0}店舗の座標を取得（${d.autoLinked || 0}店舗を自動紐付け、${d.errors || 0}件エラー）`);
+              if (d.updated > 0) fetchData();
+            } catch (e: any) {
+              setCoordResult(`エラー: ${e?.message || "不明"}`);
+            } finally {
+              setCoordSyncing(false);
+            }
+          }}
+          className={`text-xs px-4 py-2 rounded-lg whitespace-nowrap ${coordSyncing ? "bg-slate-300 text-slate-500" : "bg-amber-500 hover:bg-amber-600 text-white"}`}
+        >{coordSyncing ? "座標取得中..." : "座標一括取得"}</button>
         <button onClick={() => setShowOwnerModal(true)} className="bg-emerald-600 text-xs px-4 py-2 rounded-lg hover:bg-emerald-700 text-white whitespace-nowrap">+ オーナー</button>
         <button onClick={() => { setShowModal(true); if (owners.length > 0 && !formData.owner_id) setFormData({...formData, owner_id: owners[0].id}); }}
           className="bg-[#003D6B] text-xs px-4 py-2 rounded-lg hover:bg-[#002a4a] text-white whitespace-nowrap">+ 店舗登録</button>
       </div>
+      {coordResult && (
+        <div className="mt-2 text-xs px-3 py-2 rounded-lg bg-amber-50 text-amber-700 border border-amber-200">
+          {coordResult}
+          <button onClick={() => setCoordResult(null)} className="ml-2 text-amber-400 hover:text-amber-600">×</button>
+        </div>
+      )}
       {(searchQuery || filterService !== "all" || filterGbp !== "all") && (
         <div className="flex items-center gap-2 mt-2">
           <span className="text-xs text-slate-500">{filtered.length}件表示</span>
