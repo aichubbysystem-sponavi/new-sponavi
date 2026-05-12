@@ -166,7 +166,7 @@ export default function DashboardClient({
                       <span className="text-xs font-semibold text-slate-700">{r.reviewer_name}</span>
                       <span className="text-amber-400 text-xs">{"★".repeat(starToNum(r.star_rating))}{"☆".repeat(5 - starToNum(r.star_rating))}</span>
                     </div>
-                    <span className="text-[10px] text-slate-400">{new Date(r.create_time).toLocaleDateString("ja-JP")}</span>
+                    <span className="text-[10px] text-slate-400" suppressHydrationWarning>{new Date(r.create_time).toLocaleDateString("ja-JP")}</span>
                   </div>
                   {r.comment && <p className="text-xs text-slate-600 line-clamp-2">{
                     r.comment.includes("(Original)") ? r.comment.split("(Original)").pop()?.trim() :

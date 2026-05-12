@@ -135,7 +135,11 @@ export default function ReportClient({
   const kwVisKey = `report-kw-visibility-${shopId}`;
   const [kwVisibility, setKwVisibility] = useState<Record<string, boolean>>({});
 
+  // ハイドレーション完了フラグ（localStorage依存の表示分岐をクライアントのみに限定）
+  const [mounted, setMounted] = useState(false);
+
   useEffect(() => {
+    setMounted(true);
     try {
       const saved = localStorage.getItem(visKey);
       if (saved) setSectionVisibility(JSON.parse(saved));
@@ -164,9 +168,9 @@ export default function ReportClient({
   const visibleKeywords = keywords.filter(kw => kwVisibility[kw.word] !== false);
   const visibleRankingDatasets = rankingHistory?.datasets?.filter(ds => kwVisibility[ds.word] !== false) || [];
 
-  const showKeywords = sectionVisibility.keywords !== false && hasKeywords;
-  const showRankingHistory = sectionVisibility.rankingHistory !== false && hasRankingHistory;
-  const showSearchQueries = sectionVisibility.searchQueries !== false && hasSearchQueries;
+  const showKeywords = mounted && sectionVisibility.keywords !== false && hasKeywords;
+  const showRankingHistory = mounted && sectionVisibility.rankingHistory !== false && hasRankingHistory;
+  const showSearchQueries = mounted && sectionVisibility.searchQueries !== false && hasSearchQueries;
 
   // メモをSupabaseから読み込み
   useEffect(() => {

@@ -481,7 +481,7 @@ export default function ReportListClient({
           </div>
         )}
 
-        <footer className="text-center py-6 text-[11px] text-slate-300">© {new Date().getFullYear()} SPOTLIGHT NAVIGATOR by 株式会社Chubby</footer>
+        <footer className="text-center py-6 text-[11px] text-slate-300" suppressHydrationWarning>© {new Date().getFullYear()} SPOTLIGHT NAVIGATOR by 株式会社Chubby</footer>
 
         {/* トースト */}
         {toast && (
