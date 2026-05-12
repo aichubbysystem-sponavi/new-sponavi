@@ -647,6 +647,13 @@ export default function ReportClient({
         const totalCount = currentKeywords.reduce((sum, kw) => sum + kw.count, 0);
         const prevTotalCount = sqPrev ? (sqPrev.keywords || []).reduce((sum: number, kw: any) => sum + kw.count, 0) : null;
         const totalDiff = prevTotalCount !== null ? totalCount - prevTotalCount : null;
+        // 全期間の累計マップ
+        const cumulativeMap = new Map<string, number>();
+        for (const m of sqHistory) {
+          for (const kw of m.keywords || []) {
+            cumulativeMap.set(kw.word, (cumulativeMap.get(kw.word) || 0) + kw.count);
+          }
+        }
         const canPrev = activeIdx > 0;
         const canNext = activeIdx < sqHistory.length - 1;
         const btnStyle = (disabled: boolean): React.CSSProperties => ({
@@ -687,6 +694,7 @@ export default function ReportClient({
                     <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 70 }}>検索数</th>
                     <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 70 }}>前月</th>
                     <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 60 }}>変動</th>
+                    <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 70 }}>累計</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -702,6 +710,7 @@ export default function ReportClient({
                         <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: diff === null || !hasPrev ? "#ccc" : diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
                           {!hasPrev || diff === null ? "-" : diff > 0 ? `+${diff}` : diff === 0 ? "→" : String(diff)}
                         </td>
+                        <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 12, fontWeight: 600, color: "#4a5568" }}>{(cumulativeMap.get(kw.word) || 0).toLocaleString()}</td>
                       </tr>
                     );
                   })}
