@@ -633,34 +633,36 @@ export default function ReportClient({
 
       {/* ════ 検索語句（月切り替え対応） ════ */}
       {showSearchQueries && (() => { pageNum++;
-        const sqHistory = searchQueries.history || [];
-        const activeIdx = sqMonthIdx < 0 ? sqHistory.length - 1 : Math.min(sqMonthIdx, sqHistory.length - 1);
+        const sqHistory: { month: string; keywords: { word: string; count: number }[] }[] = Array.isArray(searchQueries.history) ? searchQueries.history : [];
+        if (sqHistory.length === 0) return null;
+        const activeIdx = sqMonthIdx < 0 || sqMonthIdx >= sqHistory.length ? sqHistory.length - 1 : sqMonthIdx;
         const sqCurrent = sqHistory[activeIdx];
         const sqPrev = activeIdx > 0 ? sqHistory[activeIdx - 1] : null;
-        if (!sqCurrent) return null;
-        const prevMap = new Map(sqPrev?.keywords.map(k => [k.word, k.count]) || []);
+        const currentKeywords = Array.isArray(sqCurrent?.keywords) ? sqCurrent.keywords : [];
+        const prevMap = new Map((sqPrev?.keywords || []).map(k => [k.word, k.count]));
         const canPrev = activeIdx > 0;
         const canNext = activeIdx < sqHistory.length - 1;
-        const navBtn = (label: string, onClick: () => void, disabled: boolean): React.CSSProperties => ({
+        const btnStyle = (disabled: boolean): React.CSSProperties => ({
           background: disabled ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.25)",
           color: disabled ? "rgba(255,255,255,0.3)" : "#fff",
           border: "none", borderRadius: 6, padding: "4px 12px", fontSize: 12, fontWeight: 600,
           cursor: disabled ? "default" : "pointer",
         });
+        const hasPrev = sqPrev !== null;
         return (
         <div style={slideStyle} className="slide">
           <div style={slideBarStyle}>
             <span>{shop.name} — 検索語句</span>
             <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <button onClick={() => canPrev && setSqMonthIdx(activeIdx - 1)} disabled={!canPrev} style={navBtn("◀", () => {}, !canPrev)}>◀</button>
-              <span style={{ fontSize: 12, minWidth: 60, textAlign: "center" }}>{sqCurrent.month}</span>
-              <button onClick={() => { if (canNext) setSqMonthIdx(activeIdx + 1); else setSqMonthIdx(-1); }} disabled={!canNext} style={navBtn("▶", () => {}, !canNext)}>▶</button>
+              <button onClick={() => { if (canPrev) setSqMonthIdx(activeIdx - 1); }} style={btnStyle(!canPrev)}>◀</button>
+              <span style={{ fontSize: 12, minWidth: 60, textAlign: "center" }}>{sqCurrent?.month || ""}</span>
+              <button onClick={() => { if (canNext) setSqMonthIdx(activeIdx + 1); }} style={btnStyle(!canNext)}>▶</button>
               <span style={{ fontSize: 10, opacity: 0.4, marginLeft: 4 }}>{activeIdx + 1}/{sqHistory.length}</span>
             </div>
             <span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
           </div>
           <div style={{ ...slideBodyStyle, display: "flex", flexDirection: "column" }}>
-            <div style={stitleStyle}>検索語句ランキング（{sqCurrent.month}）</div>
+            <div style={stitleStyle}>検索語句ランキング（{sqCurrent?.month || ""}）</div>
             <div style={{ overflow: "hidden", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", flex: 1 }}>
                 <thead>
@@ -668,23 +670,23 @@ export default function ReportClient({
                     <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 40 }}>順位</th>
                     <th style={{ background: "#0f3460", color: "#fff", padding: "10px 12px", textAlign: "left", fontWeight: 600, fontSize: 11 }}>検索語句</th>
                     <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 70 }}>検索数</th>
-                    {sqPrev && <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 70 }}>前月</th>}
-                    {sqPrev && <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 60 }}>変動</th>}
+                    <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 70 }}>前月</th>
+                    <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 60 }}>変動</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {sqCurrent.keywords.slice(0, 30).map((kw, i) => {
+                  {currentKeywords.slice(0, 30).map((kw, i) => {
                     const prev = prevMap.get(kw.word);
                     const diff = prev !== undefined ? kw.count - prev : null;
                     return (
-                      <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#f8f9fb", borderBottom: "1px solid #eee" }}>
+                      <tr key={`${sqCurrent?.month}-${i}`} style={{ background: i % 2 === 0 ? "#fff" : "#f8f9fb", borderBottom: "1px solid #eee" }}>
                         <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 13, fontWeight: 700, color: i < 3 ? "#e94560" : i < 10 ? "#0f3460" : "#888" }}>{i + 1}</td>
                         <td style={{ padding: "7px 12px", fontSize: 13, color: "#333" }}>{kw.word}</td>
                         <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 14, fontWeight: 700, color: "#0f3460" }}>{kw.count.toLocaleString()}</td>
-                        {sqPrev && <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 12, color: "#888" }}>{prev !== undefined ? prev.toLocaleString() : "-"}</td>}
-                        {sqPrev && <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: diff === null ? "#ccc" : diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
-                          {diff === null ? "-" : diff > 0 ? `+${diff}` : diff === 0 ? "→" : String(diff)}
-                        </td>}
+                        <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 12, color: "#888" }}>{hasPrev && prev !== undefined ? prev.toLocaleString() : "-"}</td>
+                        <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: diff === null || !hasPrev ? "#ccc" : diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
+                          {!hasPrev || diff === null ? "-" : diff > 0 ? `+${diff}` : diff === 0 ? "→" : String(diff)}
+                        </td>
                       </tr>
                     );
                   })}
