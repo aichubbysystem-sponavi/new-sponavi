@@ -112,12 +112,8 @@ function addHeaders(response: NextResponse, request: NextRequest, isReport: bool
 
   // CSP
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5555";
-  const fontSrc = isReport
-    ? "font-src 'self' data: https://fonts.gstatic.com"
-    : "font-src 'self' data:";
-  const styleSrc = isReport
-    ? "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com"
-    : "style-src 'self' 'unsafe-inline'";
+  const fontSrc = "font-src 'self' data: https://fonts.gstatic.com";
+  const styleSrc = "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com";
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://kxxwspavskhhjtiixcep.supabase.co";
   const supabaseWs = supabaseUrl.replace("https://", "wss://");
