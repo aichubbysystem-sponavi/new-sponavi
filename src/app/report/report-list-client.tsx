@@ -44,7 +44,7 @@ function MomBadge({ cur, prev, label, showLabel = false }: { cur: number; prev: 
       }`}
       title={`${label}前月比: ${prev.toLocaleString()}→${cur.toLocaleString()}`}
     >
-      {showLabel && <span className="text-[9px] opacity-70 mr-0.5">{label}</span>}
+      {showLabel && <span className="text-[9px] mr-0.5">{label}</span>}
       {isUp ? "↑" : "↓"}{Math.abs(pct).toFixed(0)}%
     </span>
   );
@@ -462,13 +462,28 @@ export default function ReportListClient({
                     </td>
                     <td className="p-2 text-center text-slate-600 font-medium">{shop.totalReviews > 0 ? shop.totalReviews.toLocaleString() : "-"}</td>
                     <td className="p-2 text-center hidden md:table-cell">
-                      {shop.prevTotalReviews ? <MomBadge cur={shop.totalReviews} prev={shop.prevTotalReviews} label="口コミ" /> : <span className="text-slate-300">-</span>}
+                      {shop.prevTotalReviews ? (
+                        <div className="flex flex-col items-center gap-0.5">
+                          <MomBadge cur={shop.totalReviews} prev={shop.prevTotalReviews} label="口コミ" />
+                          <span className="text-[9px] text-slate-400">{shop.prevTotalReviews}→{shop.totalReviews}</span>
+                        </div>
+                      ) : <span className="text-slate-300">-</span>}
                     </td>
                     <td className="p-2 text-center hidden lg:table-cell">
-                      {shop.prevSearchTotal ? <MomBadge cur={shop.searchTotal || 0} prev={shop.prevSearchTotal} label="検索" /> : <span className="text-slate-300">-</span>}
+                      {shop.prevSearchTotal ? (
+                        <div className="flex flex-col items-center gap-0.5">
+                          <MomBadge cur={shop.searchTotal || 0} prev={shop.prevSearchTotal} label="検索" />
+                          <span className="text-[9px] text-slate-400">{shop.prevSearchTotal.toLocaleString()}→{(shop.searchTotal || 0).toLocaleString()}</span>
+                        </div>
+                      ) : <span className="text-slate-300">-</span>}
                     </td>
                     <td className="p-2 text-center hidden lg:table-cell">
-                      {shop.prevMapTotal ? <MomBadge cur={shop.mapTotal || 0} prev={shop.prevMapTotal} label="マップ" /> : <span className="text-slate-300">-</span>}
+                      {shop.prevMapTotal ? (
+                        <div className="flex flex-col items-center gap-0.5">
+                          <MomBadge cur={shop.mapTotal || 0} prev={shop.prevMapTotal} label="マップ" />
+                          <span className="text-[9px] text-slate-400">{shop.prevMapTotal.toLocaleString()}→{(shop.mapTotal || 0).toLocaleString()}</span>
+                        </div>
+                      ) : <span className="text-slate-300">-</span>}
                     </td>
                     <td className="p-2 text-center text-slate-400">{shop.period}</td>
                     <td className="p-2 text-center">
