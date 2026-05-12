@@ -644,6 +644,9 @@ export default function ReportClient({
         const sqPrev = activeIdx > 0 ? sqHistory[activeIdx - 1] : null;
         const currentKeywords = Array.isArray(sqCurrent?.keywords) ? sqCurrent.keywords : [];
         const prevMap = new Map((sqPrev?.keywords || []).map(k => [k.word, k.count]));
+        const totalCount = currentKeywords.reduce((sum, kw) => sum + kw.count, 0);
+        const prevTotalCount = sqPrev ? (sqPrev.keywords || []).reduce((sum: number, kw: any) => sum + kw.count, 0) : null;
+        const totalDiff = prevTotalCount !== null ? totalCount - prevTotalCount : null;
         const canPrev = activeIdx > 0;
         const canNext = activeIdx < sqHistory.length - 1;
         const btnStyle = (disabled: boolean): React.CSSProperties => ({
@@ -667,6 +670,14 @@ export default function ReportClient({
           </div>
           <div style={{ ...slideBodyStyle, display: "flex", flexDirection: "column" }}>
             <div style={stitleStyle}>検索語句ランキング（{sqCurrent?.month || ""}）</div>
+            <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 12, padding: "6px 16px 2px", fontSize: 13 }}>
+              <span style={{ color: "#555", fontWeight: 500 }}>総検索数: <strong style={{ color: "#0f3460", fontSize: 16 }}>{totalCount.toLocaleString()}</strong></span>
+              {totalDiff !== null && (
+                <span style={{ fontSize: 12, fontWeight: 600, color: totalDiff > 0 ? "#0a8f3c" : totalDiff < 0 ? "#c0392b" : "#888" }}>
+                  前月比: {totalDiff > 0 ? `+${totalDiff.toLocaleString()}` : totalDiff === 0 ? "→" : totalDiff.toLocaleString()}
+                </span>
+              )}
+            </div>
             <div style={{ overflow: "hidden", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", flex: 1 }}>
                 <thead>

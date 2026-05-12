@@ -166,13 +166,28 @@ export default function ReportListClient({
   function handleSyncAll() {
     startSync(async () => {
       try {
+        // 1. 店舗一覧を同期
         const result = await syncAllData();
-        setLastSync(result?.timestamp || new Date().toISOString());
-        if (result?.success) {
-          showToast(`${result.count || shops.length}店舗のデータを反映しました`);
-        } else {
+        if (!result?.success) {
           showToast(`反映失敗: ${result?.error || "不明なエラー"}`);
+          return;
         }
+
+        // 2. 全店舗のレポート+検索語句を5店舗ずつバッチ同期
+        const allNames = shops.map(s => s.name);
+        const BATCH = 5;
+        let synced = 0;
+        for (let i = 0; i < allNames.length; i += BATCH) {
+          const batch = allNames.slice(i, i + BATCH);
+          try {
+            const r = await syncShopData(batch);
+            synced += r?.count || 0;
+          } catch {}
+          showToast(`反映中... ${Math.min(i + BATCH, allNames.length)}/${allNames.length}店舗`);
+        }
+
+        setLastSync(new Date().toISOString());
+        showToast(`${synced}/${allNames.length}店舗のデータを反映しました`);
         setTimeout(() => window.location.reload(), 1500);
       } catch (e: any) {
         showToast(`反映エラー: ${e?.message || "不明"}`);
