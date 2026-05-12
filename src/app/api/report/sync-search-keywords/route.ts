@@ -54,10 +54,7 @@ async function fetchMonth(locPart: string, year: number, month: number, token: s
   return { month: `${year}/${month}`, keywords: keywords.sort((a, b) => b.count - a.count) };
 }
 
-export async function POST(request: NextRequest) {
-  const body = await request.json().catch(() => ({}));
-  const shopName = body.shopName || "";
-  const months = body.months || 12;
+async function handleSync(shopName: string, months: number) {
 
   if (!shopName) {
     return NextResponse.json({ error: "shopName required" }, { status: 400 });
@@ -159,4 +156,19 @@ export async function POST(request: NextRequest) {
     topKeywords: latest.keywords.slice(0, 5),
     log,
   });
+}
+
+// GET: ブラウザから直接アクセス用
+export async function GET(request: NextRequest) {
+  const shopName = request.nextUrl.searchParams.get("name") || "";
+  const months = parseInt(request.nextUrl.searchParams.get("months") || "12") || 12;
+  return handleSync(shopName, months);
+}
+
+// POST: プログラムから呼び出し用
+export async function POST(request: NextRequest) {
+  const body = await request.json().catch(() => ({}));
+  const shopName = body.shopName || "";
+  const months = body.months || 12;
+  return handleSync(shopName, months);
 }
