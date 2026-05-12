@@ -172,6 +172,21 @@ export default function ReportClient({
   const showRankingHistory = mounted && sectionVisibility.rankingHistory !== false && hasRankingHistory;
   const showSearchQueries = mounted && sectionVisibility.searchQueries !== false && hasSearchQueries;
 
+  // ワードクリック: 出典データがあればそのまま表示、なければAPIで口コミ検索
+  const handleWordClick = async (word: string, source: any, type: "positive" | "negative") => {
+    if (source && source.reviews.length > 0) {
+      setNegativeModal({ ...source, type });
+      return;
+    }
+    try {
+      const res = await fetch(`/api/report/search-reviews?shop=${encodeURIComponent(shop.name)}&keyword=${encodeURIComponent(word)}`);
+      const data = await res.json();
+      setNegativeModal({ word, reviews: data.reviews || [], type });
+    } catch {
+      setNegativeModal({ word, reviews: [], type });
+    }
+  };
+
   // メモをSupabaseから読み込み
   useEffect(() => {
     (async () => {
@@ -790,37 +805,29 @@ export default function ReportClient({
               <h3 style={{ fontSize: 16, fontWeight: 700, color: "#27ae60", marginBottom: 14 }}>ポジティブワード（推定）</h3>
               <div>{reviewAnalysis.positiveWords.length > 0 ? reviewAnalysis.positiveWords.map((w, i) => {
                 const source = reviewAnalysis.positiveWordSources?.find(s => s.word === w);
-                const hasSource = source && source.reviews.length > 0;
                 return (
                   <span key={i}
-                    onClick={() => {
-                      if (hasSource) setNegativeModal({ ...source, type: "positive" });
-                      else if (googleReviewUrl) window.open(googleReviewUrl, "_blank");
-                    }}
-                    style={{ display: "inline-block", padding: "6px 16px", borderRadius: 16, fontSize: 13, margin: 5, fontWeight: 500, background: "#e6f9ee", color: "#0a8f3c", cursor: hasSource || googleReviewUrl ? "pointer" : "default", transition: "opacity 0.2s" }}
-                    title={hasSource ? "クリックで元の口コミを表示" : googleReviewUrl ? "クリックでGoogle口コミページへ" : ""}
-                  >{w}{hasSource && <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.6 }}>({source.reviews.length}件)</span>}</span>
+                    onClick={() => handleWordClick(w, source, "positive")}
+                    style={{ display: "inline-block", padding: "6px 16px", borderRadius: 16, fontSize: 13, margin: 5, fontWeight: 500, background: "#e6f9ee", color: "#0a8f3c", cursor: "pointer", transition: "opacity 0.2s" }}
+                    title="クリックで該当口コミを表示"
+                  >{w}</span>
                 );
               }) : <span style={{ color: "#bbb", fontSize: 14, fontStyle: "italic" }}>データ準備中</span>}</div>
-              <p style={{ fontSize: 10, color: "#aaa", marginTop: 8, margin: "8px 0 0" }}>※ クリックでGoogle口コミページを確認できます</p>
+              <p style={{ fontSize: 10, color: "#aaa", marginTop: 8, margin: "8px 0 0" }}>※ クリックで該当する口コミを表示します</p>
             </div>
             <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", justifyContent: "center" }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, color: "#c0392b", marginBottom: 14 }}>ネガティブワード（推定）</h3>
               <div>{reviewAnalysis.negativeWords.length > 0 ? reviewAnalysis.negativeWords.map((w, i) => {
                 const source = reviewAnalysis.negativeWordSources?.find(s => s.word === w);
-                const hasSource = source && source.reviews.length > 0;
                 return (
                   <span key={i}
-                    onClick={() => {
-                      if (hasSource) setNegativeModal({ ...source, type: "negative" });
-                      else if (googleReviewUrl) window.open(googleReviewUrl, "_blank");
-                    }}
-                    style={{ display: "inline-block", padding: "6px 16px", borderRadius: 16, fontSize: 13, margin: 5, fontWeight: 500, background: "#fde8e8", color: "#c0392b", cursor: hasSource || googleReviewUrl ? "pointer" : "default", transition: "opacity 0.2s" }}
-                    title={hasSource ? "クリックで元の口コミを表示" : googleReviewUrl ? "クリックでGoogle口コミページへ" : ""}
-                  >{w}{hasSource && <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.6 }}>({source.reviews.length}件)</span>}</span>
+                    onClick={() => handleWordClick(w, source, "negative")}
+                    style={{ display: "inline-block", padding: "6px 16px", borderRadius: 16, fontSize: 13, margin: 5, fontWeight: 500, background: "#fde8e8", color: "#c0392b", cursor: "pointer", transition: "opacity 0.2s" }}
+                    title="クリックで該当口コミを表示"
+                  >{w}</span>
                 );
               }) : <span style={{ color: "#bbb", fontSize: 14, fontStyle: "italic" }}>データ準備中</span>}</div>
-              <p style={{ fontSize: 10, color: "#aaa", marginTop: 8, margin: "8px 0 0" }}>※ クリックでGoogle口コミページを確認できます</p>
+              <p style={{ fontSize: 10, color: "#aaa", marginTop: 8, margin: "8px 0 0" }}>※ クリックで該当する口コミを表示します</p>
             </div>
             <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", gridColumn: "1/-1", display: "flex", flexDirection: "column", justifyContent: "center" }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>口コミ総評</h3>
