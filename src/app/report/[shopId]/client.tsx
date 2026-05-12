@@ -121,7 +121,7 @@ export default function ReportClient({
   const [memoEditing, setMemoEditing] = useState(false);
   const [memoLoading, setMemoLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [negativeModal, setNegativeModal] = useState<{ word: string; reviews: { reviewer: string; comment: string; date: string; starRating: string }[]; type?: "positive" | "negative" } | null>(null);
+  const [negativeModal, setNegativeModal] = useState<{ word: string; reviews: { reviewer: string; comment: string; reply?: string | null; date: string; starRating: string }[]; type?: "positive" | "negative"; matched?: boolean } | null>(null);
 
   // セクション表示ON/OFF（店舗ごとにlocalStorage保存）
   const visKey = `report-visibility-${shopId}`;
@@ -175,15 +175,15 @@ export default function ReportClient({
   // ワードクリック: 出典データがあればそのまま表示、なければAPIで口コミ検索
   const handleWordClick = async (word: string, source: any, type: "positive" | "negative") => {
     if (source && source.reviews.length > 0) {
-      setNegativeModal({ ...source, type });
+      setNegativeModal({ ...source, type, matched: true });
       return;
     }
     try {
       const res = await fetch(`/api/report/search-reviews?shop=${encodeURIComponent(shop.name)}&keyword=${encodeURIComponent(word)}`);
       const data = await res.json();
-      setNegativeModal({ word, reviews: data.reviews || [], type });
+      setNegativeModal({ word, reviews: data.reviews || [], type, matched: data.matched });
     } catch {
-      setNegativeModal({ word, reviews: [], type });
+      setNegativeModal({ word, reviews: [], type, matched: false });
     }
   };
 
@@ -892,40 +892,43 @@ export default function ReportClient({
       {negativeModal && (
         <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}
           onClick={() => setNegativeModal(null)}>
-          <div style={{ background: "#fff", borderRadius: 16, padding: "28px 32px", maxWidth: 600, width: "90%", maxHeight: "80vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}
+          <div style={{ background: "#fff", borderRadius: 16, padding: "28px 32px", maxWidth: 700, width: "90%", maxHeight: "80vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}
             onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
               <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: negativeModal.type === "positive" ? "#0a8f3c" : "#c0392b" }}>
                 「{negativeModal.word}」に関する口コミ
               </h3>
               <button onClick={() => setNegativeModal(null)}
                 style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: "#999", padding: "0 4px" }}>×</button>
             </div>
+            {!negativeModal.matched && negativeModal.reviews.length > 0 && (
+              <p style={{ fontSize: 11, color: "#999", margin: "0 0 12px", padding: "6px 12px", background: "#f8f9fb", borderRadius: 8 }}>
+                直近2ヶ月の口コミを表示しています（{negativeModal.reviews.length}件）
+              </p>
+            )}
             {negativeModal.reviews.length > 0 ? negativeModal.reviews.map((r, i) => {
               const ratingMap: Record<string, number> = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5 };
               const stars = ratingMap[r.starRating] || 0;
               return (
-                <div key={i} style={{ borderBottom: i < negativeModal.reviews.length - 1 ? "1px solid #f0f0f0" : "none", padding: "16px 0" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <div key={i} style={{ borderBottom: "1px solid #f0f0f0", padding: "14px 0" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ fontWeight: 600, fontSize: 14, color: "#333" }}>{r.reviewer}</span>
-                      {stars > 0 && <span style={{ color: "#fbc02d", fontSize: 13 }}>{"★".repeat(stars)}{"☆".repeat(5 - stars)}</span>}
+                      <span style={{ fontWeight: 700, fontSize: 14, color: "#333" }}>{r.reviewer}</span>
+                      {stars > 0 && <span style={{ color: "#fbc02d", fontSize: 14 }}>{"★".repeat(stars)}{"☆".repeat(5 - stars)}</span>}
                     </div>
                     <span style={{ fontSize: 12, color: "#999" }}>{r.date}</span>
                   </div>
-                  <p style={{ fontSize: 13, lineHeight: 1.8, color: "#555", margin: 0 }}>{r.comment}</p>
+                  <p style={{ fontSize: 13, lineHeight: 1.8, color: "#444", margin: "0 0 4px" }}>{r.comment}</p>
+                  {r.reply && (
+                    <div style={{ marginTop: 8, padding: "10px 14px", background: "#f0f4ff", borderRadius: 8, borderLeft: "3px solid #4a7fff" }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "#4a7fff", marginBottom: 4 }}>返信済み</div>
+                      <p style={{ fontSize: 12, lineHeight: 1.7, color: "#555", margin: 0 }}>{r.reply}</p>
+                    </div>
+                  )}
                 </div>
               );
             }) : (
               <p style={{ color: "#999", textAlign: "center", padding: 20 }}>該当する口コミが見つかりませんでした</p>
-            )}
-            {googleReviewUrl && (
-              <div style={{ textAlign: "center", marginTop: 16, paddingTop: 12, borderTop: "1px solid #f0f0f0" }}>
-                <a href={googleReviewUrl} target="_blank" rel="noopener noreferrer"
-                  style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 20px", borderRadius: 8, background: "#1a73e8", color: "#fff", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>
-                  Googleで口コミを見る ↗
-                </a>
-              </div>
             )}
           </div>
         </div>
