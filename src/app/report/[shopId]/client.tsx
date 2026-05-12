@@ -901,9 +901,11 @@ export default function ReportClient({
               <button onClick={() => setNegativeModal(null)}
                 style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: "#999", padding: "0 4px" }}>×</button>
             </div>
-            {!negativeModal.matched && negativeModal.reviews.length > 0 && (
-              <p style={{ fontSize: 11, color: "#999", margin: "0 0 12px", padding: "6px 12px", background: "#f8f9fb", borderRadius: 8 }}>
-                直近2ヶ月の口コミを表示しています（{negativeModal.reviews.length}件）
+            {negativeModal.reviews.length > 0 && (
+              <p style={{ fontSize: 11, color: negativeModal.matched ? "#0a8f3c" : "#999", margin: "0 0 12px", padding: "6px 12px", background: negativeModal.matched ? "#e6f9ee" : "#f8f9fb", borderRadius: 8 }}>
+                {negativeModal.matched
+                  ? `「${negativeModal.word}」に関連する口コミ ${negativeModal.reviews.length}件`
+                  : `キーワードに一致する口コミが見つからなかったため、最新の口コミを表示しています`}
               </p>
             )}
             {negativeModal.reviews.length > 0 ? negativeModal.reviews.map((r, i) => {

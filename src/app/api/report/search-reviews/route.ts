@@ -54,54 +54,43 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ reviews: [], matched: false });
   }
 
-  // 直近2ヶ月の口コミを取得（コメントありのみ）
-  const twoMonthsAgo = new Date();
-  twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
-  twoMonthsAgo.setDate(1);
-
-  const { data: reviews } = await supabase
-    .from("reviews")
-    .select("reviewer_name, star_rating, comment, reply_comment, create_time")
-    .eq("shop_id", shopId)
-    .gte("create_time", twoMonthsAgo.toISOString())
-    .not("comment", "is", null)
-    .order("create_time", { ascending: false });
-
-  if (!reviews || reviews.length === 0) {
-    // 2ヶ月で0件なら全期間から最新20件
-    const { data: allReviews } = await supabase
-      .from("reviews")
-      .select("reviewer_name, star_rating, comment, reply_comment, create_time")
-      .eq("shop_id", shopId)
-      .not("comment", "is", null)
-      .order("create_time", { ascending: false })
-      .limit(20);
-    return NextResponse.json({
-      reviews: (allReviews || []).map(formatReview),
-      matched: false,
-    });
-  }
-
-  // キーワードを分割して部分一致検索
+  // キーワードを分割
   // 「施術の不正確さ（長さ・仕上がり）」→ ["施術", "不正確", "長さ", "仕上がり"]
   const words = keyword
     .replace(/[（(【\[]/g, " ").replace(/[）)】\]]/g, " ")
-    .replace(/[なのがをはでにとい・、。]/g, " ")
+    .replace(/[なのがをはでにとい・、。さ]/g, " ")
     .split(/\s+/)
     .filter(w => w.length >= 2);
 
-  const matched = reviews.filter((r: any) => {
+  // 全期間の口コミからキーワード検索（関連する口コミだけを正確に返す）
+  const { data: allReviews } = await supabase
+    .from("reviews")
+    .select("reviewer_name, star_rating, comment, reply_comment, create_time")
+    .eq("shop_id", shopId)
+    .not("comment", "is", null)
+    .order("create_time", { ascending: false });
+
+  if (!allReviews || allReviews.length === 0) {
+    return NextResponse.json({ reviews: [], matched: false });
+  }
+
+  // キーワードマッチ（全期間）
+  const matched = allReviews.filter((r: any) => {
     const text = r.comment || "";
     return words.some(w => text.includes(w));
   });
 
   if (matched.length > 0) {
-    return NextResponse.json({ reviews: matched.map(formatReview), matched: true });
+    return NextResponse.json({
+      reviews: matched.slice(0, 20).map(formatReview),
+      matched: true,
+      matchedCount: matched.length,
+    });
   }
 
-  // ヒット0件 → 直近2ヶ月の全口コミを返す
+  // 完全に0件 → 直近の口コミ10件（分析対象の参考として）
   return NextResponse.json({
-    reviews: reviews.filter((r: any) => r.comment?.trim()).slice(0, 20).map(formatReview),
+    reviews: allReviews.slice(0, 10).map(formatReview),
     matched: false,
   });
 }
