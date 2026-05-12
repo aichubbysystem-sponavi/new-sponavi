@@ -17,6 +17,7 @@ interface StoredAnalysis {
   shop_name: string;
   positive_words: string[];
   negative_words: string[];
+  positive_word_sources?: { word: string; reviews: { reviewer: string; comment: string; date: string; starRating: string }[] }[];
   negative_word_sources?: { word: string; reviews: { reviewer: string; comment: string; date: string; starRating: string }[] }[];
   summary: string;
   comments: string[];
@@ -49,6 +50,7 @@ export async function getStoredAnalysis(
       analysis: {
         positiveWords: stored.positive_words || [],
         negativeWords: stored.negative_words || [],
+        positiveWordSources: stored.positive_word_sources || [],
         negativeWordSources: stored.negative_word_sources || [],
         summary: stored.summary || "",
       },

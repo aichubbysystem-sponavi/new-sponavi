@@ -121,7 +121,7 @@ export default function ReportClient({
   const [memoEditing, setMemoEditing] = useState(false);
   const [memoLoading, setMemoLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [negativeModal, setNegativeModal] = useState<{ word: string; reviews: { reviewer: string; comment: string; date: string; starRating: string }[] } | null>(null);
+  const [negativeModal, setNegativeModal] = useState<{ word: string; reviews: { reviewer: string; comment: string; date: string; starRating: string }[]; type?: "positive" | "negative" } | null>(null);
 
   // セクション表示ON/OFF（店舗ごとにlocalStorage保存）
   const visKey = `report-visibility-${shopId}`;
@@ -788,16 +788,25 @@ export default function ReportClient({
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "auto 1fr", gap: 16, flex: 1 }}>
             <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", justifyContent: "center" }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, color: "#27ae60", marginBottom: 14 }}>ポジティブワード（推定）</h3>
-              <div>{reviewAnalysis.positiveWords.length > 0 ? reviewAnalysis.positiveWords.map((w, i) => (
-                <span key={i} style={{ display: "inline-block", padding: "6px 16px", borderRadius: 16, fontSize: 13, margin: 5, fontWeight: 500, background: "#e6f9ee", color: "#0a8f3c" }}>{w}</span>
-              )) : <span style={{ color: "#bbb", fontSize: 14, fontStyle: "italic" }}>データ準備中</span>}</div>
+              <div>{reviewAnalysis.positiveWords.length > 0 ? reviewAnalysis.positiveWords.map((w, i) => {
+                const source = reviewAnalysis.positiveWordSources?.find(s => s.word === w);
+                return (
+                  <span key={i} onClick={() => { if (source && source.reviews.length > 0) setNegativeModal({ ...source, type: "positive" }); }}
+                    style={{ display: "inline-block", padding: "6px 16px", borderRadius: 16, fontSize: 13, margin: 5, fontWeight: 500, background: "#e6f9ee", color: "#0a8f3c", cursor: source && source.reviews.length > 0 ? "pointer" : "default", transition: "opacity 0.2s" }}
+                    title={source && source.reviews.length > 0 ? "クリックで元の口コミを表示" : ""}
+                  >{w}{source && source.reviews.length > 0 && <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.6 }}>({source.reviews.length}件)</span>}</span>
+                );
+              }) : <span style={{ color: "#bbb", fontSize: 14, fontStyle: "italic" }}>データ準備中</span>}</div>
+              {reviewAnalysis.positiveWordSources && reviewAnalysis.positiveWordSources.length > 0 && (
+                <p style={{ fontSize: 10, color: "#aaa", marginTop: 8, margin: "8px 0 0" }}>※ クリックで該当口コミを確認できます</p>
+              )}
             </div>
             <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", justifyContent: "center" }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, color: "#c0392b", marginBottom: 14 }}>ネガティブワード（推定）</h3>
               <div>{reviewAnalysis.negativeWords.length > 0 ? reviewAnalysis.negativeWords.map((w, i) => {
                 const source = reviewAnalysis.negativeWordSources?.find(s => s.word === w);
                 return (
-                  <span key={i} onClick={() => { if (source && source.reviews.length > 0) setNegativeModal(source); }}
+                  <span key={i} onClick={() => { if (source && source.reviews.length > 0) setNegativeModal({ ...source, type: "negative" }); }}
                     style={{ display: "inline-block", padding: "6px 16px", borderRadius: 16, fontSize: 13, margin: 5, fontWeight: 500, background: "#fde8e8", color: "#c0392b", cursor: source && source.reviews.length > 0 ? "pointer" : "default", transition: "opacity 0.2s" }}
                     title={source && source.reviews.length > 0 ? "クリックで元の口コミを表示" : ""}
                   >{w}{source && source.reviews.length > 0 && <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.6 }}>({source.reviews.length}件)</span>}</span>
@@ -866,14 +875,14 @@ export default function ReportClient({
         </div>
       </div>
 
-      {/* ネガティブワード詳細モーダル */}
+      {/* ワード詳細モーダル（ポジティブ/ネガティブ共用） */}
       {negativeModal && (
         <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}
           onClick={() => setNegativeModal(null)}>
           <div style={{ background: "#fff", borderRadius: 16, padding: "28px 32px", maxWidth: 600, width: "90%", maxHeight: "80vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}
             onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#c0392b" }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: negativeModal.type === "positive" ? "#0a8f3c" : "#c0392b" }}>
                 「{negativeModal.word}」に関する口コミ
               </h3>
               <button onClick={() => setNegativeModal(null)}

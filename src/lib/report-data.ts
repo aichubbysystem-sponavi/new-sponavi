@@ -34,15 +34,19 @@ export interface Keyword {
   prevRank: number;
 }
 
-export interface NegativeWordSource {
+export interface WordSource {
   word: string;
   reviews: { reviewer: string; comment: string; date: string; starRating: string }[];
 }
 
+/** @deprecated Use WordSource instead */
+export type NegativeWordSource = WordSource;
+
 export interface ReviewAnalysis {
   positiveWords: string[];
   negativeWords: string[];
-  negativeWordSources?: NegativeWordSource[];
+  positiveWordSources?: WordSource[];
+  negativeWordSources?: WordSource[];
   summary: string;
 }
 

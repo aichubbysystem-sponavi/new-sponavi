@@ -86,6 +86,7 @@ async function analyzeWithClaude(
 ): Promise<{
   positiveWords: string[];
   negativeWords: string[];
+  positiveWordSources: { word: string; reviews: { reviewer: string; comment: string; date: string; starRating: string }[] }[];
   negativeWordSources: { word: string; reviews: { reviewer: string; comment: string; date: string; starRating: string }[] }[];
   summary: string;
   comments: string[];
@@ -114,6 +115,12 @@ ${reviewTexts}
 {
   "positiveWords": ["ポジティブワード1", "ポジティブワード2", "ポジティブワード3", "ポジティブワード4", "ポジティブワード5", "ポジティブワード6"],
   "negativeWords": ["ネガティブワード1", "ネガティブワード2", "ネガティブワード3"],
+  "positiveWordSources": [
+    {
+      "word": "ポジティブワード1",
+      "reviewNumbers": [1, 2, 5]
+    }
+  ],
   "negativeWordSources": [
     {
       "word": "ネガティブワード1",
@@ -130,7 +137,7 @@ ${reviewTexts}
   ]
 }
 
-negativeWordSourcesの各reviewNumbersは、口コミテキストの[#番号]に対応する番号の配列です。そのネガティブワードが含まれる口コミの番号を全て列挙してください。`;
+positiveWordSources・negativeWordSourcesの各reviewNumbersは、口コミテキストの[#番号]に対応する番号の配列です。そのワードが含まれる・該当する口コミの番号を全て列挙してください。`;
 
   try {
     const controller = new AbortController();
@@ -164,9 +171,9 @@ negativeWordSourcesの各reviewNumbersは、口コミテキストの[#番号]に
 
     try {
       const parsed = JSON.parse(jsonMatch[0]);
-      // reviewNumbersを実際の口コミデータに変換
-      if (parsed.negativeWordSources && Array.isArray(parsed.negativeWordSources)) {
-        parsed.negativeWordSources = parsed.negativeWordSources.map((src: any) => ({
+      // reviewNumbersを実際の口コミデータに変換（共通ヘルパー）
+      const convertSources = (sources: any[]) =>
+        sources.map((src: any) => ({
           word: src.word,
           reviews: (src.reviewNumbers || [])
             .map((num: number) => {
@@ -181,9 +188,11 @@ negativeWordSourcesの各reviewNumbersは、口コミテキストの[#番号]に
             })
             .filter(Boolean),
         }));
-      } else {
-        parsed.negativeWordSources = [];
-      }
+
+      parsed.positiveWordSources = Array.isArray(parsed.positiveWordSources)
+        ? convertSources(parsed.positiveWordSources) : [];
+      parsed.negativeWordSources = Array.isArray(parsed.negativeWordSources)
+        ? convertSources(parsed.negativeWordSources) : [];
       return parsed;
     } catch { return null; }
   } catch (err) {
@@ -260,6 +269,7 @@ export async function POST(request: NextRequest) {
             shop_id: shop.id,
             positive_words: analysis.positiveWords,
             negative_words: analysis.negativeWords,
+            positive_word_sources: analysis.positiveWordSources || [],
             negative_word_sources: analysis.negativeWordSources || [],
             summary: analysis.summary,
             comments: analysis.comments,
