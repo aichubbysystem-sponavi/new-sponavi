@@ -35,16 +35,26 @@ export async function GET(request: NextRequest) {
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-  const { data: shop } = await supabase
-    .from("shops")
-    .select("id")
-    .eq("name", shopName)
-    .maybeSingle();
+  // 店舗検索: 完全一致 → 部分一致
+  let shopId: string | null = null;
+  const { data: exactShop } = await supabase
+    .from("shops").select("id").eq("name", shopName).maybeSingle();
+  if (exactShop) {
+    shopId = exactShop.id;
+  } else {
+    const simpleName = shopName.replace(/[【】\[\]（）()_\s]/g, "").toLowerCase();
+    const { data: fuzzyShops } = await supabase
+      .from("shops").select("id, name").ilike("name", `%${shopName.split(/[【（\[]/)[0].trim().slice(0, 10)}%`).limit(10);
+    const match = fuzzyShops?.find(s => s.name.replace(/[【】\[\]（）()_\s]/g, "").toLowerCase() === simpleName);
+    if (match) shopId = match.id;
+  }
 
-  if (!shop) {
+  if (!shopId) {
+    console.log(`[search-reviews] shop not found: "${shopName}"`);
     return NextResponse.json({ reviews: [], matched: false });
   }
 
+  // 直近2ヶ月の口コミを取得（コメントありのみ）
   const twoMonthsAgo = new Date();
   twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
   twoMonthsAgo.setDate(1);
@@ -52,16 +62,34 @@ export async function GET(request: NextRequest) {
   const { data: reviews } = await supabase
     .from("reviews")
     .select("reviewer_name, star_rating, comment, reply_comment, create_time")
-    .eq("shop_id", shop.id)
+    .eq("shop_id", shopId)
     .gte("create_time", twoMonthsAgo.toISOString())
+    .not("comment", "is", null)
     .order("create_time", { ascending: false });
 
   if (!reviews || reviews.length === 0) {
-    return NextResponse.json({ reviews: [], matched: false });
+    // 2ヶ月で0件なら全期間から最新20件
+    const { data: allReviews } = await supabase
+      .from("reviews")
+      .select("reviewer_name, star_rating, comment, reply_comment, create_time")
+      .eq("shop_id", shopId)
+      .not("comment", "is", null)
+      .order("create_time", { ascending: false })
+      .limit(20);
+    return NextResponse.json({
+      reviews: (allReviews || []).map(formatReview),
+      matched: false,
+    });
   }
 
-  // キーワードの各単語で部分一致検索（「雑なシャンプー」→「シャンプー」でもヒット）
-  const words = keyword.replace(/[なのがをはでにと、。]/g, " ").split(/\s+/).filter(w => w.length >= 2);
+  // キーワードを分割して部分一致検索
+  // 「施術の不正確さ（長さ・仕上がり）」→ ["施術", "不正確", "長さ", "仕上がり"]
+  const words = keyword
+    .replace(/[（(【\[]/g, " ").replace(/[）)】\]]/g, " ")
+    .replace(/[なのがをはでにとい・、。]/g, " ")
+    .split(/\s+/)
+    .filter(w => w.length >= 2);
+
   const matched = reviews.filter((r: any) => {
     const text = r.comment || "";
     return words.some(w => text.includes(w));
@@ -71,7 +99,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ reviews: matched.map(formatReview), matched: true });
   }
 
-  // ヒット0件 → 分析対象の全口コミを返す
+  // ヒット0件 → 直近2ヶ月の全口コミを返す
   return NextResponse.json({
     reviews: reviews.filter((r: any) => r.comment?.trim()).slice(0, 20).map(formatReview),
     matched: false,
