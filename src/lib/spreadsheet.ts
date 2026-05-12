@@ -733,8 +733,16 @@ export async function getReportFromSpreadsheet(
     } else {
       console.log(`[spreadsheet] shop not found in DB: "${shopName}"`);
     }
-  } catch (e) {
-    console.error("[spreadsheet] shop lookup error:", e);
+  } catch (e: any) {
+    console.error("[spreadsheet] shop lookup error:", e?.message || e);
+    console.error("[spreadsheet] shop lookup stack:", e?.stack?.slice(0, 300));
+  }
+
+  // ログ: opts の状態を出力
+  if (opts) {
+    console.log(`[spreadsheet] opts OK: shopId=${opts.shopId}, loc=${opts.locationFullPath}`);
+  } else {
+    console.log(`[spreadsheet] opts is undefined for "${shopName}" → API検索語句をスキップ`);
   }
 
   return await buildReportData(shopName, perfRows, reviewData, opts);
