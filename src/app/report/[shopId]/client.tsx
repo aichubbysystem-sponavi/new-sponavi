@@ -104,9 +104,9 @@ const lineOptions = {
 // ── Component ──
 
 export default function ReportClient({
-  data, shopId, dataSource = "mock",
+  data, shopId, dataSource = "mock", googleReviewUrl = null,
 }: {
-  data: ReportData; shopId: string; dataSource?: "cache" | "spreadsheet" | "mock";
+  data: ReportData; shopId: string; dataSource?: "cache" | "spreadsheet" | "mock"; googleReviewUrl?: string | null;
 }) {
   const { shop, kpis, monthlyLabels, charts, keywords, rankingHistory, reviewLabels, reviewCounts, reviewDelta, reviewAnalysis, comments, searchQueries } = data;
   const hasKeywords = keywords.length > 0;
@@ -905,6 +905,14 @@ export default function ReportClient({
               );
             }) : (
               <p style={{ color: "#999", textAlign: "center", padding: 20 }}>該当する口コミが見つかりませんでした</p>
+            )}
+            {googleReviewUrl && (
+              <div style={{ textAlign: "center", marginTop: 16, paddingTop: 12, borderTop: "1px solid #f0f0f0" }}>
+                <a href={googleReviewUrl} target="_blank" rel="noopener noreferrer"
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 20px", borderRadius: 8, background: "#1a73e8", color: "#fff", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>
+                  Googleで口コミを見る ↗
+                </a>
+              </div>
             )}
           </div>
         </div>
