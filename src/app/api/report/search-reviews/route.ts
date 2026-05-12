@@ -61,12 +61,27 @@ export async function GET(request: NextRequest) {
   }
 
   // キーワードを分割
-  // 「施術の不正確さ（長さ・仕上がり）」→ ["施術", "不正確", "長さ", "仕上がり"]
-  const words = keyword
-    .replace(/[（(【\[]/g, " ").replace(/[）)】\]]/g, " ")
+  // 「メンズカット技術の不足」→ ["メンズ", "カット", "技術", "不足"]
+  // 1. 括弧・助詞で分割
+  const rawWords = keyword
+    .replace(/[（(【\[）)】\]]/g, " ")
     .replace(/[なのがをはでにとい・、。さ]/g, " ")
     .split(/\s+/)
     .filter(w => w.length >= 2);
+  // 2. カタカナ⇔漢字の境界でさらに分割
+  const words: string[] = [];
+  for (const w of rawWords) {
+    const subTokens = w.match(/[\u30A0-\u30FF\uFF66-\uFF9F]+|[\u4E00-\u9FFF\u3400-\u4DBF]+|[\u3040-\u309F]+|[a-zA-Z0-9]+/g);
+    if (subTokens) {
+      for (const t of subTokens) {
+        if (t.length >= 2) words.push(t);
+      }
+    } else if (w.length >= 2) {
+      words.push(w);
+    }
+  }
+  // 重複除去
+  const uniqueWords = Array.from(new Set(words));
 
   // 全期間の口コミからキーワード検索（関連する口コミだけを正確に返す）
   const { data: allReviews } = await supabase
@@ -83,7 +98,7 @@ export async function GET(request: NextRequest) {
   // キーワードマッチ + 星評価フィルタ（全期間）
   const matched = allReviews.filter((r: any) => {
     const text = r.comment || "";
-    const hasKeyword = words.some(w => text.includes(w));
+    const hasKeyword = uniqueWords.some(w => text.includes(w));
     if (!hasKeyword) return false;
     // 星評価フィルタ（ネガティブワード→低評価のみ、ポジティブ→高評価のみ）
     if (ratingFilter) {
@@ -104,7 +119,7 @@ export async function GET(request: NextRequest) {
   // 星評価フィルタなしでキーワードマッチを再試行（フィルタ厳しすぎた場合）
   const keywordOnly = allReviews.filter((r: any) => {
     const text = r.comment || "";
-    return words.some(w => text.includes(w));
+    return uniqueWords.some(w => text.includes(w));
   });
 
   if (keywordOnly.length > 0) {
