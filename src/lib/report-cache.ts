@@ -50,6 +50,7 @@ export async function readShopListFromCache(): Promise<ShopListItem[] | null> {
     actionTotal: r.action_total || undefined,
     prevActionTotal: r.prev_action_total || undefined,
     analyzed: r.analyzed || false,
+    dataSource: r.data_source || "both",
   }));
 }
 
@@ -75,6 +76,7 @@ export async function writeShopListToCache(shops: ShopListItem[]): Promise<void>
     action_total: s.actionTotal ?? null,
     prev_action_total: s.prevActionTotal ?? null,
     analyzed: false,
+    data_source: s.dataSource || "both",
     synced_at: new Date().toISOString(),
   }));
 
