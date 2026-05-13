@@ -747,7 +747,7 @@ export default function ReportClient({
                 label: "口コミ件数", data: reviewCounts,
                 borderColor: "#fbc02d", backgroundColor: "rgba(251,192,45,.15)",
                 fill: true, tension: 0.3, pointRadius: 4, pointBackgroundColor: "#fbc02d", borderWidth: 2,
-              }]}} options={lineOptions} />
+              }]}} options={{ ...lineOptions, scales: { ...lineOptions.scales, y: { ...lineOptions.scales.y, ticks: { ...lineOptions.scales.y.ticks, stepSize: 1, callback: (v: any) => Number.isInteger(Number(v)) ? Number(v).toLocaleString() : "" } } } }} />
             </div>
           </div>
         </div>
@@ -853,7 +853,7 @@ export default function ReportClient({
           <div style={{ background: "linear-gradient(135deg,#f0f4ff,#fff)", border: "2px solid #0f3460", borderRadius: 14, padding: "28px 32px", flex: 1, display: "flex", flexDirection: "column" }}>
             <h3 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", marginBottom: 12 }}>{curLabel} 総評</h3>
             <ul style={{ paddingLeft: 20, margin: 0 }}>
-              {comments.map((c, i) => (
+              {(comments || []).map((c, i) => (
                 <li key={i} style={{ fontSize: 14, lineHeight: 2, color: "#444" }} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(c, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
               ))}
             </ul>
