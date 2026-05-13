@@ -91,4 +91,6 @@ export interface ShopListItem {
   prevMapTotal?: number;
   actionTotal?: number;
   prevActionTotal?: number;
+  /** "both" = 管理画面+シート両方, "sheet_only" = シートのみ */
+  dataSource?: "both" | "sheet_only";
 }

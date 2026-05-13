@@ -115,7 +115,7 @@ async function trySheetByGid(sheetId: string, gid: string, shopName: string): Pr
 
 let tabMapCache: { map: Map<string, string>; ts: number } | null = null;
 
-async function fetchTabGidMap(sheetId: string): Promise<Map<string, string>> {
+export async function fetchTabGidMap(sheetId: string): Promise<Map<string, string>> {
   if (tabMapCache && Date.now() - tabMapCache.ts < 1800000) return tabMapCache.map;
   const res = await fetch(`https://docs.google.com/spreadsheets/d/${sheetId}/htmlview`, {
     headers: { "User-Agent": UA }, redirect: "follow",

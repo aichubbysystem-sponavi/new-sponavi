@@ -71,6 +71,7 @@ export default function ReportListClient({
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
   const [showOnlyAlert, setShowOnlyAlert] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState<"all" | "both" | "sheet_only">("all");
 
   // お気に入りをlocalStorageから読み込み
   useEffect(() => {
@@ -134,6 +135,11 @@ export default function ReportListClient({
       result = result.filter((s) => s.area === areaFilter);
     }
 
+    // データソースフィルタ
+    if (sourceFilter !== "all") {
+      result = result.filter((s) => (s.dataSource || "both") === sourceFilter);
+    }
+
     // ソート（お気に入りを上部固定）
     result = [...result].sort((a, b) => {
       const aFav = favorites.has(a.id) ? 0 : 1;
@@ -150,7 +156,7 @@ export default function ReportListClient({
       return sortDir === "asc" ? cmp : -cmp;
     });
     return result;
-  }, [shops, search, sortKey, sortDir, ratingFilter, areaFilter, favorites, showOnlyFavorites, showOnlyAlert]);
+  }, [shops, search, sortKey, sortDir, ratingFilter, areaFilter, favorites, showOnlyFavorites, showOnlyAlert, sourceFilter]);
 
   const totalPages = Math.ceil(filtered.length / perPage);
   const paged = filtered.slice((page - 1) * perPage, page * perPage);
@@ -375,6 +381,18 @@ export default function ReportListClient({
               </button>
             )}
 
+            {/* データソースフィルタ */}
+            {shops.some(s => s.dataSource === "sheet_only") && (
+              <div className="flex gap-0.5 border border-slate-200 rounded-lg overflow-hidden">
+                {([["all", "すべて"], ["both", "管理画面"], ["sheet_only", "シートのみ"]] as ["all" | "both" | "sheet_only", string][]).map(([val, label]) => (
+                  <button key={val} onClick={() => { setSourceFilter(val); setPage(1); }}
+                    className={`px-2 py-1 text-[10px] font-semibold ${sourceFilter === val ? "bg-[#003D6B] text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {/* ソート */}
             <div className="flex gap-1 ml-auto">
               {([["name", "名前"], ["rating", "評価"], ["totalReviews", "口コミ"]] as [SortKey, string][]).map(([key, label]) => (
@@ -574,6 +592,7 @@ function ShopCard({ shop, checked, onToggle, isFavorite, onToggleFav, isAlert }:
           <MomBadge cur={shop.mapTotal || 0} prev={shop.prevMapTotal} label="マップ" showLabel />
         )}
         {shop.analyzed && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-50 text-purple-500 border border-purple-100">AI済</span>}
+        {shop.dataSource === "sheet_only" && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-orange-50 text-orange-500 border border-orange-100">シートのみ</span>}
         <span className="px-2 py-0.5 rounded-full text-[10px] text-slate-400 bg-slate-50 ml-auto">{shop.period}</span>
       </div>
     </div>

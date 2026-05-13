@@ -675,6 +675,43 @@ export async function getShopsFromSpreadsheet(): Promise<ShopListItem[] | null> 
     });
   });
 
+  // 既存店舗名のセット
+  const existingNames = new Set(shops.map(s => s.name));
+
+  // キーワードシートのタブ名からシートのみの店舗を追加
+  try {
+    const KEYWORD_SHEETS = [
+      "1JpehMxL2I-fgef1sckNaY8RIUDIknvmT2OqhHj0my1k",
+      "10hvP7iSEyst0Bp_96eVsjicM4_qxVfG0BmMkDgFyg-Q",
+    ];
+    const { fetchTabGidMap } = await import("./ranking-fetch");
+    for (const sheetId of KEYWORD_SHEETS) {
+      try {
+        const tabMap = await fetchTabGidMap(sheetId);
+        for (const tabName of Array.from(tabMap.keys())) {
+          if (!tabName || existingNames.has(tabName)) continue;
+          // 口コミデータがあれば付与
+          const reviewInfo = data.reviews.get(tabName);
+          shops.push({
+            id: tabName,
+            name: tabName,
+            address: "",
+            period: "",
+            rating: reviewInfo?.currentRating ?? 0,
+            totalReviews: reviewInfo?.currentCount ?? 0,
+            dataSource: "sheet_only",
+          });
+          existingNames.add(tabName);
+        }
+      } catch {}
+    }
+  } catch {}
+
+  // 既存店舗にdataSource="both"を設定
+  for (const s of shops) {
+    if (!s.dataSource) s.dataSource = "both";
+  }
+
   // 店舗名でソート
   shops.sort((a, b) => a.name.localeCompare(b.name, "ja"));
 
