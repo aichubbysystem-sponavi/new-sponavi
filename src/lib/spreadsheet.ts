@@ -700,18 +700,19 @@ export async function getShopsFromSpreadsheet(): Promise<ShopListItem[] | null> 
           if (!tabName || SKIP_PATTERNS.some(p => p.test(tabName))) continue;
           shopTabs.push({ gid, tabName });
         }
-        // A1セルを4並列バッチで取得
-        for (let i = 0; i < shopTabs.length; i += 4) {
-          const batch = shopTabs.slice(i, i + 4);
+        // A1セルを8並列バッチで取得（gvizエンドポイント=軽量）
+        for (let i = 0; i < shopTabs.length; i += 8) {
+          const batch = shopTabs.slice(i, i + 8);
           const results = await Promise.all(batch.map(async ({ gid }) => {
             try {
               const res = await fetch(
-                `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}&range=A1`,
-                { headers: { "User-Agent": "Mozilla/5.0" }, redirect: "follow", signal: AbortSignal.timeout(5000) }
+                `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}&range=A1`,
+                { headers: { "User-Agent": "Mozilla/5.0" }, redirect: "follow", signal: AbortSignal.timeout(8000) }
               );
               if (!res.ok) return null;
               const text = await res.text();
-              return text.split(",")[0]?.replace(/^"|"$/g, "").trim() || null;
+              // gviz CSV: "値" 形式
+              return text.replace(/^"|"$/g, "").replace(/\\n/g, "").trim().split("\n")[0]?.replace(/^"|"$/g, "").trim() || null;
             } catch { return null; }
           }));
           for (let j = 0; j < batch.length; j++) {
