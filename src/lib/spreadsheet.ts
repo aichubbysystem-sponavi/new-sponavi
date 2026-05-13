@@ -680,61 +680,74 @@ export async function getShopsFromSpreadsheet(): Promise<ShopListItem[] | null> 
 
   // キーワードシートのタブからシートのみの店舗を追加
   try {
-    const KEYWORD_SHEETS = [
-      "1JpehMxL2I-fgef1sckNaY8RIUDIknvmT2OqhHj0my1k",
-      "10hvP7iSEyst0Bp_96eVsjicM4_qxVfG0BmMkDgFyg-Q",
+    const { fetchTabGidMap } = await import("./ranking-fetch");
+
+    // ── Sheet1: タブ名 = 店舗名（A1取得不要）──
+    const SHEET1_ID = "1JpehMxL2I-fgef1sckNaY8RIUDIknvmT2OqhHj0my1k";
+    const SHEET1_SKIP = [
+      /^RPA/, /住所/, /◯△/, /一覧/, /インサイト/, /ここから/, /これより/,
+      /テスト計測/, /毎月レポート/,
     ];
-    // 非店舗タブの除外パターン
-    const SKIP_PATTERNS = [
+    try {
+      const tabMap = await fetchTabGidMap(SHEET1_ID);
+      for (const tabName of Array.from(tabMap.keys())) {
+        if (!tabName || SHEET1_SKIP.some(p => p.test(tabName))) continue;
+        if (existingNames.has(tabName)) continue;
+        const reviewInfo = data.reviews.get(tabName);
+        shops.push({
+          id: tabName, name: tabName, address: "", period: "",
+          rating: reviewInfo?.currentRating ?? 0,
+          totalReviews: reviewInfo?.currentCount ?? 0,
+          dataSource: "sheet_only",
+        });
+        existingNames.add(tabName);
+      }
+    } catch {}
+
+    // ── Sheet2: タブ名は略称 → A1セルからフルネーム取得 ──
+    const SHEET2_KW_ID = "10hvP7iSEyst0Bp_96eVsjicM4_qxVfG0BmMkDgFyg-Q";
+    const SHEET2_SKIP = [
       /インサイト/, /全店舗/, /まとめ/, /ひな型/, /一覧/, /地方/,
       /◯△/, /P-MAX/, /順位変動/, /ここより/, /kw\s/, /レディース\s/, /メンズ\s/,
       /口コミ/, /シート/,
     ];
-    const { fetchTabGidMap } = await import("./ranking-fetch");
-    for (const sheetId of KEYWORD_SHEETS) {
-      try {
-        const tabMap = await fetchTabGidMap(sheetId);
-        // 店舗タブのみ: A1セルから正しい店舗名を取得
-        const shopTabs: { gid: string; tabName: string }[] = [];
-        for (const [tabName, gid] of Array.from(tabMap.entries())) {
-          if (!tabName || SKIP_PATTERNS.some(p => p.test(tabName))) continue;
-          shopTabs.push({ gid, tabName });
+    try {
+      const tabMap = await fetchTabGidMap(SHEET2_KW_ID);
+      const shopTabs: { gid: string; tabName: string }[] = [];
+      for (const [tabName, gid] of Array.from(tabMap.entries())) {
+        if (!tabName || SHEET2_SKIP.some(p => p.test(tabName))) continue;
+        shopTabs.push({ gid, tabName });
+      }
+      // A1セルを8並列バッチで取得（gvizエンドポイント=軽量）
+      for (let i = 0; i < shopTabs.length; i += 8) {
+        const batch = shopTabs.slice(i, i + 8);
+        const results = await Promise.all(batch.map(async ({ gid }) => {
+          try {
+            const res = await fetch(
+              `https://docs.google.com/spreadsheets/d/${SHEET2_KW_ID}/gviz/tq?tqx=out:csv&gid=${gid}&range=A1`,
+              { headers: { "User-Agent": "Mozilla/5.0" }, redirect: "follow", signal: AbortSignal.timeout(8000) }
+            );
+            if (!res.ok) return null;
+            const text = await res.text();
+            return text.split("\n")[0]?.replace(/^"|"$/g, "").trim() || null;
+          } catch { return null; }
+        }));
+        for (let j = 0; j < batch.length; j++) {
+          const shopName = results[j];
+          if (!shopName || existingNames.has(shopName)) continue;
+          // エミナルクリニックまたはメンズエミナルで始まる場合のみ
+          if (!shopName.startsWith("エミナルクリニック") && !shopName.startsWith("メンズエミナル")) continue;
+          const reviewInfo = data.reviews.get(shopName);
+          shops.push({
+            id: shopName, name: shopName, address: "", period: "",
+            rating: reviewInfo?.currentRating ?? 0,
+            totalReviews: reviewInfo?.currentCount ?? 0,
+            dataSource: "sheet_only",
+          });
+          existingNames.add(shopName);
         }
-        // A1セルを8並列バッチで取得（gvizエンドポイント=軽量）
-        for (let i = 0; i < shopTabs.length; i += 8) {
-          const batch = shopTabs.slice(i, i + 8);
-          const results = await Promise.all(batch.map(async ({ gid }) => {
-            try {
-              const res = await fetch(
-                `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}&range=A1`,
-                { headers: { "User-Agent": "Mozilla/5.0" }, redirect: "follow", signal: AbortSignal.timeout(8000) }
-              );
-              if (!res.ok) return null;
-              const text = await res.text();
-              // gviz CSV: "値" 形式
-              return text.replace(/^"|"$/g, "").replace(/\\n/g, "").trim().split("\n")[0]?.replace(/^"|"$/g, "").trim() || null;
-            } catch { return null; }
-          }));
-          for (let j = 0; j < batch.length; j++) {
-            const shopName = results[j];
-            if (!shopName || existingNames.has(shopName)) continue;
-            // A1がエミナルクリニックまたはメンズエミナルで始まる場合のみ店舗として追加
-            if (!shopName.startsWith("エミナルクリニック") && !shopName.startsWith("メンズエミナル")) continue;
-            const reviewInfo = data.reviews.get(shopName);
-            shops.push({
-              id: shopName,
-              name: shopName,
-              address: "",
-              period: "",
-              rating: reviewInfo?.currentRating ?? 0,
-              totalReviews: reviewInfo?.currentCount ?? 0,
-              dataSource: "sheet_only",
-            });
-            existingNames.add(shopName);
-          }
-        }
-      } catch {}
-    }
+      }
+    } catch {}
   } catch {}
 
   // 既存店舗にdataSource="both"を設定
