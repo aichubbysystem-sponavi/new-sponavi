@@ -36,7 +36,16 @@ export default async function ReportPage({
   ]);
 
   if (!data) {
-    notFound();
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-[#0a1628] to-[#1a2a44] flex items-center justify-center">
+        <div className="bg-white rounded-2xl shadow-xl p-12 max-w-md text-center">
+          <div className="text-5xl mb-4">📊</div>
+          <h1 className="text-xl font-bold text-[#003D6B] mb-3">{shopName}</h1>
+          <p className="text-slate-500 text-sm mb-6">この店舗のレポートデータは準備中です。<br />パフォーマンスデータが登録されるとレポートが表示されます。</p>
+          <a href="/report" className="inline-block px-6 py-2 bg-[#003D6B] text-white rounded-lg text-sm font-semibold hover:bg-[#002a4a] transition">← レポート一覧に戻る</a>
+        </div>
+      </div>
+    );
   }
 
   return <ReportClient data={data} shopId={params.shopId} dataSource={source} googleReviewUrl={reviewUrl} />;

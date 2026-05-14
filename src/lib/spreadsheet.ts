@@ -685,12 +685,16 @@ export async function getShopsFromSpreadsheet(): Promise<ShopListItem[] | null> 
     // ── Sheet1: タブ名 = 店舗名（A1取得不要）──
     const SHEET1_ID = "1JpehMxL2I-fgef1sckNaY8RIUDIknvmT2OqhHj0my1k";
     const SHEET1_SKIP = [
-      /^RPA/, /住所/, /◯△/, /一覧/, /インサイト/, /ここから/, /これより/,
-      /テスト計測/, /毎月レポート/,
+      /^RPA/, /住所/, /◯△/, /〇△/, /一覧/, /インサイト/, /ここから/, /これより/,
+      /テスト計測/, /毎月レポート/, /←/, /→/, /新規店舗は追加/,
     ];
     try {
       const tabMap = await fetchTabGidMap(SHEET1_ID);
-      for (const tabName of Array.from(tabMap.keys())) {
+      for (const rawName of Array.from(tabMap.keys())) {
+        // HTMLエンコードをデコード（\x26=&, \x27=', \/=/ 等）
+        const tabName = rawName
+          .replace(/\\x26/g, "&").replace(/\\x27/g, "'")
+          .replace(/\\x22/g, '"').replace(/\\\//g, "/").trim();
         if (!tabName || SHEET1_SKIP.some(p => p.test(tabName))) continue;
         if (existingNames.has(tabName)) continue;
         const reviewInfo = data.reviews.get(tabName);
@@ -704,7 +708,7 @@ export async function getShopsFromSpreadsheet(): Promise<ShopListItem[] | null> 
       }
     } catch {}
 
-    // ── Sheet2: タブ名は略称 → A1セルからフルネーム取得 ──
+    // ── Sheet2: タブ名は略称 → A1セルからフルネーム取得（Supabaseキャッシュ併用）──
     const SHEET2_KW_ID = "10hvP7iSEyst0Bp_96eVsjicM4_qxVfG0BmMkDgFyg-Q";
     const SHEET2_SKIP = [
       /インサイト/, /全店舗/, /まとめ/, /ひな型/, /一覧/, /地方/,
@@ -718,14 +722,32 @@ export async function getShopsFromSpreadsheet(): Promise<ShopListItem[] | null> 
         if (!tabName || SHEET2_SKIP.some(p => p.test(tabName))) continue;
         shopTabs.push({ gid, tabName });
       }
-      // A1セルを8並列バッチで取得（gvizエンドポイント=軽量）
-      for (let i = 0; i < shopTabs.length; i += 8) {
-        const batch = shopTabs.slice(i, i + 8);
+
+      // Supabaseからキャッシュ済みマッピングを取得
+      const supabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+        process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+      );
+      const { data: cachedMappings } = await supabase
+        .from("sheet_tab_mapping")
+        .select("tab_gid, shop_name")
+        .eq("sheet_id", SHEET2_KW_ID);
+      const cachedMap = new Map<string, string>();
+      for (const m of cachedMappings || []) {
+        cachedMap.set(m.tab_gid, m.shop_name);
+      }
+
+      // キャッシュにないタブのみA1を取得
+      const uncachedTabs = shopTabs.filter(t => !cachedMap.has(t.gid));
+      const newMappings: { tab_gid: string; shop_name: string }[] = [];
+
+      for (let i = 0; i < uncachedTabs.length; i += 20) {
+        const batch = uncachedTabs.slice(i, i + 20);
         const results = await Promise.all(batch.map(async ({ gid }) => {
           try {
             const res = await fetch(
               `https://docs.google.com/spreadsheets/d/${SHEET2_KW_ID}/gviz/tq?tqx=out:csv&gid=${gid}&range=A1`,
-              { headers: { "User-Agent": "Mozilla/5.0" }, redirect: "follow", signal: AbortSignal.timeout(8000) }
+              { headers: { "User-Agent": "Mozilla/5.0" }, redirect: "follow", signal: AbortSignal.timeout(10000) }
             );
             if (!res.ok) return null;
             const text = await res.text();
@@ -733,21 +755,42 @@ export async function getShopsFromSpreadsheet(): Promise<ShopListItem[] | null> 
           } catch { return null; }
         }));
         for (let j = 0; j < batch.length; j++) {
-          const shopName = results[j];
-          if (!shopName || existingNames.has(shopName)) continue;
-          // エミナルクリニックまたはメンズエミナルで始まる場合のみ
-          if (!shopName.startsWith("エミナルクリニック") && !shopName.startsWith("メンズエミナル")) continue;
-          const reviewInfo = data.reviews.get(shopName);
-          shops.push({
-            id: shopName, name: shopName, address: "", period: "",
-            rating: reviewInfo?.currentRating ?? 0,
-            totalReviews: reviewInfo?.currentCount ?? 0,
-            dataSource: "sheet_only",
-          });
-          existingNames.add(shopName);
+          if (results[j]) {
+            cachedMap.set(batch[j].gid, results[j]!);
+            newMappings.push({ tab_gid: batch[j].gid, shop_name: results[j]! });
+          }
         }
       }
-    } catch {}
+
+      // 新規マッピングをSupabaseに保存
+      if (newMappings.length > 0) {
+        const rows = newMappings.map(m => ({
+          sheet_id: SHEET2_KW_ID,
+          tab_gid: m.tab_gid,
+          shop_name: m.shop_name,
+          updated_at: new Date().toISOString(),
+        }));
+        await supabase.from("sheet_tab_mapping").upsert(rows, { onConflict: "sheet_id,tab_gid" }).then(() => {});
+        console.log(`[spreadsheet] Cached ${newMappings.length} new tab→shop mappings`);
+      }
+
+      // 全タブの店舗名を追加
+      for (const tab of shopTabs) {
+        const shopName = cachedMap.get(tab.gid);
+        if (!shopName || existingNames.has(shopName)) continue;
+        if (!shopName.startsWith("エミナルクリニック") && !shopName.startsWith("メンズエミナル")) continue;
+        const reviewInfo = data.reviews.get(shopName);
+        shops.push({
+          id: shopName, name: shopName, address: "", period: "",
+          rating: reviewInfo?.currentRating ?? 0,
+          totalReviews: reviewInfo?.currentCount ?? 0,
+          dataSource: "sheet_only",
+        });
+        existingNames.add(shopName);
+      }
+    } catch (e) {
+      console.error("[spreadsheet] Sheet2 tab import error:", e);
+    }
   } catch {}
 
   // 既存店舗にdataSource="both"を設定
