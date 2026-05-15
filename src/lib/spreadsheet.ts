@@ -380,6 +380,66 @@ function generateReviewAnalysis(
  * 順位・順位履歴・検索語句を並列取得（パフォーマンス最適化）
  * shopId/locationFullPath指定時はGBP Performance APIから検索語句を優先取得
  */
+async function fetchGridRankingData(
+  shopId: string
+): Promise<import("./report-data").GridRankingReport> {
+  const empty: import("./report-data").GridRankingReport = { keywords: [], history: [] };
+  try {
+    const { createClient } = await import("@supabase/supabase-js");
+    const sb = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+    );
+    const { data: logs } = await sb
+      .from("grid_ranking_logs")
+      .select("keyword, grid_size, interval_m, results, measured_at")
+      .eq("shop_id", shopId)
+      .order("measured_at", { ascending: true });
+    if (!logs || logs.length === 0) return empty;
+
+    const keywordSet = new Set<string>();
+    const monthMap = new Map<string, import("./report-data").GridRankingSnapshot[]>();
+
+    for (const log of logs) {
+      keywordSet.add(log.keyword);
+      const d = new Date(log.measured_at);
+      const monthKey = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const results: import("./report-data").GridPoint[] = log.results || [];
+      const ranked = results.filter(r => r.rank > 0);
+      const avg = ranked.length > 0 ? ranked.reduce((s, r) => s + r.rank, 0) / ranked.length : 0;
+      const snapshot: import("./report-data").GridRankingSnapshot = {
+        keyword: log.keyword,
+        gridSize: log.grid_size,
+        intervalM: log.interval_m,
+        results,
+        measuredAt: log.measured_at,
+        avgRank: Math.round(avg * 10) / 10,
+      };
+      if (!monthMap.has(monthKey)) monthMap.set(monthKey, []);
+      monthMap.get(monthKey)!.push(snapshot);
+    }
+
+    // 同月・同キーワードで複数回計測がある場合、最新のものだけ残す
+    const history: import("./report-data").GridRankingMonthData[] = [];
+    for (const entry of Array.from(monthMap.entries())) {
+      const [month, snapshots] = entry;
+      const byKw = new Map<string, import("./report-data").GridRankingSnapshot>();
+      for (const s of snapshots) {
+        const existing = byKw.get(s.keyword);
+        if (!existing || new Date(s.measuredAt) > new Date(existing.measuredAt)) {
+          byKw.set(s.keyword, s);
+        }
+      }
+      history.push({ month, snapshots: Array.from(byKw.values()) });
+    }
+
+    return { keywords: Array.from(keywordSet), history };
+  } catch (e) {
+    console.error("[spreadsheet] grid ranking fetch error:", e);
+    return empty;
+  }
+}
+
 async function fetchAllExternalData(
   shopName: string,
   opts?: { shopId?: string; locationFullPath?: string }
@@ -387,8 +447,9 @@ async function fetchAllExternalData(
   keywords: Keyword[];
   rankingHistory: import("./report-data").RankingHistory;
   searchQueries: import("./report-data").ReportData["searchQueries"];
+  gridRanking?: import("./report-data").GridRankingReport;
 }> {
-  const [rankingResult, searchResult] = await Promise.all([
+  const [rankingResult, searchResult, gridResult] = await Promise.all([
     // 順位 + 履歴を1モジュールで同時取得
     (async () => {
       try {
@@ -422,12 +483,22 @@ async function fetchAllExternalData(
         return { latest: [] as { word: string; count: number }[], latestMonth: "", history: [] as any[] };
       }
     })(),
+    // グリッド順位計測
+    (async () => {
+      if (!opts?.shopId) return undefined;
+      try {
+        return await fetchGridRankingData(opts.shopId);
+      } catch {
+        return undefined;
+      }
+    })(),
   ]);
 
   return {
     keywords: rankingResult.keywords,
     rankingHistory: rankingResult.history,
     searchQueries: searchResult,
+    gridRanking: gridResult && gridResult.keywords.length > 0 ? gridResult : undefined,
   };
 }
 

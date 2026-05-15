@@ -58,6 +58,33 @@ export interface RankingHistory {
 export interface SearchQueryEntry { word: string; count: number; }
 export interface SearchQueryMonthData { month: string; keywords: SearchQueryEntry[]; }
 
+export interface GridPoint {
+  row: number;
+  col: number;
+  lat: number;
+  lng: number;
+  rank: number; // 0=未計測, -1=圏外
+}
+
+export interface GridRankingSnapshot {
+  keyword: string;
+  gridSize: number;
+  intervalM: number;
+  results: GridPoint[];
+  measuredAt: string; // ISO string
+  avgRank: number;
+}
+
+export interface GridRankingMonthData {
+  month: string; // "2026/04"
+  snapshots: GridRankingSnapshot[];
+}
+
+export interface GridRankingReport {
+  keywords: string[];
+  history: GridRankingMonthData[]; // 月別（古い順）
+}
+
 export interface ReportData {
   shop: ShopInfo;
   kpis: KPI[];
@@ -71,6 +98,7 @@ export interface ReportData {
   reviewAnalysis: ReviewAnalysis;
   comments: string[];
   searchQueries: { latest: SearchQueryEntry[]; latestMonth: string; history: SearchQueryMonthData[] };
+  gridRanking?: GridRankingReport;
 }
 
 export interface ShopListItem {
