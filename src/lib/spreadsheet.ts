@@ -690,11 +690,7 @@ export async function getShopsFromSpreadsheet(): Promise<ShopListItem[] | null> 
     ];
     try {
       const tabMap = await fetchTabGidMap(SHEET1_ID);
-      for (const rawName of Array.from(tabMap.keys())) {
-        // HTMLエンコードをデコード（\x26=&, \x27=', \/=/ 等）
-        const tabName = rawName
-          .replace(/\\x26/g, "&").replace(/\\x27/g, "'")
-          .replace(/\\x22/g, '"').replace(/\\\//g, "/").trim();
+      for (const tabName of Array.from(tabMap.keys())) {
         if (!tabName || SHEET1_SKIP.some(p => p.test(tabName))) continue;
         if (existingNames.has(tabName)) continue;
         const reviewInfo = data.reviews.get(tabName);

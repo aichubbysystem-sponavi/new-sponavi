@@ -113,10 +113,17 @@ async function trySheetByGid(sheetId: string, gid: string, shopName: string): Pr
   } catch { return []; }
 }
 
-let tabMapCache: { map: Map<string, string>; ts: number } | null = null;
+let tabMapCache: { map: Map<string, string>; ts: number; sheetId: string } | null = null;
+
+function decodeJsEscapes(s: string): string {
+  return s
+    .replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/\\\//g, "/");
+}
 
 export async function fetchTabGidMap(sheetId: string): Promise<Map<string, string>> {
-  if (tabMapCache && Date.now() - tabMapCache.ts < 1800000) return tabMapCache.map;
+  if (tabMapCache && tabMapCache.sheetId === sheetId && Date.now() - tabMapCache.ts < 1800000) return tabMapCache.map;
   const res = await fetch(`https://docs.google.com/spreadsheets/d/${sheetId}/htmlview`, {
     headers: { "User-Agent": UA }, redirect: "follow",
   });
@@ -125,8 +132,8 @@ export async function fetchTabGidMap(sheetId: string): Promise<Map<string, strin
   const map = new Map<string, string>();
   const regex = /name:\s*"([^"]+)"[^}]*?gid:\s*"(\d+)"/g;
   let match;
-  while ((match = regex.exec(html)) !== null) map.set(match[1], match[2]);
-  tabMapCache = { map, ts: Date.now() };
+  while ((match = regex.exec(html)) !== null) map.set(decodeJsEscapes(match[1]), match[2]);
+  tabMapCache = { map, ts: Date.now(), sheetId };
   return map;
 }
 

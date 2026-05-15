@@ -59,6 +59,9 @@ export async function writeShopListToCache(shops: ShopListItem[]): Promise<void>
 
   if (shops.length === 0) return;
 
+  // シートのみ店舗の古いレコードを削除（再同期で正しい名前に置き換え）
+  await sb.from("report_shop_list").delete().eq("data_source", "sheet_only");
+
   const rows = shops.map(s => ({
     id: s.id,
     name: s.name,
