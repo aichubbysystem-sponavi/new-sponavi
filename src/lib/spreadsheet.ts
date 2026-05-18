@@ -390,11 +390,13 @@ async function fetchGridRankingData(
       process.env.NEXT_PUBLIC_SUPABASE_URL || "",
       process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
     );
-    const { data: logs } = await sb
+    console.log(`[grid-ranking] fetching for shopId=${shopId}`);
+    const { data: logs, error } = await sb
       .from("grid_ranking_logs")
       .select("keyword, grid_size, interval_m, results, measured_at")
       .eq("shop_id", shopId)
       .order("measured_at", { ascending: true });
+    console.log(`[grid-ranking] logs=${logs?.length ?? 0}, error=${error?.message ?? "none"}`);
     if (!logs || logs.length === 0) return empty;
 
     const keywordSet = new Set<string>();
