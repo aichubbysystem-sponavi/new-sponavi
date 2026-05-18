@@ -33,20 +33,20 @@ export async function getShopList(): Promise<{
 }
 
 /**
- * 店舗名からshops.idを取得
+ * 店舗名からshops.idを全て取得（同名重複対策）
  */
-async function getShopDbId(shopName: string): Promise<string | null> {
+async function getShopDbIds(shopName: string): Promise<string[]> {
   try {
     const sb = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || "",
       process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
     );
+    // 完全一致で全件取得
     const { data } = await sb
       .from("shops")
       .select("id")
-      .eq("name", shopName)
-      .maybeSingle();
-    if (data?.id) return data.id;
+      .eq("name", shopName);
+    if (data && data.length > 0) return data.map(d => d.id);
     // 部分一致フォールバック
     const simpleName = shopName.replace(/[【】\[\]（）()]/g, " ").replace(/\s+/g, " ").trim();
     const { data: fuzzy } = await sb
@@ -57,18 +57,22 @@ async function getShopDbId(shopName: string): Promise<string | null> {
     if (fuzzy && fuzzy.length > 0) {
       const normalize = (s: string) => s.replace(/[【】\[\]（）()_\s]/g, "").toLowerCase();
       const target = normalize(shopName);
-      const match = fuzzy.find(s => normalize(s.name) === target)
-        || fuzzy.find(s => target.includes(normalize(s.name)) || normalize(s.name).includes(target));
-      return match?.id || null;
+      const matches = fuzzy.filter(s =>
+        normalize(s.name) === target ||
+        target.includes(normalize(s.name)) ||
+        normalize(s.name).includes(target)
+      );
+      if (matches.length > 0) return matches.map(m => m.id);
     }
   } catch {}
-  return null;
+  return [];
 }
 
 /**
  * グリッド順位データをリアルタイム取得
+ * shopIdsを複数受け取り、いずれかにマッチするログを取得（同名の重複店舗対策）
  */
-async function fetchGridRankingLive(shopDbId: string): Promise<GridRankingReport | undefined> {
+async function fetchGridRankingLive(shopIds: string[]): Promise<GridRankingReport | undefined> {
   try {
     const sb = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || "",
@@ -77,9 +81,9 @@ async function fetchGridRankingLive(shopDbId: string): Promise<GridRankingReport
     const { data: logs } = await sb
       .from("grid_ranking_logs")
       .select("keyword, grid_size, interval_m, results, measured_at")
-      .eq("shop_id", shopDbId)
+      .in("shop_id", shopIds)
       .order("measured_at", { ascending: true });
-    console.log(`[report-api] grid ranking live: shopDbId=${shopDbId}, logs=${logs?.length ?? 0}`);
+    console.log(`[report-api] grid ranking live: shopIds=${JSON.stringify(shopIds)}, logs=${logs?.length ?? 0}`);
     if (!logs || logs.length === 0) return undefined;
 
     const keywordSet = new Set<string>();
@@ -141,9 +145,9 @@ export async function getReportData(shopId: string): Promise<{
     if (cached) {
       // gridRankingはリアルタイムで上書き
       try {
-        const dbId = await getShopDbId(shopName);
-        if (dbId) {
-          const gridRanking = await fetchGridRankingLive(dbId);
+        const dbIds = await getShopDbIds(shopName);
+        if (dbIds.length > 0) {
+          const gridRanking = await fetchGridRankingLive(dbIds);
           cached.gridRanking = gridRanking;
         }
       } catch {}
