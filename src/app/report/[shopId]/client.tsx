@@ -707,51 +707,79 @@ export default function ReportClient({
               ))}
             </div>
             <div style={stitleStyle}>多地点順位 —「{activeKw}」{monthData ? ` (${monthData.month})` : ""}</div>
-            <div style={{ display: "flex", gap: 20, flex: 1, minHeight: 0 }}>
-              <div style={{ flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-                {snapshot ? (
-                  <>
-                    <div style={{ display: "grid", gridTemplateColumns: `repeat(${gridSize}, 1fr)`, gap: 3 }}>
-                      {Array.from({ length: gridSize * gridSize }).map((_, idx) => {
-                        const row = Math.floor(idx / gridSize);
-                        const col = idx % gridSize;
-                        const pt = snapshot.results.find(r => r.row === row && r.col === col);
-                        const rank = pt?.rank ?? 0;
-                        const isCenter = row === Math.floor(gridSize / 2) && col === Math.floor(gridSize / 2);
-                        const c = gridRankColor(rank);
-                        return (
-                          <div key={idx} style={{
-                            width: gridSize <= 5 ? 52 : gridSize <= 7 ? 42 : 34,
-                            height: gridSize <= 5 ? 52 : gridSize <= 7 ? 42 : 34,
-                            background: c.bg, color: c.color, display: "flex", alignItems: "center", justifyContent: "center",
-                            borderRadius: 6, fontSize: gridSize <= 5 ? 16 : 13, fontWeight: 800,
-                            border: isCenter ? "3px solid #e94560" : "1px solid rgba(0,0,0,.06)",
-                            boxShadow: isCenter ? "0 0 0 2px rgba(233,69,96,.3)" : undefined,
-                          }}>
-                            {rank > 0 ? rank : "-"}
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <div style={{ display: "flex", gap: 10, fontSize: 10, color: "#888" }}>
-                      <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: "#dcfce7", display: "inline-block" }} />1-3位</span>
-                      <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: "#dbeafe", display: "inline-block" }} />4-10位</span>
-                      <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: "#fef3c7", display: "inline-block" }} />11-20位</span>
-                      <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: "#fee2e2", display: "inline-block" }} />21位~</span>
-                    </div>
-                    <div style={{ fontSize: 12, color: "#555", textAlign: "center" }}>
-                      平均順位: <span style={{ fontSize: 22, fontWeight: 900, color: "#e94560" }}>{snapshot.avgRank}</span>位
-                      {prevSnapshot && (() => {
-                        const diff = prevSnapshot.avgRank - snapshot.avgRank;
-                        return diff !== 0 ? (
-                          <span style={{ marginLeft: 8, fontSize: 13, fontWeight: 700, color: diff > 0 ? "#0a8f3c" : "#c0392b" }}>
-                            {diff > 0 ? `↑${diff.toFixed(1)}` : `↓${Math.abs(diff).toFixed(1)}`}
-                          </span>
-                        ) : null;
-                      })()}
-                    </div>
-                  </>
-                ) : (
+            <div style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }}>
+              <div style={{ flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                {snapshot && snapshot.results.length > 0 ? (() => {
+                  const pts = snapshot.results;
+                  const centerPt = pts.find(p => p.row === Math.floor(gridSize / 2) && p.col === Math.floor(gridSize / 2));
+                  const centerLat = centerPt?.lat ?? pts.reduce((s, p) => s + p.lat, 0) / pts.length;
+                  const centerLng = centerPt?.lng ?? pts.reduce((s, p) => s + p.lng, 0) / pts.length;
+                  const mapW = 420;
+                  const mapH = 420;
+                  const totalSpanM = (gridSize - 1) * snapshot.intervalM;
+                  const zoom = Math.floor(Math.log2(156543.03 * Math.cos(centerLat * Math.PI / 180) * mapW / (totalSpanM * 1.6)));
+                  const mapsKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "";
+                  const mapUrl = mapsKey
+                    ? `https://maps.googleapis.com/maps/api/staticmap?center=${centerLat},${centerLng}&zoom=${zoom}&size=${mapW}x${mapH}&maptype=roadmap&style=feature:all|saturation:-30&key=${mapsKey}`
+                    : "";
+                  const metersPerPx = 156543.03 * Math.cos(centerLat * Math.PI / 180) / Math.pow(2, zoom);
+                  const circleSize = gridSize <= 5 ? 40 : gridSize <= 7 ? 34 : 28;
+                  return (
+                    <>
+                      <div style={{ position: "relative", width: mapW, height: mapH, borderRadius: 12, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,.15)" }}>
+                        {mapUrl && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={mapUrl} alt="map" width={mapW} height={mapH} style={{ position: "absolute", top: 0, left: 0, width: mapW, height: mapH }} />
+                        )}
+                        {!mapUrl && <div style={{ position: "absolute", top: 0, left: 0, width: mapW, height: mapH, background: "linear-gradient(135deg,#e8edf5,#d0dae8)" }} />}
+                        {pts.map((pt, idx) => {
+                          const dLat = pt.lat - centerLat;
+                          const dLng = pt.lng - centerLng;
+                          const pxX = mapW / 2 + (dLng * 111320 * Math.cos(centerLat * Math.PI / 180)) / metersPerPx;
+                          const pxY = mapH / 2 - (dLat * 111320) / metersPerPx;
+                          const rank = pt.rank;
+                          const isCenter = pt.row === Math.floor(gridSize / 2) && pt.col === Math.floor(gridSize / 2);
+                          const pinColor = rank <= 0 ? "#6B7280" : rank <= 3 ? "#16A34A" : rank <= 10 ? "#2563EB" : rank <= 20 ? "#F59E0B" : "#EF4444";
+                          return (
+                            <div key={idx} style={{
+                              position: "absolute",
+                              left: pxX - circleSize / 2, top: pxY - circleSize / 2,
+                              width: circleSize, height: circleSize,
+                              borderRadius: "50%",
+                              background: pinColor,
+                              color: "#fff",
+                              display: "flex", alignItems: "center", justifyContent: "center",
+                              fontSize: circleSize <= 28 ? 10 : 12, fontWeight: 800,
+                              border: isCenter ? "3px solid #fff" : "2px solid rgba(255,255,255,.7)",
+                              boxShadow: isCenter ? "0 0 0 3px #e94560, 0 2px 6px rgba(0,0,0,.3)" : "0 1px 4px rgba(0,0,0,.3)",
+                              zIndex: isCenter ? 10 : 1,
+                            }}>
+                              {rank > 0 ? rank : "-"}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div style={{ display: "flex", gap: 10, fontSize: 10, color: "#555", marginTop: 2 }}>
+                        <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#16A34A", display: "inline-block" }} />1-3位</span>
+                        <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#2563EB", display: "inline-block" }} />4-10位</span>
+                        <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#F59E0B", display: "inline-block" }} />11-20位</span>
+                        <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#EF4444", display: "inline-block" }} />21位~</span>
+                        <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#6B7280", display: "inline-block" }} />圏外</span>
+                      </div>
+                      <div style={{ fontSize: 12, color: "#555", textAlign: "center" }}>
+                        平均順位: <span style={{ fontSize: 22, fontWeight: 900, color: "#e94560" }}>{snapshot.avgRank}</span>位
+                        {prevSnapshot && (() => {
+                          const diff = prevSnapshot.avgRank - snapshot.avgRank;
+                          return diff !== 0 ? (
+                            <span style={{ marginLeft: 8, fontSize: 13, fontWeight: 700, color: diff > 0 ? "#0a8f3c" : "#c0392b" }}>
+                              {diff > 0 ? `↑${diff.toFixed(1)}` : `↓${Math.abs(diff).toFixed(1)}`}
+                            </span>
+                          ) : null;
+                        })()}
+                      </div>
+                    </>
+                  );
+                })() : (
                   <div style={{ padding: 40, color: "#999", fontSize: 13 }}>この月のデータなし</div>
                 )}
               </div>
