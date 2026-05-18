@@ -656,6 +656,188 @@ export default function ReportClient({
         </div>
       ); })()}
 
+      {/* ════ 多地点順位計測（キーワード切り替え・月切り替え） ════ */}
+      {showGridRanking && (() => { pageNum++;
+        const gr = gridRanking!;
+        const activeKw = gr.keywords[gridKwIdx] || gr.keywords[0];
+        const activeMonthI = gridMonthIdx < 0 || gridMonthIdx >= gr.history.length ? gr.history.length - 1 : gridMonthIdx;
+        const monthData = gr.history[activeMonthI];
+        const snapshot = monthData?.snapshots.find(s => s.keyword === activeKw);
+        const prevMonthData = activeMonthI > 0 ? gr.history[activeMonthI - 1] : null;
+        const prevSnapshot = prevMonthData?.snapshots.find(s => s.keyword === activeKw);
+        const trendLabels = gr.history.map(h => h.month.replace(/^\d{4}\//, "") + "月");
+        const trendData = gr.history.map(h => {
+          const s = h.snapshots.find(s => s.keyword === activeKw);
+          return s ? s.avgRank : null;
+        });
+        const gridSize = snapshot?.gridSize || 7;
+        const gridRankColor = (rank: number) => {
+          if (rank <= 0) return { bg: "#f3f4f6", color: "#9ca3af" };
+          if (rank <= 3) return { bg: "#dcfce7", color: "#15803d" };
+          if (rank <= 10) return { bg: "#dbeafe", color: "#1d4ed8" };
+          if (rank <= 20) return { bg: "#fef3c7", color: "#b45309" };
+          return { bg: "#fee2e2", color: "#dc2626" };
+        };
+        return (
+        <div style={slideStyle} className="slide">
+          <div style={slideBarStyle}>
+            <span>{shop.name} — 多地点順位計測</span>
+            <span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
+          </div>
+          <div style={{ ...slideBodyStyle, padding: "20px 36px", gap: 12 }}>
+            <div className="no-print" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#0f3460" }}>KW:</span>
+              {gr.keywords.map((kw, i) => (
+                <button key={kw} onClick={() => setGridKwIdx(i)}
+                  style={{ padding: "5px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer",
+                    background: i === (gridKwIdx < gr.keywords.length ? gridKwIdx : 0) ? "#0f3460" : "#e8edf3",
+                    color: i === (gridKwIdx < gr.keywords.length ? gridKwIdx : 0) ? "#fff" : "#555" }}>
+                  {kw}
+                </button>
+              ))}
+              <div style={{ width: 1, height: 20, background: "#ddd", margin: "0 4px" }} />
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#0f3460" }}>月:</span>
+              {gr.history.map((h, i) => (
+                <button key={h.month} onClick={() => setGridMonthIdx(i)}
+                  style={{ padding: "4px 10px", borderRadius: 14, fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer",
+                    background: i === activeMonthI ? "#e94560" : "#f0f2f5",
+                    color: i === activeMonthI ? "#fff" : "#666" }}>
+                  {h.month.replace(/^\d{4}\//, "")}月
+                </button>
+              ))}
+            </div>
+            <div style={stitleStyle}>多地点順位 —「{activeKw}」{monthData ? ` (${monthData.month})` : ""}</div>
+            <div style={{ display: "flex", gap: 20, flex: 1, minHeight: 0 }}>
+              <div style={{ flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                {snapshot ? (
+                  <>
+                    <div style={{ display: "grid", gridTemplateColumns: `repeat(${gridSize}, 1fr)`, gap: 3 }}>
+                      {Array.from({ length: gridSize * gridSize }).map((_, idx) => {
+                        const row = Math.floor(idx / gridSize);
+                        const col = idx % gridSize;
+                        const pt = snapshot.results.find(r => r.row === row && r.col === col);
+                        const rank = pt?.rank ?? 0;
+                        const isCenter = row === Math.floor(gridSize / 2) && col === Math.floor(gridSize / 2);
+                        const c = gridRankColor(rank);
+                        return (
+                          <div key={idx} style={{
+                            width: gridSize <= 5 ? 52 : gridSize <= 7 ? 42 : 34,
+                            height: gridSize <= 5 ? 52 : gridSize <= 7 ? 42 : 34,
+                            background: c.bg, color: c.color, display: "flex", alignItems: "center", justifyContent: "center",
+                            borderRadius: 6, fontSize: gridSize <= 5 ? 16 : 13, fontWeight: 800,
+                            border: isCenter ? "3px solid #e94560" : "1px solid rgba(0,0,0,.06)",
+                            boxShadow: isCenter ? "0 0 0 2px rgba(233,69,96,.3)" : undefined,
+                          }}>
+                            {rank > 0 ? rank : "-"}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display: "flex", gap: 10, fontSize: 10, color: "#888" }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: "#dcfce7", display: "inline-block" }} />1-3位</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: "#dbeafe", display: "inline-block" }} />4-10位</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: "#fef3c7", display: "inline-block" }} />11-20位</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: "#fee2e2", display: "inline-block" }} />21位~</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: "#555", textAlign: "center" }}>
+                      平均順位: <span style={{ fontSize: 22, fontWeight: 900, color: "#e94560" }}>{snapshot.avgRank}</span>位
+                      {prevSnapshot && (() => {
+                        const diff = prevSnapshot.avgRank - snapshot.avgRank;
+                        return diff !== 0 ? (
+                          <span style={{ marginLeft: 8, fontSize: 13, fontWeight: 700, color: diff > 0 ? "#0a8f3c" : "#c0392b" }}>
+                            {diff > 0 ? `↑${diff.toFixed(1)}` : `↓${Math.abs(diff).toFixed(1)}`}
+                          </span>
+                        ) : null;
+                      })()}
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ padding: 40, color: "#999", fontSize: 13 }}>この月のデータなし</div>
+                )}
+              </div>
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8, minWidth: 0 }}>
+                <h4 style={{ fontSize: 13, fontWeight: 700, color: "#0f3460", margin: 0 }}>「{activeKw}」月別平均順位</h4>
+                <div style={{ overflow: "auto", borderRadius: 10, boxShadow: "0 1px 4px rgba(0,0,0,.04)", flex: 1 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
+                    <thead>
+                      <tr>
+                        {trendLabels.map((l, i) => (
+                          <th key={i} style={{ background: i === activeMonthI ? "#e94560" : "#0f3460", color: "#fff", padding: "10px 6px", textAlign: "center", fontWeight: 600, fontSize: 11, whiteSpace: "nowrap" }}>{l}</th>
+                        ))}
+                        <th style={{ background: "#0f3460", color: "#fff", padding: "10px 6px", textAlign: "center", fontWeight: 600, fontSize: 11 }}>変動</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        {trendData.map((v, i) => (
+                          <td key={i} style={{
+                            padding: "12px 6px", textAlign: "center", fontSize: 15, fontWeight: v !== null && v <= 5 ? 900 : 600,
+                            color: v === null ? "#ddd" : v <= 3 ? "#15803d" : v <= 10 ? "#1d4ed8" : v <= 20 ? "#b45309" : "#999",
+                            background: i === activeMonthI ? "#fff8f0" : undefined, borderBottom: "1px solid #eee",
+                          }}>
+                            {v !== null ? v : "-"}
+                          </td>
+                        ))}
+                        {(() => {
+                          const valid = trendData.filter((v): v is number => v !== null);
+                          if (valid.length < 2) return <td style={{ padding: "12px 6px", textAlign: "center", color: "#888", borderBottom: "1px solid #eee" }}>→</td>;
+                          const diff = valid[valid.length - 2] - valid[valid.length - 1];
+                          return (
+                            <td style={{ padding: "12px 6px", textAlign: "center", fontSize: 13, fontWeight: 700, borderBottom: "1px solid #eee",
+                              color: diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
+                              {diff > 0 ? `↑${diff.toFixed(1)}` : diff < 0 ? `↓${Math.abs(diff).toFixed(1)}` : "→"}
+                            </td>
+                          );
+                        })()}
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                {monthData && monthData.snapshots.length > 1 && (
+                  <>
+                    <h4 style={{ fontSize: 13, fontWeight: 700, color: "#0f3460", margin: "8px 0 0" }}>全キーワード比較（{monthData.month}）</h4>
+                    <div style={{ overflow: "auto", borderRadius: 10, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
+                        <thead>
+                          <tr>
+                            <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "left", fontSize: 11 }}>キーワード</th>
+                            <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "center", fontSize: 11 }}>平均順位</th>
+                            <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "center", fontSize: 11 }}>前月比</th>
+                            <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "center", fontSize: 11 }}>計測地点</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {monthData.snapshots.map((s, si) => {
+                            const ps = prevMonthData?.snapshots.find(p => p.keyword === s.keyword);
+                            const diff = ps ? ps.avgRank - s.avgRank : 0;
+                            return (
+                              <tr key={si} style={{ background: s.keyword === activeKw ? "#fff8f0" : si % 2 === 0 ? "#fff" : "#f8f9fb" }}>
+                                <td style={{ padding: "8px 12px", fontWeight: s.keyword === activeKw ? 700 : 500, fontSize: 12, borderBottom: "1px solid #eee" }}>{s.keyword}</td>
+                                <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 16, fontWeight: 800, borderBottom: "1px solid #eee",
+                                  color: s.avgRank <= 3 ? "#15803d" : s.avgRank <= 10 ? "#1d4ed8" : s.avgRank <= 20 ? "#b45309" : "#999" }}>
+                                  {s.avgRank}
+                                </td>
+                                <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 12, fontWeight: 700, borderBottom: "1px solid #eee",
+                                  color: diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
+                                  {ps ? (diff > 0 ? `↑${diff.toFixed(1)}` : diff < 0 ? `↓${Math.abs(diff).toFixed(1)}` : "→") : "-"}
+                                </td>
+                                <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 11, color: "#888", borderBottom: "1px solid #eee" }}>
+                                  {s.gridSize}×{s.gridSize}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      ); })()}
+
       {/* ════ 検索語句（月切り替え対応） ════ */}
       {showSearchQueries && (() => { pageNum++;
         const sqHistory: { month: string; keywords: { word: string; count: number }[] }[] = Array.isArray(searchQueries.history) ? searchQueries.history : [];
@@ -849,198 +1031,6 @@ export default function ReportClient({
           </div>
         </div>
       </div>
-
-      {/* ════ 多地点順位計測（キーワード切り替え・月切り替え） ════ */}
-      {showGridRanking && (() => { pageNum++;
-        const gr = gridRanking!;
-        const activeKw = gr.keywords[gridKwIdx] || gr.keywords[0];
-        const activeMonthI = gridMonthIdx < 0 || gridMonthIdx >= gr.history.length ? gr.history.length - 1 : gridMonthIdx;
-        const monthData = gr.history[activeMonthI];
-        const snapshot = monthData?.snapshots.find(s => s.keyword === activeKw);
-        // 前月データ
-        const prevMonthData = activeMonthI > 0 ? gr.history[activeMonthI - 1] : null;
-        const prevSnapshot = prevMonthData?.snapshots.find(s => s.keyword === activeKw);
-        // 月別平均順位推移（選択キーワード）
-        const trendLabels = gr.history.map(h => h.month.replace(/^\d{4}\//, "") + "月");
-        const trendData = gr.history.map(h => {
-          const s = h.snapshots.find(s => s.keyword === activeKw);
-          return s ? s.avgRank : null;
-        });
-        const gridSize = snapshot?.gridSize || 7;
-        const gridRankColor = (rank: number) => {
-          if (rank <= 0) return { bg: "#f3f4f6", color: "#9ca3af" };
-          if (rank <= 3) return { bg: "#dcfce7", color: "#15803d" };
-          if (rank <= 10) return { bg: "#dbeafe", color: "#1d4ed8" };
-          if (rank <= 20) return { bg: "#fef3c7", color: "#b45309" };
-          return { bg: "#fee2e2", color: "#dc2626" };
-        };
-        return (
-        <div style={slideStyle} className="slide">
-          <div style={slideBarStyle}>
-            <span>{shop.name} — 多地点順位計測</span>
-            <span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
-          </div>
-          <div style={{ ...slideBodyStyle, padding: "20px 36px", gap: 12 }}>
-            {/* キーワード切り替え + 月切り替え */}
-            <div className="no-print" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: "#0f3460" }}>KW:</span>
-              {gr.keywords.map((kw, i) => (
-                <button key={kw} onClick={() => setGridKwIdx(i)}
-                  style={{ padding: "5px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer",
-                    background: i === (gridKwIdx < gr.keywords.length ? gridKwIdx : 0) ? "#0f3460" : "#e8edf3",
-                    color: i === (gridKwIdx < gr.keywords.length ? gridKwIdx : 0) ? "#fff" : "#555" }}>
-                  {kw}
-                </button>
-              ))}
-              <div style={{ width: 1, height: 20, background: "#ddd", margin: "0 4px" }} />
-              <span style={{ fontSize: 12, fontWeight: 700, color: "#0f3460" }}>月:</span>
-              {gr.history.map((h, i) => (
-                <button key={h.month} onClick={() => setGridMonthIdx(i)}
-                  style={{ padding: "4px 10px", borderRadius: 14, fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer",
-                    background: i === activeMonthI ? "#e94560" : "#f0f2f5",
-                    color: i === activeMonthI ? "#fff" : "#666" }}>
-                  {h.month.replace(/^\d{4}\//, "")}月
-                </button>
-              ))}
-            </div>
-            {/* 印刷用タイトル */}
-            <div style={stitleStyle}>多地点順位 —「{activeKw}」{monthData ? ` (${monthData.month})` : ""}</div>
-
-            <div style={{ display: "flex", gap: 20, flex: 1, minHeight: 0 }}>
-              {/* グリッドマップ */}
-              <div style={{ flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-                {snapshot ? (
-                  <>
-                    <div style={{ display: "grid", gridTemplateColumns: `repeat(${gridSize}, 1fr)`, gap: 3 }}>
-                      {Array.from({ length: gridSize * gridSize }).map((_, idx) => {
-                        const row = Math.floor(idx / gridSize);
-                        const col = idx % gridSize;
-                        const pt = snapshot.results.find(r => r.row === row && r.col === col);
-                        const rank = pt?.rank ?? 0;
-                        const isCenter = row === Math.floor(gridSize / 2) && col === Math.floor(gridSize / 2);
-                        const c = gridRankColor(rank);
-                        return (
-                          <div key={idx} style={{
-                            width: gridSize <= 5 ? 52 : gridSize <= 7 ? 42 : 34,
-                            height: gridSize <= 5 ? 52 : gridSize <= 7 ? 42 : 34,
-                            background: c.bg, color: c.color, display: "flex", alignItems: "center", justifyContent: "center",
-                            borderRadius: 6, fontSize: gridSize <= 5 ? 16 : 13, fontWeight: 800,
-                            border: isCenter ? "3px solid #e94560" : "1px solid rgba(0,0,0,.06)",
-                            boxShadow: isCenter ? "0 0 0 2px rgba(233,69,96,.3)" : undefined,
-                          }}>
-                            {rank > 0 ? rank : "-"}
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <div style={{ display: "flex", gap: 10, fontSize: 10, color: "#888" }}>
-                      <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: "#dcfce7", display: "inline-block" }} />1-3位</span>
-                      <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: "#dbeafe", display: "inline-block" }} />4-10位</span>
-                      <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: "#fef3c7", display: "inline-block" }} />11-20位</span>
-                      <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: "#fee2e2", display: "inline-block" }} />21位~</span>
-                    </div>
-                    <div style={{ fontSize: 12, color: "#555", textAlign: "center" }}>
-                      平均順位: <span style={{ fontSize: 22, fontWeight: 900, color: "#e94560" }}>{snapshot.avgRank}</span>位
-                      {prevSnapshot && (() => {
-                        const diff = prevSnapshot.avgRank - snapshot.avgRank;
-                        return diff !== 0 ? (
-                          <span style={{ marginLeft: 8, fontSize: 13, fontWeight: 700, color: diff > 0 ? "#0a8f3c" : "#c0392b" }}>
-                            {diff > 0 ? `↑${diff.toFixed(1)}` : `↓${Math.abs(diff).toFixed(1)}`}
-                          </span>
-                        ) : null;
-                      })()}
-                    </div>
-                  </>
-                ) : (
-                  <div style={{ padding: 40, color: "#999", fontSize: 13 }}>この月のデータなし</div>
-                )}
-              </div>
-
-              {/* 月別平均順位推移テーブル */}
-              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8, minWidth: 0 }}>
-                <h4 style={{ fontSize: 13, fontWeight: 700, color: "#0f3460", margin: 0 }}>「{activeKw}」月別平均順位</h4>
-                <div style={{ overflow: "auto", borderRadius: 10, boxShadow: "0 1px 4px rgba(0,0,0,.04)", flex: 1 }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
-                    <thead>
-                      <tr>
-                        {trendLabels.map((l, i) => (
-                          <th key={i} style={{ background: i === activeMonthI ? "#e94560" : "#0f3460", color: "#fff", padding: "10px 6px", textAlign: "center", fontWeight: 600, fontSize: 11, whiteSpace: "nowrap" }}>{l}</th>
-                        ))}
-                        <th style={{ background: "#0f3460", color: "#fff", padding: "10px 6px", textAlign: "center", fontWeight: 600, fontSize: 11 }}>変動</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        {trendData.map((v, i) => (
-                          <td key={i} style={{
-                            padding: "12px 6px", textAlign: "center", fontSize: 15, fontWeight: v !== null && v <= 5 ? 900 : 600,
-                            color: v === null ? "#ddd" : v <= 3 ? "#15803d" : v <= 10 ? "#1d4ed8" : v <= 20 ? "#b45309" : "#999",
-                            background: i === activeMonthI ? "#fff8f0" : undefined, borderBottom: "1px solid #eee",
-                          }}>
-                            {v !== null ? v : "-"}
-                          </td>
-                        ))}
-                        {(() => {
-                          const valid = trendData.filter((v): v is number => v !== null);
-                          if (valid.length < 2) return <td style={{ padding: "12px 6px", textAlign: "center", color: "#888", borderBottom: "1px solid #eee" }}>→</td>;
-                          const diff = valid[valid.length - 2] - valid[valid.length - 1];
-                          return (
-                            <td style={{ padding: "12px 6px", textAlign: "center", fontSize: 13, fontWeight: 700, borderBottom: "1px solid #eee",
-                              color: diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
-                              {diff > 0 ? `↑${diff.toFixed(1)}` : diff < 0 ? `↓${Math.abs(diff).toFixed(1)}` : "→"}
-                            </td>
-                          );
-                        })()}
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* 全キーワード比較テーブル（当月） */}
-                {monthData && monthData.snapshots.length > 1 && (
-                  <>
-                    <h4 style={{ fontSize: 13, fontWeight: 700, color: "#0f3460", margin: "8px 0 0" }}>全キーワード比較（{monthData.month}）</h4>
-                    <div style={{ overflow: "auto", borderRadius: 10, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
-                      <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
-                        <thead>
-                          <tr>
-                            <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "left", fontSize: 11 }}>キーワード</th>
-                            <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "center", fontSize: 11 }}>平均順位</th>
-                            <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "center", fontSize: 11 }}>前月比</th>
-                            <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "center", fontSize: 11 }}>計測地点</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {monthData.snapshots.map((s, si) => {
-                            const ps = prevMonthData?.snapshots.find(p => p.keyword === s.keyword);
-                            const diff = ps ? ps.avgRank - s.avgRank : 0;
-                            return (
-                              <tr key={si} style={{ background: s.keyword === activeKw ? "#fff8f0" : si % 2 === 0 ? "#fff" : "#f8f9fb" }}>
-                                <td style={{ padding: "8px 12px", fontWeight: s.keyword === activeKw ? 700 : 500, fontSize: 12, borderBottom: "1px solid #eee" }}>{s.keyword}</td>
-                                <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 16, fontWeight: 800, borderBottom: "1px solid #eee",
-                                  color: s.avgRank <= 3 ? "#15803d" : s.avgRank <= 10 ? "#1d4ed8" : s.avgRank <= 20 ? "#b45309" : "#999" }}>
-                                  {s.avgRank}
-                                </td>
-                                <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 12, fontWeight: 700, borderBottom: "1px solid #eee",
-                                  color: diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
-                                  {ps ? (diff > 0 ? `↑${diff.toFixed(1)}` : diff < 0 ? `↓${Math.abs(diff).toFixed(1)}` : "→") : "-"}
-                                </td>
-                                <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 11, color: "#888", borderBottom: "1px solid #eee" }}>
-                                  {s.gridSize}×{s.gridSize}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      ); })()}
 
       {/* ════ P11: 担当者コメント ════ */}
       {(() => { pageNum++; return null; })()}
