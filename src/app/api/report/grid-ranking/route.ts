@@ -154,14 +154,42 @@ export async function PUT(request: NextRequest) {
 
 /**
  * GET /api/report/grid-ranking - 過去のグリッド計測結果を取得
+ * ?shopId=xxx or ?shopName=xxx（デバッグ用: 店舗名からID逆引き）
+ * ?debug=1 で全grid_ranking_logsのshop_id一覧を返す
  */
 export async function GET(request: NextRequest) {
-  const shopId = request.nextUrl.searchParams.get("shopId");
-  if (!shopId) {
-    return NextResponse.json({ error: "shopIdが必要です" }, { status: 400 });
+  const supabase = getSupabase();
+  const debug = request.nextUrl.searchParams.get("debug");
+
+  if (debug === "1") {
+    const { data: allLogs } = await supabase
+      .from("grid_ranking_logs")
+      .select("shop_id, keyword, measured_at")
+      .order("measured_at", { ascending: false })
+      .limit(50);
+    // shop_idからshop名を逆引き
+    const shopIds = Array.from(new Set((allLogs || []).map(l => l.shop_id)));
+    const shopNames: Record<string, string> = {};
+    for (const id of shopIds) {
+      const { data: shop } = await supabase.from("shops").select("name").eq("id", id).maybeSingle();
+      shopNames[id] = shop?.name || "NOT_FOUND";
+    }
+    return NextResponse.json({ logs: allLogs, shopNames });
   }
 
-  const supabase = getSupabase();
+  let shopId = request.nextUrl.searchParams.get("shopId");
+  const shopName = request.nextUrl.searchParams.get("shopName");
+
+  if (!shopId && shopName) {
+    const { data: shop } = await supabase.from("shops").select("id").eq("name", shopName).maybeSingle();
+    if (shop) shopId = shop.id;
+    else return NextResponse.json({ error: "店舗が見つかりません", searchedName: shopName }, { status: 404 });
+  }
+
+  if (!shopId) {
+    return NextResponse.json({ error: "shopIdまたはshopNameが必要です" }, { status: 400 });
+  }
+
   const { data } = await supabase
     .from("grid_ranking_logs")
     .select("*")
