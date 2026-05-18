@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import DOMPurify from "isomorphic-dompurify";
 import Link from "next/link";
 import {
@@ -117,6 +117,9 @@ export default function ReportClient({
   const [sqMonthIdx, setSqMonthIdx] = useState(-1); // -1 = 最新月
   const [gridKwIdx, setGridKwIdx] = useState(0);
   const [gridMonthIdx, setGridMonthIdx] = useState(-1); // -1 = 最新月
+  const gridMapRef = useRef<HTMLDivElement>(null);
+  const gridGoogleMapRef = useRef<any>(null);
+  const gridMarkersRef = useRef<any[]>([]);
   const curLabel = monthlyLabels[monthlyLabels.length - 1] || "";
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const [memo, setMemo] = useState("");
@@ -176,6 +179,87 @@ export default function ReportClient({
   const showRankingHistory = mounted && sectionVisibility.rankingHistory !== false && hasRankingHistory;
   const showSearchQueries = mounted && sectionVisibility.searchQueries !== false && hasSearchQueries;
   const showGridRanking = mounted && sectionVisibility.gridRanking !== false && hasGridRanking;
+
+  // グリッドマップ用: 現在表示中のスナップショットを取得
+  const activeGridKw = gridRanking?.keywords[gridKwIdx] || gridRanking?.keywords[0] || "";
+  const activeGridMonthI = !gridRanking ? 0 : (gridMonthIdx < 0 || gridMonthIdx >= gridRanking.history.length ? gridRanking.history.length - 1 : gridMonthIdx);
+  const activeGridSnapshot = gridRanking?.history[activeGridMonthI]?.snapshots.find(s => s.keyword === activeGridKw);
+
+  // Google Maps JS API読み込み + マーカー描画
+  const renderGridMap = useCallback(() => {
+    if (!gridMapRef.current || !activeGridSnapshot || !window.google?.maps) return;
+    const pts = activeGridSnapshot.results;
+    if (pts.length === 0) return;
+    const gs = activeGridSnapshot.gridSize;
+    const centerPt = pts.find(p => p.row === Math.floor(gs / 2) && p.col === Math.floor(gs / 2));
+    const cLat = centerPt?.lat ?? pts.reduce((s, p) => s + p.lat, 0) / pts.length;
+    const cLng = centerPt?.lng ?? pts.reduce((s, p) => s + p.lng, 0) / pts.length;
+
+    if (!gridGoogleMapRef.current) {
+      gridGoogleMapRef.current = new window.google.maps.Map(gridMapRef.current, {
+        center: { lat: cLat, lng: cLng }, zoom: 13,
+        mapTypeControl: true, streetViewControl: false, fullscreenControl: false,
+        styles: [
+          { featureType: "poi", stylers: [{ visibility: "off" }] },
+          { featureType: "transit", stylers: [{ visibility: "off" }] },
+        ],
+      });
+    }
+
+    // 既存マーカー削除
+    gridMarkersRef.current.forEach(m => m.setMap(null));
+    gridMarkersRef.current = [];
+
+    const bounds = new window.google.maps.LatLngBounds();
+    const rankColor = (r: number) => r <= 0 ? "#6B7280" : r <= 3 ? "#16A34A" : r <= 10 ? "#2563EB" : r <= 20 ? "#F59E0B" : "#EF4444";
+
+    pts.forEach(pt => {
+      const marker = new window.google.maps.Marker({
+        position: { lat: pt.lat, lng: pt.lng },
+        map: gridGoogleMapRef.current,
+        icon: {
+          path: window.google.maps.SymbolPath.CIRCLE,
+          fillColor: rankColor(pt.rank), fillOpacity: 0.9,
+          strokeColor: "#fff", strokeWeight: 2, scale: 18,
+        },
+        label: { text: pt.rank > 0 ? String(pt.rank) : "-", color: "#fff", fontWeight: "bold", fontSize: "11px" },
+      });
+      gridMarkersRef.current.push(marker);
+      bounds.extend({ lat: pt.lat, lng: pt.lng });
+    });
+
+    // 店舗中心マーカー
+    const cm = new window.google.maps.Marker({
+      position: { lat: cLat, lng: cLng }, map: gridGoogleMapRef.current,
+      icon: { path: window.google.maps.SymbolPath.BACKWARD_CLOSED_ARROW, fillColor: "#000", fillOpacity: 1, strokeColor: "#fff", strokeWeight: 2, scale: 6 },
+      zIndex: 999,
+    });
+    gridMarkersRef.current.push(cm);
+    gridGoogleMapRef.current.fitBounds(bounds, 40);
+  }, [activeGridSnapshot]);
+
+  useEffect(() => {
+    if (!showGridRanking || !activeGridSnapshot) return;
+    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "";
+    if (!apiKey) return;
+
+    const tryRender = () => {
+      if (window.google?.maps && gridMapRef.current) { renderGridMap(); return; }
+      // まだスクリプト未読み込み
+      const existing = document.getElementById("google-maps-script");
+      if (existing) { existing.addEventListener("load", renderGridMap); return; }
+      const script = document.createElement("script");
+      script.id = "google-maps-script";
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=marker`;
+      script.async = true; script.defer = true;
+      script.onload = renderGridMap;
+      document.head.appendChild(script);
+    };
+
+    // DOMにマウントされるまで少し待つ
+    const timer = setTimeout(tryRender, 100);
+    return () => clearTimeout(timer);
+  }, [showGridRanking, activeGridSnapshot, renderGridMap]);
 
   // ワードクリック: 出典データがあればそのまま表示、なければAPIで口コミ検索
   const handleWordClick = async (word: string, source: any, type: "positive" | "negative") => {
@@ -709,77 +793,29 @@ export default function ReportClient({
             <div style={stitleStyle}>多地点順位 —「{activeKw}」{monthData ? ` (${monthData.month})` : ""}</div>
             <div style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }}>
               <div style={{ flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                {snapshot && snapshot.results.length > 0 ? (() => {
-                  const pts = snapshot.results;
-                  const centerPt = pts.find(p => p.row === Math.floor(gridSize / 2) && p.col === Math.floor(gridSize / 2));
-                  const centerLat = centerPt?.lat ?? pts.reduce((s, p) => s + p.lat, 0) / pts.length;
-                  const centerLng = centerPt?.lng ?? pts.reduce((s, p) => s + p.lng, 0) / pts.length;
-                  const mapW = 420;
-                  const mapH = 420;
-                  const totalSpanM = (gridSize - 1) * snapshot.intervalM;
-                  const zoom = Math.floor(Math.log2(156543.03 * Math.cos(centerLat * Math.PI / 180) * mapW / (totalSpanM * 1.6)));
-                  const mapsKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "";
-                  const mapUrl = mapsKey
-                    ? `https://maps.googleapis.com/maps/api/staticmap?center=${centerLat},${centerLng}&zoom=${zoom}&size=${mapW}x${mapH}&maptype=roadmap&style=feature:all|saturation:-30&key=${mapsKey}`
-                    : "";
-                  const metersPerPx = 156543.03 * Math.cos(centerLat * Math.PI / 180) / Math.pow(2, zoom);
-                  const circleSize = gridSize <= 5 ? 40 : gridSize <= 7 ? 34 : 28;
-                  return (
-                    <>
-                      <div style={{ position: "relative", width: mapW, height: mapH, borderRadius: 12, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,.15)" }}>
-                        {mapUrl && (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={mapUrl} alt="map" width={mapW} height={mapH} style={{ position: "absolute", top: 0, left: 0, width: mapW, height: mapH }} />
-                        )}
-                        {!mapUrl && <div style={{ position: "absolute", top: 0, left: 0, width: mapW, height: mapH, background: "linear-gradient(135deg,#e8edf5,#d0dae8)" }} />}
-                        {pts.map((pt, idx) => {
-                          const dLat = pt.lat - centerLat;
-                          const dLng = pt.lng - centerLng;
-                          const pxX = mapW / 2 + (dLng * 111320 * Math.cos(centerLat * Math.PI / 180)) / metersPerPx;
-                          const pxY = mapH / 2 - (dLat * 111320) / metersPerPx;
-                          const rank = pt.rank;
-                          const isCenter = pt.row === Math.floor(gridSize / 2) && pt.col === Math.floor(gridSize / 2);
-                          const pinColor = rank <= 0 ? "#6B7280" : rank <= 3 ? "#16A34A" : rank <= 10 ? "#2563EB" : rank <= 20 ? "#F59E0B" : "#EF4444";
-                          return (
-                            <div key={idx} style={{
-                              position: "absolute",
-                              left: pxX - circleSize / 2, top: pxY - circleSize / 2,
-                              width: circleSize, height: circleSize,
-                              borderRadius: "50%",
-                              background: pinColor,
-                              color: "#fff",
-                              display: "flex", alignItems: "center", justifyContent: "center",
-                              fontSize: circleSize <= 28 ? 10 : 12, fontWeight: 800,
-                              border: isCenter ? "3px solid #fff" : "2px solid rgba(255,255,255,.7)",
-                              boxShadow: isCenter ? "0 0 0 3px #e94560, 0 2px 6px rgba(0,0,0,.3)" : "0 1px 4px rgba(0,0,0,.3)",
-                              zIndex: isCenter ? 10 : 1,
-                            }}>
-                              {rank > 0 ? rank : "-"}
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <div style={{ display: "flex", gap: 10, fontSize: 10, color: "#555", marginTop: 2 }}>
-                        <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#16A34A", display: "inline-block" }} />1-3位</span>
-                        <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#2563EB", display: "inline-block" }} />4-10位</span>
-                        <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#F59E0B", display: "inline-block" }} />11-20位</span>
-                        <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#EF4444", display: "inline-block" }} />21位~</span>
-                        <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#6B7280", display: "inline-block" }} />圏外</span>
-                      </div>
-                      <div style={{ fontSize: 12, color: "#555", textAlign: "center" }}>
-                        平均順位: <span style={{ fontSize: 22, fontWeight: 900, color: "#e94560" }}>{snapshot.avgRank}</span>位
-                        {prevSnapshot && (() => {
-                          const diff = prevSnapshot.avgRank - snapshot.avgRank;
-                          return diff !== 0 ? (
-                            <span style={{ marginLeft: 8, fontSize: 13, fontWeight: 700, color: diff > 0 ? "#0a8f3c" : "#c0392b" }}>
-                              {diff > 0 ? `↑${diff.toFixed(1)}` : `↓${Math.abs(diff).toFixed(1)}`}
-                            </span>
-                          ) : null;
-                        })()}
-                      </div>
-                    </>
-                  );
-                })() : (
+                {snapshot ? (
+                  <>
+                    <div ref={gridMapRef} style={{ width: 440, height: 400, borderRadius: 12, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,.15)", background: "#e8edf5" }} />
+                    <div style={{ display: "flex", gap: 10, fontSize: 10, color: "#555", marginTop: 2 }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#16A34A", display: "inline-block" }} />1-3位</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#2563EB", display: "inline-block" }} />4-10位</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#F59E0B", display: "inline-block" }} />11-20位</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#EF4444", display: "inline-block" }} />21位~</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#6B7280", display: "inline-block" }} />圏外</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: "#555", textAlign: "center" }}>
+                      平均順位: <span style={{ fontSize: 22, fontWeight: 900, color: "#e94560" }}>{snapshot.avgRank}</span>位
+                      {prevSnapshot && (() => {
+                        const diff = prevSnapshot.avgRank - snapshot.avgRank;
+                        return diff !== 0 ? (
+                          <span style={{ marginLeft: 8, fontSize: 13, fontWeight: 700, color: diff > 0 ? "#0a8f3c" : "#c0392b" }}>
+                            {diff > 0 ? `↑${diff.toFixed(1)}` : `↓${Math.abs(diff).toFixed(1)}`}
+                          </span>
+                        ) : null;
+                      })()}
+                    </div>
+                  </>
+                ) : (
                   <div style={{ padding: 40, color: "#999", fontSize: 13 }}>この月のデータなし</div>
                 )}
               </div>
