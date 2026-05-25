@@ -1057,7 +1057,8 @@ export default function ReportClient({
               <h3 style={{ fontSize: 16, fontWeight: 700, color: "#27ae60", marginBottom: 14 }}>ポジティブワード（推定）</h3>
               <div>{(() => {
                 const sources = reviewAnalysis.positiveWordSources;
-                const displayWords = sources
+                const hasSources = sources && sources.length > 0 && sources.some(s => s.reviews.length > 0);
+                const displayWords = hasSources
                   ? reviewAnalysis.positiveWords.filter(w => sources.some(s => s.word === w && s.reviews.length > 0))
                   : reviewAnalysis.positiveWords;
                 return displayWords.length > 0 ? displayWords.map((w, i) => {
@@ -1077,7 +1078,8 @@ export default function ReportClient({
               <h3 style={{ fontSize: 16, fontWeight: 700, color: "#c0392b", marginBottom: 14 }}>ネガティブワード（推定）</h3>
               <div>{(() => {
                 const sources = reviewAnalysis.negativeWordSources;
-                const displayWords = sources
+                const hasSources = sources && sources.length > 0 && sources.some(s => s.reviews.length > 0);
+                const displayWords = hasSources
                   ? reviewAnalysis.negativeWords.filter(w => sources.some(s => s.word === w && s.reviews.length > 0))
                   : reviewAnalysis.negativeWords;
                 return displayWords.length > 0 ? displayWords.map((w, i) => {
