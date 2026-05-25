@@ -347,29 +347,23 @@ export default function ReviewsPage() {
     extractKeywords();
   }, [selectedShopId, isAllMode, selectedMonth]);
 
-  // キーワードクリック → 該当口コミをモーダル表示
+  // キーワードクリック → search-reviews APIで該当口コミ取得（レポートと同じロジック）
   const handleKeywordClick = async (word: string, type: "good" | "bad") => {
-    if (!selectedShopId) return;
-    // 同名重複店舗対応: 全shop_idを取得
     const shopName = selectedShop?.name || "";
-    const { data: shops } = await supabase.from("shops").select("id").eq("name", shopName);
-    const ids = shops && shops.length > 0 ? shops.map(s => s.id) : [selectedShopId];
-    const { data } = await supabase
-      .from("reviews")
-      .select("reviewer_name, comment, star_rating, create_time")
-      .in("shop_id", ids)
-      .not("comment", "is", null)
-      .order("create_time", { ascending: false })
-      .limit(500);
-    if (!data) return;
-    const matched = data.filter(r => {
-      const text = r.comment || "";
-      if (!text.includes(word)) return false;
-      const stars = starToNum(r.star_rating);
-      if (type === "good") return stars >= 4;
-      return stars <= 3;
-    });
-    setKeywordModal({ word, type, reviews: matched });
+    if (!shopName) return;
+    try {
+      const res = await fetch(`/api/report/search-reviews?shop=${encodeURIComponent(shopName)}&keyword=${encodeURIComponent(word)}&type=${type === "good" ? "positive" : "negative"}`);
+      const json = await res.json();
+      const reviews = (json.reviews || []).map((r: any) => ({
+        reviewer_name: r.reviewer || "匿名",
+        comment: r.comment || "",
+        star_rating: r.starRating || "",
+        create_time: r.date || "",
+      }));
+      setKeywordModal({ word, type, reviews });
+    } catch {
+      setKeywordModal({ word, type, reviews: [] });
+    }
   };
 
   // フィルタ変更時にページをリセット（pageが1以外の場合のみ）
