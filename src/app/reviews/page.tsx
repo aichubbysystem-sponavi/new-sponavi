@@ -354,7 +354,10 @@ export default function ReviewsPage() {
     if (!data) return;
     const matched = data.filter(r => {
       const text = r.comment || "";
-      return text.includes(word);
+      if (!text.includes(word)) return false;
+      const stars = starToNum(r.star_rating);
+      if (type === "good") return stars >= 4;
+      return stars <= 3;
     });
     setKeywordModal({ word, type, reviews: matched });
   };
