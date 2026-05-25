@@ -43,27 +43,22 @@ export async function GET(request: NextRequest) {
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-  // 店舗検索: 完全一致 → 部分一致
-  let shopId: string | null = null;
-  const { data: exactShop } = await supabase
-    .from("shops").select("id").eq("name", shopName).maybeSingle();
-  if (exactShop) {
-    shopId = exactShop.id;
+  // 店舗検索: 同名の全IDを取得（重複店舗対応）
+  const shopIds: string[] = [];
+  const { data: exactShops } = await supabase
+    .from("shops").select("id").eq("name", shopName);
+  if (exactShops && exactShops.length > 0) {
+    shopIds.push(...exactShops.map(s => s.id));
   } else {
     const simpleName = shopName.replace(/[【】\[\]（）()_\s]/g, "").toLowerCase();
     const { data: fuzzyShops } = await supabase
       .from("shops").select("id, name").ilike("name", `%${shopName.split(/[【（\[]/)[0].trim().slice(0, 10)}%`).limit(10);
-    const match = fuzzyShops?.find(s => s.name.replace(/[【】\[\]（）()_\s]/g, "").toLowerCase() === simpleName);
-    if (match) shopId = match.id;
+    const matches = fuzzyShops?.filter(s => s.name.replace(/[【】\[\]（）()_\s]/g, "").toLowerCase() === simpleName) || [];
+    shopIds.push(...matches.map(s => s.id));
   }
 
-  if (!shopId) {
+  if (shopIds.length === 0) {
     console.log(`[search-reviews] shop not found: "${shopName}"`);
-    if (debug) {
-      const { data: fuzzySearch } = await supabase.from("shops").select("id, name").ilike("name", "%よし乃%").limit(5);
-      const { data: allShops, count: totalCount } = await supabase.from("shops").select("id, name", { count: "exact" }).limit(5);
-      return NextResponse.json({ reviews: [], matched: false, debug: { shopNotFound: shopName, shopNameLength: shopName.length, hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY, totalShops: totalCount, fuzzyYoshino: fuzzySearch, firstShops: allShops?.map(s => s.name) } });
-    }
     return NextResponse.json({ reviews: [], matched: false });
   }
 
@@ -90,20 +85,20 @@ export async function GET(request: NextRequest) {
   // 重複除去
   const uniqueWords = Array.from(new Set(words));
 
-  // 全期間の口コミからキーワード検索（関連する口コミだけを正確に返す）
+  // 全期間の口コミからキーワード検索（同名重複店舗の全IDで検索）
   const { data: allReviews } = await supabase
     .from("reviews")
     .select("reviewer_name, star_rating, comment, reply_comment, create_time")
-    .eq("shop_id", shopId)
+    .in("shop_id", shopIds)
     .not("comment", "is", null)
     .order("create_time", { ascending: false });
 
   if (!allReviews || allReviews.length === 0) {
-    if (debug) return NextResponse.json({ reviews: [], matched: false, debug: { shopId, reviewCount: 0, uniqueWords } });
+    if (debug) return NextResponse.json({ reviews: [], matched: false, debug: { shopIds, reviewCount: 0, uniqueWords } });
     return NextResponse.json({ reviews: [], matched: false });
   }
   if (debug) {
-    return NextResponse.json({ debug: { shopId, reviewCount: allReviews.length, uniqueWords, sampleComment: allReviews[0]?.comment?.slice(0, 100) } });
+    return NextResponse.json({ debug: { shopIds, reviewCount: allReviews.length, uniqueWords, sampleComment: allReviews[0]?.comment?.slice(0, 100) } });
   }
 
   // キーワードマッチ + 星評価フィルタ（全期間）
