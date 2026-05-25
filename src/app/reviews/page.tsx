@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useShop } from "@/components/shop-provider";
 import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
@@ -1199,31 +1200,31 @@ export default function ReviewsPage() {
           )}
         </>
       )}
-      {/* キーワード口コミモーダル */}
-      {keywordModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"
+      {/* キーワード口コミモーダル（Portalでbody直下に描画） */}
+      {keywordModal && createPortal(
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}
           onClick={() => setKeywordModal(null)}>
-          <div className="bg-white rounded-2xl p-7 max-w-[700px] w-[90%] max-h-[80vh] overflow-auto shadow-2xl"
+          <div style={{ background: "#fff", borderRadius: 16, padding: "28px 32px", maxWidth: 700, width: "90%", maxHeight: "80vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}
             onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-4">
-              <h3 className={`text-lg font-bold ${keywordModal.type === "good" ? "text-emerald-700" : "text-red-600"}`}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: keywordModal.type === "good" ? "#047857" : "#dc2626" }}>
                 「{keywordModal.word}」を含む口コミ（{keywordModal.reviews.length}件）
               </h3>
               <button onClick={() => setKeywordModal(null)}
-                className="text-2xl text-slate-400 hover:text-slate-600 px-1">×</button>
+                style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: "#999", padding: "0 4px" }}>×</button>
             </div>
             {keywordModal.reviews.length > 0 ? keywordModal.reviews.slice(0, 30).map((r, i) => {
               const stars = starToNum(r.star_rating);
               return (
-                <div key={i} className="border-b border-slate-100 py-3">
-                  <div className="flex justify-between items-center mb-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-sm text-slate-700">{r.reviewer_name || "匿名"}</span>
-                      {stars > 0 && <span className="text-amber-400 text-sm">{"★".repeat(stars)}{"☆".repeat(5 - stars)}</span>}
+                <div key={i} style={{ borderBottom: "1px solid #f0f0f0", padding: "12px 0" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontWeight: 700, fontSize: 14, color: "#334155" }}>{r.reviewer_name || "匿名"}</span>
+                      {stars > 0 && <span style={{ color: "#f59e0b", fontSize: 14 }}>{"★".repeat(stars)}{"☆".repeat(5 - stars)}</span>}
                     </div>
-                    <span className="text-xs text-slate-400">{new Date(r.create_time).toLocaleDateString("ja-JP")}</span>
+                    <span style={{ fontSize: 12, color: "#94a3b8" }}>{new Date(r.create_time).toLocaleDateString("ja-JP")}</span>
                   </div>
-                  <p className="text-sm text-slate-600 leading-relaxed">{
+                  <p style={{ fontSize: 13, lineHeight: 1.8, color: "#475569", margin: 0 }}>{
                     (r.comment || "").includes("(Original)")
                       ? ((r.comment || "").split("(Original)").pop()?.trim() || r.comment)
                       : ((r.comment || "").split(/\s*\(Translated by Google\)\s*/)[0] || r.comment)
@@ -1231,13 +1232,14 @@ export default function ReviewsPage() {
                 </div>
               );
             }) : (
-              <p className="text-slate-400 text-center py-8">該当する口コミが見つかりませんでした</p>
+              <p style={{ color: "#94a3b8", textAlign: "center", padding: 32 }}>該当する口コミが見つかりませんでした</p>
             )}
             {keywordModal.reviews.length > 30 && (
-              <p className="text-xs text-slate-400 text-center mt-3">他 {keywordModal.reviews.length - 30}件</p>
+              <p style={{ fontSize: 12, color: "#94a3b8", textAlign: "center", marginTop: 12 }}>他 {keywordModal.reviews.length - 30}件</p>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
