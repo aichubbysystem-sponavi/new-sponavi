@@ -42,6 +42,7 @@ export default function ReviewsPage() {
   const [selectedMonth, setSelectedMonth] = useState<string>("all"); // "all" or "2026-04"
   const [availableMonths, setAvailableMonths] = useState<string[]>([]);
   const [topWords, setTopWords] = useState<{ word: string; count: number; type: "good" | "bad" }[]>([]);
+  const [keywordModal, setKeywordModal] = useState<{ word: string; type: "good" | "bad"; reviews: { reviewer_name: string; comment: string; star_rating: string; create_time: string }[] } | null>(null);
   const [monthlyStats, setMonthlyStats] = useState<{ month: string; count: number; avgRating: number; cumulative: number }[]>([]);
   const [showCharts, setShowCharts] = useState(false);
   const [templates, setTemplates] = useState<{ id: string; name: string; content: string; star_category: string; use_count: number }[]>([]);
@@ -334,6 +335,28 @@ export default function ReviewsPage() {
     };
     extractKeywords();
   }, [selectedShopId, isAllMode, selectedMonth]);
+
+  // キーワードクリック → 該当口コミをモーダル表示
+  const handleKeywordClick = async (word: string, type: "good" | "bad") => {
+    if (!selectedShopId) return;
+    // 同名重複店舗対応: 全shop_idを取得
+    const shopName = selectedShop?.name || "";
+    const { data: shops } = await supabase.from("shops").select("id").eq("name", shopName);
+    const ids = shops && shops.length > 0 ? shops.map(s => s.id) : [selectedShopId];
+    const { data } = await supabase
+      .from("reviews")
+      .select("reviewer_name, comment, star_rating, create_time")
+      .in("shop_id", ids)
+      .not("comment", "is", null)
+      .order("create_time", { ascending: false })
+      .limit(500);
+    if (!data) return;
+    const matched = data.filter(r => {
+      const text = r.comment || "";
+      return text.includes(word);
+    });
+    setKeywordModal({ word, type, reviews: matched });
+  };
 
   // フィルタ変更時にページをリセット（pageが1以外の場合のみ）
   useEffect(() => {
@@ -1000,11 +1023,12 @@ export default function ReviewsPage() {
               const opacity = Math.max(0.5, Math.min(1, 0.5 + (w.count / maxCount) * 0.5));
               return (
                 <span key={i}
-                  className={`inline-block px-2 py-0.5 rounded-full font-bold cursor-default transition-transform hover:scale-110 ${
+                  className={`inline-block px-2 py-0.5 rounded-full font-bold cursor-pointer transition-transform hover:scale-110 ${
                     w.type === "good" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-red-50 text-red-700 border border-red-200"
                   }`}
                   style={{ fontSize: size, opacity }}
-                  title={`${w.word}: ${w.count}回（${w.type === "good" ? "ポジティブ" : "ネガティブ"}）`}>
+                  title={`${w.word}: ${w.count}回 — クリックで該当口コミを表示`}
+                  onClick={() => handleKeywordClick(w.word, w.type)}>
                   {w.word}
                 </span>
               );
@@ -1174,6 +1198,46 @@ export default function ReviewsPage() {
             </div>
           )}
         </>
+      )}
+      {/* キーワード口コミモーダル */}
+      {keywordModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"
+          onClick={() => setKeywordModal(null)}>
+          <div className="bg-white rounded-2xl p-7 max-w-[700px] w-[90%] max-h-[80vh] overflow-auto shadow-2xl"
+            onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className={`text-lg font-bold ${keywordModal.type === "good" ? "text-emerald-700" : "text-red-600"}`}>
+                「{keywordModal.word}」を含む口コミ（{keywordModal.reviews.length}件）
+              </h3>
+              <button onClick={() => setKeywordModal(null)}
+                className="text-2xl text-slate-400 hover:text-slate-600 px-1">×</button>
+            </div>
+            {keywordModal.reviews.length > 0 ? keywordModal.reviews.slice(0, 30).map((r, i) => {
+              const stars = starToNum(r.star_rating);
+              return (
+                <div key={i} className="border-b border-slate-100 py-3">
+                  <div className="flex justify-between items-center mb-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-sm text-slate-700">{r.reviewer_name || "匿名"}</span>
+                      {stars > 0 && <span className="text-amber-400 text-sm">{"★".repeat(stars)}{"☆".repeat(5 - stars)}</span>}
+                    </div>
+                    <span className="text-xs text-slate-400">{new Date(r.create_time).toLocaleDateString("ja-JP")}</span>
+                  </div>
+                  <p className="text-sm text-slate-600 leading-relaxed">{
+                    (r.comment || "").includes("(Original)")
+                      ? ((r.comment || "").split("(Original)").pop()?.trim() || r.comment)
+                      : ((r.comment || "").split(/\s*\(Translated by Google\)\s*/)[0] || r.comment)
+                  }</p>
+                </div>
+              );
+            }) : (
+              <p className="text-slate-400 text-center py-8">該当する口コミが見つかりませんでした</p>
+            )}
+            {keywordModal.reviews.length > 30 && (
+              <p className="text-xs text-slate-400 text-center mt-3">他 {keywordModal.reviews.length - 30}件</p>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
