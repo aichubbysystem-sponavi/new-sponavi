@@ -30,6 +30,8 @@ export async function GET(request: NextRequest) {
   const keyword = request.nextUrl.searchParams.get("keyword") || "";
   const type = request.nextUrl.searchParams.get("type") || ""; // "positive" or "negative"
 
+  const debug = request.nextUrl.searchParams.get("debug") === "1";
+
   if (!shopName || !keyword) {
     return NextResponse.json({ reviews: [], matched: false });
   }
@@ -57,6 +59,10 @@ export async function GET(request: NextRequest) {
 
   if (!shopId) {
     console.log(`[search-reviews] shop not found: "${shopName}"`);
+    if (debug) {
+      const { data: allShops } = await supabase.from("shops").select("id, name").limit(20);
+      return NextResponse.json({ reviews: [], matched: false, debug: { shopNotFound: shopName, hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY, shops: allShops?.map(s => s.name) } });
+    }
     return NextResponse.json({ reviews: [], matched: false });
   }
 
@@ -92,7 +98,11 @@ export async function GET(request: NextRequest) {
     .order("create_time", { ascending: false });
 
   if (!allReviews || allReviews.length === 0) {
+    if (debug) return NextResponse.json({ reviews: [], matched: false, debug: { shopId, reviewCount: 0, uniqueWords } });
     return NextResponse.json({ reviews: [], matched: false });
+  }
+  if (debug) {
+    return NextResponse.json({ debug: { shopId, reviewCount: allReviews.length, uniqueWords, sampleComment: allReviews[0]?.comment?.slice(0, 100) } });
   }
 
   // キーワードマッチ + 星評価フィルタ（全期間）
