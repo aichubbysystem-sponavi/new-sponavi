@@ -529,6 +529,8 @@ export async function buildReportData(
 
   const cur = recent[recent.length - 1];
   const prev = recent.length >= 2 ? recent[recent.length - 2] : null;
+  // 前年同月（KPIサマリーの%比較用）
+  const yoy = recent.length >= 13 ? recent[recent.length - 13] : prev;
 
   const curActions = cur.calls + cur.routes + cur.websites + cur.bookings + cur.foodMenus;
   const curDate = cur.date;
@@ -567,13 +569,13 @@ export async function buildReportData(
   }
 
   const kpis: KPI[] = [
-    { label: "Google検索 合計", value: cur.searchMobile + cur.searchPC, prevValue: prev ? prev.searchMobile + prev.searchPC : 0, unit: "回" },
-    { label: "Googleマップ 合計", value: cur.mapMobile + cur.mapPC, prevValue: prev ? prev.mapMobile + prev.mapPC : 0, unit: "回" },
-    { label: "ウェブサイトクリック", value: cur.websites, prevValue: prev?.websites ?? 0, unit: "件" },
-    { label: "ルート検索", value: cur.routes, prevValue: prev?.routes ?? 0, unit: "件" },
-    { label: "通話", value: cur.calls, prevValue: prev?.calls ?? 0, unit: "件" },
-    { label: "フードメニュークリック", value: cur.foodMenus, prevValue: prev?.foodMenus ?? 0, unit: "件" },
-    { label: "予約", value: cur.bookings, prevValue: prev?.bookings ?? 0, unit: "件" },
+    { label: "Google検索 合計", value: cur.searchMobile + cur.searchPC, prevValue: yoy ? yoy.searchMobile + yoy.searchPC : 0, unit: "回" },
+    { label: "Googleマップ 合計", value: cur.mapMobile + cur.mapPC, prevValue: yoy ? yoy.mapMobile + yoy.mapPC : 0, unit: "回" },
+    { label: "ウェブサイトクリック", value: cur.websites, prevValue: yoy?.websites ?? 0, unit: "件" },
+    { label: "ルート検索", value: cur.routes, prevValue: yoy?.routes ?? 0, unit: "件" },
+    { label: "通話", value: cur.calls, prevValue: yoy?.calls ?? 0, unit: "件" },
+    { label: "フードメニュークリック", value: cur.foodMenus, prevValue: yoy?.foodMenus ?? 0, unit: "件" },
+    { label: "予約", value: cur.bookings, prevValue: yoy?.bookings ?? 0, unit: "件" },
     { label: `口コミ増減【${toLabel(curDate)}】`, value: reviewDeltaForKpi, prevValue: prevReviewCount, unit: "件" },
   ];
 

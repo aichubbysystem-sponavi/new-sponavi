@@ -122,26 +122,24 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  // 星評価フィルタなしでキーワードマッチを再試行（フィルタ厳しすぎた場合）
-  const keywordOnly = allReviews.filter((r: any) => {
-    const text = r.comment || "";
-    return uniqueWords.some(w => text.includes(w));
-  });
-
-  if (keywordOnly.length > 0) {
-    return NextResponse.json({
-      reviews: keywordOnly.slice(0, 20).map(formatReview),
-      matched: true,
-      matchedCount: keywordOnly.length,
+  // キーワードマッチしたが星評価で除外された場合のみ、評価フィルタなしで再試行
+  if (ratingFilter) {
+    const keywordOnly = allReviews.filter((r: any) => {
+      const text = r.comment || "";
+      return uniqueWords.some(w => text.includes(w));
     });
+    if (keywordOnly.length > 0) {
+      return NextResponse.json({
+        reviews: keywordOnly.slice(0, 20).map(formatReview),
+        matched: true,
+        matchedCount: keywordOnly.length,
+      });
+    }
   }
 
-  // 完全に0件 → 同じ評価帯の口コミ10件を参考表示
-  const fallback = ratingFilter
-    ? allReviews.filter((r: any) => ratingFilter.has(((r.star_rating || "") as string).toUpperCase()))
-    : allReviews;
+  // 完全に0件 → 空で返す（無関係な口コミは表示しない）
   return NextResponse.json({
-    reviews: fallback.slice(0, 10).map(formatReview),
+    reviews: [],
     matched: false,
   });
 }

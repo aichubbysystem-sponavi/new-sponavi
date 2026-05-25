@@ -108,7 +108,17 @@ export default function ReportClient({
 }: {
   data: ReportData; shopId: string; dataSource?: "cache" | "spreadsheet" | "mock"; googleReviewUrl?: string | null;
 }) {
-  const { shop, kpis, monthlyLabels, charts, keywords, rankingHistory, reviewLabels, reviewCounts, reviewDelta, reviewAnalysis, comments, searchQueries, gridRanking } = data;
+  const { shop, kpis: rawKpis, monthlyLabels, charts, keywords, rankingHistory, reviewLabels, reviewCounts, reviewDelta, reviewAnalysis, comments, searchQueries, gridRanking } = data;
+
+  // 全期間で値が0の指標を非表示（業種によって「予約」「フードメニュー」等がない場合）
+  const hasBookings = charts.bookings?.some(v => v > 0) ?? false;
+  const hasFoodMenus = charts.foodMenus?.some(v => v > 0) ?? false;
+  const kpis = rawKpis.filter(kpi => {
+    if (kpi.label === "予約" && !hasBookings) return false;
+    if (kpi.label === "フードメニュークリック" && !hasFoodMenus) return false;
+    return true;
+  });
+
   const hasKeywords = keywords.length > 0;
   const hasRankingHistory = rankingHistory && rankingHistory.labels.length > 0;
   const hasReviews = reviewCounts.length > 0;
@@ -393,8 +403,8 @@ export default function ReportClient({
     { label: "ウェブサイト", cur: (i: number) => charts.websites[i] },
     { label: "ルート", cur: (i: number) => charts.routes[i] },
     { label: "通話", cur: (i: number) => charts.calls[i] },
-    { label: "メニュークリック", cur: (i: number) => charts.foodMenus[i] },
-    { label: "予約", cur: (i: number) => charts.bookings[i] },
+    ...(hasFoodMenus ? [{ label: "メニュークリック", cur: (i: number) => charts.foodMenus[i] }] : []),
+    ...(hasBookings ? [{ label: "予約", cur: (i: number) => charts.bookings[i] }] : []),
   ];
 
   const momRows = prevIdx >= 0 ? cmpMetrics.map(m => cmpRow(m.label, m.cur(curIdx), m.cur(prevIdx))) : [];
@@ -594,7 +604,10 @@ export default function ReportClient({
           <div style={{ overflow: "hidden", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", fontSize: 13, flex: 1 }}>
               <thead><tr>
-                {["月","検索モバイル","検索PC","検索合計","マップモバイル","マップPC","マップ合計","Web","ルート","通話","メニュー","予約","合計"].map((h,i) => (
+                {["月","検索モバイル","検索PC","検索合計","マップモバイル","マップPC","マップ合計","Web","ルート","通話",
+                  ...(hasFoodMenus ? ["メニュー"] : []),
+                  ...(hasBookings ? ["予約"] : []),
+                  "合計"].map((h,i) => (
                   <th key={i} style={{ background: "#0f3460", color: "#fff", padding: "12px 10px", textAlign: "center", fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
                 ))}
               </tr></thead>
@@ -613,8 +626,8 @@ export default function ReportClient({
                       <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.websites.toLocaleString()}</td>
                       <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.routes.toLocaleString()}</td>
                       <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.calls.toLocaleString()}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.foodMenus.toLocaleString()}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.bookings.toLocaleString()}</td>
+                      {hasFoodMenus && <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.foodMenus.toLocaleString()}</td>}
+                      {hasBookings && <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.bookings.toLocaleString()}</td>}
                       <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0", fontWeight: 700 }}>{r.totalActions.toLocaleString()}</td>
                     </tr>
                   );
