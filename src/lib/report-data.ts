@@ -45,8 +45,8 @@ export type NegativeWordSource = WordSource;
 export interface ReviewAnalysis {
   positiveWords: string[];
   negativeWords: string[];
-  positiveWordSources?: WordSource[];
-  negativeWordSources?: WordSource[];
+  positiveWordSources?: WordSource[] | null;
+  negativeWordSources?: WordSource[] | null;
   summary: string;
 }
 

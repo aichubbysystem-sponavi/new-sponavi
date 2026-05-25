@@ -50,8 +50,8 @@ export async function getStoredAnalysis(
       analysis: {
         positiveWords: stored.positive_words || [],
         negativeWords: stored.negative_words || [],
-        positiveWordSources: stored.positive_word_sources || [],
-        negativeWordSources: stored.negative_word_sources || [],
+        positiveWordSources: stored.positive_word_sources ?? null,
+        negativeWordSources: stored.negative_word_sources ?? null,
         summary: stored.summary || "",
       },
       comments: stored.comments || [],

@@ -1056,9 +1056,9 @@ export default function ReportClient({
             <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", justifyContent: "center" }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, color: "#27ae60", marginBottom: 14 }}>ポジティブワード（推定）</h3>
               <div>{(() => {
-                const hasSources = reviewAnalysis.positiveWordSources && reviewAnalysis.positiveWordSources.length > 0;
-                const displayWords = hasSources
-                  ? reviewAnalysis.positiveWords.filter(w => reviewAnalysis.positiveWordSources?.some(s => s.word === w && s.reviews.length > 0))
+                const sources = reviewAnalysis.positiveWordSources;
+                const displayWords = sources
+                  ? reviewAnalysis.positiveWords.filter(w => sources.some(s => s.word === w && s.reviews.length > 0))
                   : reviewAnalysis.positiveWords;
                 return displayWords.length > 0 ? displayWords.map((w, i) => {
                   const source = reviewAnalysis.positiveWordSources?.find(s => s.word === w);
@@ -1076,9 +1076,9 @@ export default function ReportClient({
             <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", justifyContent: "center" }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, color: "#c0392b", marginBottom: 14 }}>ネガティブワード（推定）</h3>
               <div>{(() => {
-                const hasSources = reviewAnalysis.negativeWordSources && reviewAnalysis.negativeWordSources.length > 0;
-                const displayWords = hasSources
-                  ? reviewAnalysis.negativeWords.filter(w => reviewAnalysis.negativeWordSources?.some(s => s.word === w && s.reviews.length > 0))
+                const sources = reviewAnalysis.negativeWordSources;
+                const displayWords = sources
+                  ? reviewAnalysis.negativeWords.filter(w => sources.some(s => s.word === w && s.reviews.length > 0))
                   : reviewAnalysis.negativeWords;
                 return displayWords.length > 0 ? displayWords.map((w, i) => {
                   const source = reviewAnalysis.negativeWordSources?.find(s => s.word === w);
@@ -1194,7 +1194,7 @@ export default function ReportClient({
                 </div>
               );
             }) : (
-              <p style={{ color: "#999", textAlign: "center", padding: 20 }}>該当する口コミが見つかりませんでした</p>
+              <p style={{ color: "#999", textAlign: "center", padding: 20 }}>該当する口コミが見つかりませんでした。口コミデータの同期が完了していない可能性があります。</p>
             )}
           </div>
         </div>
