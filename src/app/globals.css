@@ -133,6 +133,14 @@ main .text-white {
 .bg-\[\#003D6B\] .text-white,
 .bg-\[\#003D6B\].\!text-white,
 button.bg-\[\#003D6B\],
+button.bg-emerald-600,
+button.bg-emerald-700,
+button.bg-red-500,
+button.bg-red-600,
+button.bg-blue-600,
+button.bg-blue-700,
+button.bg-slate-700,
+button.bg-slate-800,
 [style*="color: white"] {
   color: white !important;
 }
