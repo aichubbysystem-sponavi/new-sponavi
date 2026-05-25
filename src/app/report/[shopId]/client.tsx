@@ -136,6 +136,7 @@ export default function ReportClient({
     rankingHistory: true,
     searchQueries: true,
     gridRanking: true,
+    reviewAnalysis: true,
   });
 
   // 個別キーワード表示ON/OFF（店舗ごとにlocalStorage保存）
@@ -179,6 +180,7 @@ export default function ReportClient({
   const showRankingHistory = mounted && sectionVisibility.rankingHistory !== false && hasRankingHistory;
   const showSearchQueries = mounted && sectionVisibility.searchQueries !== false && hasSearchQueries;
   const showGridRanking = mounted && sectionVisibility.gridRanking !== false && hasGridRanking;
+  const showReviewAnalysis = mounted && sectionVisibility.reviewAnalysis !== false;
 
   // グリッドマップ用: 現在表示中のスナップショットを取得
   const activeGridKw = gridRanking?.keywords[gridKwIdx] || gridRanking?.keywords[0] || "";
@@ -404,38 +406,52 @@ export default function ReportClient({
         </div>
       </div>
 
-      {/* 表示設定パネル */}
+      {/* 表示設定モーダル */}
       {showSettings && (
-        <div className="no-print" style={{ background: "#1a1a2e", padding: "16px 32px", display: "flex", alignItems: "center", gap: 24, borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
-          <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: 600 }}>表示ON/OFF:</span>
-          {[
-            { key: "keywords", label: "キーワード順位", hasData: hasKeywords },
-            { key: "rankingHistory", label: "順位推移テーブル", hasData: hasRankingHistory },
-            { key: "searchQueries", label: "検索語句", hasData: hasSearchQueries },
-            { key: "gridRanking", label: "多地点順位", hasData: hasGridRanking },
-          ].map(item => (
-            <label key={item.key} style={{ display: "flex", alignItems: "center", gap: 6, cursor: item.hasData ? "pointer" : "not-allowed", opacity: item.hasData ? 1 : 0.4 }}>
-              <input type="checkbox" checked={sectionVisibility[item.key] !== false && item.hasData} disabled={!item.hasData}
-                onChange={() => toggleSection(item.key)}
-                style={{ width: 16, height: 16, cursor: item.hasData ? "pointer" : "not-allowed" }} />
-              <span style={{ color: "#fff", fontSize: 13 }}>{item.label}</span>
-              {!item.hasData && <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 10 }}>（データなし）</span>}
-            </label>
-          ))}
-          {hasKeywords && (
-            <>
-              <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.15)", margin: "0 4px" }} />
-              <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: 600 }}>個別KW:</span>
-              {keywords.map(kw => (
-                <label key={kw.word} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
-                  <input type="checkbox" checked={kwVisibility[kw.word] !== false}
-                    onChange={() => toggleKeyword(kw.word)}
-                    style={{ width: 14, height: 14, cursor: "pointer" }} />
-                  <span style={{ color: "#fff", fontSize: 12 }}>{kw.word}</span>
-                </label>
-              ))}
-            </>
-          )}
+        <div className="no-print" style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={() => setShowSettings(false)}>
+          <div style={{ background: "#1a1a2e", borderRadius: 16, padding: "28px 32px", maxWidth: 500, width: "90%", maxHeight: "80vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}
+            onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#fff" }}>表示設定</h3>
+              <button onClick={() => setShowSettings(false)} style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: "rgba(255,255,255,0.5)", padding: "0 4px" }}>×</button>
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: 600, display: "block", marginBottom: 10 }}>スライド表示ON/OFF</span>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {[
+                  { key: "keywords", label: "キーワード順位", hasData: hasKeywords },
+                  { key: "rankingHistory", label: "順位推移テーブル", hasData: hasRankingHistory },
+                  { key: "gridRanking", label: "多地点順位", hasData: hasGridRanking },
+                  { key: "searchQueries", label: "検索語句", hasData: hasSearchQueries },
+                  { key: "reviewAnalysis", label: "口コミ分析", hasData: true },
+                ].map(item => (
+                  <label key={item.key} style={{ display: "flex", alignItems: "center", gap: 8, cursor: item.hasData ? "pointer" : "not-allowed", opacity: item.hasData ? 1 : 0.4 }}>
+                    <input type="checkbox" checked={sectionVisibility[item.key] !== false && item.hasData} disabled={!item.hasData}
+                      onChange={() => toggleSection(item.key)}
+                      style={{ width: 16, height: 16, cursor: item.hasData ? "pointer" : "not-allowed" }} />
+                    <span style={{ color: "#fff", fontSize: 13 }}>{item.label}</span>
+                    {!item.hasData && <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 10 }}>（データなし）</span>}
+                  </label>
+                ))}
+              </div>
+            </div>
+            {hasKeywords && (
+              <div>
+                <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: 600, display: "block", marginBottom: 10 }}>個別キーワード</span>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {keywords.map(kw => (
+                    <label key={kw.word} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+                      <input type="checkbox" checked={kwVisibility[kw.word] !== false}
+                        onChange={() => toggleKeyword(kw.word)}
+                        style={{ width: 14, height: 14, cursor: "pointer" }} />
+                      <span style={{ color: "#fff", fontSize: 12 }}>{kw.word}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -1047,8 +1063,8 @@ export default function ReportClient({
       )}
 
       {/* ════ P10: 口コミ分析 ════ */}
-      {(() => { pageNum++; return null; })()}
-      <div style={slideStyle} className="slide">
+      {showReviewAnalysis && (() => { pageNum++; return null; })()}
+      {showReviewAnalysis && <div style={slideStyle} className="slide">
         <div style={slideBarStyle}><span>{shop.name} — AIによる口コミ分析</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={stitleStyle}>口コミ分析（直近2ヶ月）</div>
@@ -1108,11 +1124,11 @@ export default function ReportClient({
             </div>
           </div>
         </div>
-      </div>
+      </div>}
 
       {/* ════ P11: 担当者コメント ════ */}
-      {(() => { pageNum++; return null; })()}
-      <div style={slideStyle} className="slide">
+      {showReviewAnalysis && (() => { pageNum++; return null; })()}
+      {showReviewAnalysis && <div style={slideStyle} className="slide">
         <div style={slideBarStyle}><span>{shop.name} — AIによる担当者コメント</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={stitleStyle}>担当者コメント</div>
@@ -1152,7 +1168,7 @@ export default function ReportClient({
             </div>
           </div>
         </div>
-      </div>
+      </div>}
 
       {/* ワード詳細モーダル（ポジティブ/ネガティブ共用） */}
       {negativeModal && (
