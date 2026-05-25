@@ -358,6 +358,7 @@ export default function ReportClient({
   if (hasReviews) totalPages += 2; // P9(口コミ件数推移), P10(月間増加数)
   if (showKeywords) totalPages++;
   if (showRankingHistory) totalPages++;
+  if (showGridRanking) totalPages++;
   if (showSearchQueries) totalPages++;
 
   function pn(slideNum: number) {
