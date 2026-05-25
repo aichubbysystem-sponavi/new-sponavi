@@ -263,9 +263,37 @@ export default function ReviewsPage() {
   useEffect(() => {
     const extractKeywords = async () => {
       if (isAllMode || !selectedShopId) { setTopWords([]); return; }
+      const shopName = selectedShop?.name || "";
+
+      // まずreport_analysis（AI分析）からワードを取得
+      const { data: aiData } = await supabase
+        .from("report_analysis")
+        .select("positive_words, negative_words, positive_word_sources, negative_word_sources")
+        .eq("shop_name", shopName)
+        .order("analyzed_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (aiData && ((aiData.positive_words?.length || 0) > 0 || (aiData.negative_words?.length || 0) > 0)) {
+        // AI分析データがある場合はそれを使用
+        const result: { word: string; count: number; type: "good" | "bad" }[] = [];
+        const posSources = aiData.positive_word_sources || [];
+        const negSources = aiData.negative_word_sources || [];
+        (aiData.positive_words || []).forEach((w: string, i: number) => {
+          const src = posSources.find((s: any) => s.word === w);
+          result.push({ word: w, count: src?.reviews?.length || (aiData.positive_words.length - i), type: "good" });
+        });
+        (aiData.negative_words || []).forEach((w: string, i: number) => {
+          const src = negSources.find((s: any) => s.word === w);
+          result.push({ word: w, count: src?.reviews?.length || (aiData.negative_words.length - i), type: "bad" });
+        });
+        setTopWords(result);
+        return;
+      }
+
+      // AI分析がない場合はフォールバック: 従来の単語頻度集計
       let query = supabase.from("reviews").select("comment, star_rating").not("comment", "is", null);
       query = query.eq("shop_id", selectedShopId);
-      // 月別フィルタ
       if (selectedMonth !== "all") {
         const startDate = `${selectedMonth}-01T00:00:00`;
         const [y, m] = selectedMonth.split("-").map(Number);
@@ -277,17 +305,11 @@ export default function ReviewsPage() {
 
       const goodWords = new Map<string, number>();
       const badWords = new Map<string, number>();
-
-      // 店舗名から断片を除外用に分割
       const shopNameParts = new Set<string>();
-      const sn = selectedShop?.name || "";
-      // 店舗名のカタカナ・漢字部分を2文字以上で抽出して除外リストに
+      const sn = shopName;
       (sn.match(/[\u30A0-\u30FF]{2,}/g) || []).forEach((p) => shopNameParts.add(p));
       (sn.match(/[\u4E00-\u9FFF]{2,}/g) || []).forEach((p) => shopNameParts.add(p));
-
-      // 無意味な末尾パターン
       const junkEnding = /(?:します|しました|ました|ません|ですが|ですし|ですね|ですよ|ですか|ますが|ますね|ますよ|ますか|と思い|と思う|思いま|いです|かった|良いで|しいの|もあり|てもら|ていた|くださ|ござい|いただ|されて|させて|してい|してく|になり|になっ|にして|をして|できま|ておりま|れまし|きまし|みまし|てまし|ていま)$/;
-      // 無意味な語そのもの
       const stopSet = new Set([
         "思います","良いです","美味しい","美味しく","美味しか","嬉しい","楽しい",
         "良かった","美味しかった","オススメ","おすすめ","最高です",
@@ -295,39 +317,27 @@ export default function ReviewsPage() {
         "良いと思","食べても","しかった","いいです","多いです","高いです","安いです",
         "行きたい","食べたい","飲みたい",
       ]);
-
       allComments.forEach((r) => {
         if (!r.comment) return;
         const text = r.comment.replace(/\(Original\)[\s\S]*/i, "").replace(/\(Translated by Google\)/i, "").trim();
         const stars = starToNum(r.star_rating);
         const isGood = stars >= 4;
-
-        // カタカナ語（3文字以上 — 2文字は「カツ」等で意味不明になりやすい）
         const katakanaWords: string[] = text.match(/[\u30A0-\u30FF]{3,10}/g) || [];
-        // 漢字2文字以上の語
         const kanjiWords: string[] = text.match(/[\u4E00-\u9FFF]{2,6}/g) || [];
-        // 漢字+カタカナの複合語（例: 「接客態度」「駐車場」）
         const compoundWords: string[] = text.match(/[\u4E00-\u9FFF\u30A0-\u30FF]{3,8}/g) || [];
-
         const allWords = [...katakanaWords, ...kanjiWords, ...compoundWords];
         const seen = new Set<string>();
-
         allWords.forEach((w: string) => {
           if (seen.has(w)) return;
           seen.add(w);
           if (w.length < 3) return;
-          // ひらがなを含むものは除外（漢字・カタカナのみ通す）
           if (/[\u3040-\u309F]/.test(w)) return;
-          // 無意味パターン除外
           if (junkEnding.test(w) || stopSet.has(w)) return;
-          // 店舗名の断片は除外
           if (shopNameParts.has(w)) return;
-
           const map = isGood ? goodWords : badWords;
           map.set(w, (map.get(w) || 0) + 1);
         });
       });
-
       const result: { word: string; count: number; type: "good" | "bad" }[] = [];
       goodWords.forEach((count, word) => { if (count >= 2) result.push({ word, count, type: "good" }); });
       badWords.forEach((count, word) => { if (count >= 2) result.push({ word, count, type: "bad" }); });
