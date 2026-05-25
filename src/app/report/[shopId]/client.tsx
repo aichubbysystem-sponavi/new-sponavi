@@ -136,12 +136,15 @@ export default function ReportClient({
     rankingHistory: true,
     searchQueries: true,
     gridRanking: true,
-    reviewAnalysis: true,
   });
 
   // 個別キーワード表示ON/OFF（店舗ごとにlocalStorage保存）
   const kwVisKey = `report-kw-visibility-${shopId}`;
   const [kwVisibility, setKwVisibility] = useState<Record<string, boolean>>({});
+
+  // 口コミ分析ワード個別ON/OFF（店舗ごとにlocalStorage保存）
+  const rwVisKey = `report-rw-visibility-${shopId}`;
+  const [rwVisibility, setRwVisibility] = useState<Record<string, boolean>>({});
 
   // ハイドレーション完了フラグ（localStorage依存の表示分岐をクライアントのみに限定）
   const [mounted, setMounted] = useState(false);
@@ -153,8 +156,10 @@ export default function ReportClient({
       if (saved) setSectionVisibility(JSON.parse(saved));
       const kwSaved = localStorage.getItem(kwVisKey);
       if (kwSaved) setKwVisibility(JSON.parse(kwSaved));
+      const rwSaved = localStorage.getItem(rwVisKey);
+      if (rwSaved) setRwVisibility(JSON.parse(rwSaved));
     } catch {}
-  }, [visKey, kwVisKey]);
+  }, [visKey, kwVisKey, rwVisKey]);
 
   const toggleSection = (key: string) => {
     setSectionVisibility(prev => {
@@ -172,6 +177,14 @@ export default function ReportClient({
     });
   };
 
+  const toggleReviewWord = (word: string) => {
+    setRwVisibility(prev => {
+      const next = { ...prev, [word]: prev[word] === false ? true : false };
+      localStorage.setItem(rwVisKey, JSON.stringify(next));
+      return next;
+    });
+  };
+
   // 表示するキーワードのみフィルタ
   const visibleKeywords = keywords.filter(kw => kwVisibility[kw.word] !== false);
   const visibleRankingDatasets = rankingHistory?.datasets?.filter(ds => kwVisibility[ds.word] !== false) || [];
@@ -180,7 +193,6 @@ export default function ReportClient({
   const showRankingHistory = mounted && sectionVisibility.rankingHistory !== false && hasRankingHistory;
   const showSearchQueries = mounted && sectionVisibility.searchQueries !== false && hasSearchQueries;
   const showGridRanking = mounted && sectionVisibility.gridRanking !== false && hasGridRanking;
-  const showReviewAnalysis = mounted && sectionVisibility.reviewAnalysis !== false;
 
   // グリッドマップ用: 現在表示中のスナップショットを取得
   const activeGridKw = gridRanking?.keywords[gridKwIdx] || gridRanking?.keywords[0] || "";
@@ -424,7 +436,6 @@ export default function ReportClient({
                   { key: "rankingHistory", label: "順位推移テーブル", hasData: hasRankingHistory },
                   { key: "gridRanking", label: "多地点順位", hasData: hasGridRanking },
                   { key: "searchQueries", label: "検索語句", hasData: hasSearchQueries },
-                  { key: "reviewAnalysis", label: "口コミ分析", hasData: true },
                 ].map(item => (
                   <label key={item.key} style={{ display: "flex", alignItems: "center", gap: 8, cursor: item.hasData ? "pointer" : "not-allowed", opacity: item.hasData ? 1 : 0.4 }}>
                     <input type="checkbox" checked={sectionVisibility[item.key] !== false && item.hasData} disabled={!item.hasData}
@@ -437,7 +448,7 @@ export default function ReportClient({
               </div>
             </div>
             {hasKeywords && (
-              <div>
+              <div style={{ marginBottom: 20 }}>
                 <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: 600, display: "block", marginBottom: 10 }}>個別キーワード</span>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                   {keywords.map(kw => (
@@ -449,6 +460,41 @@ export default function ReportClient({
                     </label>
                   ))}
                 </div>
+              </div>
+            )}
+            {(reviewAnalysis.positiveWords.length > 0 || reviewAnalysis.negativeWords.length > 0) && (
+              <div>
+                <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: 600, display: "block", marginBottom: 10 }}>口コミ分析ワード</span>
+                {reviewAnalysis.positiveWords.length > 0 && (
+                  <div style={{ marginBottom: 10 }}>
+                    <span style={{ color: "#27ae60", fontSize: 11, fontWeight: 600, display: "block", marginBottom: 6 }}>ポジティブ</span>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {reviewAnalysis.positiveWords.map(w => (
+                        <label key={`pos-${w}`} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+                          <input type="checkbox" checked={rwVisibility[`pos:${w}`] !== false}
+                            onChange={() => toggleReviewWord(`pos:${w}`)}
+                            style={{ width: 14, height: 14, cursor: "pointer" }} />
+                          <span style={{ color: "#a7f3d0", fontSize: 12 }}>{w}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {reviewAnalysis.negativeWords.length > 0 && (
+                  <div>
+                    <span style={{ color: "#e74c3c", fontSize: 11, fontWeight: 600, display: "block", marginBottom: 6 }}>ネガティブ</span>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {reviewAnalysis.negativeWords.map(w => (
+                        <label key={`neg-${w}`} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+                          <input type="checkbox" checked={rwVisibility[`neg:${w}`] !== false}
+                            onChange={() => toggleReviewWord(`neg:${w}`)}
+                            style={{ width: 14, height: 14, cursor: "pointer" }} />
+                          <span style={{ color: "#fca5a5", fontSize: 12 }}>{w}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1063,8 +1109,8 @@ export default function ReportClient({
       )}
 
       {/* ════ P10: 口コミ分析 ════ */}
-      {showReviewAnalysis && (() => { pageNum++; return null; })()}
-      {showReviewAnalysis && <div style={slideStyle} className="slide">
+      {(() => { pageNum++; return null; })()}
+      <div style={slideStyle} className="slide">
         <div style={slideBarStyle}><span>{shop.name} — AIによる口コミ分析</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={stitleStyle}>口コミ分析（直近2ヶ月）</div>
@@ -1074,9 +1120,10 @@ export default function ReportClient({
               <div>{(() => {
                 const sources = reviewAnalysis.positiveWordSources;
                 const hasSources = sources && sources.length > 0 && sources.some(s => s.reviews.length > 0);
-                const displayWords = hasSources
+                const displayWords = (hasSources
                   ? reviewAnalysis.positiveWords.filter(w => sources.some(s => s.word === w && s.reviews.length > 0))
-                  : reviewAnalysis.positiveWords;
+                  : reviewAnalysis.positiveWords
+                ).filter(w => rwVisibility[`pos:${w}`] !== false);
                 return displayWords.length > 0 ? displayWords.map((w, i) => {
                   const source = reviewAnalysis.positiveWordSources?.find(s => s.word === w);
                   return (
@@ -1095,9 +1142,10 @@ export default function ReportClient({
               <div>{(() => {
                 const sources = reviewAnalysis.negativeWordSources;
                 const hasSources = sources && sources.length > 0 && sources.some(s => s.reviews.length > 0);
-                const displayWords = hasSources
+                const displayWords = (hasSources
                   ? reviewAnalysis.negativeWords.filter(w => sources.some(s => s.word === w && s.reviews.length > 0))
-                  : reviewAnalysis.negativeWords;
+                  : reviewAnalysis.negativeWords
+                ).filter(w => rwVisibility[`neg:${w}`] !== false);
                 return displayWords.length > 0 ? displayWords.map((w, i) => {
                   const source = reviewAnalysis.negativeWordSources?.find(s => s.word === w);
                   return (
@@ -1124,11 +1172,11 @@ export default function ReportClient({
             </div>
           </div>
         </div>
-      </div>}
+      </div>
 
       {/* ════ P11: 担当者コメント ════ */}
-      {showReviewAnalysis && (() => { pageNum++; return null; })()}
-      {showReviewAnalysis && <div style={slideStyle} className="slide">
+      {(() => { pageNum++; return null; })()}
+      <div style={slideStyle} className="slide">
         <div style={slideBarStyle}><span>{shop.name} — AIによる担当者コメント</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={stitleStyle}>担当者コメント</div>
@@ -1168,7 +1216,7 @@ export default function ReportClient({
             </div>
           </div>
         </div>
-      </div>}
+      </div>
 
       {/* ワード詳細モーダル（ポジティブ/ネガティブ共用） */}
       {negativeModal && (
