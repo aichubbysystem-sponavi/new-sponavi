@@ -60,8 +60,9 @@ export async function GET(request: NextRequest) {
   if (!shopId) {
     console.log(`[search-reviews] shop not found: "${shopName}"`);
     if (debug) {
-      const { data: allShops } = await supabase.from("shops").select("id, name").limit(20);
-      return NextResponse.json({ reviews: [], matched: false, debug: { shopNotFound: shopName, hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY, shops: allShops?.map(s => s.name) } });
+      const { data: fuzzySearch } = await supabase.from("shops").select("id, name").ilike("name", "%よし乃%").limit(5);
+      const { data: allShops, count: totalCount } = await supabase.from("shops").select("id, name", { count: "exact" }).limit(5);
+      return NextResponse.json({ reviews: [], matched: false, debug: { shopNotFound: shopName, shopNameLength: shopName.length, hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY, totalShops: totalCount, fuzzyYoshino: fuzzySearch, firstShops: allShops?.map(s => s.name) } });
     }
     return NextResponse.json({ reviews: [], matched: false });
   }
