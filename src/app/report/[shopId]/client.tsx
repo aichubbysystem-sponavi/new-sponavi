@@ -577,11 +577,17 @@ export default function ReportClient({
                     )}
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "flex-start" }}>
-                    {isLastKpi ? (
+                    {isLastKpi ? (<>
                       <span style={badgeStyle(kpi.value >= 0)}>
                         {kpi.value >= 0 ? "▲" : "▼"} {(shop.totalReviews - kpi.value).toLocaleString()}→{shop.totalReviews.toLocaleString()}件 前月比
                       </span>
-                    ) : (<>
+                      {kpi.yoyValue != null ? (() => {
+                        const yoyDelta = shop.totalReviews - kpi.yoyValue!;
+                        return <span style={badgeStyle(yoyDelta >= 0)}>
+                          {yoyDelta >= 0 ? "▲" : "▼"} {kpi.yoyValue!.toLocaleString()}→{shop.totalReviews.toLocaleString()}件 前年比
+                        </span>;
+                      })() : <span style={{ fontSize: 10, color: "#bbb" }}>前年比 なし</span>}
+                    </>) : (<>
                       {mom && <span style={badgeStyle(mom.isUp)}>{mom.isUp ? "▲" : "▼"} {mom.text}（{kpi.momValue!.toLocaleString()}→{kpi.value.toLocaleString()}）前月比</span>}
                       {yoyC ? <span style={badgeStyle(yoyC.isUp)}>{yoyC.isUp ? "▲" : "▼"} {yoyC.text}（{kpi.yoyValue!.toLocaleString()}→{kpi.value.toLocaleString()}）前年比</span>
                         : <span style={{ fontSize: 10, color: "#bbb" }}>前年比 なし</span>}
