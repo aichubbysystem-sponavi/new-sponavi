@@ -154,7 +154,7 @@ export async function GET(request: NextRequest) {
 
   if (allMatched.length > 0) {
     return NextResponse.json({
-      reviews: allMatched.slice(0, 20).map(formatReview),
+      reviews: allMatched.sort((a, b) => (b.create_time || "").localeCompare(a.create_time || "")).slice(0, 20).map(formatReview),
       matched: true,
       matchedCount: allMatched.length,
     });
