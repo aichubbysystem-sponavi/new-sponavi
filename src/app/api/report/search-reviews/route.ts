@@ -70,13 +70,15 @@ export async function GET(request: NextRequest) {
     .replace(/[なのがをはでにとい・、。さ]/g, " ")
     .split(/\s+/)
     .filter(w => w.length >= 2);
-  // 2. カタカナ⇔漢字の境界でさらに分割
+  // 2. カタカナ⇔漢字の境界でさらに分割（漢字1文字もOK）
   const words: string[] = [];
   for (const w of rawWords) {
     const subTokens = w.match(/[\u30A0-\u30FF\uFF66-\uFF9F]+|[\u4E00-\u9FFF\u3400-\u4DBF]+|[\u3040-\u309F]+|[a-zA-Z0-9]+/g);
     if (subTokens) {
       for (const t of subTokens) {
-        if (t.length >= 2) words.push(t);
+        // 漢字は1文字OK、それ以外は2文字以上
+        const isKanji = /^[\u4E00-\u9FFF\u3400-\u4DBF]+$/.test(t);
+        if (isKanji || t.length >= 2) words.push(t);
       }
     } else if (w.length >= 2) {
       words.push(w);
@@ -105,13 +107,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ debug: { shopIds, reviewCount: allReviews.length, uniqueWords, sampleComment: allReviews[0]?.comment?.slice(0, 100) } });
   }
 
-  // キーワードマッチ + 星評価フィルタ（直近1年）
-  // まず元フレーズ全体で一致を試み、0件なら分割ワードANDマッチでフォールバック
-  const matchReviews = (reviews: any[], filter: (text: string) => boolean) => {
+  // キーワードマッチ（直近1年）
+  const matchReviews = (reviews: any[], filter: (text: string) => boolean, useRatingFilter: boolean) => {
     return reviews.filter((r: any) => {
       const text = r.comment || "";
       if (!filter(text)) return false;
-      if (ratingFilter) {
+      if (useRatingFilter && ratingFilter) {
         const rating = ((r.star_rating || "") as string).toUpperCase();
         return ratingFilter.has(rating);
       }
@@ -119,11 +120,15 @@ export async function GET(request: NextRequest) {
     });
   };
 
-  // 優先: 元フレーズ全体で検索
-  let matched = matchReviews(allReviews, (text) => text.includes(keyword));
-  // フォールバック: 分割ワード全てを含む口コミのみ（ANDマッチ）
+  // 1. 元フレーズ全体で検索（星評価フィルタなし — 原文に含まれるなら表示すべき）
+  let matched = matchReviews(allReviews, (text) => text.includes(keyword), false);
+  // 2. 分割ワードANDマッチ + 星評価フィルタ
   if (matched.length === 0 && uniqueWords.length > 0) {
-    matched = matchReviews(allReviews, (text) => uniqueWords.every(w => text.includes(w)));
+    matched = matchReviews(allReviews, (text) => uniqueWords.every(w => text.includes(w)), true);
+  }
+  // 3. 分割ワードANDマッチ（星評価フィルタなし）
+  if (matched.length === 0 && uniqueWords.length > 0) {
+    matched = matchReviews(allReviews, (text) => uniqueWords.every(w => text.includes(w)), false);
   }
 
   if (matched.length > 0) {
