@@ -77,7 +77,7 @@ async function fetchReviews(shopId: string): Promise<ReviewListResponse | null> 
   }
 }
 
-// Claude APIで分析
+// Claude APIで分析（リトライ付き: 失敗時は件数を半分に減らして再試行）
 async function analyzeWithClaude(
   shopName: string,
   reviews: GBPReview[],
@@ -93,11 +93,28 @@ async function analyzeWithClaude(
 } | null> {
   if (!ANTHROPIC_API_KEY) return null;
 
-  const filteredReviews = reviews
-    .filter((r) => r.comment && r.comment.trim());
+  const allFiltered = reviews.filter((r) => r.comment && r.comment.trim());
+  if (allFiltered.length === 0) return null;
 
+  // 段階的リトライ: 全件 → 半分 → さらに半分 → 最小50件
+  const limits = [allFiltered.length, Math.ceil(allFiltered.length / 2), Math.ceil(allFiltered.length / 4), 50].filter((v, i, a) => i === 0 || v < a[i - 1]);
+
+  for (const limit of limits) {
+    const result = await tryAnalyze(shopName, allFiltered.slice(0, limit), averageRating, totalReviewCount);
+    if (result) return result;
+    console.log(`[analyze] ${shopName}: ${limit}件で失敗、リトライ...`);
+  }
+  return null;
+}
+
+async function tryAnalyze(
+  shopName: string,
+  filteredReviews: GBPReview[],
+  averageRating: number,
+  totalReviewCount: number
+): Promise<any | null> {
   const reviewTexts = filteredReviews
-    .map((r, i) => `[#${i + 1}][${r.starRating}][${r.reviewer.displayName}][${r.createTime?.slice(0, 10) || "不明"}] ${r.comment}`)
+    .map((r, i) => `[#${i + 1}][${r.starRating}][${r.reviewer.displayName}][${r.createTime?.slice(0, 10) || "不明"}] ${r.comment.slice(0, 300)}`)
     .join("\n");
 
   if (!reviewTexts) return null;
@@ -107,7 +124,7 @@ async function analyzeWithClaude(
 店舗名: ${shopName}
 評価: ${averageRating} / 5.0（${totalReviewCount}件）
 
-【口コミテキスト（直近1年）】
+【口コミテキスト（直近1年・${filteredReviews.length}件）】
 ${reviewTexts}
 
 【重要ルール】
