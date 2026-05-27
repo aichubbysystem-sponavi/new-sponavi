@@ -235,14 +235,14 @@ function parseRanksHistory(headerText: string, dataText: string): RankHistoryDat
   if (dataLines.length < 2) return { labels: [], datasets: [] };
   const dataRows = dataLines.slice(1).map(l => parseCSVRow(l));
 
-  // 月ラベルと順位を全行分取得（直近12ヶ月）
+  // 月ラベルと順位を全行分取得（直近13ヶ月＝前年同月含む）
   const allMonths: { label: string; row: string[] }[] = [];
   for (const row of dataRows) {
     const dateCell = (row[1] || "").trim();
     const m = dateCell.match(/(\d{4})[\/年](\d{1,2})/);
     if (m) allMonths.push({ label: `${m[1]}/${m[2]}`, row });
   }
-  const recent = allMonths.slice(-12);
+  const recent = allMonths.slice(-13);
 
   const labels = recent.map(m => m.label);
   const datasets = kwIndices.map(idx => {
