@@ -1110,6 +1110,18 @@ export default function ReportClient({
                 fill: true, tension: 0.3, pointRadius: 4, pointBackgroundColor: "#fbc02d", borderWidth: 2,
               }]}} options={{ ...lineOptions, scales: { ...lineOptions.scales, y: { ...lineOptions.scales.y, ticks: { ...lineOptions.scales.y.ticks, stepSize: 1, callback: (v: any) => Number.isInteger(Number(v)) ? Number(v).toLocaleString() : "" } } } }} />
             </div>
+            <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 9 }}>
+              <tbody>
+                <tr style={{ background: "#f8f9fa" }}>
+                  <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60 }}>月</td>
+                  {reviewLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l}</td>)}
+                </tr>
+                <tr>
+                  <td style={{ padding: "3px 4px", fontWeight: 700, color: "#333" }}>件数</td>
+                  {reviewCounts.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700 }}>{v.toLocaleString()}</td>)}
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       )}
@@ -1151,6 +1163,18 @@ export default function ReportClient({
                 );
               })()}
             </div>
+            <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 9 }}>
+              <tbody>
+                <tr style={{ background: "#f8f9fa" }}>
+                  <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60 }}>月</td>
+                  {reviewLabels.slice(1).map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l}</td>)}
+                </tr>
+                <tr>
+                  <td style={{ padding: "3px 4px", fontWeight: 700, color: "#333" }}>増加数</td>
+                  {reviewDelta.slice(1).map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700 }}>{v != null ? (v >= 0 ? `+${v}` : String(v)) : "-"}</td>)}
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       )}
