@@ -68,6 +68,7 @@ export default function ReviewAnalysisPage() {
   }, [selected, shops, forceReanalyze]);
 
   const successCount = results.filter((r) => r.status === "success").length;
+  const failedResults = results.filter((r) => r.status === "error" || r.status === "analysis_failed" || r.status === "db_error");
 
   return (
     <div className="animate-fade-in">
@@ -128,6 +129,32 @@ export default function ReviewAnalysisPage() {
           <span className="text-xs text-slate-500">分析済みも再分析する</span>
         </label>
       </div>
+
+      {/* 失敗店舗サマリー */}
+      {failedResults.length > 0 && (
+        <div className="bg-red-50 rounded-xl p-4 shadow-sm border border-red-200 mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-red-700">失敗店舗（{failedResults.length}件）</h3>
+            <button
+              onClick={() => {
+                const failedIds = new Set(failedResults.map(r => r.shopId));
+                setSelected(failedIds);
+              }}
+              className="text-xs px-3 py-1 bg-red-600 text-white rounded-lg hover:bg-red-700 cursor-pointer"
+            >
+              失敗店舗だけ選択して再実行
+            </button>
+          </div>
+          <div className="space-y-1 max-h-40 overflow-y-auto">
+            {failedResults.map((r, i) => (
+              <div key={i} className="flex items-center justify-between py-1 px-2 text-sm bg-white rounded">
+                <span className="text-slate-700">{r.shopName}</span>
+                <span className="text-xs text-red-500 font-medium">{r.status === "analysis_failed" ? "分析失敗" : r.status === "db_error" ? "DB保存エラー" : "エラー"}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 進捗・結果 */}
       {(results.length > 0 || error) && (
