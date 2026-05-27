@@ -120,27 +120,43 @@ export async function GET(request: NextRequest) {
     });
   };
 
-  // 1. 元フレーズ全体で検索（星評価フィルタなし — 原文に含まれるなら表示すべき）
-  let matched = matchReviews(allReviews, (text) => text.includes(keyword), false);
-  // 2. 分割ワードANDマッチ + 星評価フィルタ
-  if (matched.length === 0 && uniqueWords.length > 0) {
-    matched = matchReviews(allReviews, (text) => uniqueWords.every(w => text.includes(w)), true);
-  }
-  // 3. 分割ワードANDマッチ（星評価フィルタなし）
-  if (matched.length === 0 && uniqueWords.length > 0) {
-    matched = matchReviews(allReviews, (text) => uniqueWords.every(w => text.includes(w)), false);
-  }
-  // 4. 主要ワード（最長の単語）で個別検索（フィルタなし）
-  if (matched.length === 0 && uniqueWords.length > 0) {
-    const mainWord = uniqueWords.reduce((a, b) => a.length >= b.length ? a : b);
-    matched = matchReviews(allReviews, (text) => text.includes(mainWord), false);
+  // 段階的に検索して結果をマージ（最大20件）
+  const seen = new Set<string>();
+  const allMatched: any[] = [];
+  const addResults = (results: any[]) => {
+    for (const r of results) {
+      const key = r.comment || r.reviewer_name + r.create_time;
+      if (!seen.has(key)) {
+        seen.add(key);
+        allMatched.push(r);
+      }
+    }
+  };
+
+  // 1. 元フレーズ全体で検索（星評価フィルタなし）
+  addResults(matchReviews(allReviews, (text) => text.includes(keyword), false));
+
+  // 2. 分割ワードANDマッチ
+  if (allMatched.length < 20 && uniqueWords.length > 0) {
+    addResults(matchReviews(allReviews, (text) => uniqueWords.every(w => text.includes(w)), false));
   }
 
-  if (matched.length > 0) {
+  // 3. 主要ワード（最長の単語）で個別検索 — 関連口コミを広く拾う
+  if (allMatched.length < 20 && uniqueWords.length > 0) {
+    const mainWord = uniqueWords.reduce((a, b) => a.length >= b.length ? a : b);
+    addResults(matchReviews(allReviews, (text) => text.includes(mainWord), false));
+  }
+
+  // 4. 各分割ワードでOR検索 — さらに関連口コミを補完
+  if (allMatched.length < 20 && uniqueWords.length > 1) {
+    addResults(matchReviews(allReviews, (text) => uniqueWords.some(w => text.includes(w)), false));
+  }
+
+  if (allMatched.length > 0) {
     return NextResponse.json({
-      reviews: matched.slice(0, 20).map(formatReview),
+      reviews: allMatched.slice(0, 20).map(formatReview),
       matched: true,
-      matchedCount: matched.length,
+      matchedCount: allMatched.length,
     });
   }
 
