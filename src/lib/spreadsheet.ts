@@ -529,8 +529,8 @@ export async function buildReportData(
 
   const cur = recent[recent.length - 1];
   const prev = recent.length >= 2 ? recent[recent.length - 2] : null;
-  // 前年同月（KPIサマリーの%比較用）
-  const yoy = recent.length >= 13 ? recent[recent.length - 13] : prev;
+  // 前年同月（KPIサマリーの%比較用）、前年データなしなら最古の月
+  const yoy = recent.length >= 13 ? recent[recent.length - 13] : recent[0];
 
   const curActions = cur.calls + cur.routes + cur.websites + cur.bookings + cur.foodMenus;
   const curDate = cur.date;
