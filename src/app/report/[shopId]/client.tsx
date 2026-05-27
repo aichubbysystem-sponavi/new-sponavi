@@ -1021,15 +1021,7 @@ export default function ReportClient({
         const yoyMap = new Map((sqYoy?.keywords || []).map(k => [k.word, k.count]));
         const yoyTotalCount = sqYoy ? (sqYoy.keywords || []).reduce((sum: number, kw: any) => sum + kw.count, 0) : null;
         const yoyTotalDiff = yoyTotalCount !== null ? totalCount - yoyTotalCount : null;
-        // 対策開始月データ
-        const startMatch = shop.startDate.match(/(\d+)年(\d+)月/);
-        const startMonth = startMatch ? `${startMatch[1]}/${parseInt(startMatch[2])}` : "";
-        const sqStart = startMonth ? sqHistory.find(h => h.month === startMonth) : null;
-        const startMap = new Map((sqStart?.keywords || []).map(k => [k.word, k.count]));
-        const startTotalCount = sqStart ? (sqStart.keywords || []).reduce((sum: number, kw: any) => sum + kw.count, 0) : null;
-        const startTotalDiff = startTotalCount !== null ? totalCount - startTotalCount : null;
         const hasYoy = sqYoy !== null;
-        const hasStart = sqStart !== null && startMonth !== curMonth;
         // 全期間の累計マップ
         const cumulativeMap = new Map<string, number>();
         for (const m of sqHistory) {
@@ -1072,11 +1064,6 @@ export default function ReportClient({
                   前年比: {yoyTotalDiff > 0 ? `+${yoyTotalDiff.toLocaleString()}` : yoyTotalDiff === 0 ? "→" : yoyTotalDiff.toLocaleString()}
                 </span>
               )}
-              {hasStart && startTotalDiff !== null && (
-                <span style={{ fontSize: 12, fontWeight: 600, color: startTotalDiff > 0 ? "#0a8f3c" : startTotalDiff < 0 ? "#c0392b" : "#888" }}>
-                  対策開始時比: {startTotalDiff > 0 ? `+${startTotalDiff.toLocaleString()}` : startTotalDiff === 0 ? "→" : startTotalDiff.toLocaleString()}
-                </span>
-              )}
             </div>
             <div style={{ overflow: "hidden", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", flex: 1 }}>
@@ -1088,7 +1075,7 @@ export default function ReportClient({
                     <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 60 }}>前月</th>
                     <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 50 }}>変動</th>
                     {hasYoy && <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 60 }}>前年</th>}
-                    {hasStart && <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 60 }}>開始時</th>}
+                    {hasYoy && <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 60 }}>前年比</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -1108,9 +1095,12 @@ export default function ReportClient({
                           const yoyVal = yoyMap.get(kw.word);
                           return <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 12, color: "#888" }}>{yoyVal !== undefined ? yoyVal.toLocaleString() : "-"}</td>;
                         })()}
-                        {hasStart && (() => {
-                          const startVal = startMap.get(kw.word);
-                          return <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 12, color: "#888" }}>{startVal !== undefined ? startVal.toLocaleString() : "-"}</td>;
+                        {hasYoy && (() => {
+                          const yoyVal = yoyMap.get(kw.word);
+                          const yoyDiff = yoyVal !== undefined ? kw.count - yoyVal : null;
+                          return <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: yoyDiff === null ? "#ccc" : yoyDiff > 0 ? "#0a8f3c" : yoyDiff < 0 ? "#c0392b" : "#888" }}>
+                            {yoyDiff === null ? "-" : yoyDiff > 0 ? `+${yoyDiff.toLocaleString()}` : yoyDiff === 0 ? "→" : yoyDiff.toLocaleString()}
+                          </td>;
                         })()}
                       </tr>
                     );
