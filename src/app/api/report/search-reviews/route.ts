@@ -130,6 +130,11 @@ export async function GET(request: NextRequest) {
   if (matched.length === 0 && uniqueWords.length > 0) {
     matched = matchReviews(allReviews, (text) => uniqueWords.every(w => text.includes(w)), false);
   }
+  // 4. 主要ワード（最長の単語）で個別検索（フィルタなし）
+  if (matched.length === 0 && uniqueWords.length > 0) {
+    const mainWord = uniqueWords.reduce((a, b) => a.length >= b.length ? a : b);
+    matched = matchReviews(allReviews, (text) => text.includes(mainWord), false);
+  }
 
   if (matched.length > 0) {
     return NextResponse.json({
