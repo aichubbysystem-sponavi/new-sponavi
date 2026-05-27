@@ -85,12 +85,16 @@ export async function GET(request: NextRequest) {
   // 重複除去
   const uniqueWords = Array.from(new Set(words));
 
-  // 全期間の口コミからキーワード検索（同名重複店舗の全IDで検索）
+  // 直近1年の口コミからキーワード検索（同名重複店舗の全IDで検索）
+  const oneYearAgo = new Date();
+  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+  const oneYearAgoStr = oneYearAgo.toISOString();
   const { data: allReviews } = await supabase
     .from("reviews")
     .select("reviewer_name, star_rating, comment, reply_comment, create_time")
     .in("shop_id", shopIds)
     .not("comment", "is", null)
+    .gte("create_time", oneYearAgoStr)
     .order("create_time", { ascending: false });
 
   if (!allReviews || allReviews.length === 0) {
@@ -101,18 +105,27 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ debug: { shopIds, reviewCount: allReviews.length, uniqueWords, sampleComment: allReviews[0]?.comment?.slice(0, 100) } });
   }
 
-  // キーワードマッチ + 星評価フィルタ（全期間）
-  const matched = allReviews.filter((r: any) => {
-    const text = r.comment || "";
-    const hasKeyword = uniqueWords.some(w => text.includes(w));
-    if (!hasKeyword) return false;
-    // 星評価フィルタ（ネガティブワード→低評価のみ、ポジティブ→高評価のみ）
-    if (ratingFilter) {
-      const rating = ((r.star_rating || "") as string).toUpperCase();
-      return ratingFilter.has(rating);
-    }
-    return true;
-  });
+  // キーワードマッチ + 星評価フィルタ（直近1年）
+  // まず元フレーズ全体で一致を試み、0件なら分割ワードでフォールバック
+  const matchWithWords = (reviews: any[], searchWords: string[]) => {
+    return reviews.filter((r: any) => {
+      const text = r.comment || "";
+      const hasKeyword = searchWords.some(w => text.includes(w));
+      if (!hasKeyword) return false;
+      if (ratingFilter) {
+        const rating = ((r.star_rating || "") as string).toUpperCase();
+        return ratingFilter.has(rating);
+      }
+      return true;
+    });
+  };
+
+  // 優先: 元フレーズ全体で検索
+  let matched = matchWithWords(allReviews, [keyword]);
+  // フォールバック: 分割ワードで検索（元フレーズでヒットしなかった場合のみ）
+  if (matched.length === 0 && uniqueWords.length > 0) {
+    matched = matchWithWords(allReviews, uniqueWords);
+  }
 
   if (matched.length > 0) {
     return NextResponse.json({
@@ -122,22 +135,7 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  // キーワードマッチしたが星評価で除外された場合のみ、評価フィルタなしで再試行
-  if (ratingFilter) {
-    const keywordOnly = allReviews.filter((r: any) => {
-      const text = r.comment || "";
-      return uniqueWords.some(w => text.includes(w));
-    });
-    if (keywordOnly.length > 0) {
-      return NextResponse.json({
-        reviews: keywordOnly.slice(0, 20).map(formatReview),
-        matched: true,
-        matchedCount: keywordOnly.length,
-      });
-    }
-  }
-
-  // 完全に0件 → 空で返す（無関係な口コミは表示しない）
+  // 0件 → 空で返す（無関係な口コミは表示しない）
   return NextResponse.json({
     reviews: [],
     matched: false,
