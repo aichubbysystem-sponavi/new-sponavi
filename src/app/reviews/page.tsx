@@ -64,6 +64,9 @@ export default function ReviewsPage() {
   const [selectedNoReview, setSelectedNoReview] = useState<Set<string>>(new Set());
   const [lastClickedIdx, setLastClickedIdx] = useState<number | null>(null);
   const [shopSyncStatus, setShopSyncStatus] = useState<Map<string, string>>(new Map());
+  // 同期失敗店舗一覧
+  const [syncFailedShops, setSyncFailedShops] = useState<{ shopName: string; status: string }[]>([]);
+  const [showSyncFailed, setShowSyncFailed] = useState(false);
 
   const isAllMode = shopFilterMode === "all";
 
@@ -484,9 +487,12 @@ export default function ReviewsPage() {
 
   const handleSyncAll = async () => {
     setSyncing(true);
+    setSyncFailedShops([]);
+    setShowSyncFailed(false);
     let totalSynced = 0;
     let totalErrors = 0;
     let consecutiveErrors = 0;
+    const allFailed: { shopName: string; status: string }[] = [];
     const allShopIds = shops.map((s) => s.id);
     const shopNameMap = new Map(shops.map(s => [s.id, s.name]));
 
@@ -527,13 +533,23 @@ export default function ReviewsPage() {
         const res = await api.post("/api/report/sync-reviews", { shopIds: [shopId] }, { timeout: 60000 });
         totalSynced += res.data.totalSynced || 0;
         if (res.data.totalErrors > 0) totalErrors++;
+        // 失敗店舗を収集
+        const shopResults = res.data.results || [];
+        for (const r of shopResults) {
+          if (r.status !== "success" && r.status !== "no_reviews") {
+            allFailed.push({ shopName: r.shopName, status: r.status });
+          }
+        }
         consecutiveErrors = 0;
       } catch (e: any) {
         consecutiveErrors++;
         totalErrors++;
+        allFailed.push({ shopName, status: `error: ${e?.message || "タイムアウト"}` });
         // 連続10回失敗で中断（それ以外はスキップして続行）
         if (consecutiveErrors >= 10) {
           const detail = e?.response?.data?.error || e?.message || "タイムアウト";
+          setSyncFailedShops(allFailed);
+          if (allFailed.length > 0) setShowSyncFailed(true);
           setSyncMsg(`⚠ ${done}/${allShopIds.length}店舗で中断（${totalSynced}件取得済み）。原因: ${detail}。再読み込みで残りから再開できます。`);
           await fetchReviews();
           setSyncing(false);
@@ -546,6 +562,8 @@ export default function ReviewsPage() {
         await new Promise(r => setTimeout(r, 2000));
       }
     }
+    setSyncFailedShops(allFailed);
+    if (allFailed.length > 0) setShowSyncFailed(true);
     setSyncMsg(`✓ ${totalSynced}件の口コミを同期しました（全${allShopIds.length}店舗完了、スキップ${skippedCount}件、エラー${totalErrors}件）`);
     await fetchReviews();
     await fetchUnrepliedCount();
@@ -726,6 +744,34 @@ export default function ReviewsPage() {
             <button onClick={() => setShowRangeSync(false)} className="text-xs text-slate-400 hover:text-slate-600">閉じる</button>
           </div>
           <p className="text-[10px] text-slate-400 mt-2">1店舗ずつ順番に同期します（2秒間隔）。途中で止まっても再度実行で続きから再開可能。</p>
+        </div>
+      )}
+
+      {/* 同期失敗店舗パネル */}
+      {showSyncFailed && syncFailedShops.length > 0 && (
+        <div className="bg-red-50 rounded-xl p-4 shadow-sm border border-red-200 mb-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-red-700">同期失敗店舗（{syncFailedShops.length}件）</h3>
+            <button onClick={() => setShowSyncFailed(false)} className="text-xs text-slate-400 hover:text-slate-600">閉じる</button>
+          </div>
+          <div className="space-y-1 max-h-60 overflow-y-auto">
+            {syncFailedShops.map((s, i) => (
+              <div key={i} className="flex items-center justify-between py-1.5 px-2 text-sm bg-white rounded">
+                <span className="text-slate-700 truncate">{s.shopName}</span>
+                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                  s.status === "no_gbp_location" ? "bg-amber-100 text-amber-700"
+                    : s.status.includes("404") ? "bg-orange-100 text-orange-700"
+                    : "bg-red-100 text-red-700"
+                }`}>
+                  {s.status === "no_gbp_location" ? "GBP未連携"
+                    : s.status.includes("404") ? "ロケーション不明"
+                    : s.status.includes("401") || s.status.includes("403") ? "認証エラー"
+                    : s.status.includes("429") ? "レート制限"
+                    : s.status}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
