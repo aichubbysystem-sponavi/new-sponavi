@@ -133,15 +133,19 @@ ${reviewTexts}
       "reviewNumbers": [3, 7]
     }
   ],
-  "summary": "口コミ総評（3行程度。評価の傾向、特筆すべき点、改善点を含む）",
+  "summary": "口コミの全体傾向を1行で要約（50文字以内。例: 味の評価は高いが接客面に課題あり）",
   "comments": [
-    "担当者コメント1（数値データに基づく分析。strongタグで強調箇所を囲む）",
-    "担当者コメント2",
-    "担当者コメント3",
-    "担当者コメント4",
-    "担当者コメント5（来月の施策提案）"
+    "コメント1（口コミデータに基づく具体的な分析。strongタグで強調箇所を囲む）",
+    "コメント2",
+    "コメント3",
+    "コメント4",
+    "コメント5（来月の施策提案）"
   ]
 }
+
+【commentsのルール】
+- コメント内に口コミの参照番号（#1, #6, [#10]等）を絶対に含めないでください。お客様に見せるレポートです。
+- 具体的な口コミ内容を引用する場合は「○○という声がある」のように表現してください。
 
 【WordSourcesのルール】
 - positiveWordSources・negativeWordSourcesの各reviewNumbersは、口コミテキストの[#番号]に対応する番号の配列です。
@@ -240,6 +244,16 @@ ${reviewTexts}
       // 空のソースも除去
       parsed.positiveWordSources = parsed.positiveWordSources.filter((s: any) => s.reviews.length > 0);
       parsed.negativeWordSources = parsed.negativeWordSources.filter((s: any) => s.reviews.length > 0);
+
+      // コメントから口コミ参照番号を除去（#6, [#10], (#3)等）
+      if (Array.isArray(parsed.comments)) {
+        parsed.comments = parsed.comments.map((c: string) =>
+          c.replace(/[\[（(]?#\d+[\]）)]?/g, "").replace(/\s{2,}/g, " ").trim()
+        );
+      }
+      if (parsed.summary) {
+        parsed.summary = parsed.summary.replace(/[\[（(]?#\d+[\]）)]?/g, "").replace(/\s{2,}/g, " ").trim();
+      }
 
       return parsed;
     } catch { return null; }
