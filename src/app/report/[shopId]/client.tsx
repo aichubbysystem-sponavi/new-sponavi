@@ -1266,16 +1266,19 @@ export default function ReportClient({
       {/* ════ P11: 担当者コメント ════ */}
       {(() => { pageNum++; return null; })()}
       <div style={slideStyle} className="slide">
-        <div style={slideBarStyle}><span>{shop.name} — AIによる担当者コメント</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBarStyle}><span>{shop.name} — AIによるコメント</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
-          <div style={stitleStyle}>担当者コメント</div>
+          <div style={stitleStyle}>AIによるコメント</div>
           <div style={{ background: "linear-gradient(135deg,#f0f4ff,#fff)", border: "2px solid #0f3460", borderRadius: 14, padding: "28px 32px", flex: 1, display: "flex", flexDirection: "column" }}>
-            <h3 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", marginBottom: 12 }}>{curLabel} 総評</h3>
-            <ul style={{ paddingLeft: 20, margin: 0 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", marginBottom: 16 }}>{curLabel} 総評</h3>
+            <div style={{ margin: 0 }}>
               {(comments || []).map((c, i) => (
-                <li key={i} style={{ fontSize: 14, lineHeight: 2, color: "#444" }} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(c, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
+                <p key={i} style={{ fontSize: 14, lineHeight: 2, color: "#444", margin: "0 0 12px 0" }}>
+                  <span style={{ fontWeight: 700, color: "#0f3460", marginRight: 8 }}>{"①②③④⑤⑥⑦⑧⑨⑩"[i] || `${i + 1}.`}</span>
+                  <span dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(c, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
+                </p>
               ))}
-            </ul>
+            </div>
             {/* メモ欄 */}
             <div style={{ marginTop: 16, borderTop: "1px solid #dde", paddingTop: 12 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
