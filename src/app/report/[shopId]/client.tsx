@@ -635,7 +635,7 @@ export default function ReportClient({
             <tbody>
               <tr style={{ background: "#f8f9fa" }}>
                 <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60 }}>月</td>
-                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l}</td>)}
+                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l.split("/")[1]}月</td>)}
               </tr>
               <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>モバイル</td>
                 {charts.searchMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
@@ -663,7 +663,7 @@ export default function ReportClient({
             <tbody>
               <tr style={{ background: "#f8f9fa" }}>
                 <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60 }}>月</td>
-                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l}</td>)}
+                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l.split("/")[1]}月</td>)}
               </tr>
               <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>モバイル</td>
                 {charts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
@@ -694,7 +694,7 @@ export default function ReportClient({
             <tbody>
               <tr style={{ background: "#f8f9fa" }}>
                 <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60 }}>月</td>
-                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l}</td>)}
+                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l.split("/")[1]}月</td>)}
               </tr>
               <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>Web</td>
                 {charts.websites.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
@@ -1114,7 +1114,7 @@ export default function ReportClient({
               <tbody>
                 <tr style={{ background: "#f8f9fa" }}>
                   <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60 }}>月</td>
-                  {reviewLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l}</td>)}
+                  {reviewLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l.split("/")[1]}月</td>)}
                 </tr>
                 <tr>
                   <td style={{ padding: "3px 4px", fontWeight: 700, color: "#333" }}>件数</td>
@@ -1167,7 +1167,7 @@ export default function ReportClient({
               <tbody>
                 <tr style={{ background: "#f8f9fa" }}>
                   <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60 }}>月</td>
-                  {reviewLabels.slice(1).map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l}</td>)}
+                  {reviewLabels.slice(1).map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l.split("/")[1]}月</td>)}
                 </tr>
                 <tr>
                   <td style={{ padding: "3px 4px", fontWeight: 700, color: "#333" }}>増加数</td>
