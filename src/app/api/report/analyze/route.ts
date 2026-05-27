@@ -46,8 +46,7 @@ async function fetchReviews(shopId: string): Promise<ReviewListResponse | null> 
       .eq("shop_id", shopId)
       .gte("create_time", oneYearAgo.toISOString())
       .not("comment", "is", null)
-      .order("create_time", { ascending: false })
-      .limit(100);
+      .order("create_time", { ascending: false });
 
     if (!reviews || reviews.length === 0) return null;
 
@@ -95,8 +94,7 @@ async function analyzeWithClaude(
   if (!ANTHROPIC_API_KEY) return null;
 
   const filteredReviews = reviews
-    .filter((r) => r.comment && r.comment.trim())
-    .slice(0, 100);
+    .filter((r) => r.comment && r.comment.trim());
 
   const reviewTexts = filteredReviews
     .map((r, i) => `[#${i + 1}][${r.starRating}][${r.reviewer.displayName}][${r.createTime?.slice(0, 10) || "不明"}] ${r.comment}`)
