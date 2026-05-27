@@ -405,7 +405,7 @@ async function fetchGridRankingData(
     for (const log of logs) {
       keywordSet.add(log.keyword);
       const d = new Date(log.measured_at);
-      const monthKey = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const monthKey = `${d.getFullYear()}/${d.getMonth() + 1}`;
       const results: import("./report-data").GridPoint[] = log.results || [];
       const ranked = results.filter(r => r.rank > 0);
       const avg = ranked.length > 0 ? ranked.reduce((s, r) => s + r.rank, 0) / ranked.length : 0;
