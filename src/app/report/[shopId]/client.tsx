@@ -375,7 +375,13 @@ export default function ReportClient({
   if (showKeywords) totalPages++;
   if (showRankingHistory) totalPages++;
   if (showGridRanking) totalPages++;
-  if (showSearchQueries) totalPages++;
+  if (showSearchQueries) {
+    totalPages++;
+    // 16件以上なら2ページ目も表示
+    const sqHist = searchQueries?.history;
+    const sqLatestKws = Array.isArray(sqHist) && sqHist.length > 0 ? (sqHist[sqHist.length - 1]?.keywords?.length || 0) : 0;
+    if (sqLatestKws > 15) totalPages++;
+  }
 
   function pn(slideNum: number) {
     return `${slideNum} / ${totalPages}`;
@@ -1038,79 +1044,104 @@ export default function ReportClient({
           cursor: disabled ? "default" : "pointer",
         });
         const hasPrev = sqPrev !== null;
-        return (
+        const PER_PAGE = 15;
+        const page1 = currentKeywords.slice(0, PER_PAGE);
+        const page2 = currentKeywords.slice(PER_PAGE, PER_PAGE * 2);
+        const thStyle = (w?: number): React.CSSProperties => ({ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, ...(w ? { width: w } : {}) });
+        const renderSqTable = (rows: typeof currentKeywords, startIdx: number) => (
+          <div style={{ overflow: "hidden", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", flex: 1 }}>
+              <thead>
+                <tr>
+                  <th style={thStyle(40)}>順位</th>
+                  <th style={{ ...thStyle(), textAlign: "left", padding: "10px 12px" }}>検索語句</th>
+                  <th style={thStyle(70)}>検索数</th>
+                  <th style={thStyle(60)}>前月</th>
+                  <th style={thStyle(50)}>変動</th>
+                  {hasYoy && <th style={thStyle(60)}>前年</th>}
+                  {hasYoy && <th style={thStyle(60)}>前年比</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((kw, ri) => {
+                  const rank = startIdx + ri;
+                  const prev = prevMap.get(kw.word);
+                  const diff = prev !== undefined ? kw.count - prev : null;
+                  const yoyVal = yoyMap.get(kw.word);
+                  const yoyDiff = yoyVal !== undefined ? kw.count - yoyVal : null;
+                  return (
+                    <tr key={`${sqCurrent?.month}-${rank}`} style={{ background: ri % 2 === 0 ? "#fff" : "#f8f9fb", borderBottom: "1px solid #eee" }}>
+                      <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 13, fontWeight: 700, color: rank < 3 ? "#e94560" : rank < 10 ? "#0f3460" : "#888" }}>{rank + 1}</td>
+                      <td style={{ padding: "7px 12px", fontSize: 13, color: "#333" }}>{kw.word}</td>
+                      <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 14, fontWeight: 700, color: "#0f3460" }}>{kw.count.toLocaleString()}</td>
+                      <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 12, color: "#888" }}>{hasPrev && prev !== undefined ? prev.toLocaleString() : "-"}</td>
+                      <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: diff === null || !hasPrev ? "#ccc" : diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
+                        {!hasPrev || diff === null ? "-" : diff > 0 ? `+${diff}` : diff === 0 ? "→" : String(diff)}
+                      </td>
+                      {hasYoy && <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 12, color: "#888" }}>{yoyVal !== undefined ? yoyVal.toLocaleString() : "-"}</td>}
+                      {hasYoy && <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: yoyDiff === null ? "#ccc" : yoyDiff > 0 ? "#0a8f3c" : yoyDiff < 0 ? "#c0392b" : "#888" }}>
+                        {yoyDiff === null ? "-" : yoyDiff > 0 ? `+${yoyDiff.toLocaleString()}` : yoyDiff === 0 ? "→" : yoyDiff.toLocaleString()}
+                      </td>}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        );
+        const sqNavBar = (
+          <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button onClick={() => { if (canPrev) setSqMonthIdx(activeIdx - 1); }} style={btnStyle(!canPrev)}>◀</button>
+            <span style={{ fontSize: 12, minWidth: 60, textAlign: "center" }}>{sqCurrent?.month || ""}</span>
+            <button onClick={() => { if (canNext) setSqMonthIdx(activeIdx + 1); }} style={btnStyle(!canNext)}>▶</button>
+            <span style={{ fontSize: 10, opacity: 0.4, marginLeft: 4 }}>{activeIdx + 1}/{sqHistory.length}</span>
+          </div>
+        );
+        const sqSummary = (
+          <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 12, padding: "6px 16px 2px", fontSize: 13 }}>
+            <span style={{ color: "#555", fontWeight: 500 }}>総検索数: <strong style={{ color: "#0f3460", fontSize: 16 }}>{totalCount.toLocaleString()}</strong></span>
+            {totalDiff !== null && (
+              <span style={{ fontSize: 12, fontWeight: 600, color: totalDiff > 0 ? "#0a8f3c" : totalDiff < 0 ? "#c0392b" : "#888" }}>
+                前月比: {totalDiff > 0 ? `+${totalDiff.toLocaleString()}` : totalDiff === 0 ? "→" : totalDiff.toLocaleString()}
+              </span>
+            )}
+            {yoyTotalDiff !== null && (
+              <span style={{ fontSize: 12, fontWeight: 600, color: yoyTotalDiff > 0 ? "#0a8f3c" : yoyTotalDiff < 0 ? "#c0392b" : "#888" }}>
+                前年比: {yoyTotalDiff > 0 ? `+${yoyTotalDiff.toLocaleString()}` : yoyTotalDiff === 0 ? "→" : yoyTotalDiff.toLocaleString()}
+              </span>
+            )}
+          </div>
+        );
+        return (<>
+        {/* 検索語句 ページ1 (1-15位) */}
         <div style={slideStyle} className="slide">
           <div style={slideBarStyle}>
             <span>{shop.name} — 検索語句</span>
-            <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <button onClick={() => { if (canPrev) setSqMonthIdx(activeIdx - 1); }} style={btnStyle(!canPrev)}>◀</button>
-              <span style={{ fontSize: 12, minWidth: 60, textAlign: "center" }}>{sqCurrent?.month || ""}</span>
-              <button onClick={() => { if (canNext) setSqMonthIdx(activeIdx + 1); }} style={btnStyle(!canNext)}>▶</button>
-              <span style={{ fontSize: 10, opacity: 0.4, marginLeft: 4 }}>{activeIdx + 1}/{sqHistory.length}</span>
-            </div>
+            {sqNavBar}
             <span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
           </div>
           <div style={{ ...slideBodyStyle, display: "flex", flexDirection: "column" }}>
-            <div style={stitleStyle}>検索語句ランキング（{sqCurrent?.month || ""}）</div>
-            <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 12, padding: "6px 16px 2px", fontSize: 13 }}>
-              <span style={{ color: "#555", fontWeight: 500 }}>総検索数: <strong style={{ color: "#0f3460", fontSize: 16 }}>{totalCount.toLocaleString()}</strong></span>
-              {totalDiff !== null && (
-                <span style={{ fontSize: 12, fontWeight: 600, color: totalDiff > 0 ? "#0a8f3c" : totalDiff < 0 ? "#c0392b" : "#888" }}>
-                  前月比: {totalDiff > 0 ? `+${totalDiff.toLocaleString()}` : totalDiff === 0 ? "→" : totalDiff.toLocaleString()}
-                </span>
-              )}
-              {yoyTotalDiff !== null && (
-                <span style={{ fontSize: 12, fontWeight: 600, color: yoyTotalDiff > 0 ? "#0a8f3c" : yoyTotalDiff < 0 ? "#c0392b" : "#888" }}>
-                  前年比: {yoyTotalDiff > 0 ? `+${yoyTotalDiff.toLocaleString()}` : yoyTotalDiff === 0 ? "→" : yoyTotalDiff.toLocaleString()}
-                </span>
-              )}
-            </div>
-            <div style={{ overflow: "hidden", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", flex: 1 }}>
-                <thead>
-                  <tr>
-                    <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 40 }}>順位</th>
-                    <th style={{ background: "#0f3460", color: "#fff", padding: "10px 12px", textAlign: "left", fontWeight: 600, fontSize: 11 }}>検索語句</th>
-                    <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 70 }}>検索数</th>
-                    <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 60 }}>前月</th>
-                    <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 50 }}>変動</th>
-                    {hasYoy && <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 60 }}>前年</th>}
-                    {hasYoy && <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 60 }}>前年比</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {currentKeywords.slice(0, 30).map((kw, i) => {
-                    const prev = prevMap.get(kw.word);
-                    const diff = prev !== undefined ? kw.count - prev : null;
-                    return (
-                      <tr key={`${sqCurrent?.month}-${i}`} style={{ background: i % 2 === 0 ? "#fff" : "#f8f9fb", borderBottom: "1px solid #eee" }}>
-                        <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 13, fontWeight: 700, color: i < 3 ? "#e94560" : i < 10 ? "#0f3460" : "#888" }}>{i + 1}</td>
-                        <td style={{ padding: "7px 12px", fontSize: 13, color: "#333" }}>{kw.word}</td>
-                        <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 14, fontWeight: 700, color: "#0f3460" }}>{kw.count.toLocaleString()}</td>
-                        <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 12, color: "#888" }}>{hasPrev && prev !== undefined ? prev.toLocaleString() : "-"}</td>
-                        <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: diff === null || !hasPrev ? "#ccc" : diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
-                          {!hasPrev || diff === null ? "-" : diff > 0 ? `+${diff}` : diff === 0 ? "→" : String(diff)}
-                        </td>
-                        {hasYoy && (() => {
-                          const yoyVal = yoyMap.get(kw.word);
-                          return <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 12, color: "#888" }}>{yoyVal !== undefined ? yoyVal.toLocaleString() : "-"}</td>;
-                        })()}
-                        {hasYoy && (() => {
-                          const yoyVal = yoyMap.get(kw.word);
-                          const yoyDiff = yoyVal !== undefined ? kw.count - yoyVal : null;
-                          return <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: yoyDiff === null ? "#ccc" : yoyDiff > 0 ? "#0a8f3c" : yoyDiff < 0 ? "#c0392b" : "#888" }}>
-                            {yoyDiff === null ? "-" : yoyDiff > 0 ? `+${yoyDiff.toLocaleString()}` : yoyDiff === 0 ? "→" : yoyDiff.toLocaleString()}
-                          </td>;
-                        })()}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <div style={stitleStyle}>検索語句ランキング（{sqCurrent?.month || ""}）1〜{Math.min(PER_PAGE, currentKeywords.length)}位</div>
+            {sqSummary}
+            {renderSqTable(page1, 0)}
           </div>
         </div>
-      ); })()}
+        {/* 検索語句 ページ2 (16-30位) */}
+        {page2.length > 0 && (() => { pageNum++; return (
+        <div style={slideStyle} className="slide">
+          <div style={slideBarStyle}>
+            <span>{shop.name} — 検索語句</span>
+            {sqNavBar}
+            <span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
+          </div>
+          <div style={{ ...slideBodyStyle, display: "flex", flexDirection: "column" }}>
+            <div style={stitleStyle}>検索語句ランキング（{sqCurrent?.month || ""}）{PER_PAGE + 1}〜{Math.min(PER_PAGE * 2, currentKeywords.length)}位</div>
+            {renderSqTable(page2, PER_PAGE)}
+          </div>
+        </div>
+        ); })()}
+        </>);
+      })()}
 
       {/* ════ P8: 口コミ件数推移 ════ */}
       {(() => { pageNum++; return null; })()}
