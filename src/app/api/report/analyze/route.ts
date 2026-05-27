@@ -28,6 +28,7 @@ interface ReviewListResponse {
   reviews: GBPReview[];
   averageRating: number;
   totalReviewCount: number;
+  ratingDistribution: Record<number, number>;
 }
 
 // Supabase DBから口コミ取得（Go API不要）- 直近1年
@@ -50,12 +51,15 @@ async function fetchReviews(shopId: string): Promise<ReviewListResponse | null> 
 
     if (!reviews || reviews.length === 0) return null;
 
-    // 平均評価を算出
+    // 評価別集計
     const ratingMap: Record<string, number> = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5, ONE_STAR: 1, TWO_STARS: 2, THREE_STARS: 3, FOUR_STARS: 4, FIVE_STARS: 5 };
     const ratings = reviews.map((r: any) => ratingMap[(r.star_rating || "").toUpperCase()] || 0).filter((r: number) => r > 0);
     const avgRating = ratings.length > 0 ? Math.round((ratings.reduce((a: number, b: number) => a + b, 0) / ratings.length) * 10) / 10 : 0;
+    const ratingDist: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    for (const r of ratings) ratingDist[r] = (ratingDist[r] || 0) + 1;
 
     return {
+      ratingDistribution: ratingDist,
       reviews: reviews.map((r: any) => {
         const comment = r.comment || "";
         const displayComment = comment.includes("(Original)")
@@ -82,7 +86,8 @@ async function analyzeWithClaude(
   shopName: string,
   reviews: GBPReview[],
   averageRating: number,
-  totalReviewCount: number
+  totalReviewCount: number,
+  ratingDistribution?: Record<number, number>
 ): Promise<{
   positiveWords: string[];
   negativeWords: string[];
@@ -100,7 +105,7 @@ async function analyzeWithClaude(
   const limits = [allFiltered.length, Math.ceil(allFiltered.length / 2), Math.ceil(allFiltered.length / 4), 50].filter((v, i, a) => i === 0 || v < a[i - 1]);
 
   for (const limit of limits) {
-    const result = await tryAnalyze(shopName, allFiltered.slice(0, limit), averageRating, totalReviewCount);
+    const result = await tryAnalyze(shopName, allFiltered.slice(0, limit), averageRating, totalReviewCount, ratingDistribution);
     if (result) return result;
     console.log(`[analyze] ${shopName}: ${limit}件で失敗、リトライ...`);
   }
@@ -111,7 +116,8 @@ async function tryAnalyze(
   shopName: string,
   filteredReviews: GBPReview[],
   averageRating: number,
-  totalReviewCount: number
+  totalReviewCount: number,
+  ratingDistribution?: Record<number, number>
 ): Promise<any | null> {
   const reviewTexts = filteredReviews
     .map((r, i) => `[#${i + 1}][${r.starRating}][${r.reviewer.displayName}][${r.createTime?.slice(0, 10) || "不明"}] ${r.comment.slice(0, 300)}`)
@@ -119,11 +125,29 @@ async function tryAnalyze(
 
   if (!reviewTexts) return null;
 
+  // 口コミの統計データを事前計算
+  const ratingMapLocal: Record<string, number> = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5 };
+  const dist = ratingDistribution || (() => {
+    const d: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    for (const r of filteredReviews) d[ratingMapLocal[r.starRating] || 0] = (d[ratingMapLocal[r.starRating] || 0] || 0) + 1;
+    return d;
+  })();
+  const totalRated = Object.values(dist).reduce((a, b) => a + b, 0);
+  const pctOf = (n: number) => totalRated > 0 ? Math.round(n / totalRated * 100) : 0;
+  const statsText = `★5: ${dist[5]}件(${pctOf(dist[5])}%), ★4: ${dist[4]}件(${pctOf(dist[4])}%), ★3: ${dist[3]}件(${pctOf(dist[3])}%), ★2: ${dist[2]}件(${pctOf(dist[2])}%), ★1: ${dist[1]}件(${pctOf(dist[1])}%)`;
+  const positiveCount = (dist[4] || 0) + (dist[5] || 0);
+  const negativeCount = (dist[1] || 0) + (dist[2] || 0) + (dist[3] || 0);
+
   const prompt = `あなたはMEO対策の専門家です。以下の店舗の直近1年の口コミを分析し、JSON形式で結果を返してください。
 
 店舗名: ${shopName}
 Google評価: ${averageRating} / 5.0（${totalReviewCount}件）
-※ この評価はGoogleの公式値です。summaryやcommentsで評価を言及する場合はこの数値をそのまま使用してください。独自に計算しないでください。
+
+【正確な統計データ（以下の数値をcommentsで使用すること。独自に数えないでください）】
+直近1年の口コミ: ${totalRated}件
+評価分布: ${statsText}
+高評価(★4-5): ${positiveCount}件(${pctOf(positiveCount)}%)
+低評価(★1-3): ${negativeCount}件(${pctOf(negativeCount)}%)
 
 【口コミテキスト（直近1年・${filteredReviews.length}件）】
 ${reviewTexts}
@@ -164,6 +188,8 @@ ${reviewTexts}
 【commentsのルール】
 - コメント内に口コミの参照番号（#1, #6, [#10]等）を絶対に含めないでください。お客様に見せるレポートです。
 - 具体的な口コミ内容を引用する場合は「○○という声がある」のように表現してください。
+- 数値（件数、割合、評価値）は必ず上記の「正確な統計データ」セクションの値を使用してください。口コミテキストから独自に数えた数値は使わないでください。
+- Google評価の数値もそのまま使用してください。
 
 【WordSourcesのルール】
 - positiveWordSources・negativeWordSourcesの各reviewNumbersは、口コミテキストの[#番号]に対応する番号の配列です。
@@ -337,7 +363,8 @@ export async function POST(request: NextRequest) {
         shop.name,
         reviewData.reviews,
         officialRating,
-        officialCount
+        officialCount,
+        reviewData.ratingDistribution
       );
 
       if (!analysis) {
