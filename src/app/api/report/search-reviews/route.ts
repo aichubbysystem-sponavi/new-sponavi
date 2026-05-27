@@ -141,15 +141,15 @@ export async function GET(request: NextRequest) {
     addResults(matchReviews(allReviews, (text) => uniqueWords.every(w => text.includes(w)), false));
   }
 
-  // 3. 主要ワード（最長の単語）で個別検索 — 関連口コミを広く拾う
+  // 3. 主要ワード（最長の単語）で個別検索（星評価フィルタあり — 逆評価の口コミ混入防止）
   if (allMatched.length < 20 && uniqueWords.length > 0) {
     const mainWord = uniqueWords.reduce((a, b) => a.length >= b.length ? a : b);
-    addResults(matchReviews(allReviews, (text) => text.includes(mainWord), false));
+    addResults(matchReviews(allReviews, (text) => text.includes(mainWord), true));
   }
 
-  // 4. 各分割ワードでOR検索 — さらに関連口コミを補完
+  // 4. 各分割ワードでOR検索（星評価フィルタあり）
   if (allMatched.length < 20 && uniqueWords.length > 1) {
-    addResults(matchReviews(allReviews, (text) => uniqueWords.some(w => text.includes(w)), false));
+    addResults(matchReviews(allReviews, (text) => uniqueWords.some(w => text.includes(w)), true));
   }
 
   if (allMatched.length > 0) {
