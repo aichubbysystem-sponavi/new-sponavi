@@ -366,7 +366,7 @@ export default function ReportClient({
   };
 
   // ── Page count ──
-  let totalPages = 8; // P1-P6, P11(口コミ分析), P12(担当者コメント)
+  let totalPages = 7; // P1,P2(月次),P3-P5(グラフ),口コミ分析,AIコメント
   if (hasReviews) totalPages += 2; // P9(口コミ件数推移), P10(月間増加数)
   if (showKeywords) totalPages++;
   if (showRankingHistory) totalPages++;
@@ -394,29 +394,6 @@ export default function ReportClient({
     bookings: charts.bookings[i], foodMenus: charts.foodMenus[i],
     totalActions: charts.calls[i] + charts.routes[i] + charts.websites[i] + charts.bookings[i] + charts.foodMenus[i],
   }));
-
-  // ── Comparison rows ──
-  const curIdx = monthlyLabels.length - 1;
-  const prevIdx = curIdx - 1;
-  const yoyIdx = curIdx - 12 >= 0 ? curIdx - 12 : -1;
-
-  function cmpRow(label: string, cur: number, prev: number) {
-    const c = pctChange(cur, prev);
-    return { label, cur, prev, ...c };
-  }
-
-  const cmpMetrics = [
-    { label: "Google検索合計", cur: (i: number) => charts.searchMobile[i] + charts.searchPC[i] },
-    { label: "Googleマップ合計", cur: (i: number) => charts.mapMobile[i] + charts.mapPC[i] },
-    { label: "ウェブサイト", cur: (i: number) => charts.websites[i] },
-    { label: "ルート", cur: (i: number) => charts.routes[i] },
-    { label: "通話", cur: (i: number) => charts.calls[i] },
-    ...(hasFoodMenus ? [{ label: "メニュークリック", cur: (i: number) => charts.foodMenus[i] }] : []),
-    ...(hasBookings ? [{ label: "予約", cur: (i: number) => charts.bookings[i] }] : []),
-  ];
-
-  const momRows = prevIdx >= 0 ? cmpMetrics.map(m => cmpRow(m.label, m.cur(curIdx), m.cur(prevIdx))) : [];
-  const yoyRows = yoyIdx >= 0 ? cmpMetrics.map(m => cmpRow(m.label, m.cur(curIdx), m.cur(yoyIdx))) : [];
 
   // ── Page numbering tracker ──
   let pageNum = 1;
@@ -600,41 +577,8 @@ export default function ReportClient({
         </div>
       </div>
 
-      {/* ════ P2: 前月比・前年比 ════ */}
+      {/* ════ P2: 月次テーブル ════ */}
       {(() => { pageNum = 2; return null; })()}
-      <div style={slideStyle} className="slide">
-        <div style={slideBarStyle}><span>{shop.name} — 前月比・前年比</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
-        <div style={slideBodyStyle}>
-          <div style={stitleStyle}>前月比・前年比</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, flex: 1 }}>
-            <div style={{ background: "#fff", borderRadius: 12, padding: "28px 32px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column" }}>
-              <h4 style={{ fontSize: 16, fontWeight: 600, color: "#555", marginBottom: 18 }}>前月比（{prevIdx >= 0 ? monthlyLabels[prevIdx] : "—"} → {curLabel}）</h4>
-              {momRows.map((r, i) => (
-                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "2px 0", fontSize: 14, flex: 1 }}>
-                  <span style={{ color: "#444", fontWeight: 500 }}>{r.label}</span>
-                  <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: 16, fontSize: 13, fontWeight: 600, background: r.isUp ? "#e6f9ee" : "#fde8e8", color: r.isUp ? "#0a8f3c" : "#c0392b" }}>
-                    {r.isUp ? "▲" : "▼"} {r.prev.toLocaleString()}→{r.cur.toLocaleString()}（{r.text}）
-                  </span>
-                </div>
-              ))}
-            </div>
-            <div style={{ background: "#fff", borderRadius: 12, padding: "28px 32px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column" }}>
-              <h4 style={{ fontSize: 16, fontWeight: 600, color: "#555", marginBottom: 18 }}>前年比（{yoyIdx >= 0 ? monthlyLabels[yoyIdx] : "—"} → {curLabel}）</h4>
-              {yoyRows.length > 0 ? yoyRows.map((r, i) => (
-                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "2px 0", fontSize: 14, flex: 1 }}>
-                  <span style={{ color: "#444", fontWeight: 500 }}>{r.label}</span>
-                  <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: 16, fontSize: 13, fontWeight: 600, background: r.isUp ? "#e6f9ee" : "#fde8e8", color: r.isUp ? "#0a8f3c" : "#c0392b" }}>
-                    {r.isUp ? "▲" : "▼"} {r.prev.toLocaleString()}→{r.cur.toLocaleString()}（{r.text}）
-                  </span>
-                </div>
-              )) : <div style={{ textAlign: "center", color: "#999", marginTop: 40, fontSize: 14 }}>前年データなし（12ヶ月分のデータが必要です）</div>}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ════ P3: 月次テーブル ════ */}
-      {(() => { pageNum = 3; return null; })()}
       <div style={slideStyle} className="slide">
         <div style={slideBarStyle}><span>{shop.name} — 月次推移データ</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
@@ -676,8 +620,8 @@ export default function ReportClient({
         </div>
       </div>
 
-      {/* ════ P4: Google検索数推移 ════ */}
-      {(() => { pageNum = 4; return null; })()}
+      {/* ════ P3: Google検索数推移 ════ */}
+      {(() => { pageNum = 3; return null; })()}
       <div style={slideStyle} className="slide">
         <div style={slideBarStyle}><span>{shop.name} — Google検索数推移</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
@@ -691,7 +635,7 @@ export default function ReportClient({
             <tbody>
               <tr style={{ background: "#f8f9fa" }}>
                 <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60 }}>月</td>
-                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l.replace(/^\d{4}\//, "")}</td>)}
+                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l}</td>)}
               </tr>
               <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>モバイル</td>
                 {charts.searchMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
@@ -704,8 +648,8 @@ export default function ReportClient({
         </div>
       </div>
 
-      {/* ════ P5: Googleマップ表示数推移 ════ */}
-      {(() => { pageNum = 5; return null; })()}
+      {/* ════ P4: Googleマップ表示数推移 ════ */}
+      {(() => { pageNum = 4; return null; })()}
       <div style={slideStyle} className="slide">
         <div style={slideBarStyle}><span>{shop.name} — Googleマップ表示数推移</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
@@ -719,7 +663,7 @@ export default function ReportClient({
             <tbody>
               <tr style={{ background: "#f8f9fa" }}>
                 <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60 }}>月</td>
-                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l.replace(/^\d{4}\//, "")}</td>)}
+                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l}</td>)}
               </tr>
               <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>モバイル</td>
                 {charts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
@@ -732,8 +676,8 @@ export default function ReportClient({
         </div>
       </div>
 
-      {/* ════ P6: ユーザー反応数推移 ════ */}
-      {(() => { pageNum = 6; return null; })()}
+      {/* ════ P5: ユーザー反応数推移 ════ */}
+      {(() => { pageNum = 5; return null; })()}
       <div style={slideStyle} className="slide">
         <div style={slideBarStyle}><span>{shop.name} — ユーザー反応数推移</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
@@ -750,7 +694,7 @@ export default function ReportClient({
             <tbody>
               <tr style={{ background: "#f8f9fa" }}>
                 <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60 }}>月</td>
-                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l.replace(/^\d{4}\//, "")}</td>)}
+                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l}</td>)}
               </tr>
               <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>Web</td>
                 {charts.websites.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
@@ -770,7 +714,7 @@ export default function ReportClient({
       </div>
 
       {/* ════ P7: キーワード順位 (データある場合のみ) ════ */}
-      {showKeywords && (() => { pageNum = 7; return (
+      {showKeywords && (() => { pageNum = 6; return (
         <div style={slideStyle} className="slide">
           <div style={slideBarStyle}><span>{shop.name} — キーワード順位変動</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={slideBodyStyle}>
@@ -810,7 +754,7 @@ export default function ReportClient({
                     <th style={{ background: "#0f3460", color: "#fff", padding: "12px 12px", textAlign: "left", fontWeight: 600, whiteSpace: "nowrap", fontSize: 12, position: "sticky", left: 0 }}>キーワード</th>
                     {rankingHistory.labels.map((l, i) => (
                       <th key={i} style={{ background: i === rankingHistory.labels.length - 1 ? "#e94560" : "#0f3460", color: "#fff", padding: "12px 8px", textAlign: "center", fontWeight: 600, whiteSpace: "nowrap", fontSize: 12 }}>
-                        {l.replace(/^\d{4}\//, "")}月
+                        {l}月
                       </th>
                     ))}
                     <th style={{ background: "#0f3460", color: "#fff", padding: "12px 8px", textAlign: "center", fontWeight: 600, fontSize: 11 }}>変動</th>
