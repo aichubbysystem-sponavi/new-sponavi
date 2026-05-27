@@ -122,7 +122,8 @@ async function tryAnalyze(
   const prompt = `あなたはMEO対策の専門家です。以下の店舗の直近1年の口コミを分析し、JSON形式で結果を返してください。
 
 店舗名: ${shopName}
-評価: ${averageRating} / 5.0（${totalReviewCount}件）
+Google評価: ${averageRating} / 5.0（${totalReviewCount}件）
+※ この評価はGoogleの公式値です。summaryやcommentsで評価を言及する場合はこの数値をそのまま使用してください。独自に計算しないでください。
 
 【口コミテキスト（直近1年・${filteredReviews.length}件）】
 ${reviewTexts}
@@ -326,12 +327,17 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
+      // Google公式評価をshopsテーブルから取得（AI独自計算より正確）
+      const { data: shopRow } = await supabase.from("shops").select("rating, review_count").eq("id", shop.id).maybeSingle();
+      const officialRating = shopRow?.rating ?? reviewData.averageRating;
+      const officialCount = shopRow?.review_count ?? reviewData.totalReviewCount;
+
       // Claude APIで分析
       const analysis = await analyzeWithClaude(
         shop.name,
         reviewData.reviews,
-        reviewData.averageRating,
-        reviewData.totalReviewCount
+        officialRating,
+        officialCount
       );
 
       if (!analysis) {
