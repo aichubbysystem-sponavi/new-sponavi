@@ -101,8 +101,8 @@ async function analyzeWithClaude(
   const allFiltered = reviews.filter((r) => r.comment && r.comment.trim());
   if (allFiltered.length === 0) return null;
 
-  // 段階的リトライ: 全件 → 半分 → さらに半分 → 最小50件
-  const limits = [allFiltered.length, Math.ceil(allFiltered.length / 2), Math.ceil(allFiltered.length / 4), 50].filter((v, i, a) => i === 0 || v < a[i - 1]);
+  // 段階的リトライ: 全件 → 50件（最大2回、合計60秒以内に収める）
+  const limits = allFiltered.length > 50 ? [allFiltered.length, 50] : [allFiltered.length];
 
   for (const limit of limits) {
     const result = await tryAnalyze(shopName, allFiltered.slice(0, limit), averageRating, totalReviewCount, ratingDistribution);
@@ -199,7 +199,7 @@ ${reviewTexts}
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 60000); // 60秒タイムアウト
+    const timeout = setTimeout(() => controller.abort(), 30000); // 30秒タイムアウト
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       signal: controller.signal,
