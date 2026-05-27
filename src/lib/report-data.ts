@@ -15,6 +15,8 @@ export interface KPI {
   prevValue: number;
   unit: string;
   compareLabel?: string;
+  momValue?: number | null;  // 前月値
+  yoyValue?: number | null;  // 前年同月値
 }
 
 export interface ChartData {

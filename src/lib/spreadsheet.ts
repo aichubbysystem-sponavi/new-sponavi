@@ -529,9 +529,9 @@ export async function buildReportData(
 
   const cur = recent[recent.length - 1];
   const prev = recent.length >= 2 ? recent[recent.length - 2] : null;
-  // 前年同月（KPIサマリーの%比較用）、前年データなしなら最古の月
-  const yoy = recent.length >= 13 ? recent[recent.length - 13] : recent[0];
-  const compareLabel = recent.length >= 13 ? "前年比" : `${recent.length - 1}ヶ月前比`;
+  // 前年同月（KPIサマリーの%比較用）
+  const yoy = recent.length >= 13 ? recent[recent.length - 13] : null;
+  const hasYoyData = yoy !== null;
 
   const curActions = cur.calls + cur.routes + cur.websites + cur.bookings + cur.foodMenus;
   const curDate = cur.date;
@@ -552,33 +552,32 @@ export async function buildReportData(
     totalReviews = reviewData.currentCount;
   }
 
-  // 口コミ増減（KPI 8番目用）— 前年同月比、なければ最古月比
-  let reviewDeltaForKpi = 0;
-  let prevReviewCount = 0;
-  let reviewCompareLabel = compareLabel;
+  // 口コミ増減（KPI 8番目用）— 前月比 + 前年同月比
+  let reviewMomDelta = 0;
+  let reviewMomPrev = 0;
+  let reviewYoyDelta: number | null = null;
+  let reviewYoyPrev: number | null = null;
   if (reviewData && reviewData.monthly.length >= 2) {
     const rm = reviewData.monthly;
+    // 前月比
+    reviewMomPrev = rm[rm.length - 2].count;
+    reviewMomDelta = totalReviews - reviewMomPrev;
+    // 前年同月比
     if (rm.length >= 13) {
-      // 前年同月
-      prevReviewCount = rm[rm.length - 13].count;
-      reviewCompareLabel = "前年比";
-    } else {
-      // 最古の月
-      prevReviewCount = rm[0].count;
-      reviewCompareLabel = `${rm.length - 1}ヶ月前比`;
+      reviewYoyPrev = rm[rm.length - 13].count;
+      reviewYoyDelta = totalReviews - reviewYoyPrev;
     }
-    reviewDeltaForKpi = totalReviews - prevReviewCount;
   }
 
   const kpis: KPI[] = [
-    { label: "Google検索 合計", value: cur.searchMobile + cur.searchPC, prevValue: yoy ? yoy.searchMobile + yoy.searchPC : 0, unit: "回", compareLabel },
-    { label: "Googleマップ 合計", value: cur.mapMobile + cur.mapPC, prevValue: yoy ? yoy.mapMobile + yoy.mapPC : 0, unit: "回", compareLabel },
-    { label: "ウェブサイトクリック", value: cur.websites, prevValue: yoy?.websites ?? 0, unit: "件", compareLabel },
-    { label: "ルート検索", value: cur.routes, prevValue: yoy?.routes ?? 0, unit: "件", compareLabel },
-    { label: "通話", value: cur.calls, prevValue: yoy?.calls ?? 0, unit: "件", compareLabel },
-    { label: "フードメニュークリック", value: cur.foodMenus, prevValue: yoy?.foodMenus ?? 0, unit: "件", compareLabel },
-    { label: "予約", value: cur.bookings, prevValue: yoy?.bookings ?? 0, unit: "件", compareLabel },
-    { label: `口コミ増減【${toLabel(curDate)}】`, value: reviewDeltaForKpi, prevValue: prevReviewCount, unit: "件", compareLabel: reviewCompareLabel },
+    { label: "Google検索 合計", value: cur.searchMobile + cur.searchPC, prevValue: prev ? prev.searchMobile + prev.searchPC : 0, unit: "回", momValue: prev ? prev.searchMobile + prev.searchPC : null, yoyValue: yoy ? yoy.searchMobile + yoy.searchPC : null },
+    { label: "Googleマップ 合計", value: cur.mapMobile + cur.mapPC, prevValue: prev ? prev.mapMobile + prev.mapPC : 0, unit: "回", momValue: prev ? prev.mapMobile + prev.mapPC : null, yoyValue: yoy ? yoy.mapMobile + yoy.mapPC : null },
+    { label: "ウェブサイトクリック", value: cur.websites, prevValue: prev?.websites ?? 0, unit: "件", momValue: prev?.websites ?? null, yoyValue: yoy?.websites ?? null },
+    { label: "ルート検索", value: cur.routes, prevValue: prev?.routes ?? 0, unit: "件", momValue: prev?.routes ?? null, yoyValue: yoy?.routes ?? null },
+    { label: "通話", value: cur.calls, prevValue: prev?.calls ?? 0, unit: "件", momValue: prev?.calls ?? null, yoyValue: yoy?.calls ?? null },
+    { label: "フードメニュークリック", value: cur.foodMenus, prevValue: prev?.foodMenus ?? 0, unit: "件", momValue: prev?.foodMenus ?? null, yoyValue: yoy?.foodMenus ?? null },
+    { label: "予約", value: cur.bookings, prevValue: prev?.bookings ?? 0, unit: "件", momValue: prev?.bookings ?? null, yoyValue: yoy?.bookings ?? null },
+    { label: `口コミ増減【${toLabel(curDate)}】`, value: reviewMomDelta, prevValue: reviewMomPrev, unit: "件", compareLabel: "前月比", momValue: reviewMomPrev, yoyValue: reviewYoyPrev },
   ];
 
   // 対象期間

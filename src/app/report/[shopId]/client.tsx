@@ -556,16 +556,18 @@ export default function ReportClient({
           <div style={{ ...stitleStyle, marginBottom: 14 }}>主要指標サマリー（{curLabel}）</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, flex: 1 }}>
             {kpis.map((kpi, i) => {
-              const isLastKpi = i === kpis.length - 1; // 口コミ増減カード
-              const c = pctChange(kpi.value, kpi.prevValue);
+              const isLastKpi = i === kpis.length - 1;
+              const mom = kpi.momValue != null ? pctChange(kpi.value, kpi.momValue) : null;
+              const yoyC = kpi.yoyValue != null ? pctChange(kpi.value, kpi.yoyValue) : null;
+              const badgeStyle = (isUp: boolean): React.CSSProperties => ({ display: "inline-block", padding: "2px 7px", borderRadius: 16, fontSize: 10, fontWeight: 600, background: isUp ? "#e6f9ee" : "#fde8e8", color: isUp ? "#0a8f3c" : "#c0392b" });
               return (
-                <div key={i} style={{ background: "#fff", borderRadius: 12, padding: "20px 20px", position: "relative", overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                <div key={i} style={{ background: "#fff", borderRadius: 12, padding: "14px 16px", position: "relative", overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", justifyContent: "center" }}>
                   <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: 3, background: kpiTopColors[i] }} />
                   <div style={{ fontSize: 11, color: "#888", fontWeight: 500 }}>{kpi.label}</div>
-                  <div style={{ fontSize: 28, fontWeight: 900, lineHeight: 1.1, margin: "4px 0" }}>
+                  <div style={{ fontSize: 26, fontWeight: 900, lineHeight: 1.1, margin: "4px 0" }}>
                     {isLastKpi ? `${kpi.value >= 0 ? "+" : ""}${kpi.value.toLocaleString()}件` : kpi.value.toLocaleString()}
                   </div>
-                  <div style={{ fontSize: 11, color: "#aaa" }}>
+                  <div style={{ fontSize: 11, color: "#aaa", marginBottom: 4 }}>
                     {isLastKpi ? (
                       <span>累計: {shop.totalReviews.toLocaleString()}件（評価 {shop.rating}）</span>
                     ) : kpi.label.includes("検索") || kpi.label.includes("マップ") ? (
@@ -574,12 +576,17 @@ export default function ReportClient({
                       <span>&nbsp;</span>
                     )}
                   </div>
-                  <span style={{ display: "inline-block", marginTop: 6, padding: "3px 8px", borderRadius: 16, fontSize: 10, fontWeight: 600, background: isLastKpi ? (kpi.value >= 0 ? "#e6f9ee" : "#fde8e8") : (c.isUp ? "#e6f9ee" : "#fde8e8"), color: isLastKpi ? (kpi.value >= 0 ? "#0a8f3c" : "#c0392b") : (c.isUp ? "#0a8f3c" : "#c0392b"), alignSelf: "flex-start" }}>
-                    {isLastKpi
-                      ? `${kpi.value >= 0 ? "▲" : "▼"} ${(shop.totalReviews - kpi.value).toLocaleString()}→${shop.totalReviews.toLocaleString()}件${kpi.compareLabel ? ` ${kpi.compareLabel}` : ""}`
-                      : `${c.isUp ? "▲" : "▼"} ${c.text}（${kpi.prevValue.toLocaleString()}→${kpi.value.toLocaleString()}）${kpi.compareLabel ? ` ${kpi.compareLabel}` : ""}`
-                    }
-                  </span>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "flex-start" }}>
+                    {isLastKpi ? (
+                      <span style={badgeStyle(kpi.value >= 0)}>
+                        {kpi.value >= 0 ? "▲" : "▼"} {(shop.totalReviews - kpi.value).toLocaleString()}→{shop.totalReviews.toLocaleString()}件 前月比
+                      </span>
+                    ) : (<>
+                      {mom && <span style={badgeStyle(mom.isUp)}>{mom.isUp ? "▲" : "▼"} {mom.text}（{kpi.momValue!.toLocaleString()}→{kpi.value.toLocaleString()}）前月比</span>}
+                      {yoyC ? <span style={badgeStyle(yoyC.isUp)}>{yoyC.isUp ? "▲" : "▼"} {yoyC.text}（{kpi.yoyValue!.toLocaleString()}→{kpi.value.toLocaleString()}）前年比</span>
+                        : <span style={{ fontSize: 10, color: "#bbb" }}>前年比 なし</span>}
+                    </>)}
+                  </div>
                 </div>
               );
             })}
