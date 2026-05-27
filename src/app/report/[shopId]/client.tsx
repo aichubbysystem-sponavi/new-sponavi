@@ -110,14 +110,9 @@ export default function ReportClient({
 }) {
   const { shop, kpis: rawKpis, monthlyLabels, charts, keywords, rankingHistory, reviewLabels, reviewCounts, reviewDelta, reviewAnalysis, comments, searchQueries, gridRanking } = data;
 
-  // 全期間で値が0の指標を非表示（業種によって「予約」「フードメニュー」等がない場合）
-  const hasBookings = charts.bookings?.some(v => v > 0) ?? false;
-  const hasFoodMenus = charts.foodMenus?.some(v => v > 0) ?? false;
-  const kpis = rawKpis.filter(kpi => {
-    if (kpi.label === "予約" && !hasBookings) return false;
-    if (kpi.label === "フードメニュークリック" && !hasFoodMenus) return false;
-    return true;
-  });
+  // 全期間で値が0の指標を自動判定（業種によって「予約」「フードメニュー」等がない場合）
+  const hasBookingsData = charts.bookings?.some(v => v > 0) ?? false;
+  const hasFoodMenusData = charts.foodMenus?.some(v => v > 0) ?? false;
 
   const hasKeywords = keywords.length > 0;
   const hasRankingHistory = rankingHistory && rankingHistory.labels.length > 0;
@@ -146,6 +141,8 @@ export default function ReportClient({
     rankingHistory: true,
     searchQueries: true,
     gridRanking: true,
+    metricBookings: true,
+    metricFoodMenus: true,
   });
 
   // 個別キーワード表示ON/OFF（店舗ごとにlocalStorage保存）
@@ -194,6 +191,15 @@ export default function ReportClient({
       return next;
     });
   };
+
+  // 指標の表示判定: 自動（データ0で非表示）+ 手動ON/OFF
+  const hasBookings = hasBookingsData && sectionVisibility.metricBookings !== false;
+  const hasFoodMenus = hasFoodMenusData && sectionVisibility.metricFoodMenus !== false;
+  const kpis = rawKpis.filter(kpi => {
+    if (kpi.label === "予約" && !hasBookings) return false;
+    if (kpi.label === "フードメニュークリック" && !hasFoodMenus) return false;
+    return true;
+  });
 
   // 表示するキーワードのみフィルタ
   const visibleKeywords = keywords.filter(kw => kwVisibility[kw.word] !== false);
@@ -447,6 +453,23 @@ export default function ReportClient({
                   { key: "rankingHistory", label: "順位推移テーブル", hasData: hasRankingHistory },
                   { key: "gridRanking", label: "多地点順位", hasData: hasGridRanking },
                   { key: "searchQueries", label: "検索語句", hasData: hasSearchQueries },
+                ].map(item => (
+                  <label key={item.key} style={{ display: "flex", alignItems: "center", gap: 8, cursor: item.hasData ? "pointer" : "not-allowed", opacity: item.hasData ? 1 : 0.4 }}>
+                    <input type="checkbox" checked={sectionVisibility[item.key] !== false && item.hasData} disabled={!item.hasData}
+                      onChange={() => toggleSection(item.key)}
+                      style={{ width: 16, height: 16, cursor: item.hasData ? "pointer" : "not-allowed" }} />
+                    <span style={{ color: "#fff", fontSize: 13 }}>{item.label}</span>
+                    {!item.hasData && <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 10 }}>（データなし）</span>}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: 600, display: "block", marginBottom: 10 }}>指標の表示/非表示</span>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {[
+                  { key: "metricFoodMenus", label: "フードメニュークリック", hasData: hasFoodMenusData },
+                  { key: "metricBookings", label: "予約", hasData: hasBookingsData },
                 ].map(item => (
                   <label key={item.key} style={{ display: "flex", alignItems: "center", gap: 8, cursor: item.hasData ? "pointer" : "not-allowed", opacity: item.hasData ? 1 : 0.4 }}>
                     <input type="checkbox" checked={sectionVisibility[item.key] !== false && item.hasData} disabled={!item.hasData}
