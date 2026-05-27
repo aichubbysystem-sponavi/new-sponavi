@@ -151,6 +151,15 @@ export async function getReportData(shopId: string): Promise<{
           cached.gridRanking = gridRanking;
         }
       } catch {}
+      // reviewAnalysisもDBからリアルタイム取得（再分析反映のため）
+      try {
+        const { getStoredAnalysis } = await import("./review-analyzer");
+        const stored = await getStoredAnalysis(shopName);
+        if (stored) {
+          cached.reviewAnalysis = stored.analysis;
+          cached.comments = stored.comments;
+        }
+      } catch {}
       return { data: cached, source: "cache" };
     }
   } catch {}
