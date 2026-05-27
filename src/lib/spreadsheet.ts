@@ -577,7 +577,7 @@ export async function buildReportData(
     { label: "通話", value: cur.calls, prevValue: yoy?.calls ?? 0, unit: "件", compareLabel },
     { label: "フードメニュークリック", value: cur.foodMenus, prevValue: yoy?.foodMenus ?? 0, unit: "件", compareLabel },
     { label: "予約", value: cur.bookings, prevValue: yoy?.bookings ?? 0, unit: "件", compareLabel },
-    { label: `口コミ増減【${toLabel(curDate)}】`, value: reviewDeltaForKpi, prevValue: prevReviewCount, unit: "件" },
+    { label: `口コミ増減【${toLabel(curDate)}】`, value: reviewDeltaForKpi, prevValue: prevReviewCount, unit: "件", compareLabel: "前月比" },
   ];
 
   // 対象期間
