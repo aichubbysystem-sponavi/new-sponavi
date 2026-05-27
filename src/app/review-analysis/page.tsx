@@ -75,7 +75,7 @@ export default function ReviewAnalysisPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-800">口コミ分析</h1>
           <p className="text-sm text-slate-500 mt-1">
-            GBPの口コミをAIで分析し、レポートのP10・P11を自動生成します
+            GBPの口コミをAIで分析し、レポートの口コミ分析・AIコメントを自動生成します
           </p>
         </div>
       </div>
