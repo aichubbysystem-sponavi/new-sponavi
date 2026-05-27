@@ -597,9 +597,9 @@ export default function ReportClient({
             <div style={{ background: "#fff", borderRadius: 12, padding: "28px 32px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column" }}>
               <h4 style={{ fontSize: 16, fontWeight: 600, color: "#555", marginBottom: 18 }}>前月比（{prevIdx >= 0 ? monthlyLabels[prevIdx] : "—"} → {curLabel}）</h4>
               {momRows.map((r, i) => (
-                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 0, fontSize: 14, flex: 1 }}>
-                  <span style={{ color: "#444" }}>{r.label}</span>
-                  <span style={{ display: "inline-block", padding: "3px 8px", borderRadius: 16, fontSize: 10, fontWeight: 600, background: r.isUp ? "#e6f9ee" : "#fde8e8", color: r.isUp ? "#0a8f3c" : "#c0392b" }}>
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "2px 0", fontSize: 14, flex: 1 }}>
+                  <span style={{ color: "#444", fontWeight: 500 }}>{r.label}</span>
+                  <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: 16, fontSize: 13, fontWeight: 600, background: r.isUp ? "#e6f9ee" : "#fde8e8", color: r.isUp ? "#0a8f3c" : "#c0392b" }}>
                     {r.isUp ? "▲" : "▼"} {r.prev.toLocaleString()}→{r.cur.toLocaleString()}（{r.text}）
                   </span>
                 </div>
@@ -608,9 +608,9 @@ export default function ReportClient({
             <div style={{ background: "#fff", borderRadius: 12, padding: "28px 32px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column" }}>
               <h4 style={{ fontSize: 16, fontWeight: 600, color: "#555", marginBottom: 18 }}>前年比（{yoyIdx >= 0 ? monthlyLabels[yoyIdx] : "—"} → {curLabel}）</h4>
               {yoyRows.length > 0 ? yoyRows.map((r, i) => (
-                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 0, fontSize: 14, flex: 1 }}>
-                  <span style={{ color: "#444" }}>{r.label}</span>
-                  <span style={{ display: "inline-block", padding: "3px 8px", borderRadius: 16, fontSize: 10, fontWeight: 600, background: r.isUp ? "#e6f9ee" : "#fde8e8", color: r.isUp ? "#0a8f3c" : "#c0392b" }}>
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "2px 0", fontSize: 14, flex: 1 }}>
+                  <span style={{ color: "#444", fontWeight: 500 }}>{r.label}</span>
+                  <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: 16, fontSize: 13, fontWeight: 600, background: r.isUp ? "#e6f9ee" : "#fde8e8", color: r.isUp ? "#0a8f3c" : "#c0392b" }}>
                     {r.isUp ? "▲" : "▼"} {r.prev.toLocaleString()}→{r.cur.toLocaleString()}（{r.text}）
                   </span>
                 </div>
@@ -637,8 +637,8 @@ export default function ReportClient({
                 ))}
               </tr></thead>
               <tbody>
-                {monthlyTableData.map((r, i) => {
-                  const isLast = i === monthlyTableData.length - 1;
+                {[...monthlyTableData].reverse().map((r, i) => {
+                  const isLast = i === 0; // 新しい月が先頭
                   return (
                     <tr key={i} style={{ background: isLast ? "#f0f4ff" : undefined, fontWeight: isLast ? 600 : undefined }}>
                       <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.label}</td>
