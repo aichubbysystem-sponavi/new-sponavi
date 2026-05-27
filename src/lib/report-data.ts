@@ -14,6 +14,7 @@ export interface KPI {
   value: number;
   prevValue: number;
   unit: string;
+  compareLabel?: string;
 }
 
 export interface ChartData {

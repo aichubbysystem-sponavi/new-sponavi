@@ -8,9 +8,10 @@ interface KpiCardProps {
   change?: number;
   icon?: string;
   format?: "number" | "percent";
+  compareLabel?: string;
 }
 
-export default function KpiCard({ label, value, change, icon, format = "number" }: KpiCardProps) {
+export default function KpiCard({ label, value, change, icon, format = "number", compareLabel }: KpiCardProps) {
   const displayValue =
     format === "number" && typeof value === "number"
       ? value.toLocaleString()
@@ -35,7 +36,7 @@ export default function KpiCard({ label, value, change, icon, format = "number" 
           >
             {change >= 0 ? "↑" : "↓"} {Math.abs(change)}%
           </span>
-          <span className="text-xs text-slate-400">前月比</span>
+          <span className="text-xs text-slate-400">{compareLabel || "前月比"}</span>
         </div>
       )}
     </div>

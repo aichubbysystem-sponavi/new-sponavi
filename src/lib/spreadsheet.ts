@@ -312,7 +312,7 @@ function generateComments(
   const search = kpis[0];
   const searchPct = pctText(search.value, search.prevValue);
   comments.push(
-    `Google検索数は${search.value.toLocaleString()}回（前月比${searchPct}）。${
+    `Google検索数は${search.value.toLocaleString()}回（${search.compareLabel || "前月比"}${searchPct}）。${
       search.value >= search.prevValue
         ? "検索経由の認知が拡大しています。"
         : "季節的な変動の可能性もあるため、来月のデータで推移を確認します。"
@@ -323,7 +323,7 @@ function generateComments(
   const map = kpis[1];
   const mapPct = pctText(map.value, map.prevValue);
   comments.push(
-    `Googleマップ表示数は${map.value.toLocaleString()}回（前月比${mapPct}）。${
+    `Googleマップ表示数は${map.value.toLocaleString()}回（${map.compareLabel || "前月比"}${mapPct}）。${
       map.value >= map.prevValue
         ? "マップ経由の集客力が強化されています。"
         : "マップ上での視認性向上のため、GBP情報の最適化を継続します。"
@@ -341,7 +341,7 @@ function generateComments(
   const actions = kpis[7];
   const actionPct = pctText(actions.value, actions.prevValue);
   comments.push(
-    `ユーザーアクション合計${actions.value.toLocaleString()}件（前月比${actionPct}）。${
+    `ユーザーアクション合計${actions.value.toLocaleString()}件（${kpis[0].compareLabel || "前月比"}${actionPct}）。${
       actions.value >= actions.prevValue
         ? "ユーザーの反応が改善傾向にあります。"
         : "投稿頻度の向上やメニュー情報の充実で改善を図ります。"
@@ -531,6 +531,7 @@ export async function buildReportData(
   const prev = recent.length >= 2 ? recent[recent.length - 2] : null;
   // 前年同月（KPIサマリーの%比較用）、前年データなしなら最古の月
   const yoy = recent.length >= 13 ? recent[recent.length - 13] : recent[0];
+  const compareLabel = recent.length >= 13 ? "前年比" : `${recent.length - 1}ヶ月前比`;
 
   const curActions = cur.calls + cur.routes + cur.websites + cur.bookings + cur.foodMenus;
   const curDate = cur.date;
@@ -569,13 +570,13 @@ export async function buildReportData(
   }
 
   const kpis: KPI[] = [
-    { label: "Google検索 合計", value: cur.searchMobile + cur.searchPC, prevValue: yoy ? yoy.searchMobile + yoy.searchPC : 0, unit: "回" },
-    { label: "Googleマップ 合計", value: cur.mapMobile + cur.mapPC, prevValue: yoy ? yoy.mapMobile + yoy.mapPC : 0, unit: "回" },
-    { label: "ウェブサイトクリック", value: cur.websites, prevValue: yoy?.websites ?? 0, unit: "件" },
-    { label: "ルート検索", value: cur.routes, prevValue: yoy?.routes ?? 0, unit: "件" },
-    { label: "通話", value: cur.calls, prevValue: yoy?.calls ?? 0, unit: "件" },
-    { label: "フードメニュークリック", value: cur.foodMenus, prevValue: yoy?.foodMenus ?? 0, unit: "件" },
-    { label: "予約", value: cur.bookings, prevValue: yoy?.bookings ?? 0, unit: "件" },
+    { label: "Google検索 合計", value: cur.searchMobile + cur.searchPC, prevValue: yoy ? yoy.searchMobile + yoy.searchPC : 0, unit: "回", compareLabel },
+    { label: "Googleマップ 合計", value: cur.mapMobile + cur.mapPC, prevValue: yoy ? yoy.mapMobile + yoy.mapPC : 0, unit: "回", compareLabel },
+    { label: "ウェブサイトクリック", value: cur.websites, prevValue: yoy?.websites ?? 0, unit: "件", compareLabel },
+    { label: "ルート検索", value: cur.routes, prevValue: yoy?.routes ?? 0, unit: "件", compareLabel },
+    { label: "通話", value: cur.calls, prevValue: yoy?.calls ?? 0, unit: "件", compareLabel },
+    { label: "フードメニュークリック", value: cur.foodMenus, prevValue: yoy?.foodMenus ?? 0, unit: "件", compareLabel },
+    { label: "予約", value: cur.bookings, prevValue: yoy?.bookings ?? 0, unit: "件", compareLabel },
     { label: `口コミ増減【${toLabel(curDate)}】`, value: reviewDeltaForKpi, prevValue: prevReviewCount, unit: "件" },
   ];
 
