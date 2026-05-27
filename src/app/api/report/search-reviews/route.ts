@@ -67,7 +67,7 @@ export async function GET(request: NextRequest) {
   // 1. 括弧・助詞で分割
   const rawWords = keyword
     .replace(/[（(【\[）)】\]]/g, " ")
-    .replace(/[なのがをはでにとい・、。さ]/g, " ")
+    .replace(/[なのがをはでにと・、。さ]/g, " ")
     .split(/\s+/)
     .filter(w => w.length >= 2);
   // 2. カタカナ⇔漢字の境界でさらに分割（漢字1文字もOK）
