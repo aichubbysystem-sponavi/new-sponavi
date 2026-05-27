@@ -152,7 +152,7 @@ ${reviewTexts}
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 45000); // 45秒タイムアウト
+    const timeout = setTimeout(() => controller.abort(), 60000); // 60秒タイムアウト
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       signal: controller.signal,
@@ -163,7 +163,7 @@ ${reviewTexts}
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 1024,
+        max_tokens: 2048,
         messages: [{ role: "user", content: prompt }],
       }),
     });
