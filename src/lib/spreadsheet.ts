@@ -552,21 +552,22 @@ export async function buildReportData(
     totalReviews = reviewData.currentCount;
   }
 
-  // 口コミ増減（KPI 8番目用）
-  // 先月対比列（summaryDelta）を優先使用（月別データは契約後件数のみの店舗があるため）
+  // 口コミ増減（KPI 8番目用）— 前年同月比、なければ最古月比
   let reviewDeltaForKpi = 0;
   let prevReviewCount = 0;
-  if (reviewData) {
-    if (reviewData.summaryDelta !== undefined) {
-      // 先月対比列の件数増減（スプレッドシートで正確に管理されている値）
-      reviewDeltaForKpi = reviewData.summaryDelta;
-      prevReviewCount = totalReviews - reviewDeltaForKpi;
-    } else if (reviewData.monthly.length >= 2) {
-      // フォールバック: 月別データから計算
-      const rm = reviewData.monthly;
-      prevReviewCount = rm[rm.length - 2].count;
-      reviewDeltaForKpi = totalReviews - prevReviewCount;
+  let reviewCompareLabel = compareLabel;
+  if (reviewData && reviewData.monthly.length >= 2) {
+    const rm = reviewData.monthly;
+    if (rm.length >= 13) {
+      // 前年同月
+      prevReviewCount = rm[rm.length - 13].count;
+      reviewCompareLabel = "前年比";
+    } else {
+      // 最古の月
+      prevReviewCount = rm[0].count;
+      reviewCompareLabel = `${rm.length - 1}ヶ月前比`;
     }
+    reviewDeltaForKpi = totalReviews - prevReviewCount;
   }
 
   const kpis: KPI[] = [
@@ -577,7 +578,7 @@ export async function buildReportData(
     { label: "通話", value: cur.calls, prevValue: yoy?.calls ?? 0, unit: "件", compareLabel },
     { label: "フードメニュークリック", value: cur.foodMenus, prevValue: yoy?.foodMenus ?? 0, unit: "件", compareLabel },
     { label: "予約", value: cur.bookings, prevValue: yoy?.bookings ?? 0, unit: "件", compareLabel },
-    { label: `口コミ増減【${toLabel(curDate)}】`, value: reviewDeltaForKpi, prevValue: prevReviewCount, unit: "件", compareLabel: "前月比" },
+    { label: `口コミ増減【${toLabel(curDate)}】`, value: reviewDeltaForKpi, prevValue: prevReviewCount, unit: "件", compareLabel: reviewCompareLabel },
   ];
 
   // 対象期間
