@@ -967,8 +967,10 @@ export default function ReportClient({
         const activeIdx = sqMonthIdx < 0 || sqMonthIdx >= sqHistory.length ? sqHistory.length - 1 : sqMonthIdx;
         const sqCurrent = sqHistory[activeIdx];
         const sqPrev = activeIdx > 0 ? sqHistory[activeIdx - 1] : null;
+        const sqPrev2 = activeIdx > 1 ? sqHistory[activeIdx - 2] : null;
         const currentKeywords = Array.isArray(sqCurrent?.keywords) ? sqCurrent.keywords : [];
         const prevMap = new Map((sqPrev?.keywords || []).map(k => [k.word, k.count]));
+        const prev2Map = new Map((sqPrev2?.keywords || []).map(k => [k.word, k.count]));
         const totalCount = currentKeywords.reduce((sum, kw) => sum + kw.count, 0);
         const prevTotalCount = sqPrev ? (sqPrev.keywords || []).reduce((sum: number, kw: any) => sum + kw.count, 0) : null;
         const totalDiff = prevTotalCount !== null ? totalCount - prevTotalCount : null;
@@ -997,6 +999,7 @@ export default function ReportClient({
           cursor: disabled ? "default" : "pointer",
         });
         const hasPrev = sqPrev !== null;
+        const hasPrev2 = sqPrev2 !== null;
         const PER_PAGE = 15;
         const page1 = currentKeywords.slice(0, PER_PAGE);
         const page2 = currentKeywords.slice(PER_PAGE, PER_PAGE * 2);
@@ -1010,7 +1013,7 @@ export default function ReportClient({
                   <th style={{ ...thStyle(), textAlign: "left", padding: "10px 12px" }}>検索語句</th>
                   <th style={thStyle(70)}>検索数</th>
                   <th style={thStyle(60)}>前月</th>
-                  <th style={thStyle(50)}>変動</th>
+                  {hasPrev2 && <th style={thStyle(60)}>前々月</th>}
                   {hasYoy && <th style={thStyle(60)}>前年</th>}
                   {hasYoy && <th style={thStyle(60)}>前年比</th>}
                 </tr>
@@ -1019,7 +1022,7 @@ export default function ReportClient({
                 {rows.map((kw, ri) => {
                   const rank = startIdx + ri;
                   const prev = prevMap.get(kw.word);
-                  const diff = prev !== undefined ? kw.count - prev : null;
+                  const prev2 = prev2Map.get(kw.word);
                   const yoyVal = yoyMap.get(kw.word);
                   const yoyDiff = yoyVal !== undefined ? kw.count - yoyVal : null;
                   return (
@@ -1028,9 +1031,7 @@ export default function ReportClient({
                       <td style={{ padding: "7px 12px", fontSize: 13, color: "#333" }}>{kw.word}</td>
                       <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 14, fontWeight: 700, color: "#0f3460" }}>{kw.count.toLocaleString()}</td>
                       <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 12, color: "#888" }}>{hasPrev && prev !== undefined ? prev.toLocaleString() : "-"}</td>
-                      <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: diff === null || !hasPrev ? "#ccc" : diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
-                        {!hasPrev || diff === null ? "-" : diff > 0 ? `+${diff}` : diff === 0 ? "→" : String(diff)}
-                      </td>
+                      {hasPrev2 && <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 12, color: "#888" }}>{prev2 !== undefined ? prev2.toLocaleString() : "-"}</td>}
                       {hasYoy && <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 12, color: "#888" }}>{yoyVal !== undefined ? yoyVal.toLocaleString() : "-"}</td>}
                       {hasYoy && <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: yoyDiff === null ? "#ccc" : yoyDiff > 0 ? "#0a8f3c" : yoyDiff < 0 ? "#c0392b" : "#888" }}>
                         {yoyDiff === null ? "-" : yoyDiff > 0 ? `+${yoyDiff.toLocaleString()}` : yoyDiff === 0 ? "→" : yoyDiff.toLocaleString()}
