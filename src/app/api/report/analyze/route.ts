@@ -233,6 +233,15 @@ ${reviewTexts}
       autoFillSources(parsed.positiveWords || [], parsed.positiveWordSources, posRatings);
       autoFillSources(parsed.negativeWords || [], parsed.negativeWordSources, negRatings);
 
+      // 口コミが紐付かないワードを削除
+      const posSourceWords = new Set(parsed.positiveWordSources.filter((s: any) => s.reviews.length > 0).map((s: any) => s.word));
+      const negSourceWords = new Set(parsed.negativeWordSources.filter((s: any) => s.reviews.length > 0).map((s: any) => s.word));
+      parsed.positiveWords = (parsed.positiveWords || []).filter((w: string) => posSourceWords.has(w));
+      parsed.negativeWords = (parsed.negativeWords || []).filter((w: string) => negSourceWords.has(w));
+      // 空のソースも除去
+      parsed.positiveWordSources = parsed.positiveWordSources.filter((s: any) => s.reviews.length > 0);
+      parsed.negativeWordSources = parsed.negativeWordSources.filter((s: any) => s.reviews.length > 0);
+
       return parsed;
     } catch { return null; }
   } catch (err) {

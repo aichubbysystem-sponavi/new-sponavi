@@ -120,13 +120,18 @@ ${comments}
         if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
       } catch { errors++; continue; }
 
+      // 口コミ原文に存在しないワードを除去
+      const allCommentText = reviews.map(r => r.comment || "").join(" ");
+      const posWords = (parsed.positive_words || []).filter((w: string) => allCommentText.includes(w));
+      const negWords = (parsed.negative_words || []).filter((w: string) => allCommentText.includes(w));
+
       await supabase.from("report_analysis").upsert({
         shop_name: shop.name,
         month: currentMonth,
         rating: Math.round(avgRating * 10) / 10,
         review_count: reviews.length,
-        positive_words: parsed.positive_words || [],
-        negative_words: parsed.negative_words || [],
+        positive_words: posWords,
+        negative_words: negWords,
         summary: parsed.summary || "",
         comments: parsed.comments || [],
         created_at: new Date().toISOString(),
