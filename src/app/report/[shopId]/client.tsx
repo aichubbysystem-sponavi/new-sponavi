@@ -1013,6 +1013,23 @@ export default function ReportClient({
         const totalCount = currentKeywords.reduce((sum, kw) => sum + kw.count, 0);
         const prevTotalCount = sqPrev ? (sqPrev.keywords || []).reduce((sum: number, kw: any) => sum + kw.count, 0) : null;
         const totalDiff = prevTotalCount !== null ? totalCount - prevTotalCount : null;
+        // 前年同月データ
+        const curMonth = sqCurrent?.month || "";
+        const curParts = curMonth.split("/").map(Number);
+        const yoyMonth = curParts.length === 2 ? `${curParts[0] - 1}/${curParts[1]}` : "";
+        const sqYoy = yoyMonth ? sqHistory.find(h => h.month === yoyMonth) : null;
+        const yoyMap = new Map((sqYoy?.keywords || []).map(k => [k.word, k.count]));
+        const yoyTotalCount = sqYoy ? (sqYoy.keywords || []).reduce((sum: number, kw: any) => sum + kw.count, 0) : null;
+        const yoyTotalDiff = yoyTotalCount !== null ? totalCount - yoyTotalCount : null;
+        // 対策開始月データ
+        const startMatch = shop.startDate.match(/(\d+)年(\d+)月/);
+        const startMonth = startMatch ? `${startMatch[1]}/${parseInt(startMatch[2])}` : "";
+        const sqStart = startMonth ? sqHistory.find(h => h.month === startMonth) : null;
+        const startMap = new Map((sqStart?.keywords || []).map(k => [k.word, k.count]));
+        const startTotalCount = sqStart ? (sqStart.keywords || []).reduce((sum: number, kw: any) => sum + kw.count, 0) : null;
+        const startTotalDiff = startTotalCount !== null ? totalCount - startTotalCount : null;
+        const hasYoy = sqYoy !== null;
+        const hasStart = sqStart !== null && startMonth !== curMonth;
         // 全期間の累計マップ
         const cumulativeMap = new Map<string, number>();
         for (const m of sqHistory) {
@@ -1050,6 +1067,16 @@ export default function ReportClient({
                   前月比: {totalDiff > 0 ? `+${totalDiff.toLocaleString()}` : totalDiff === 0 ? "→" : totalDiff.toLocaleString()}
                 </span>
               )}
+              {yoyTotalDiff !== null && (
+                <span style={{ fontSize: 12, fontWeight: 600, color: yoyTotalDiff > 0 ? "#0a8f3c" : yoyTotalDiff < 0 ? "#c0392b" : "#888" }}>
+                  前年比: {yoyTotalDiff > 0 ? `+${yoyTotalDiff.toLocaleString()}` : yoyTotalDiff === 0 ? "→" : yoyTotalDiff.toLocaleString()}
+                </span>
+              )}
+              {hasStart && startTotalDiff !== null && (
+                <span style={{ fontSize: 12, fontWeight: 600, color: startTotalDiff > 0 ? "#0a8f3c" : startTotalDiff < 0 ? "#c0392b" : "#888" }}>
+                  対策開始時比: {startTotalDiff > 0 ? `+${startTotalDiff.toLocaleString()}` : startTotalDiff === 0 ? "→" : startTotalDiff.toLocaleString()}
+                </span>
+              )}
             </div>
             <div style={{ overflow: "hidden", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", flex: 1 }}>
@@ -1058,9 +1085,10 @@ export default function ReportClient({
                     <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 40 }}>順位</th>
                     <th style={{ background: "#0f3460", color: "#fff", padding: "10px 12px", textAlign: "left", fontWeight: 600, fontSize: 11 }}>検索語句</th>
                     <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 70 }}>検索数</th>
-                    <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 70 }}>前月</th>
-                    <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 60 }}>変動</th>
-                    <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 70 }}>累計</th>
+                    <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 60 }}>前月</th>
+                    <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 50 }}>変動</th>
+                    {hasYoy && <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 60 }}>前年</th>}
+                    {hasStart && <th style={{ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, width: 60 }}>開始時</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -1076,7 +1104,14 @@ export default function ReportClient({
                         <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: diff === null || !hasPrev ? "#ccc" : diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
                           {!hasPrev || diff === null ? "-" : diff > 0 ? `+${diff}` : diff === 0 ? "→" : String(diff)}
                         </td>
-                        <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 12, fontWeight: 600, color: "#4a5568" }}>{(cumulativeMap.get(kw.word) || 0).toLocaleString()}</td>
+                        {hasYoy && (() => {
+                          const yoyVal = yoyMap.get(kw.word);
+                          return <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 12, color: "#888" }}>{yoyVal !== undefined ? yoyVal.toLocaleString() : "-"}</td>;
+                        })()}
+                        {hasStart && (() => {
+                          const startVal = startMap.get(kw.word);
+                          return <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 12, color: "#888" }}>{startVal !== undefined ? startVal.toLocaleString() : "-"}</td>;
+                        })()}
                       </tr>
                     );
                   })}
