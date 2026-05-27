@@ -291,12 +291,31 @@ export default function ReportClient({
     return () => clearTimeout(timer);
   }, [showGridRanking, activeGridSnapshot, renderGridMap]);
 
-  // ワードクリック: 出典データがあればそのまま表示、なければAPIで口コミ検索
+  // ワードクリック: 出典データを優先、部分一致も試行、最後にAPI検索
   const handleWordClick = async (word: string, source: any, type: "positive" | "negative") => {
-    if (source && source.reviews.length > 0) {
+    // 1. 完全一致の出典データ
+    if (source && source.reviews && source.reviews.length > 0) {
       setNegativeModal({ ...source, type, matched: true });
       return;
     }
+    // 2. 部分一致で出典データを検索（AIがワード名を微妙に変えた場合の救済）
+    const allSources = type === "positive" ? reviewAnalysis.positiveWordSources : reviewAnalysis.negativeWordSources;
+    if (allSources && allSources.length > 0) {
+      const partial = allSources.find(s => s.word.includes(word) || word.includes(s.word));
+      if (partial && partial.reviews && partial.reviews.length > 0) {
+        setNegativeModal({ word, reviews: partial.reviews, type, matched: true });
+        return;
+      }
+      // 3. 全出典の口コミからテキスト検索
+      const allSourceReviews = allSources.flatMap(s => s.reviews || []);
+      const textMatched = allSourceReviews.filter(r => r.comment && r.comment.includes(word));
+      if (textMatched.length > 0) {
+        const unique = textMatched.filter((r, i, arr) => arr.findIndex(x => x.comment === r.comment) === i);
+        setNegativeModal({ word, reviews: unique, type, matched: true });
+        return;
+      }
+    }
+    // 4. 最終手段: API検索
     try {
       const res = await fetch(`/api/report/search-reviews?shop=${encodeURIComponent(shop.name)}&keyword=${encodeURIComponent(word)}&type=${type}`);
       const data = await res.json();
