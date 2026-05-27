@@ -106,12 +106,11 @@ export async function GET(request: NextRequest) {
   }
 
   // キーワードマッチ + 星評価フィルタ（直近1年）
-  // まず元フレーズ全体で一致を試み、0件なら分割ワードでフォールバック
-  const matchWithWords = (reviews: any[], searchWords: string[]) => {
+  // まず元フレーズ全体で一致を試み、0件なら分割ワードANDマッチでフォールバック
+  const matchReviews = (reviews: any[], filter: (text: string) => boolean) => {
     return reviews.filter((r: any) => {
       const text = r.comment || "";
-      const hasKeyword = searchWords.some(w => text.includes(w));
-      if (!hasKeyword) return false;
+      if (!filter(text)) return false;
       if (ratingFilter) {
         const rating = ((r.star_rating || "") as string).toUpperCase();
         return ratingFilter.has(rating);
@@ -121,10 +120,10 @@ export async function GET(request: NextRequest) {
   };
 
   // 優先: 元フレーズ全体で検索
-  let matched = matchWithWords(allReviews, [keyword]);
-  // フォールバック: 分割ワードで検索（元フレーズでヒットしなかった場合のみ）
+  let matched = matchReviews(allReviews, (text) => text.includes(keyword));
+  // フォールバック: 分割ワード全てを含む口コミのみ（ANDマッチ）
   if (matched.length === 0 && uniqueWords.length > 0) {
-    matched = matchWithWords(allReviews, uniqueWords);
+    matched = matchReviews(allReviews, (text) => uniqueWords.every(w => text.includes(w)));
   }
 
   if (matched.length > 0) {
