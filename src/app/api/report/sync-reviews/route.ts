@@ -340,15 +340,18 @@ export async function POST(request: NextRequest) {
         // 全トークンを順番に試す（アカウントごとにアクセス権が異なるため）
         let reviews: GBPReview[] = [];
         let apiError: number | undefined;
+        let googleTotalCount = 0;
+        let googleAvgRating = 0;
         for (let ti = 0; ti < allTokens.length; ti++) {
           const result = await fetchReviews(fullPath, allTokens[ti]);
           if (result.reviews.length > 0) {
             reviews = result.reviews;
+            googleTotalCount = result.totalCount;
+            googleAvgRating = result.avgRating;
             apiError = undefined;
             break;
           }
           apiError = result.apiError;
-          // 最後のトークン以外でエラーなら次を試す
           if (ti < allTokens.length - 1 && (result.apiError || result.reviews.length === 0)) {
             continue;
           }
@@ -406,6 +409,14 @@ export async function POST(request: NextRequest) {
             })),
             { onConflict: "review_id" }
           ).then(({ error }) => { if (error) console.error("[sync-reviews] Alert error:", error.message); });
+        }
+
+        // Google公式評価をshopsテーブルに保存
+        if (googleAvgRating > 0 || googleTotalCount > 0) {
+          const updateData: any = {};
+          if (googleAvgRating > 0) updateData.rating = googleAvgRating;
+          if (googleTotalCount > 0) updateData.review_count = googleTotalCount;
+          await supabase.from("shops").update(updateData).eq("id", shop.id);
         }
 
         totalSynced += reviews.length;
