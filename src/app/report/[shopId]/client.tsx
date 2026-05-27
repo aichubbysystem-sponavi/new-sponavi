@@ -1202,7 +1202,7 @@ export default function ReportClient({
       <div style={slideStyle} className="slide">
         <div style={slideBarStyle}><span>{shop.name} — AIによる口コミ分析</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
-          <div style={stitleStyle}>口コミ分析（直近2ヶ月）</div>
+          <div style={stitleStyle}>口コミ分析（直近1年）</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "auto 1fr", gap: 16, flex: 1 }}>
             <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", justifyContent: "center" }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, color: "#27ae60", marginBottom: 14 }}>ポジティブワード（推定）</h3>

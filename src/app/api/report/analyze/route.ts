@@ -30,23 +30,24 @@ interface ReviewListResponse {
   totalReviewCount: number;
 }
 
-// Supabase DBから口コミ取得（Go API不要）- 直近2ヶ月のみ
+// Supabase DBから口コミ取得（Go API不要）- 直近1年
 async function fetchReviews(shopId: string): Promise<ReviewListResponse | null> {
   try {
     const supabase = getSupabaseAdmin();
-    // 直近2ヶ月の口コミのみ取得
-    const twoMonthsAgo = new Date();
-    twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
-    twoMonthsAgo.setDate(1);
-    twoMonthsAgo.setHours(0, 0, 0, 0);
+    // 直近1年の口コミを取得
+    const oneYearAgo = new Date();
+    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+    oneYearAgo.setDate(1);
+    oneYearAgo.setHours(0, 0, 0, 0);
 
     const { data: reviews, count } = await supabase
       .from("reviews")
       .select("review_id, reviewer_name, star_rating, comment, create_time", { count: "exact" })
       .eq("shop_id", shopId)
-      .gte("create_time", twoMonthsAgo.toISOString())
+      .gte("create_time", oneYearAgo.toISOString())
+      .not("comment", "is", null)
       .order("create_time", { ascending: false })
-      .limit(50);
+      .limit(100);
 
     if (!reviews || reviews.length === 0) return null;
 
@@ -95,7 +96,7 @@ async function analyzeWithClaude(
 
   const filteredReviews = reviews
     .filter((r) => r.comment && r.comment.trim())
-    .slice(0, 50);
+    .slice(0, 100);
 
   const reviewTexts = filteredReviews
     .map((r, i) => `[#${i + 1}][${r.starRating}][${r.reviewer.displayName}][${r.createTime?.slice(0, 10) || "不明"}] ${r.comment}`)
@@ -103,12 +104,12 @@ async function analyzeWithClaude(
 
   if (!reviewTexts) return null;
 
-  const prompt = `あなたはMEO対策の専門家です。以下の店舗の直近2ヶ月の口コミを分析し、JSON形式で結果を返してください。
+  const prompt = `あなたはMEO対策の専門家です。以下の店舗の直近1年の口コミを分析し、JSON形式で結果を返してください。
 
 店舗名: ${shopName}
 評価: ${averageRating} / 5.0（${totalReviewCount}件）
 
-【口コミテキスト（直近2ヶ月）】
+【口コミテキスト（直近1年）】
 ${reviewTexts}
 
 【重要ルール】
