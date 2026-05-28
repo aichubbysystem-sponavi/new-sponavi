@@ -354,9 +354,17 @@ export async function POST(request: NextRequest) {
       }
 
       // Google公式評価をshopsテーブルから取得（AI独自計算より正確）
-      const { data: shopRow } = await supabase.from("shops").select("rating, review_count").eq("id", shop.id).maybeSingle();
+      let shopRow = (await supabase.from("shops").select("rating, review_count").eq("id", shop.id).maybeSingle()).data;
+      // shop.idで見つからない場合、shop.nameでフォールバック検索
+      if (!shopRow?.rating) {
+        const { data: nameRow } = await supabase.from("shops").select("rating, review_count").eq("name", shop.name).not("rating", "is", null).maybeSingle();
+        if (nameRow?.rating) shopRow = nameRow;
+      }
       const officialRating = shopRow?.rating ?? reviewData.averageRating;
       const officialCount = shopRow?.review_count ?? reviewData.totalReviewCount;
+      if (!shopRow?.rating) {
+        console.warn(`[analyze] ${shop.name}: shopsテーブルにrating未保存。DB口コミから算出した${officialRating}を使用。口コミ再同期でshops.ratingが更新されます。`);
+      }
 
       // Claude APIで分析
       const analysis = await analyzeWithClaude(

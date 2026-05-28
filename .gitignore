@@ -50,3 +50,5 @@ client_secret*.json
 メモ.txt
 ログ.txt
 貼り付け用.txt
+
+.vercel

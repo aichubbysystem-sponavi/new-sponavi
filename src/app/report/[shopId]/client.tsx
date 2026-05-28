@@ -202,8 +202,13 @@ export default function ReportClient({
   });
 
   // 表示するキーワードのみフィルタ
-  const visibleKeywords = keywords.filter(kw => kwVisibility[kw.word] !== false);
-  const visibleRankingDatasets = rankingHistory?.datasets?.filter(ds => kwVisibility[ds.word] !== false) || [];
+  const visibleKeywords = keywords.filter(kw => kwVisibility[kw.word] !== false && (kw.rank > 0 || kw.prevRank > 0));
+  const visibleRankingDatasets = (rankingHistory?.datasets?.filter(ds => {
+    if (kwVisibility[ds.word] === false) return false;
+    // 全期間データなし（全て null）のキーワードを非表示
+    const hasAnyData = ds.ranks.some((r: number | null) => r !== null);
+    return hasAnyData;
+  }) || []);
 
   const showKeywords = mounted && sectionVisibility.keywords !== false && hasKeywords;
   const showRankingHistory = mounted && sectionVisibility.rankingHistory !== false && hasRankingHistory;
@@ -547,7 +552,7 @@ export default function ReportClient({
                   <div style={{ fontSize: 11, color: "#aaa", marginBottom: 4 }}>
                     {isLastKpi ? (
                       <span>累計: {shop.totalReviews.toLocaleString()}件（評価 {shop.rating}）</span>
-                    ) : kpi.label.includes("検索") || kpi.label.includes("マップ") ? (
+                    ) : kpi.label === "Google検索 合計" || kpi.label === "Googleマップ 合計" ? (
                       <><span style={{ marginRight: 6 }}>モバイル: {i === 0 ? charts.searchMobile[charts.searchMobile.length-1]?.toLocaleString() : charts.mapMobile[charts.mapMobile.length-1]?.toLocaleString()}</span><span>PC: {i === 0 ? charts.searchPC[charts.searchPC.length-1]?.toLocaleString() : charts.mapPC[charts.mapPC.length-1]?.toLocaleString()}</span></>
                     ) : (
                       <span>&nbsp;</span>
@@ -673,6 +678,7 @@ export default function ReportClient({
                 {charts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700 }}>{(v + charts.mapPC[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
+          <div style={{ fontSize: 9, color: "#999", textAlign: "right", margin: "4px 16px 0", fontStyle: "italic" }}>※ 2025年11月以降、Google Business Profile APIの計測仕様変更により数値が大幅に変動する場合があります</div>
         </div>
       </div>
 
@@ -1048,7 +1054,7 @@ export default function ReportClient({
             <button onClick={() => { if (canPrev) setSqMonthIdx(activeIdx - 1); }} style={btnStyle(!canPrev)}>◀</button>
             <span style={{ fontSize: 12, minWidth: 60, textAlign: "center" }}>{sqCurrent?.month || ""}</span>
             <button onClick={() => { if (canNext) setSqMonthIdx(activeIdx + 1); }} style={btnStyle(!canNext)}>▶</button>
-            <span style={{ fontSize: 10, opacity: 0.4, marginLeft: 4 }}>{activeIdx + 1}/{sqHistory.length}</span>
+            <span style={{ fontSize: 10, opacity: 0.4, marginLeft: 4 }}>{sqHistory.length}ヶ月分</span>
           </div>
         );
         const sqSummary = (
@@ -1234,7 +1240,7 @@ export default function ReportClient({
               <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>口コミ総評</h3>
               <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 12 }}>
                 <div>
-                  <div style={{ fontSize: 32, color: "#fbc02d" }}>{"★".repeat(Math.floor(shop.rating))}{"☆".repeat(5 - Math.floor(shop.rating))}</div>
+                  <div style={{ fontSize: 32, color: "#fbc02d" }}>{"★".repeat(Math.round(shop.rating))}{"☆".repeat(5 - Math.round(shop.rating))}</div>
                   <span style={{ fontSize: 56, fontWeight: 900, color: "#0f3460" }}>{shop.rating}</span>
                   <span style={{ fontSize: 16, color: "#888", marginLeft: 8 }}>/ 5.0（{shop.totalReviews.toLocaleString()}件）</span>
                 </div>
