@@ -156,7 +156,7 @@ async function fetchReviews(fullPath: string, token: string): Promise<GBPReview[
     if (data.reviews) all.push(...data.reviews);
     nextPage = data.nextPageToken;
     pages++;
-  } while (nextPage && pages < 20);
+  } while (nextPage && pages < 40);
   return all;
 }
 
