@@ -133,17 +133,12 @@ export async function GET(request: NextRequest) {
     }
   };
 
-  // 1. 元フレーズ全体で完全含有検索（最優先・星評価フィルタあり）
+  // 1. 元フレーズ全体で完全含有検索（星評価フィルタあり）
   addResults(matchReviews(allReviews, (text) => text.includes(keyword), true));
 
-  // 2. 元フレーズ全体で完全含有検索（星評価フィルタなし — 逆評価でも原文含有なら表示）
-  if (allMatched.length < 20) {
+  // 2. 元フレーズ全体で完全含有検索（星評価フィルタなし — type未指定の場合のみ）
+  if (allMatched.length < 20 && !ratingFilter) {
     addResults(matchReviews(allReviews, (text) => text.includes(keyword), false));
-  }
-
-  // 3. 分割ワードANDマッチ（星評価フィルタあり）
-  if (allMatched.length < 20 && uniqueWords.length > 1) {
-    addResults(matchReviews(allReviews, (text) => uniqueWords.every(w => text.includes(w)), true));
   }
 
   if (allMatched.length > 0) {
