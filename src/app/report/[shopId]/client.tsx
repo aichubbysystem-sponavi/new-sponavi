@@ -1267,11 +1267,10 @@ export default function ReportClient({
             <h3 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", marginBottom: 16 }}>{curLabel} 総評</h3>
             <div style={{ margin: 0 }}>
               {(comments || []).map((c, i) => {
-                // 古い分析結果に含まれる誤ったGoogle評価値をshopsテーブルの公式値で補正
+                // コメント内の評価値をshop.rating（P13と同じ公式値）で強制置換
                 let fixedComment = c;
                 if (shop.rating > 0) {
-                  // 「Google評価3.7/5.0」「全体評価は3.7/5.0」「評価は3.7/5.0」等のパターンに対応
-                  fixedComment = fixedComment.replace(/((?:Google|全体)?評価[はで]?\s*)[\d.]+(\s*\/\s*5\.0)/g, `$1${shop.rating}$2`);
+                  fixedComment = fixedComment.replace(/\d\.\d(\s*\/\s*5\.0)/g, `${shop.rating}$1`);
                 }
                 return (
                 <p key={i} style={{ fontSize: 14, lineHeight: 2, color: "#444", margin: "0 0 12px 0" }}>
