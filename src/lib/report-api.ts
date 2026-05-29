@@ -92,7 +92,9 @@ async function fetchGridRankingLive(shopIds: string[], shopName?: string): Promi
       if (overrides && overrides.length > 0) {
         for (const o of overrides) {
           keywordSet.add(o.keyword);
-          const month = o.month || "unknown";
+          // 月フォーマットを統一（"2026/04" → "2026/4"）実測データと合わせる
+          const rawMonth = o.month || "unknown";
+          const month = rawMonth.replace(/\/0(\d)$/, "/$1");
           if (!monthMap.has(month)) monthMap.set(month, []);
           const ranked = (o.results || []).filter((r: any) => r.rank > 0);
           const avg = ranked.length > 0 ? ranked.reduce((s: number, r: any) => s + r.rank, 0) / ranked.length : 0;
