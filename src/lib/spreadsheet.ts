@@ -488,7 +488,6 @@ async function fetchAllExternalData(
     // グリッド順位計測（overrides優先 → 実測データフォールバック）
     (async () => {
       try {
-        // 1. overrides（手動編集/自動生成データ）を優先取得
         const { createClient } = await import("@supabase/supabase-js");
         const sb = createClient(
           process.env.NEXT_PUBLIC_SUPABASE_URL || "",
@@ -496,29 +495,44 @@ async function fetchAllExternalData(
         );
         const { data: overrides } = await sb
           .from("grid_ranking_overrides")
-          .select("keyword, grid_size, results, updated_at")
-          .eq("shop_name", shopName);
+          .select("keyword, month, grid_size, results, updated_at")
+          .eq("shop_name", shopName)
+          .order("month", { ascending: true });
         if (overrides && overrides.length > 0) {
           const keywords = Array.from(new Set(overrides.map(o => o.keyword)));
-          const history: import("./report-data").GridRankingMonthData[] = [];
-          // overridesは月区分なしなので最新月として扱う
-          const now = new Date();
-          const monthKey = `${now.getFullYear()}/${now.getMonth() + 1}`;
-          const snapshots = overrides.map(o => ({
-            keyword: o.keyword,
-            gridSize: o.grid_size || 7,
-            intervalM: 1000,
-            results: o.results || [],
-            measuredAt: o.updated_at,
-            avgRank: (() => {
-              const ranked = (o.results || []).filter((r: any) => r.rank > 0);
-              return ranked.length > 0 ? Math.round(ranked.reduce((s: number, r: any) => s + r.rank, 0) / ranked.length * 10) / 10 : 0;
-            })(),
-          }));
-          history.push({ month: monthKey, snapshots });
+          // 月別にグループ化
+          const monthMap = new Map<string, import("./report-data").GridRankingSnapshot[]>();
+          for (const o of overrides) {
+            const month = o.month || "unknown";
+            if (!monthMap.has(month)) monthMap.set(month, []);
+            const ranked = (o.results || []).filter((r: any) => r.rank > 0);
+            const avg = ranked.length > 0 ? Math.round(ranked.reduce((s: number, r: any) => s + r.rank, 0) / ranked.length * 10) / 10 : 0;
+            monthMap.get(month)!.push({
+              keyword: o.keyword, gridSize: o.grid_size || 7, intervalM: 1000,
+              results: o.results || [], measuredAt: o.updated_at, avgRank: avg,
+            });
+          }
+          const history = Array.from(monthMap.entries()).map(([month, snapshots]) => ({ month, snapshots }));
+          // 実測データもマージ（overridesにない月は実測データで補完）
+          if (opts?.shopId) {
+            try {
+              const measured = await fetchGridRankingData(opts.shopId);
+              if (measured && measured.history.length > 0) {
+                const overrideMonths = new Set(history.map(h => h.month));
+                for (const mh of measured.history) {
+                  if (!overrideMonths.has(mh.month)) {
+                    history.push(mh);
+                    for (const s of mh.snapshots) {
+                      if (!keywords.includes(s.keyword)) keywords.push(s.keyword);
+                    }
+                  }
+                }
+                history.sort((a, b) => a.month.localeCompare(b.month));
+              }
+            } catch {}
+          }
           return { keywords, history };
         }
-        // 2. 実測データにフォールバック
         if (!opts?.shopId) return undefined;
         return await fetchGridRankingData(opts.shopId);
       } catch {

@@ -518,6 +518,45 @@ export default function ReportClient({
                 )}
               </div>
             )}
+            {/* 多地点順位 一括生成 */}
+            {hasKeywords && (
+              <div style={{ marginTop: 16, borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 16 }}>
+                <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: 600, display: "block", marginBottom: 10 }}>多地点順位グリッド一括生成</span>
+                <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 11, margin: "0 0 10px" }}>
+                  P6/P7のキーワード順位から、各月の7×7グリッドを自動生成します。中心=実測順位、周囲=距離に応じた推定値。
+                </p>
+                <button onClick={async () => {
+                  setGridGenerating(true);
+                  try {
+                    // rankingHistoryから全月×全キーワードのデータを作成
+                    const batch: { keyword: string; month: string; centerRank: number }[] = [];
+                    if (rankingHistory?.datasets && rankingHistory?.labels) {
+                      for (const ds of rankingHistory.datasets) {
+                        for (let i = 0; i < rankingHistory.labels.length; i++) {
+                          const rank = ds.ranks[i];
+                          if (rank !== null && rank > 0) {
+                            batch.push({ keyword: ds.word, month: rankingHistory.labels[i], centerRank: rank });
+                          }
+                        }
+                      }
+                    }
+                    if (batch.length > 0) {
+                      await fetch("/api/report/grid-ranking-generate", {
+                        method: "POST", headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ shopName: shop.name, shopId: shopId, batch }),
+                      });
+                      alert(`${batch.length}件のグリッドを生成しました。ページをリロードします。`);
+                      window.location.reload();
+                    } else {
+                      alert("キーワード順位データがありません");
+                    }
+                  } catch (e: any) { alert("エラー: " + (e?.message || "不明")); } finally { setGridGenerating(false); }
+                }} disabled={gridGenerating}
+                style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: gridGenerating ? "#666" : "#e94560", color: "#fff", fontSize: 12, fontWeight: 600, cursor: gridGenerating ? "wait" : "pointer", width: "100%" }}>
+                  {gridGenerating ? "生成中..." : "全月×全キーワードのグリッドを一括生成"}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -893,7 +932,7 @@ export default function ReportClient({
                                             try {
                                               await fetch("/api/report/grid-ranking-generate", {
                                                 method: "PUT", headers: { "Content-Type": "application/json" },
-                                                body: JSON.stringify({ shopName: shop.name, keyword: activeKw, row, col, newRank }),
+                                                body: JSON.stringify({ shopName: shop.name, keyword: activeKw, month: monthData?.month || "", row, col, newRank }),
                                               });
                                             } catch {}
                                           }}
@@ -912,7 +951,7 @@ export default function ReportClient({
                           try {
                             await fetch("/api/report/grid-ranking-generate", {
                               method: "DELETE", headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ shopName: shop.name, keyword: activeKw }),
+                              body: JSON.stringify({ shopName: shop.name, keyword: activeKw, month: monthData?.month || "" }),
                             });
                             window.location.reload();
                           } catch {}
@@ -944,7 +983,7 @@ export default function ReportClient({
                       setGridGenerating(true);
                       try {
                         // 実測データをoverridesにコピーして編集モードにする
-                        const body = { shopId: shopId, shopName: shop.name, keyword: activeKw, centerRank: snapshot.avgRank };
+                        const body = { shopId: shopId, shopName: shop.name, keyword: activeKw, month: monthData?.month || "", centerRank: snapshot.avgRank };
                         await fetch("/api/report/grid-ranking-generate", {
                           method: "POST", headers: { "Content-Type": "application/json" },
                           body: JSON.stringify(body),
@@ -968,7 +1007,7 @@ export default function ReportClient({
                           try {
                             await fetch("/api/report/grid-ranking-generate", {
                               method: "POST", headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ shopId: shopId, shopName: shop.name, keyword: activeKw, centerRank }),
+                              body: JSON.stringify({ shopId: shopId, shopName: shop.name, keyword: activeKw, month: monthData?.month || curLabel, centerRank }),
                             });
                             window.location.reload();
                           } catch {} finally { setGridGenerating(false); }
