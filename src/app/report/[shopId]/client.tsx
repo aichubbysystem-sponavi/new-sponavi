@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import DOMPurify from "isomorphic-dompurify";
 import Link from "next/link";
 import {
@@ -222,8 +222,13 @@ export default function ReportClient({
 
   // グリッドマップ用: 現在表示中のスナップショットを取得
   const activeGridKw = gridRanking?.keywords[gridKwIdx] || gridRanking?.keywords[0] || "";
-  const activeGridMonthI = !gridRanking ? 0 : (gridMonthIdx < 0 || gridMonthIdx >= gridRanking.history.length ? gridRanking.history.length - 1 : gridMonthIdx);
-  const activeGridSnapshot = gridRanking?.history[activeGridMonthI]?.snapshots.find(s => s.keyword === activeGridKw);
+  // マップ描画用: レポート対象月以前の直近6ヶ月（グリッドセクション描画と同じ基準）
+  const gridRecentHistory = useMemo(() => {
+    if (!gridRanking) return [];
+    return gridRanking.history.filter(h => h.month <= curLabel).slice(-6);
+  }, [gridRanking, curLabel]);
+  const activeGridMonthI = gridMonthIdx >= 0 && gridMonthIdx < gridRecentHistory.length ? gridMonthIdx : gridRecentHistory.length - 1;
+  const activeGridSnapshot = gridRecentHistory[activeGridMonthI]?.snapshots.find(s => s.keyword === activeGridKw);
 
   // Google Maps JS API読み込み + マーカー描画
   const renderGridMap = useCallback(() => {
