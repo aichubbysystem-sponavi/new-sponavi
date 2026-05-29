@@ -941,14 +941,22 @@ export default function ReportClient({
       {/* ════ 多地点順位計測（キーワード切り替え・月切り替え） ════ */}
       {showGridRanking && (() => { pageNum++;
         const gr = gridRanking!;
+        // 直近6ヶ月に絞る
+        const recentHistory = gr.history.slice(-6);
         const activeKw = gr.keywords[gridKwIdx] || gr.keywords[0];
-        const activeMonthI = gridMonthIdx < 0 || gridMonthIdx >= gr.history.length ? gr.history.length - 1 : gridMonthIdx;
-        const monthData = gr.history[activeMonthI];
+        // デフォルト表示月をレポート対象月（curLabel）に合わせる
+        const defaultMonthI = (() => {
+          if (gridMonthIdx >= 0 && gridMonthIdx < recentHistory.length) return gridMonthIdx;
+          const curIdx = recentHistory.findIndex(h => h.month === curLabel);
+          return curIdx >= 0 ? curIdx : recentHistory.length - 1;
+        })();
+        const activeMonthI = defaultMonthI;
+        const monthData = recentHistory[activeMonthI];
         const snapshot = monthData?.snapshots.find(s => s.keyword === activeKw);
-        const prevMonthData = activeMonthI > 0 ? gr.history[activeMonthI - 1] : null;
+        const prevMonthData = activeMonthI > 0 ? recentHistory[activeMonthI - 1] : null;
         const prevSnapshot = prevMonthData?.snapshots.find(s => s.keyword === activeKw);
-        const trendLabels = gr.history.map(h => h.month.replace(/^\d{4}\//, "") + "月");
-        const trendData = gr.history.map(h => {
+        const trendLabels = recentHistory.map(h => h.month.replace(/^\d{4}\//, "") + "月");
+        const trendData = recentHistory.map(h => {
           const s = h.snapshots.find(s => s.keyword === activeKw);
           return s ? s.avgRank : null;
         });
@@ -979,7 +987,7 @@ export default function ReportClient({
               ))}
               <div style={{ width: 1, height: 20, background: "#ddd", margin: "0 4px" }} />
               <span style={{ fontSize: 12, fontWeight: 700, color: "#0f3460" }}>月:</span>
-              {gr.history.map((h, i) => (
+              {recentHistory.map((h, i) => (
                 <button key={h.month} onClick={() => setGridMonthIdx(i)}
                   style={{ padding: "4px 10px", borderRadius: 14, fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer",
                     background: i === activeMonthI ? "#e94560" : "#f0f2f5",
