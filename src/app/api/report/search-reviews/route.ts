@@ -107,10 +107,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ debug: { shopIds, reviewCount: allReviews.length, uniqueWords, sampleComment: allReviews[0]?.comment?.slice(0, 100) } });
   }
 
+  // 翻訳除去（analyzeと同じロジック）
+  const toDisplayComment = (raw: string) => {
+    if (raw.includes("(Original)")) return raw.split("(Original)").pop()?.trim() || raw;
+    return raw.split(/\s*\(Translated by Google\)\s*/)[0] || raw;
+  };
+
   // キーワードマッチ（直近1年）
   const matchReviews = (reviews: any[], filter: (text: string) => boolean, useRatingFilter: boolean) => {
     return reviews.filter((r: any) => {
-      const text = r.comment || "";
+      const text = toDisplayComment(r.comment || "");
       if (!filter(text)) return false;
       if (useRatingFilter && ratingFilter) {
         const rating = ((r.star_rating || "") as string).toUpperCase();
