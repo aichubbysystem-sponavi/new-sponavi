@@ -405,7 +405,7 @@ async function fetchGridRankingData(
     for (const log of logs) {
       keywordSet.add(log.keyword);
       const d = new Date(log.measured_at);
-      const monthKey = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const monthKey = `${d.getFullYear()}/${d.getMonth() + 1}`;
       const results: import("./report-data").GridPoint[] = log.results || [];
       const ranked = results.filter(r => r.rank > 0);
       const avg = ranked.length > 0 ? ranked.reduce((s, r) => s + r.rank, 0) / ranked.length : 0;
@@ -503,7 +503,8 @@ async function fetchAllExternalData(
           // 月別にグループ化
           const monthMap = new Map<string, import("./report-data").GridRankingSnapshot[]>();
           for (const o of overrides) {
-            const month = o.month || "unknown";
+            // 月フォーマット統一: "2026/04" → "2026/4"（ゼロなし）
+            const month = (o.month || "unknown").replace(/\/0(\d)$/, "/$1");
             if (!monthMap.has(month)) monthMap.set(month, []);
             const ranked = (o.results || []).filter((r: any) => r.rank > 0);
             const avg = ranked.length > 0 ? Math.round(ranked.reduce((s: number, r: any) => s + r.rank, 0) / ranked.length * 10) / 10 : 0;

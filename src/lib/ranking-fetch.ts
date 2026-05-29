@@ -240,7 +240,7 @@ function parseRanksHistory(headerText: string, dataText: string): RankHistoryDat
   for (const row of dataRows) {
     const dateCell = (row[1] || "").trim();
     const m = dateCell.match(/(\d{4})[\/年](\d{1,2})/);
-    if (m) allMonths.push({ label: `${m[1]}/${m[2]}`, row });
+    if (m) allMonths.push({ label: `${m[1]}/${parseInt(m[2])}`, row });
   }
   const recent = allMonths.slice(-13);
 
