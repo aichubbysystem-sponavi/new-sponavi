@@ -891,9 +891,8 @@ export default function ReportClient({
                                             setEditingGridCell(null);
                                             if (newRank === rank) return;
                                             try {
-                                              const token = document.cookie.match(/sb-.*-auth-token=([^;]+)/)?.[1] || "";
                                               await fetch("/api/report/grid-ranking-generate", {
-                                                method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                                                method: "PUT", headers: { "Content-Type": "application/json" },
                                                 body: JSON.stringify({ shopName: shop.name, keyword: activeKw, row, col, newRank }),
                                               });
                                             } catch {}
@@ -932,11 +931,10 @@ export default function ReportClient({
                     <button className="no-print" onClick={async () => {
                       setGridGenerating(true);
                       try {
-                        const token = document.cookie.match(/sb-.*-auth-token=([^;]+)/)?.[1] || "";
                         // 実測データをoverridesにコピーして編集モードにする
                         const body = { shopId: shopId, shopName: shop.name, keyword: activeKw, centerRank: snapshot.avgRank };
                         await fetch("/api/report/grid-ranking-generate", {
-                          method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                          method: "POST", headers: { "Content-Type": "application/json" },
                           body: JSON.stringify(body),
                         });
                         window.location.reload();
@@ -956,9 +954,8 @@ export default function ReportClient({
                         <button className="no-print" onClick={async () => {
                           setGridGenerating(true);
                           try {
-                            const token = document.cookie.match(/sb-.*-auth-token=([^;]+)/)?.[1] || "";
                             await fetch("/api/report/grid-ranking-generate", {
-                              method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                              method: "POST", headers: { "Content-Type": "application/json" },
                               body: JSON.stringify({ shopId: shopId, shopName: shop.name, keyword: activeKw, centerRank }),
                             });
                             window.location.reload();

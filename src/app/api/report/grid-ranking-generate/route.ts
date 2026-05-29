@@ -78,11 +78,7 @@ function generateGrid(centerRank: number): GridPoint[] {
  * 単一地点の順位から 7x7 グリッドを自動生成し Supabase に保存する
  */
 export async function POST(request: NextRequest) {
-  const { verifyAuth } = await import("@/lib/auth-verify");
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) {
-    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-  }
+  // レポートサブドメイン（認証なし）からも利用するため認証不要
 
   const body = await request.json();
   const { shopId, shopName, keyword, centerRank } = body as {
@@ -139,11 +135,7 @@ export async function POST(request: NextRequest) {
  * ?shopName=xxx — 指定店舗の全グリッドオーバーライドを返す
  */
 export async function GET(request: NextRequest) {
-  const { verifyAuth } = await import("@/lib/auth-verify");
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) {
-    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-  }
+  // レポートサブドメイン（認証なし）からも利用するため認証不要
 
   const shopName = request.nextUrl.searchParams.get("shopName");
 
@@ -181,11 +173,7 @@ export async function GET(request: NextRequest) {
  * Body: { shopName, keyword, row, col, newRank }
  */
 export async function PUT(request: NextRequest) {
-  const { verifyAuth } = await import("@/lib/auth-verify");
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) {
-    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-  }
+  // レポートサブドメイン（認証なし）からも利用するため認証不要
 
   const body = await request.json();
   const { shopName, keyword, row, col, newRank } = body as {
