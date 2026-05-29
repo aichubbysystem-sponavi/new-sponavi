@@ -928,6 +928,23 @@ export default function ReportClient({
                         ) : null;
                       })()}
                     </div>
+                    {/* 編集可能にするボタン（実測データがある場合） */}
+                    <button className="no-print" onClick={async () => {
+                      setGridGenerating(true);
+                      try {
+                        const token = document.cookie.match(/sb-.*-auth-token=([^;]+)/)?.[1] || "";
+                        // 実測データをoverridesにコピーして編集モードにする
+                        const body = { shopId: shopId, shopName: shop.name, keyword: activeKw, centerRank: snapshot.avgRank };
+                        await fetch("/api/report/grid-ranking-generate", {
+                          method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                          body: JSON.stringify(body),
+                        });
+                        window.location.reload();
+                      } catch {} finally { setGridGenerating(false); }
+                    }} disabled={gridGenerating}
+                    style={{ marginTop: 6, padding: "5px 14px", borderRadius: 6, border: "1px solid #ccc", background: "#fff", color: "#555", fontSize: 11, cursor: gridGenerating ? "wait" : "pointer" }}>
+                      {gridGenerating ? "生成中..." : "数値を編集可能にする"}
+                    </button>
                   </>
                 ) : (
                   <div style={{ padding: 40, textAlign: "center" }}>
