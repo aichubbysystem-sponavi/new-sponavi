@@ -133,6 +133,9 @@ export default function ReportClient({
   const [memoLoading, setMemoLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [negativeModal, setNegativeModal] = useState<{ word: string; reviews: { reviewer: string; comment: string; reply?: string | null; date: string; starRating: string }[]; type?: "positive" | "negative"; matched?: boolean } | null>(null);
+  const [editingGridCell, setEditingGridCell] = useState<{ row: number; col: number } | null>(null);
+  const [editingGridValue, setEditingGridValue] = useState("");
+  const [gridGenerating, setGridGenerating] = useState(false);
 
   // セクション表示ON/OFF（店舗ごとにlocalStorage保存）
   const visKey = `report-visibility-${shopId}`;
@@ -859,7 +862,54 @@ export default function ReportClient({
               <div style={{ flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
                 {snapshot ? (
                   <>
-                    <div ref={gridMapRef} style={{ width: 440, height: 400, borderRadius: 12, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,.15)", background: "#e8edf5" }} />
+                    {/* 座標ありの場合はGoogle Maps、なしの場合はグリッドテーブル */}
+                    {snapshot.results.some((r: any) => r.lat && r.lng) ? (
+                      <div ref={gridMapRef} style={{ width: 440, height: 400, borderRadius: 12, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,.15)", background: "#e8edf5" }} />
+                    ) : (
+                      <div style={{ background: "#fff", borderRadius: 12, padding: 8, boxShadow: "0 2px 12px rgba(0,0,0,.08)" }}>
+                        <table style={{ borderCollapse: "collapse" }}>
+                          <tbody>
+                            {Array.from({ length: gridSize }, (_, row) => (
+                              <tr key={row}>
+                                {Array.from({ length: gridSize }, (_, col) => {
+                                  const pt = snapshot.results.find((r: any) => r.row === row && r.col === col);
+                                  const rank = pt?.rank || 0;
+                                  const isCenter = row === Math.floor(gridSize / 2) && col === Math.floor(gridSize / 2);
+                                  const c = gridRankColor(rank);
+                                  const isEditing = editingGridCell?.row === row && editingGridCell?.col === col;
+                                  return (
+                                    <td key={col} onClick={() => { setEditingGridCell({ row, col }); setEditingGridValue(String(rank)); }}
+                                      style={{ width: 52, height: 52, textAlign: "center", cursor: "pointer",
+                                        background: c.bg, border: isCenter ? "3px solid #0f3460" : "1px solid #e5e7eb",
+                                        fontWeight: rank > 0 && rank <= 3 ? 900 : 700, fontSize: rank > 0 ? 18 : 13, color: c.color,
+                                        position: "relative" }}>
+                                      {isEditing ? (
+                                        <input type="number" autoFocus value={editingGridValue}
+                                          onChange={(e) => setEditingGridValue(e.target.value)}
+                                          onBlur={async () => {
+                                            const newRank = parseInt(editingGridValue) || 0;
+                                            setEditingGridCell(null);
+                                            if (newRank === rank) return;
+                                            try {
+                                              const token = document.cookie.match(/sb-.*-auth-token=([^;]+)/)?.[1] || "";
+                                              await fetch("/api/report/grid-ranking-generate", {
+                                                method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                                                body: JSON.stringify({ shopName: shop.name, keyword: activeKw, row, col, newRank }),
+                                              });
+                                            } catch {}
+                                          }}
+                                          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                                          style={{ width: 40, fontSize: 16, textAlign: "center", border: "2px solid #0f3460", borderRadius: 4, padding: 2, outline: "none" }} />
+                                      ) : rank > 0 ? rank : "圏外"}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                     <div style={{ display: "flex", gap: 10, fontSize: 10, color: "#555", marginTop: 2 }}>
                       <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#16A34A", display: "inline-block" }} />1-3位</span>
                       <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#2563EB", display: "inline-block" }} />4-10位</span>
@@ -880,7 +930,29 @@ export default function ReportClient({
                     </div>
                   </>
                 ) : (
-                  <div style={{ padding: 40, color: "#999", fontSize: 13 }}>この月のデータなし</div>
+                  <div style={{ padding: 40, textAlign: "center" }}>
+                    <div style={{ color: "#999", fontSize: 13, marginBottom: 12 }}>この月のデータなし</div>
+                    {(() => {
+                      const kwData = keywords.find(k => k.word === activeKw);
+                      const centerRank = kwData?.rank || 0;
+                      return centerRank > 0 ? (
+                        <button className="no-print" onClick={async () => {
+                          setGridGenerating(true);
+                          try {
+                            const token = document.cookie.match(/sb-.*-auth-token=([^;]+)/)?.[1] || "";
+                            await fetch("/api/report/grid-ranking-generate", {
+                              method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                              body: JSON.stringify({ shopId: shopId, shopName: shop.name, keyword: activeKw, centerRank }),
+                            });
+                            window.location.reload();
+                          } catch {} finally { setGridGenerating(false); }
+                        }} disabled={gridGenerating}
+                        style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: gridGenerating ? "#999" : "#0f3460", color: "#fff", fontSize: 12, fontWeight: 600, cursor: gridGenerating ? "wait" : "pointer" }}>
+                          {gridGenerating ? "生成中..." : `「${activeKw}」${centerRank}位からグリッド自動生成`}
+                        </button>
+                      ) : <div style={{ color: "#bbb", fontSize: 11 }}>キーワード順位データがありません</div>;
+                    })()}
+                  </div>
                 )}
               </div>
               <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8, minWidth: 0 }}>

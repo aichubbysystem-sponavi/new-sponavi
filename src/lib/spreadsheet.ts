@@ -485,13 +485,45 @@ async function fetchAllExternalData(
         return { latest: [] as { word: string; count: number }[], latestMonth: "", history: [] as any[] };
       }
     })(),
-    // グリッド順位計測
+    // グリッド順位計測（overrides優先 → 実測データフォールバック）
     (async () => {
-      if (!opts?.shopId) return undefined;
       try {
+        // 1. overrides（手動編集/自動生成データ）を優先取得
+        const { createClient } = await import("@supabase/supabase-js");
+        const sb = createClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+          process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+        );
+        const { data: overrides } = await sb
+          .from("grid_ranking_overrides")
+          .select("keyword, grid_size, results, updated_at")
+          .eq("shop_name", shopName);
+        if (overrides && overrides.length > 0) {
+          const keywords = Array.from(new Set(overrides.map(o => o.keyword)));
+          const history: import("./report-data").GridRankingMonthData[] = [];
+          // overridesは月区分なしなので最新月として扱う
+          const now = new Date();
+          const monthKey = `${now.getFullYear()}/${now.getMonth() + 1}`;
+          const snapshots = overrides.map(o => ({
+            keyword: o.keyword,
+            gridSize: o.grid_size || 7,
+            intervalM: 1000,
+            results: o.results || [],
+            measuredAt: o.updated_at,
+            avgRank: (() => {
+              const ranked = (o.results || []).filter((r: any) => r.rank > 0);
+              return ranked.length > 0 ? Math.round(ranked.reduce((s: number, r: any) => s + r.rank, 0) / ranked.length * 10) / 10 : 0;
+            })(),
+          }));
+          history.push({ month: monthKey, snapshots });
+          return { keywords, history };
+        }
+        // 2. 実測データにフォールバック
+        if (!opts?.shopId) return undefined;
         return await fetchGridRankingData(opts.shopId);
       } catch {
-        return undefined;
+        if (!opts?.shopId) return undefined;
+        try { return await fetchGridRankingData(opts.shopId); } catch { return undefined; }
       }
     })(),
   ]);
