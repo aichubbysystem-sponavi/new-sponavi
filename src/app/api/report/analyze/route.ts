@@ -161,22 +161,10 @@ ${reviewTexts}
 - positiveWords・negativeWordsはそれぞれ最低12個以上の候補を出してください（後で自動フィルタします）。
 - 1件の口コミにしか登場しないフレーズでも構いません。できるだけ多くの候補を出してください。
 
-【出力形式】以下のJSON形式のみ出力してください。
+【出力形式】以下のJSON形式のみ出力してください。WordSourcesは不要です。
 {
   "positiveWords": ["ポジ1", "ポジ2", "ポジ3", "ポジ4", "ポジ5", "ポジ6", "ポジ7", "ポジ8", "ポジ9", "ポジ10", "ポジ11", "ポジ12"],
   "negativeWords": ["ネガ1", "ネガ2", "ネガ3", "ネガ4", "ネガ5", "ネガ6", "ネガ7", "ネガ8", "ネガ9", "ネガ10", "ネガ11", "ネガ12"],
-  "positiveWordSources": [
-    {
-      "word": "ポジティブワード1",
-      "reviewNumbers": [1, 2, 5]
-    }
-  ],
-  "negativeWordSources": [
-    {
-      "word": "ネガティブワード1",
-      "reviewNumbers": [3, 7]
-    }
-  ],
   "summary": "口コミの全体傾向を1行で要約（50文字以内。例: 味の評価は高いが接客面に課題あり）",
   "comments": [
     "コメント1（口コミデータに基づく具体的な分析。strongタグで強調箇所を囲む）",
@@ -191,13 +179,7 @@ ${reviewTexts}
 - コメント内に口コミの参照番号（#1, #6, [#10]等）を絶対に含めないでください。お客様に見せるレポートです。
 - 具体的な口コミ内容を引用する場合は「○○という声がある」のように表現してください。
 - 数値（件数、割合、評価値）は必ず上記の「正確な統計データ」セクションの値を使用してください。口コミテキストから独自に数えた数値は使わないでください。
-- Google評価の数値もそのまま使用してください。
-
-【WordSourcesのルール】
-- positiveWordSources・negativeWordSourcesの各reviewNumbersは、口コミテキストの[#番号]に対応する番号の配列です。
-- positiveWordsの全ワードがpositiveWordSourcesに、negativeWordsの全ワードがnegativeWordSourcesに必ず含まれていること。
-- 各ワードのreviewNumbersには、そのワード（フレーズ）が実際に含まれている口コミの番号を全て列挙してください。
-- reviewNumbersが空配列にならないようにしてください。該当口コミが見つからないワードは出力しないでください。`;
+- Google評価の数値もそのまま使用してください。`;
 
   try {
     const controller = new AbortController();
@@ -231,23 +213,6 @@ ${reviewTexts}
 
     try {
       const parsed = JSON.parse(jsonMatch[0]);
-      // reviewNumbersを実際の口コミデータに変換（共通ヘルパー）
-      const convertSources = (sources: any[]) =>
-        sources.map((src: any) => ({
-          word: src.word,
-          reviews: (src.reviewNumbers || [])
-            .map((num: number) => {
-              const r = filteredReviews[num - 1];
-              if (!r) return null;
-              return {
-                reviewer: r.reviewer.displayName,
-                comment: r.comment,
-                date: r.createTime?.slice(0, 10) || "不明",
-                starRating: r.starRating,
-              };
-            })
-            .filter(Boolean),
-        }));
 
       // ── キーワード厳密検証: 口コミ原文に完全含有するもののみ残し、登場回数TOP6 ──
       const posRatings = new Set(["FOUR", "FIVE", "4", "5"]);
