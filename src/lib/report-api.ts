@@ -72,41 +72,63 @@ async function getShopDbIds(shopName: string): Promise<string[]> {
  * グリッド順位データをリアルタイム取得
  * shopIdsを複数受け取り、いずれかにマッチするログを取得（同名の重複店舗対策）
  */
-async function fetchGridRankingLive(shopIds: string[]): Promise<GridRankingReport | undefined> {
+async function fetchGridRankingLive(shopIds: string[], shopName?: string): Promise<GridRankingReport | undefined> {
   try {
     const sb = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || "",
       process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
     );
+
+    const keywordSet = new Set<string>();
+    const monthMap = new Map<string, any[]>();
+
+    // 1. overrides（手動編集データ）を優先読み込み
+    if (shopName) {
+      const { data: overrides } = await sb
+        .from("grid_ranking_overrides")
+        .select("keyword, month, grid_size, results, updated_at")
+        .eq("shop_name", shopName)
+        .order("month", { ascending: true });
+      if (overrides && overrides.length > 0) {
+        for (const o of overrides) {
+          keywordSet.add(o.keyword);
+          const month = o.month || "unknown";
+          if (!monthMap.has(month)) monthMap.set(month, []);
+          const ranked = (o.results || []).filter((r: any) => r.rank > 0);
+          const avg = ranked.length > 0 ? ranked.reduce((s: number, r: any) => s + r.rank, 0) / ranked.length : 0;
+          monthMap.get(month)!.push({
+            keyword: o.keyword, gridSize: o.grid_size || 7, intervalM: 1000,
+            results: o.results || [], measuredAt: o.updated_at, avgRank: Math.round(avg * 10) / 10,
+          });
+        }
+      }
+    }
+
+    // 2. 実測データ（overridesにない月のみ補完）
     const { data: logs } = await sb
       .from("grid_ranking_logs")
       .select("keyword, grid_size, interval_m, results, measured_at")
       .in("shop_id", shopIds)
       .order("measured_at", { ascending: true });
-    console.log(`[report-api] grid ranking live: shopIds=${JSON.stringify(shopIds)}, logs=${logs?.length ?? 0}`);
-    if (!logs || logs.length === 0) return undefined;
-
-    const keywordSet = new Set<string>();
-    const monthMap = new Map<string, any[]>();
-
-    for (const log of logs) {
-      keywordSet.add(log.keyword);
-      const d = new Date(log.measured_at);
-      const monthKey = `${d.getFullYear()}/${d.getMonth() + 1}`;
-      const results = log.results || [];
-      const ranked = results.filter((r: any) => r.rank > 0);
-      const avg = ranked.length > 0 ? ranked.reduce((s: number, r: any) => s + r.rank, 0) / ranked.length : 0;
-      const snapshot = {
-        keyword: log.keyword,
-        gridSize: log.grid_size,
-        intervalM: log.interval_m,
-        results,
-        measuredAt: log.measured_at,
-        avgRank: Math.round(avg * 10) / 10,
-      };
-      if (!monthMap.has(monthKey)) monthMap.set(monthKey, []);
-      monthMap.get(monthKey)!.push(snapshot);
+    if (logs && logs.length > 0) {
+      for (const log of logs) {
+        const d = new Date(log.measured_at);
+        const monthKey = `${d.getFullYear()}/${d.getMonth() + 1}`;
+        // overridesに同月のデータがあればスキップ
+        if (monthMap.has(monthKey)) continue;
+        keywordSet.add(log.keyword);
+        if (!monthMap.has(monthKey)) monthMap.set(monthKey, []);
+        const results = log.results || [];
+        const ranked = results.filter((r: any) => r.rank > 0);
+        const avg = ranked.length > 0 ? ranked.reduce((s: number, r: any) => s + r.rank, 0) / ranked.length : 0;
+        monthMap.get(monthKey)!.push({
+          keyword: log.keyword, gridSize: log.grid_size, intervalM: log.interval_m,
+          results, measuredAt: log.measured_at, avgRank: Math.round(avg * 10) / 10,
+        });
+      }
     }
+
+    if (keywordSet.size === 0) return undefined;
 
     const history: any[] = [];
     for (const entry of Array.from(monthMap.entries())) {
@@ -120,6 +142,7 @@ async function fetchGridRankingLive(shopIds: string[]): Promise<GridRankingRepor
       }
       history.push({ month, snapshots: Array.from(byKw.values()) });
     }
+    history.sort((a: any, b: any) => a.month.localeCompare(b.month));
 
     const result: GridRankingReport = { keywords: Array.from(keywordSet), history };
     return result.keywords.length > 0 ? result : undefined;
@@ -143,13 +166,11 @@ export async function getReportData(shopId: string): Promise<{
   try {
     const cached = await readReportDataFromCache(shopName);
     if (cached) {
-      // gridRankingはリアルタイムで上書き
+      // gridRankingはリアルタイムで上書き（overrides + 実測データ）
       try {
         const dbIds = await getShopDbIds(shopName);
-        if (dbIds.length > 0) {
-          const gridRanking = await fetchGridRankingLive(dbIds);
-          cached.gridRanking = gridRanking;
-        }
+        const gridRanking = await fetchGridRankingLive(dbIds.length > 0 ? dbIds : ["_"], shopName);
+        if (gridRanking) cached.gridRanking = gridRanking;
       } catch {}
       // reviewAnalysisもDBからリアルタイム取得（再分析反映のため）
       try {
