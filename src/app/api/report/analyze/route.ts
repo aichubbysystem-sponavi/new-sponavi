@@ -346,6 +346,17 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
+      // コメント・サマリー内の評価値を公式値で強制置換（DB保存前に確定させる）
+      const ratingStr = String(officialRating);
+      const fixRating = (text: string) =>
+        text.replace(/(\d\.\d)\s*\/\s*5\.0/g, `${ratingStr}/5.0`);
+      if (analysis.comments) {
+        analysis.comments = analysis.comments.map(fixRating);
+      }
+      if (analysis.summary) {
+        analysis.summary = fixRating(analysis.summary);
+      }
+
       // Supabaseに保存（upsert）
       const { error } = await supabase
         .from("report_analysis")
@@ -359,8 +370,8 @@ export async function POST(request: NextRequest) {
             negative_word_sources: analysis.negativeWordSources || [],
             summary: analysis.summary,
             comments: analysis.comments,
-            review_count: reviewData.totalReviewCount,
-            average_rating: reviewData.averageRating,
+            review_count: officialCount,
+            average_rating: officialRating,
             analyzed_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           },
