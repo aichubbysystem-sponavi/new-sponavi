@@ -136,6 +136,8 @@ export default function ReportClient({
   const [editingGridCell, setEditingGridCell] = useState<{ row: number; col: number } | null>(null);
   const [editingGridValue, setEditingGridValue] = useState("");
   const [gridGenerating, setGridGenerating] = useState(false);
+  const [gridEditMonth, setGridEditMonth] = useState("");
+  const [gridEditKw, setGridEditKw] = useState("");
 
   // セクション表示ON/OFF（店舗ごとにlocalStorage保存）
   const visKey = `report-visibility-${shopId}`;
@@ -518,45 +520,135 @@ export default function ReportClient({
                 )}
               </div>
             )}
-            {/* 多地点順位 一括生成 */}
-            {hasKeywords && (
+            {/* 多地点順位グリッド編集 */}
+            {hasKeywords && (() => {
+              const allMonths = rankingHistory?.labels || [];
+              const allKws = rankingHistory?.datasets?.map(d => d.word) || [];
+              const [editMonth, setEditMonth] = [gridEditMonth, setGridEditMonth];
+              const [editKw, setEditKw] = [gridEditKw, setGridEditKw];
+              const selectedMonth = editMonth || allMonths[allMonths.length - 1] || "";
+              const selectedKw = editKw || allKws[0] || "";
+              // 現在選択中の月+KWのoverridesグリッドを取得
+              const overrideData = gridRanking?.history.find(h => h.month === selectedMonth)?.snapshots.find(s => s.keyword === selectedKw);
+              const gridCells = overrideData?.results || [];
+              const gridRankColorModal = (rank: number) => {
+                if (rank <= 0) return { bg: "rgba(156,163,175,0.3)", color: "#9ca3af" };
+                if (rank <= 3) return { bg: "rgba(22,163,74,0.3)", color: "#16a34a" };
+                if (rank <= 10) return { bg: "rgba(37,99,235,0.3)", color: "#2563eb" };
+                if (rank <= 20) return { bg: "rgba(245,158,11,0.3)", color: "#f59e0b" };
+                return { bg: "rgba(239,68,68,0.3)", color: "#ef4444" };
+              };
+              // 選択中月+KWのcenterRank（P7データから）
+              const dsData = rankingHistory?.datasets?.find(d => d.word === selectedKw);
+              const monthIdx = allMonths.indexOf(selectedMonth);
+              const centerRank = dsData && monthIdx >= 0 ? (dsData.ranks[monthIdx] ?? 0) : 0;
+
+              return (
               <div style={{ marginTop: 16, borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 16 }}>
-                <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: 600, display: "block", marginBottom: 10 }}>多地点順位グリッド一括生成</span>
-                <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 11, margin: "0 0 10px" }}>
-                  P6/P7のキーワード順位から、各月の7×7グリッドを自動生成します。中心=実測順位、周囲=距離に応じた推定値。
-                </p>
-                <button onClick={async () => {
-                  setGridGenerating(true);
-                  try {
-                    // rankingHistoryから全月×全キーワードのデータを作成
-                    const batch: { keyword: string; month: string; centerRank: number }[] = [];
-                    if (rankingHistory?.datasets && rankingHistory?.labels) {
-                      for (const ds of rankingHistory.datasets) {
-                        for (let i = 0; i < rankingHistory.labels.length; i++) {
-                          const rank = ds.ranks[i];
-                          if (rank !== null && rank > 0) {
-                            batch.push({ keyword: ds.word, month: rankingHistory.labels[i], centerRank: rank });
+                <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: 600, display: "block", marginBottom: 10 }}>多地点順位グリッド編集</span>
+                {/* 月・KW選択 */}
+                <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+                  <select value={selectedMonth} onChange={e => setGridEditMonth(e.target.value)}
+                    style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.2)", background: "#2a2a4e", color: "#fff", fontSize: 12 }}>
+                    {allMonths.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                  <select value={selectedKw} onChange={e => setGridEditKw(e.target.value)}
+                    style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.2)", background: "#2a2a4e", color: "#fff", fontSize: 12 }}>
+                    {allKws.map(k => <option key={k} value={k}>{k}</option>)}
+                  </select>
+                  <span style={{ color: "rgba(255,255,255,0.4)", fontSize: 11, alignSelf: "center" }}>
+                    中心順位: {centerRank > 0 ? `${centerRank}位` : "データなし"}
+                  </span>
+                </div>
+                {/* 生成ボタン */}
+                <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                  <button onClick={async () => {
+                    if (centerRank <= 0) { alert("この月のキーワード順位データがありません"); return; }
+                    setGridGenerating(true);
+                    try {
+                      await fetch("/api/report/grid-ranking-generate", {
+                        method: "POST", headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ shopId, shopName: shop.name, keyword: selectedKw, month: selectedMonth, centerRank }),
+                      });
+                      window.location.reload();
+                    } catch {} finally { setGridGenerating(false); }
+                  }} disabled={gridGenerating}
+                  style={{ padding: "5px 12px", borderRadius: 6, border: "none", background: gridGenerating ? "#666" : "#0f3460", color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+                    {gridGenerating ? "生成中..." : "この月を自動生成"}
+                  </button>
+                  <button onClick={async () => {
+                    setGridGenerating(true);
+                    try {
+                      const batch: { keyword: string; month: string; centerRank: number }[] = [];
+                      if (rankingHistory?.datasets && rankingHistory?.labels) {
+                        for (const ds of rankingHistory.datasets) {
+                          for (let i = 0; i < rankingHistory.labels.length; i++) {
+                            const rank = ds.ranks[i];
+                            if (rank !== null && rank > 0) batch.push({ keyword: ds.word, month: rankingHistory.labels[i], centerRank: rank });
                           }
                         }
                       }
-                    }
-                    if (batch.length > 0) {
-                      await fetch("/api/report/grid-ranking-generate", {
-                        method: "POST", headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ shopName: shop.name, shopId: shopId, batch }),
-                      });
-                      alert(`${batch.length}件のグリッドを生成しました。ページをリロードします。`);
-                      window.location.reload();
-                    } else {
-                      alert("キーワード順位データがありません");
-                    }
-                  } catch (e: any) { alert("エラー: " + (e?.message || "不明")); } finally { setGridGenerating(false); }
-                }} disabled={gridGenerating}
-                style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: gridGenerating ? "#666" : "#e94560", color: "#fff", fontSize: 12, fontWeight: 600, cursor: gridGenerating ? "wait" : "pointer", width: "100%" }}>
-                  {gridGenerating ? "生成中..." : "全月×全キーワードのグリッドを一括生成"}
-                </button>
+                      if (batch.length > 0) {
+                        await fetch("/api/report/grid-ranking-generate", {
+                          method: "POST", headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ shopName: shop.name, shopId, batch }),
+                        });
+                        alert(`${batch.length}件生成しました`);
+                        window.location.reload();
+                      }
+                    } catch {} finally { setGridGenerating(false); }
+                  }} disabled={gridGenerating}
+                  style={{ padding: "5px 12px", borderRadius: 6, border: "none", background: gridGenerating ? "#666" : "#e94560", color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+                    全月一括生成
+                  </button>
+                </div>
+                {/* 7×7 グリッド */}
+                {gridCells.length > 0 ? (
+                  <table style={{ borderCollapse: "collapse", margin: "0 auto" }}>
+                    <tbody>
+                      {Array.from({ length: 7 }, (_, row) => (
+                        <tr key={row}>
+                          {Array.from({ length: 7 }, (_, col) => {
+                            const pt = gridCells.find((r: any) => r.row === row && r.col === col);
+                            const rank = pt?.rank || 0;
+                            const isCenter = row === 3 && col === 3;
+                            const c = gridRankColorModal(rank);
+                            const isEd = editingGridCell?.row === row && editingGridCell?.col === col;
+                            return (
+                              <td key={col} onClick={() => { setEditingGridCell({ row, col }); setEditingGridValue(String(rank)); }}
+                                style={{ width: 42, height: 42, textAlign: "center", cursor: "pointer",
+                                  background: c.bg, border: isCenter ? "2px solid #e94560" : "1px solid rgba(255,255,255,0.1)",
+                                  fontWeight: 700, fontSize: rank > 0 ? 14 : 10, color: c.color, borderRadius: 4 }}>
+                                {isEd ? (
+                                  <input type="number" autoFocus value={editingGridValue}
+                                    onChange={e => setEditingGridValue(e.target.value)}
+                                    onBlur={async () => {
+                                      const newRank = parseInt(editingGridValue) || 0;
+                                      setEditingGridCell(null);
+                                      if (newRank === rank) return;
+                                      await fetch("/api/report/grid-ranking-generate", {
+                                        method: "PUT", headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({ shopName: shop.name, keyword: selectedKw, month: selectedMonth, row, col, newRank }),
+                                      });
+                                    }}
+                                    onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                                    style={{ width: 32, fontSize: 13, textAlign: "center", border: "1px solid #e94560", borderRadius: 3, padding: 1, outline: "none", background: "#1a1a2e", color: "#fff" }} />
+                                ) : rank > 0 ? rank : "-"}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 11, textAlign: "center", padding: 16 }}>
+                    {centerRank > 0 ? "「この月を自動生成」でグリッドを作成してください" : "この月/KWのデータなし"}
+                  </div>
+                )}
               </div>
-            )}
+              );
+            })()}
           </div>
         </div>
       )}
