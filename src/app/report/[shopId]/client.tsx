@@ -907,6 +907,18 @@ export default function ReportClient({
                             ))}
                           </tbody>
                         </table>
+                        <button className="no-print" onClick={async () => {
+                          if (!confirm("編集データを削除して実測データに戻しますか？")) return;
+                          try {
+                            await fetch("/api/report/grid-ranking-generate", {
+                              method: "DELETE", headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ shopName: shop.name, keyword: activeKw }),
+                            });
+                            window.location.reload();
+                          } catch {}
+                        }} style={{ marginTop: 6, padding: "4px 12px", borderRadius: 6, border: "1px solid #ddd", background: "#fff", color: "#999", fontSize: 10, cursor: "pointer" }}>
+                          実測データに戻す
+                        </button>
                       </div>
                     )}
                     <div style={{ display: "flex", gap: 10, fontSize: 10, color: "#555", marginTop: 2 }}>

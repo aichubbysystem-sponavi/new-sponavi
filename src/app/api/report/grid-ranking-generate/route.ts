@@ -43,6 +43,7 @@ function randInt(min: number, max: number): number {
  * - 結果 > 100 は圏外（0）
  */
 function generateGrid(centerRank: number): GridPoint[] {
+  centerRank = Math.round(centerRank); // 小数→整数に丸める
   const GRID_SIZE = 7;
   const CENTER = 3; // 0-indexed
   const grid: GridPoint[] = [];
@@ -237,4 +238,31 @@ export async function PUT(request: NextRequest) {
   }
 
   return NextResponse.json({ success: true, results });
+}
+
+/**
+ * DELETE /api/report/grid-ranking-generate
+ * overridesを削除して実測データに戻す
+ * Body: { shopName, keyword }
+ */
+export async function DELETE(request: NextRequest) {
+  const body = await request.json();
+  const { shopName, keyword } = body as { shopName: string; keyword: string };
+
+  if (!shopName || !keyword) {
+    return NextResponse.json({ error: "shopName, keyword が必要です" }, { status: 400 });
+  }
+
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from("grid_ranking_overrides")
+    .delete()
+    .eq("shop_name", shopName)
+    .eq("keyword", keyword);
+
+  if (error) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true });
 }
