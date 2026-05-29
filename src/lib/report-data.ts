@@ -7,6 +7,8 @@ export interface ShopInfo {
   startDate: string;
   totalReviews: number;
   rating: number;
+  lat: number;
+  lng: number;
 }
 
 export interface KPI {

@@ -666,6 +666,15 @@ export async function buildReportData(
   }
   // 口コミ数はスプレッドシートを常に優先（DBは古い値の場合がある）
 
+  // 店舗座標を取得（多地点グリッドマップ表示用）
+  let shopLat = 0, shopLng = 0;
+  try {
+    const { createClient: cc } = await import("@supabase/supabase-js");
+    const sbc = cc(process.env.NEXT_PUBLIC_SUPABASE_URL || "", process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "");
+    const { data: coordRow } = await sbc.from("shops").select("latitude, longitude").eq("name", shopName).not("latitude", "is", null).limit(1).maybeSingle();
+    if (coordRow) { shopLat = coordRow.latitude || 0; shopLng = coordRow.longitude || 0; }
+  } catch {}
+
   return {
     shop: {
       name: shopName,
@@ -674,6 +683,8 @@ export async function buildReportData(
       startDate,
       totalReviews,
       rating: currentRating,
+      lat: shopLat,
+      lng: shopLng,
     },
     kpis,
     monthlyLabels,

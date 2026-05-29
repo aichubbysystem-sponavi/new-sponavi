@@ -232,41 +232,16 @@ export default function ReportClient({
     if (pts.length === 0) return;
     const gs = activeGridSnapshot.gridSize;
 
-    // 座標なしデータ（overrides）の場合、仮座標を生成してマップ表示
+    // 座標なしデータ（overrides）の場合、shop.lat/lngから仮座標を生成
     const hasCoords = pts.some(p => p.lat && p.lng);
-    if (!hasCoords) {
-      // gridRanking全データから座標を探す
-      let refLat = 0, refLng = 0;
-      if (data.gridRanking) {
-        for (const h of data.gridRanking.history) {
-          for (const s of h.snapshots) {
-            for (const r of (s.results || [])) {
-              if (r.lat && r.lng) { refLat = r.lat; refLng = r.lng; break; }
-            }
-            if (refLat) break;
-          }
-          if (refLat) break;
-        }
-      }
-      // 座標が見つからない場合はStoredCenterから取得（フォールバック）
-      if (!refLat && (window as any).__gridCenterLat) {
-        refLat = (window as any).__gridCenterLat;
-        refLng = (window as any).__gridCenterLng;
-      }
-      if (refLat && refLng) {
-        const interval = 1000;
-        const center = Math.floor(gs / 2);
-        pts = pts.map(p => ({
-          ...p,
-          lat: refLat + ((p.row - center) * interval * -0.000009),
-          lng: refLng + ((p.col - center) * interval * 0.000011),
-        }));
-      }
-    }
-    // 次回以降のために座標をキャッシュ
-    if (pts.some(p => p.lat && p.lng)) {
-      const cp = pts.find(p => p.row === Math.floor(gs / 2) && p.col === Math.floor(gs / 2));
-      if (cp) { (window as any).__gridCenterLat = cp.lat; (window as any).__gridCenterLng = cp.lng; }
+    if (!hasCoords && shop.lat && shop.lng) {
+      const interval = 1000;
+      const center = Math.floor(gs / 2);
+      pts = pts.map(p => ({
+        ...p,
+        lat: shop.lat + ((p.row - center) * interval * -0.000009),
+        lng: shop.lng + ((p.col - center) * interval * 0.000011),
+      }));
     }
 
     const centerPt = pts.find(p => p.row === Math.floor(gs / 2) && p.col === Math.floor(gs / 2));
@@ -314,7 +289,7 @@ export default function ReportClient({
     });
     gridMarkersRef.current.push(cm);
     gridGoogleMapRef.current.fitBounds(bounds, 40);
-  }, [activeGridSnapshot, data.gridRanking]);
+  }, [activeGridSnapshot, shop.lat, shop.lng]);
 
   useEffect(() => {
     if (!showGridRanking || !activeGridSnapshot) return;
