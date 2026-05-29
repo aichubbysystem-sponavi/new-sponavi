@@ -712,6 +712,36 @@ export default function ReviewsPage() {
               style={{ color: syncing || loadingNoReview ? undefined : "#fff" }}>
               {loadingNoReview ? "検索中..." : "口コミなし店舗"}
             </button>
+            <button onClick={async () => {
+              if (!selectedShopId) return;
+              const shopName = selectedShop?.name || shops?.find((s: any) => s.id === selectedShopId)?.name || "店舗";
+              const { data } = await supabase
+                .from("reviews")
+                .select("reviewer_name, star_rating, comment, reply_comment, create_time")
+                .eq("shop_id", selectedShopId)
+                .order("create_time", { ascending: false });
+              if (!data || data.length === 0) { alert("口コミデータがありません"); return; }
+              const ratingMap: Record<string, string> = { ONE: "1", TWO: "2", THREE: "3", FOUR: "4", FIVE: "5", ONE_STAR: "1", TWO_STARS: "2", THREE_STARS: "3", FOUR_STARS: "4", FIVE_STARS: "5" };
+              const header = "投稿日,投稿者,評価,口コミ,返信";
+              const rows = data.map((r: any) => {
+                const date = r.create_time?.slice(0, 10) || "";
+                const name = (r.reviewer_name || "匿名").replace(/"/g, '""');
+                const stars = ratingMap[(r.star_rating || "").toUpperCase()] || r.star_rating || "";
+                const comment = (r.comment || "").replace(/"/g, '""').replace(/\n/g, " ");
+                const reply = (r.reply_comment || "").replace(/"/g, '""').replace(/\n/g, " ");
+                return `${date},"${name}",${stars},"${comment}","${reply}"`;
+              });
+              const csv = "\uFEFF" + header + "\n" + rows.join("\n");
+              const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url; a.download = `${shopName}_口コミ一覧.csv`; a.click();
+              URL.revokeObjectURL(url);
+            }} disabled={!selectedShopId}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${!selectedShopId ? "bg-slate-200 text-slate-400" : "bg-teal-600 hover:bg-teal-700"}`}
+              style={{ color: selectedShopId ? "#fff" : undefined }}>
+              CSVダウンロード
+            </button>
           </div>
         </div>
       </div>
