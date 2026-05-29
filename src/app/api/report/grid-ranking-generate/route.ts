@@ -67,17 +67,28 @@ export async function POST(request: NextRequest) {
       updated_at: new Date().toISOString(),
     }));
 
-    // 既存データを一旦削除して再挿入（upsertだと複合キーの問題があるため）
-    for (const row of rows) {
-      await supabase.from("grid_ranking_overrides")
-        .delete()
-        .eq("shop_name", row.shop_name)
-        .eq("keyword", row.keyword)
-        .eq("month", row.month);
+    // 既存データを一括削除
+    await supabase.from("grid_ranking_overrides")
+      .delete()
+      .eq("shop_name", shopName);
+
+    // 10件ずつバッチinsert
+    let inserted = 0;
+    const errors: string[] = [];
+    for (let i = 0; i < rows.length; i += 10) {
+      const chunk = rows.slice(i, i + 10);
+      const { error } = await supabase.from("grid_ranking_overrides").insert(chunk);
+      if (error) {
+        console.error(`[grid-generate] batch insert error at ${i}:`, error.message);
+        errors.push(error.message);
+      } else {
+        inserted += chunk.length;
+      }
     }
-    const { error } = await supabase.from("grid_ranking_overrides").insert(rows);
-    if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-    return NextResponse.json({ success: true, count: rows.length });
+    if (errors.length > 0 && inserted === 0) {
+      return NextResponse.json({ success: false, error: errors[0] }, { status: 500 });
+    }
+    return NextResponse.json({ success: true, count: inserted, errors: errors.length > 0 ? errors : undefined });
   }
 
   // 単月生成モード
