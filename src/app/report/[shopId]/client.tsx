@@ -1006,7 +1006,7 @@ export default function ReportClient({
         });
         const hasPrev = sqPrev !== null;
         const hasPrev2 = sqPrev2 !== null;
-        const PER_PAGE = 15;
+        const PER_PAGE = 30;
         const page1 = currentKeywords.slice(0, PER_PAGE);
         const page2 = currentKeywords.slice(PER_PAGE, PER_PAGE * 2);
         const thStyle = (w?: number): React.CSSProperties => ({ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, ...(w ? { width: w } : {}) });
@@ -1018,10 +1018,12 @@ export default function ReportClient({
                   <th style={thStyle(40)}>順位</th>
                   <th style={{ ...thStyle(), textAlign: "left", padding: "10px 12px" }}>検索語句</th>
                   <th style={thStyle(70)}>検索数</th>
-                  <th style={thStyle(60)}>前月</th>
-                  {hasPrev2 && <th style={thStyle(60)}>前々月</th>}
-                  {hasYoy && <th style={thStyle(60)}>前年</th>}
-                  {hasYoy && <th style={thStyle(60)}>前年比</th>}
+                  {hasPrev && <th style={thStyle(55)}>前月</th>}
+                  {hasPrev && <th style={thStyle(55)}>前月比</th>}
+                  {hasPrev2 && <th style={thStyle(55)}>前々月</th>}
+                  {hasPrev2 && <th style={thStyle(55)}>前々月比</th>}
+                  {hasYoy && <th style={thStyle(55)}>前年</th>}
+                  {hasYoy && <th style={thStyle(55)}>前年比</th>}
                 </tr>
               </thead>
               <tbody>
@@ -1029,19 +1031,23 @@ export default function ReportClient({
                   const rank = startIdx + ri;
                   const prev = prevMap.get(kw.word);
                   const prev2 = prev2Map.get(kw.word);
+                  const prevDiff = prev !== undefined ? kw.count - prev : null;
+                  const prev2Diff = prev2 !== undefined ? kw.count - prev2 : null;
                   const yoyVal = yoyMap.get(kw.word);
                   const yoyDiff = yoyVal !== undefined ? kw.count - yoyVal : null;
+                  const diffStyle = (d: number | null): React.CSSProperties => ({ padding: "7px 4px", textAlign: "center", fontSize: 11, fontWeight: 600, color: d === null ? "#ccc" : d > 0 ? "#0a8f3c" : d < 0 ? "#c0392b" : "#888" });
+                  const fmtDiff = (d: number | null) => d === null ? "-" : d > 0 ? `+${d.toLocaleString()}` : d === 0 ? "→" : d.toLocaleString();
                   return (
                     <tr key={`${sqCurrent?.month}-${rank}`} style={{ background: ri % 2 === 0 ? "#fff" : "#f8f9fb", borderBottom: "1px solid #eee" }}>
                       <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 13, fontWeight: 700, color: rank < 3 ? "#e94560" : rank < 10 ? "#0f3460" : "#888" }}>{rank + 1}</td>
                       <td style={{ padding: "7px 12px", fontSize: 13, color: "#333" }}>{kw.word}</td>
                       <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 14, fontWeight: 700, color: "#0f3460" }}>{kw.count.toLocaleString()}</td>
-                      <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 12, color: "#888" }}>{hasPrev && prev !== undefined ? prev.toLocaleString() : "-"}</td>
+                      {hasPrev && <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 12, color: "#888" }}>{prev !== undefined ? prev.toLocaleString() : "-"}</td>}
+                      {hasPrev && <td style={diffStyle(prevDiff)}>{fmtDiff(prevDiff)}</td>}
                       {hasPrev2 && <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 12, color: "#888" }}>{prev2 !== undefined ? prev2.toLocaleString() : "-"}</td>}
+                      {hasPrev2 && <td style={diffStyle(prev2Diff)}>{fmtDiff(prev2Diff)}</td>}
                       {hasYoy && <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 12, color: "#888" }}>{yoyVal !== undefined ? yoyVal.toLocaleString() : "-"}</td>}
-                      {hasYoy && <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: yoyDiff === null ? "#ccc" : yoyDiff > 0 ? "#0a8f3c" : yoyDiff < 0 ? "#c0392b" : "#888" }}>
-                        {yoyDiff === null ? "-" : yoyDiff > 0 ? `+${yoyDiff.toLocaleString()}` : yoyDiff === 0 ? "→" : yoyDiff.toLocaleString()}
-                      </td>}
+                      {hasYoy && <td style={diffStyle(yoyDiff)}>{fmtDiff(yoyDiff)}</td>}
                     </tr>
                   );
                 })}
@@ -1260,12 +1266,19 @@ export default function ReportClient({
           <div style={{ background: "linear-gradient(135deg,#f0f4ff,#fff)", border: "2px solid #0f3460", borderRadius: 14, padding: "28px 32px", flex: 1, display: "flex", flexDirection: "column" }}>
             <h3 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", marginBottom: 16 }}>{curLabel} 総評</h3>
             <div style={{ margin: 0 }}>
-              {(comments || []).map((c, i) => (
+              {(comments || []).map((c, i) => {
+                // 古い分析結果に含まれる誤ったGoogle評価値をshopsテーブルの公式値で補正
+                let fixedComment = c;
+                if (shop.rating > 0) {
+                  fixedComment = fixedComment.replace(/Google評価[\s]*[\d.]+\/5\.0/g, `Google評価${shop.rating}/5.0`);
+                }
+                return (
                 <p key={i} style={{ fontSize: 14, lineHeight: 2, color: "#444", margin: "0 0 12px 0" }}>
                   <span style={{ fontWeight: 700, color: "#0f3460", marginRight: 8 }}>{"①②③④⑤⑥⑦⑧⑨⑩"[i] || `${i + 1}.`}</span>
-                  <span dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(c, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
+                  <span dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(fixedComment, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
                 </p>
-              ))}
+                );
+              })}
             </div>
             {/* メモ欄 */}
             <div style={{ marginTop: 16, borderTop: "1px solid #dde", paddingTop: 12 }}>
