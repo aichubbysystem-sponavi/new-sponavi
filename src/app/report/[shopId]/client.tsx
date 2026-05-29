@@ -1270,7 +1270,8 @@ export default function ReportClient({
                 // 古い分析結果に含まれる誤ったGoogle評価値をshopsテーブルの公式値で補正
                 let fixedComment = c;
                 if (shop.rating > 0) {
-                  fixedComment = fixedComment.replace(/Google評価[\s]*[\d.]+\/5\.0/g, `Google評価${shop.rating}/5.0`);
+                  // 「Google評価3.7/5.0」「全体評価は3.7/5.0」「評価は3.7/5.0」等のパターンに対応
+                  fixedComment = fixedComment.replace(/((?:Google|全体)?評価[はで]?\s*)[\d.]+(\s*\/\s*5\.0)/g, `$1${shop.rating}$2`);
                 }
                 return (
                 <p key={i} style={{ fontSize: 14, lineHeight: 2, color: "#444", margin: "0 0 12px 0" }}>
