@@ -166,6 +166,20 @@ export async function getReportData(shopId: string): Promise<{
   try {
     const cached = await readReportDataFromCache(shopName);
     if (cached) {
+      // rankingHistory + keywords をシートからリアルタイム取得（キャッシュは古い値のままになるため）
+      try {
+        const { fetchRankingFromSheets, fetchRankingHistoryFromSheets } = await import("./ranking-fetch");
+        const [freshRanks, freshHistory] = await Promise.all([
+          fetchRankingFromSheets(shopName),
+          fetchRankingHistoryFromSheets(shopName),
+        ]);
+        if (freshHistory.labels.length > 0) {
+          cached.rankingHistory = freshHistory;
+        }
+        if (freshRanks.length > 0) {
+          cached.keywords = freshRanks.map(r => ({ word: r.word, rank: r.rank, prevRank: r.prevRank }));
+        }
+      } catch {}
       // gridRankingはリアルタイムで上書き（overrides + 実測データ）
       try {
         const dbIds = await getShopDbIds(shopName);
