@@ -941,8 +941,9 @@ export default function ReportClient({
       {/* ════ 多地点順位計測（キーワード切り替え・月切り替え） ════ */}
       {showGridRanking && (() => { pageNum++;
         const gr = gridRanking!;
-        // 直近6ヶ月に絞る
-        const recentHistory = gr.history.slice(-6);
+        // レポート対象月以前の直近6ヶ月に絞る（今月分は含めない）
+        const filteredHistory = gr.history.filter(h => h.month <= curLabel);
+        const recentHistory = filteredHistory.slice(-6);
         const activeKw = gr.keywords[gridKwIdx] || gr.keywords[0];
         // デフォルト表示月をレポート対象月（curLabel）に合わせる
         const defaultMonthI = (() => {
