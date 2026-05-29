@@ -1006,10 +1006,10 @@ export default function ReportClient({
         });
         const hasPrev = sqPrev !== null;
         const hasPrev2 = sqPrev2 !== null;
-        const PER_PAGE = 30;
+        const PER_PAGE = 15;
         const page1 = currentKeywords.slice(0, PER_PAGE);
         const page2 = currentKeywords.slice(PER_PAGE, PER_PAGE * 2);
-        const thStyle = (w?: number): React.CSSProperties => ({ background: "#0f3460", color: "#fff", padding: "10px 8px", textAlign: "center", fontWeight: 600, fontSize: 11, ...(w ? { width: w } : {}) });
+        const thStyle = (w?: number, groupStart?: boolean): React.CSSProperties => ({ background: "#0f3460", color: "#fff", padding: "10px 6px", textAlign: "center", fontWeight: 600, fontSize: 11, whiteSpace: "nowrap", ...(w ? { width: w } : {}), ...(groupStart ? { borderLeft: "2px solid rgba(255,255,255,0.3)" } : {}) });
         const renderSqTable = (rows: typeof currentKeywords, startIdx: number) => (
           <div style={{ overflow: "hidden", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", flex: 1 }}>
@@ -1017,13 +1017,13 @@ export default function ReportClient({
                 <tr>
                   <th style={thStyle(40)}>順位</th>
                   <th style={{ ...thStyle(), textAlign: "left", padding: "10px 12px" }}>検索語句</th>
-                  <th style={thStyle(70)}>検索数</th>
-                  {hasPrev && <th style={thStyle(55)}>前月</th>}
-                  {hasPrev && <th style={thStyle(55)}>前月比</th>}
-                  {hasPrev2 && <th style={thStyle(55)}>前々月</th>}
-                  {hasPrev2 && <th style={thStyle(55)}>前々月比</th>}
-                  {hasYoy && <th style={thStyle(55)}>前年</th>}
-                  {hasYoy && <th style={thStyle(55)}>前年比</th>}
+                  <th style={thStyle(65)}>検索数</th>
+                  {hasPrev && <th style={thStyle(50, true)}>前月</th>}
+                  {hasPrev && <th style={thStyle(50)}>前月比</th>}
+                  {hasPrev2 && <th style={thStyle(50, true)}>前々月</th>}
+                  {hasPrev2 && <th style={thStyle(50)}>前々月比</th>}
+                  {hasYoy && <th style={thStyle(50, true)}>前年</th>}
+                  {hasYoy && <th style={thStyle(50)}>前年比</th>}
                 </tr>
               </thead>
               <tbody>
@@ -1041,13 +1041,13 @@ export default function ReportClient({
                     <tr key={`${sqCurrent?.month}-${rank}`} style={{ background: ri % 2 === 0 ? "#fff" : "#f8f9fb", borderBottom: "1px solid #eee" }}>
                       <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 13, fontWeight: 700, color: rank < 3 ? "#e94560" : rank < 10 ? "#0f3460" : "#888" }}>{rank + 1}</td>
                       <td style={{ padding: "7px 12px", fontSize: 13, color: "#333" }}>{kw.word}</td>
-                      <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 14, fontWeight: 700, color: "#0f3460" }}>{kw.count.toLocaleString()}</td>
-                      {hasPrev && <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 12, color: "#888" }}>{prev !== undefined ? prev.toLocaleString() : "-"}</td>}
-                      {hasPrev && <td style={diffStyle(prevDiff)}>{fmtDiff(prevDiff)}</td>}
-                      {hasPrev2 && <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 12, color: "#888" }}>{prev2 !== undefined ? prev2.toLocaleString() : "-"}</td>}
-                      {hasPrev2 && <td style={diffStyle(prev2Diff)}>{fmtDiff(prev2Diff)}</td>}
-                      {hasYoy && <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 12, color: "#888" }}>{yoyVal !== undefined ? yoyVal.toLocaleString() : "-"}</td>}
-                      {hasYoy && <td style={diffStyle(yoyDiff)}>{fmtDiff(yoyDiff)}</td>}
+                      <td style={{ padding: "7px 6px", textAlign: "center", fontSize: 14, fontWeight: 700, color: "#0f3460" }}>{kw.count.toLocaleString()}</td>
+                      {hasPrev && <td style={{ padding: "7px 6px", textAlign: "center", fontSize: 12, color: "#888", borderLeft: "2px solid #e8edf3" }}>{prev !== undefined ? prev.toLocaleString() : "-"}</td>}
+                      {hasPrev && <td style={{ ...diffStyle(prevDiff), padding: "7px 4px" }}>{fmtDiff(prevDiff)}</td>}
+                      {hasPrev2 && <td style={{ padding: "7px 6px", textAlign: "center", fontSize: 12, color: "#888", borderLeft: "2px solid #e8edf3" }}>{prev2 !== undefined ? prev2.toLocaleString() : "-"}</td>}
+                      {hasPrev2 && <td style={{ ...diffStyle(prev2Diff), padding: "7px 4px" }}>{fmtDiff(prev2Diff)}</td>}
+                      {hasYoy && <td style={{ padding: "7px 6px", textAlign: "center", fontSize: 12, color: "#888", borderLeft: "2px solid #e8edf3" }}>{yoyVal !== undefined ? yoyVal.toLocaleString() : "-"}</td>}
+                      {hasYoy && <td style={{ ...diffStyle(yoyDiff), padding: "7px 4px" }}>{fmtDiff(yoyDiff)}</td>}
                     </tr>
                   );
                 })}
