@@ -724,7 +724,7 @@ export default function ReportClient({
         <div style={slideStyle} className="slide">
           <div style={slideBarStyle}><span>{shop.name} — キーワード順位変動</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={slideBodyStyle}>
-            <div style={stitleStyle}>キーワード順位変動</div>
+            <div style={stitleStyle}>キーワード順位変動（{curLabel}）</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16, flex: 1 }}>
               {visibleKeywords.map((kw, i) => {
                 const diff = kw.prevRank - kw.rank;
