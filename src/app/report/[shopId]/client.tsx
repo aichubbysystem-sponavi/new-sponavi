@@ -986,7 +986,8 @@ export default function ReportClient({
                   {kw}
                 </button>
               ))}
-              <div style={{ width: 1, height: 20, background: "#ddd", margin: "0 4px" }} />
+            </div>
+            <div className="no-print" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: "#0f3460" }}>月:</span>
               {recentHistory.map((h, i) => (
                 <button key={h.month} onClick={() => setGridMonthIdx(i)}
