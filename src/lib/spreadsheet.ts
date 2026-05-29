@@ -671,8 +671,8 @@ export async function buildReportData(
   try {
     const { createClient: cc } = await import("@supabase/supabase-js");
     const sbc = cc(process.env.NEXT_PUBLIC_SUPABASE_URL || "", process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "");
-    const { data: coordRow } = await sbc.from("shops").select("latitude, longitude").eq("name", shopName).not("latitude", "is", null).limit(1).maybeSingle();
-    if (coordRow) { shopLat = coordRow.latitude || 0; shopLng = coordRow.longitude || 0; }
+    const { data: coordRow } = await sbc.from("shops").select("gbp_latitude, gbp_longitude").eq("name", shopName).not("gbp_latitude", "is", null).limit(1).maybeSingle();
+    if (coordRow) { shopLat = coordRow.gbp_latitude || 0; shopLng = coordRow.gbp_longitude || 0; }
   } catch {}
 
   return {
