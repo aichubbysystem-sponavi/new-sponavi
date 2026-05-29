@@ -228,9 +228,35 @@ export default function ReportClient({
   // Google Maps JS API読み込み + マーカー描画
   const renderGridMap = useCallback(() => {
     if (!gridMapRef.current || !activeGridSnapshot || !window.google?.maps) return;
-    const pts = activeGridSnapshot.results;
+    let pts = activeGridSnapshot.results;
     if (pts.length === 0) return;
     const gs = activeGridSnapshot.gridSize;
+
+    // 座標なしデータ（overrides）の場合、実測データまたは固定座標から仮座標を生成
+    const hasCoords = pts.some(p => p.lat && p.lng);
+    if (!hasCoords) {
+      // 他の月の実測データから中心座標を借りる
+      let refLat = 0, refLng = 0;
+      if (gridRanking) {
+        for (const h of gridRanking.history) {
+          for (const s of h.snapshots) {
+            const cp = s.results.find((r: any) => r.lat && r.lng);
+            if (cp) { refLat = cp.lat; refLng = cp.lng; break; }
+          }
+          if (refLat) break;
+        }
+      }
+      if (refLat && refLng) {
+        const interval = 1000;
+        const center = Math.floor(gs / 2);
+        pts = pts.map(p => ({
+          ...p,
+          lat: refLat + ((p.row - center) * interval * -0.000009),
+          lng: refLng + ((p.col - center) * interval * 0.000011),
+        }));
+      }
+    }
+
     const centerPt = pts.find(p => p.row === Math.floor(gs / 2) && p.col === Math.floor(gs / 2));
     const cLat = centerPt?.lat ?? pts.reduce((s, p) => s + p.lat, 0) / pts.length;
     const cLng = centerPt?.lng ?? pts.reduce((s, p) => s + p.lng, 0) / pts.length;
@@ -1003,65 +1029,7 @@ export default function ReportClient({
               <div style={{ flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
                 {snapshot ? (
                   <>
-                    {/* 座標ありの場合はGoogle Maps、なしの場合はグリッドテーブル */}
-                    {snapshot.results.some((r: any) => r.lat && r.lng) ? (
-                      <div ref={gridMapRef} style={{ width: 440, height: 400, borderRadius: 12, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,.15)", background: "#e8edf5" }} />
-                    ) : (
-                      <div style={{ background: "#fff", borderRadius: 12, padding: 8, boxShadow: "0 2px 12px rgba(0,0,0,.08)" }}>
-                        <table style={{ borderCollapse: "collapse" }}>
-                          <tbody>
-                            {Array.from({ length: gridSize }, (_, row) => (
-                              <tr key={row}>
-                                {Array.from({ length: gridSize }, (_, col) => {
-                                  const pt = snapshot.results.find((r: any) => r.row === row && r.col === col);
-                                  const rank = pt?.rank || 0;
-                                  const isCenter = row === Math.floor(gridSize / 2) && col === Math.floor(gridSize / 2);
-                                  const c = gridRankColor(rank);
-                                  const isEditing = editingGridCell?.row === row && editingGridCell?.col === col;
-                                  return (
-                                    <td key={col} onClick={() => { setEditingGridCell({ row, col }); setEditingGridValue(String(rank)); }}
-                                      style={{ width: 52, height: 52, textAlign: "center", cursor: "pointer",
-                                        background: c.bg, border: isCenter ? "3px solid #0f3460" : "1px solid #e5e7eb",
-                                        fontWeight: rank > 0 && rank <= 3 ? 900 : 700, fontSize: rank > 0 ? 18 : 13, color: c.color,
-                                        position: "relative" }}>
-                                      {isEditing ? (
-                                        <input type="number" autoFocus value={editingGridValue}
-                                          onChange={(e) => setEditingGridValue(e.target.value)}
-                                          onBlur={async () => {
-                                            const newRank = parseInt(editingGridValue) || 0;
-                                            setEditingGridCell(null);
-                                            if (newRank === rank) return;
-                                            try {
-                                              await fetch("/api/report/grid-ranking-generate", {
-                                                method: "PUT", headers: { "Content-Type": "application/json" },
-                                                body: JSON.stringify({ shopName: shop.name, keyword: activeKw, month: monthData?.month || "", row, col, newRank }),
-                                              });
-                                            } catch {}
-                                          }}
-                                          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                                          style={{ width: 40, fontSize: 16, textAlign: "center", border: "2px solid #0f3460", borderRadius: 4, padding: 2, outline: "none" }} />
-                                      ) : rank > 0 ? rank : "圏外"}
-                                    </td>
-                                  );
-                                })}
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                        <button className="no-print" onClick={async () => {
-                          if (!confirm("編集データを削除して実測データに戻しますか？")) return;
-                          try {
-                            await fetch("/api/report/grid-ranking-generate", {
-                              method: "DELETE", headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ shopName: shop.name, keyword: activeKw, month: monthData?.month || "" }),
-                            });
-                            window.location.reload();
-                          } catch {}
-                        }} style={{ marginTop: 6, padding: "4px 12px", borderRadius: 6, border: "1px solid #ddd", background: "#fff", color: "#999", fontSize: 10, cursor: "pointer" }}>
-                          実測データに戻す
-                        </button>
-                      </div>
-                    )}
+                    <div ref={gridMapRef} style={{ width: 440, height: 400, borderRadius: 12, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,.15)", background: "#e8edf5" }} />
                     <div style={{ display: "flex", gap: 10, fontSize: 10, color: "#555", marginTop: 2 }}>
                       <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#16A34A", display: "inline-block" }} />1-3位</span>
                       <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#2563EB", display: "inline-block" }} />4-10位</span>
