@@ -129,11 +129,19 @@ interface GBPReview {
   reviewReply?: { comment: string; updateTime?: string };
 }
 
-async function fetchReviews(fullPath: string, token: string): Promise<GBPReview[]> {
+interface FetchResult {
+  reviews: GBPReview[];
+  totalCount: number;
+  avgRating: number;
+}
+
+async function fetchReviews(fullPath: string, token: string): Promise<FetchResult> {
   const all: GBPReview[] = [];
   let nextPage: string | undefined;
   let pages = 0;
   let retries429 = 0;
+  let totalCount = 0;
+  let avgRating = 0;
   const MAX_429_RETRIES = 3;
   do {
     const params = new URLSearchParams({ orderBy: "updateTime desc", pageSize: "50" });
@@ -151,13 +159,15 @@ async function fetchReviews(fullPath: string, token: string): Promise<GBPReview[
       continue;
     }
     if (!res.ok) break;
-    retries429 = 0; // 成功したらリセット
+    retries429 = 0;
     const data = await res.json();
     if (data.reviews) all.push(...data.reviews);
+    if (data.totalReviewCount) totalCount = data.totalReviewCount;
+    if (data.averageRating) avgRating = data.averageRating;
     nextPage = data.nextPageToken;
     pages++;
   } while (nextPage && pages < 40);
-  return all;
+  return { reviews: all, totalCount, avgRating };
 }
 
 // ── 同期進捗管理（Supabase sync_progress テーブル） ──
@@ -292,11 +302,12 @@ export async function GET(request: NextRequest) {
 
     try {
       // 全トークンを試す（アカウントごとにアクセス権が異なるため）
-      let reviews: GBPReview[] = [];
+      let result: FetchResult = { reviews: [], totalCount: 0, avgRating: 0 };
       for (const t of allTokens) {
-        reviews = await fetchReviews(fullPath, t);
-        if (reviews.length > 0) break;
+        result = await fetchReviews(fullPath, t);
+        if (result.reviews.length > 0) break;
       }
+      const reviews = result.reviews;
       if (reviews.length === 0) continue;
 
       consecutiveAuthErrors = 0; // 成功したらリセット
@@ -314,6 +325,14 @@ export async function GET(request: NextRequest) {
 
       for (let j = 0; j < rows.length; j += 50) {
         await supabase.from("reviews").upsert(rows.slice(j, j + 50), { onConflict: "review_id" });
+      }
+
+      // Google公式評価をshopsテーブルに保存
+      if (result.avgRating > 0 || result.totalCount > 0) {
+        const updateData: Record<string, any> = {};
+        if (result.avgRating > 0) updateData.rating = result.avgRating;
+        if (result.totalCount > 0) updateData.review_count = result.totalCount;
+        await supabase.from("shops").update(updateData).eq("id", shop.id);
       }
 
       synced += reviews.length;
