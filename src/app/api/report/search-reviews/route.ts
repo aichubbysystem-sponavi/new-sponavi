@@ -133,23 +133,17 @@ export async function GET(request: NextRequest) {
     }
   };
 
-  // 1. 元フレーズ全体で検索（星評価フィルタなし）
-  addResults(matchReviews(allReviews, (text) => text.includes(keyword), false));
+  // 1. 元フレーズ全体で完全含有検索（最優先・星評価フィルタあり）
+  addResults(matchReviews(allReviews, (text) => text.includes(keyword), true));
 
-  // 2. 分割ワードANDマッチ
-  if (allMatched.length < 20 && uniqueWords.length > 0) {
-    addResults(matchReviews(allReviews, (text) => uniqueWords.every(w => text.includes(w)), false));
+  // 2. 元フレーズ全体で完全含有検索（星評価フィルタなし — 逆評価でも原文含有なら表示）
+  if (allMatched.length < 20) {
+    addResults(matchReviews(allReviews, (text) => text.includes(keyword), false));
   }
 
-  // 3. 主要ワード（最長の単語）で個別検索（星評価フィルタあり — 逆評価の口コミ混入防止）
-  if (allMatched.length < 20 && uniqueWords.length > 0) {
-    const mainWord = uniqueWords.reduce((a, b) => a.length >= b.length ? a : b);
-    addResults(matchReviews(allReviews, (text) => text.includes(mainWord), true));
-  }
-
-  // 4. 各分割ワードでOR検索（星評価フィルタあり）
+  // 3. 分割ワードANDマッチ（星評価フィルタあり）
   if (allMatched.length < 20 && uniqueWords.length > 1) {
-    addResults(matchReviews(allReviews, (text) => uniqueWords.some(w => text.includes(w)), true));
+    addResults(matchReviews(allReviews, (text) => uniqueWords.every(w => text.includes(w)), true));
   }
 
   if (allMatched.length > 0) {

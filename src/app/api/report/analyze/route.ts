@@ -247,47 +247,46 @@ ${reviewTexts}
             .filter(Boolean),
         }));
 
-      parsed.positiveWordSources = Array.isArray(parsed.positiveWordSources)
-        ? convertSources(parsed.positiveWordSources) : [];
-      parsed.negativeWordSources = Array.isArray(parsed.negativeWordSources)
-        ? convertSources(parsed.negativeWordSources) : [];
-
-      // WordSourcesに対応がないワードを自動補完（口コミテキストから検索）
-      const autoFillSources = (words: string[], sources: any[], ratingFilter?: Set<string>) => {
-        const sourceWords = new Set(sources.map((s: any) => s.word));
-        for (const w of words) {
-          if (sourceWords.has(w)) continue;
-          const matched = filteredReviews.filter(r => {
-            if (!r.comment.includes(w)) return false;
-            if (ratingFilter) return ratingFilter.has(r.starRating);
-            return true;
-          });
-          if (matched.length > 0) {
-            sources.push({
-              word: w,
-              reviews: matched.slice(0, 5).map(r => ({
-                reviewer: r.reviewer.displayName,
-                comment: r.comment,
-                date: r.createTime?.slice(0, 10) || "不明",
-                starRating: r.starRating,
-              })),
-            });
-          }
-        }
-      };
+      // ── キーワード厳密検証: 口コミ原文に完全含有するもののみ残し、登場回数TOP6 ──
       const posRatings = new Set(["FOUR", "FIVE", "4", "5"]);
       const negRatings = new Set(["ONE", "TWO", "THREE", "1", "2", "3"]);
-      autoFillSources(parsed.positiveWords || [], parsed.positiveWordSources, posRatings);
-      autoFillSources(parsed.negativeWords || [], parsed.negativeWordSources, negRatings);
 
-      // 口コミが紐付かないワードを削除
-      const posSourceWords = new Set(parsed.positiveWordSources.filter((s: any) => s.reviews.length > 0).map((s: any) => s.word));
-      const negSourceWords = new Set(parsed.negativeWordSources.filter((s: any) => s.reviews.length > 0).map((s: any) => s.word));
-      parsed.positiveWords = (parsed.positiveWords || []).filter((w: string) => posSourceWords.has(w));
-      parsed.negativeWords = (parsed.negativeWords || []).filter((w: string) => negSourceWords.has(w));
-      // 空のソースも除去
-      parsed.positiveWordSources = parsed.positiveWordSources.filter((s: any) => s.reviews.length > 0);
-      parsed.negativeWordSources = parsed.negativeWordSources.filter((s: any) => s.reviews.length > 0);
+      const strictValidateAndRank = (words: string[], ratingFilter: Set<string>, maxCount: number) => {
+        const wordCounts: { word: string; count: number; reviews: any[] }[] = [];
+        for (const w of words) {
+          if (!w || w.length < 2) continue;
+          // 口コミ原文に完全含有 & 星評価フィルタ
+          const matched = filteredReviews.filter(r =>
+            r.comment && r.comment.includes(w) && ratingFilter.has(r.starRating)
+          );
+          if (matched.length === 0) continue;
+          wordCounts.push({
+            word: w,
+            count: matched.length,
+            reviews: matched.slice(0, 5).map(r => ({
+              reviewer: r.reviewer.displayName,
+              comment: r.comment,
+              date: r.createTime?.slice(0, 10) || "不明",
+              starRating: r.starRating,
+            })),
+          });
+        }
+        // 登場回数の多い順にソート → TOP maxCount
+        wordCounts.sort((a, b) => b.count - a.count);
+        const top = wordCounts.slice(0, maxCount);
+        return {
+          words: top.map(t => t.word),
+          sources: top.map(t => ({ word: t.word, reviews: t.reviews })),
+        };
+      };
+
+      const posResult = strictValidateAndRank(parsed.positiveWords || [], posRatings, 6);
+      const negResult = strictValidateAndRank(parsed.negativeWords || [], negRatings, 6);
+
+      parsed.positiveWords = posResult.words;
+      parsed.negativeWords = negResult.words;
+      parsed.positiveWordSources = posResult.sources;
+      parsed.negativeWordSources = negResult.sources;
 
       // コメントから口コミ参照番号を除去（#6, [#10], (#3)等）
       if (Array.isArray(parsed.comments)) {
