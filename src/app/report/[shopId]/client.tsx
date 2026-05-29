@@ -1455,8 +1455,11 @@ export default function ReportClient({
                 if (shop.rating > 0) {
                   fixedComment = fixedComment.replace(/\d\.\d(\s*\/\s*5\.0)/g, `${shop.rating}$1`);
                 }
-                // コメント内の丸数字①②③④を改行して見やすくする
+                // コメント内の番号付きリストを改行して見やすくする
+                // ①②③④ 形式
                 fixedComment = fixedComment.replace(/([^（(])([①②③④⑤⑥⑦⑧⑨⑩])/g, "$1<br>$2");
+                // (1)(2)(3)(4) 形式（文中に出現する場合）
+                fixedComment = fixedComment.replace(/([。、）)])\s*(\(\d+\))/g, "$1<br>$2");
                 return (
                 <p key={i} style={{ fontSize: 14, lineHeight: 2, color: "#444", margin: "0 0 12px 0" }}>
                   <span style={{ fontWeight: 700, color: "#0f3460", marginRight: 8 }}>{"①②③④⑤⑥⑦⑧⑨⑩"[i] || `${i + 1}.`}</span>
