@@ -537,7 +537,7 @@ export default function ReviewsPage() {
       setSyncMsg(`全店舗同期中... ${done}/${allShopIds.length}店舗完了（残り${remaining}店舗、${totalSynced}件取得）\n処理中: ${shopName}`);
 
       try {
-        const res = await api.post("/api/report/sync-reviews", { shopIds: [shopId] }, { timeout: 30000 });
+        const res = await api.post("/api/report/sync-reviews", { shopIds: [shopId] }, { timeout: 20000 });
         totalSynced += res.data.totalSynced || 0;
         if (res.data.totalErrors > 0) totalErrors++;
         // 失敗店舗を収集
@@ -599,7 +599,7 @@ export default function ReviewsPage() {
       setSyncMsg(`範囲同期中... ${no}番目 / ${start}〜${end} （${totalSynced}件取得）\n処理中: ${shopName}`);
 
       try {
-        const res = await api.post("/api/report/sync-reviews", { shopIds: [shopId] }, { timeout: 30000 });
+        const res = await api.post("/api/report/sync-reviews", { shopIds: [shopId] }, { timeout: 20000 });
         totalSynced += res.data.totalSynced || 0;
         if (res.data.totalErrors > 0) totalErrors++;
       } catch {

@@ -230,7 +230,7 @@ async function fetchReviews(
     if (data.averageRating) avgRating = data.averageRating;
     nextPageToken = data.nextPageToken;
     pageCount++;
-  } while (nextPageToken && pageCount < 40);
+  } while (nextPageToken && pageCount < 10);
 
   return { reviews: allReviews, totalCount, avgRating, apiError };
 }
