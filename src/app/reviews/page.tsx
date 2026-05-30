@@ -501,13 +501,19 @@ export default function ReviewsPage() {
     let alreadySynced = new Set<string>();
     try {
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-      const { data: recentShops } = await supabase
-        .from("reviews")
-        .select("shop_id")
-        .gte("synced_at", since)
-        .limit(10000);
-      if (recentShops) {
-        alreadySynced = new Set(recentShops.map((r: any) => r.shop_id));
+      // ページネーションで全shop_idを収集（1店舗に数百件レビューがあるため）
+      const PAGE = 5000;
+      let from = 0;
+      while (true) {
+        const { data } = await supabase
+          .from("reviews")
+          .select("shop_id")
+          .gte("synced_at", since)
+          .range(from, from + PAGE - 1);
+        if (!data || data.length === 0) break;
+        data.forEach((r: any) => alreadySynced.add(r.shop_id));
+        if (data.length < PAGE) break;
+        from += PAGE;
       }
     } catch {}
 
