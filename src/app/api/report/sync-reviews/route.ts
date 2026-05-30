@@ -211,15 +211,9 @@ async function fetchReviews(
     });
 
     if (res.status === 429) {
-      retries429 = (retries429 || 0) + 1;
-      if (retries429 >= 3) {
-        console.warn(`[sync-reviews] 429 rate limit exceeded 3 times for ${fullPath}, skipping`);
-        apiError = 429;
-        break;
-      }
-      console.log(`[sync-reviews] Rate limited for ${fullPath}, waiting ${10 * retries429}s... (retry ${retries429}/3)`);
-      await new Promise(r => setTimeout(r, 10000 * retries429));
-      continue;
+      console.warn(`[sync-reviews] 429 rate limit for ${fullPath}, skipping`);
+      apiError = 429;
+      break;
     }
     retries429 = 0;
 
@@ -342,7 +336,9 @@ export async function POST(request: NextRequest) {
         let apiError: number | undefined;
         let googleTotalCount = 0;
         let googleAvgRating = 0;
-        for (let ti = 0; ti < allTokens.length; ti++) {
+        // 最大2トークンまで試行（全トークン試すと遅すぎるため）
+        const maxTokenTries = Math.min(allTokens.length, 2);
+        for (let ti = 0; ti < maxTokenTries; ti++) {
           const result = await fetchReviews(fullPath, allTokens[ti]);
           if (result.reviews.length > 0) {
             reviews = result.reviews;
@@ -352,9 +348,8 @@ export async function POST(request: NextRequest) {
             break;
           }
           apiError = result.apiError;
-          if (ti < allTokens.length - 1 && (result.apiError || result.reviews.length === 0)) {
-            continue;
-          }
+          // 401/403はトークン問題→次トークン、429は即中断
+          if (result.apiError === 429) break;
         }
 
         if (reviews.length === 0) {

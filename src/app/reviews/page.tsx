@@ -557,9 +557,9 @@ export default function ReviewsPage() {
         }
       }
 
-      // 次の店舗まで2秒待機（レート制限対策）
+      // 次の店舗まで500ms待機
       if (i < remainingIds.length - 1) {
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise(r => setTimeout(r, 500));
       }
     }
     setSyncFailedShops(allFailed);
