@@ -211,9 +211,15 @@ async function fetchReviews(
     });
 
     if (res.status === 429) {
-      console.warn(`[sync-reviews] 429 rate limit for ${fullPath}, skipping`);
-      apiError = 429;
-      break;
+      retries429++;
+      if (retries429 >= 2) {
+        console.warn(`[sync-reviews] 429 rate limit exceeded for ${fullPath}, skipping`);
+        apiError = 429;
+        break;
+      }
+      console.log(`[sync-reviews] Rate limited for ${fullPath}, waiting 5s... (retry ${retries429}/1)`);
+      await new Promise(r => setTimeout(r, 5000));
+      continue;
     }
     retries429 = 0;
 
@@ -230,7 +236,7 @@ async function fetchReviews(
     if (data.averageRating) avgRating = data.averageRating;
     nextPageToken = data.nextPageToken;
     pageCount++;
-  } while (nextPageToken && pageCount < 10);
+  } while (nextPageToken && pageCount < 20);
 
   return { reviews: allReviews, totalCount, avgRating, apiError };
 }
