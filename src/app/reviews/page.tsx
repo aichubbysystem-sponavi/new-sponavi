@@ -504,7 +504,8 @@ export default function ReviewsPage() {
       const { data: recentShops } = await supabase
         .from("reviews")
         .select("shop_id")
-        .gte("synced_at", since);
+        .gte("synced_at", since)
+        .limit(10000);
       if (recentShops) {
         alreadySynced = new Set(recentShops.map((r: any) => r.shop_id));
       }
