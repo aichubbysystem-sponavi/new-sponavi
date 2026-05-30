@@ -84,7 +84,7 @@ export default function ReviewsPage() {
 
       let query = supabase
         .from("reviews")
-        .select("*", { count: "exact" })
+        .select("*", { count: isAllMode ? "estimated" : "exact" })
         .order("create_time", { ascending: dateSort === "asc" })
         .range(from, to);
 
@@ -131,7 +131,7 @@ export default function ReviewsPage() {
   const fetchUnrepliedCount = useCallback(async () => {
     let query = supabase
       .from("reviews")
-      .select("id", { count: "exact", head: true })
+      .select("id", { count: isAllMode ? "estimated" : "exact", head: true })
       .is("reply_comment", null);
 
     if (!isAllMode && selectedShopId) {

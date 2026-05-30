@@ -55,12 +55,12 @@ export default function Header() {
             value={showDropdown ? shopSearch : ""}
             onChange={(e) => setShopSearch(e.target.value)}
             onFocus={() => { setShowDropdown(true); setShopSearch(""); }}
-            className="bg-white border border-[#003D6B]/20 rounded-md px-3 py-1.5 text-xs lg:text-sm text-[#324567] focus:outline-none focus:ring-2 focus:ring-[#003D6B]/30 w-[160px] lg:w-[280px]"
+            className="bg-white border border-[#003D6B]/20 rounded-md px-3 py-1.5 text-xs lg:text-sm text-[#324567] focus:outline-none focus:ring-2 focus:ring-[#003D6B]/30 w-[200px] lg:w-[280px]"
           />
           {!showDropdown && (
             <div className="absolute inset-0 flex items-center px-3 pointer-events-none">
               <span className="text-xs lg:text-sm text-[#324567] truncate">
-                {shopFilterMode === "all" ? `全店舗（${shops.length}）` : selectedShop?.name || ""}
+                {shopFilterMode === "all" ? `全店舗表示(${shops.length})` : selectedShop?.name || ""}
               </span>
             </div>
           )}
