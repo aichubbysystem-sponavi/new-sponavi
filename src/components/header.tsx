@@ -51,7 +51,7 @@ export default function Header() {
         <div className="relative" ref={dropdownRef}>
           <input
             type="text"
-            placeholder={shopFilterMode === "all" ? "全店舗表示中" : (selectedShop?.name || "店舗を検索...")}
+            placeholder={showDropdown ? "店舗を検索..." : ""}
             value={showDropdown ? shopSearch : ""}
             onChange={(e) => setShopSearch(e.target.value)}
             onFocus={() => { setShowDropdown(true); setShopSearch(""); }}
