@@ -42,7 +42,7 @@ export default function ShopProvider({ children }: { children: React.ReactNode }
   const [selectedShopId, setSelectedShopId] = useState("");
   const [loading, setLoading] = useState(true);
   const [apiConnected, setApiConnected] = useState(false);
-  const [shopFilterMode, setShopFilterMode] = useState<"all" | "single">("single");
+  const [shopFilterMode, setShopFilterMode] = useState<"all" | "single">("all");
   const [unrepliedCount, setUnrepliedCount] = useState(0);
 
   const fetchUnreplied = useCallback(async () => {
