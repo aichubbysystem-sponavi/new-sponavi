@@ -100,7 +100,7 @@ export async function POST(request: NextRequest) {
   const errors: string[] = [];
   const debug: string[] = [];
 
-  for (const shop of shops.slice(0, 5)) { // デバッグ: 最初の5店舗だけ
+  for (const shop of shops) {
     const gbpLoc = shop.gbp_location_name || "";
     if (!gbpLoc) { skippedNoPath++; continue; }
 
