@@ -96,35 +96,39 @@ export async function POST(request: NextRequest) {
   }
 
   let updated = 0;
+  let skippedNoPath = 0;
   const errors: string[] = [];
+  const debug: string[] = [];
 
-  for (const shop of shops) {
+  for (const shop of shops.slice(0, 5)) { // デバッグ: 最初の5店舗だけ
     const gbpLoc = shop.gbp_location_name || "";
-    if (!gbpLoc) continue;
+    if (!gbpLoc) { skippedNoPath++; continue; }
 
     // フルパスを構築
     let fullPath = gbpLoc;
     if (!gbpLoc.startsWith("accounts/")) {
       const accName = locAccountMap.get(gbpLoc);
       if (accName) fullPath = `${accName}/${gbpLoc}`;
-      else continue;
+      else { skippedNoPath++; debug.push(`NO_MAP: ${shop.name} | loc=${gbpLoc}`); continue; }
     }
 
     try {
-      // GBP Business Information API でロケーション詳細取得（categories含む）
       const url = `https://mybusinessbusinessinformation.googleapis.com/v1/${fullPath}?readMask=categories`;
+      debug.push(`FETCH: ${shop.name} | url=${url.slice(0, 120)}`);
       const res = await fetch(url, {
         headers: { Authorization: `Bearer ${accessToken}` },
         signal: AbortSignal.timeout(10000),
       });
 
       if (!res.ok) {
-        if (res.status === 404) continue;
+        const errText = await res.text().catch(() => "");
+        debug.push(`HTTP_ERR: ${res.status} | ${errText.slice(0, 100)}`);
         errors.push(`${shop.name}: HTTP ${res.status}`);
         continue;
       }
 
       const data = await res.json();
+      debug.push(`RESPONSE: ${JSON.stringify(data).slice(0, 200)}`);
       const primaryCategory = data.categories?.primaryCategory;
       if (primaryCategory?.displayName) {
         await supabase.from("shops").update({
@@ -132,12 +136,15 @@ export async function POST(request: NextRequest) {
           gbp_main_category_id: primaryCategory.name || null,
         }).eq("id", shop.id);
         updated++;
+        debug.push(`SAVED: ${primaryCategory.displayName}`);
+      } else {
+        debug.push(`NO_CATEGORY in response`);
       }
     } catch (e: any) {
       errors.push(`${shop.name}: ${e?.message || "取得失敗"}`);
+      debug.push(`ERROR: ${e?.message}`);
     }
 
-    // レート制限対策
     await new Promise(r => setTimeout(r, 200));
   }
 
@@ -145,7 +152,10 @@ export async function POST(request: NextRequest) {
     success: true,
     total: shops.length,
     updated,
+    skippedNoPath,
     errors: errors.length,
     errorDetails: errors.slice(0, 10),
+    debug,
+    locMapSize: locAccountMap.size,
   });
 }
