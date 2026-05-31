@@ -113,7 +113,9 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      const url = `https://mybusinessbusinessinformation.googleapis.com/v1/${fullPath}?readMask=categories`;
+      // GBP API v1はlocations/{id}形式（accounts/xxx/locations/yyyではない）
+      const locPart = fullPath.includes("/locations/") ? fullPath.split("/locations/").pop() : fullPath.replace("locations/", "");
+      const url = `https://mybusinessbusinessinformation.googleapis.com/v1/locations/${locPart}?readMask=categories`;
       debug.push(`FETCH: ${shop.name} | url=${url.slice(0, 120)}`);
       const res = await fetch(url, {
         headers: { Authorization: `Bearer ${accessToken}` },
