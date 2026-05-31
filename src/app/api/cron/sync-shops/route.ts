@@ -112,7 +112,7 @@ export async function GET(request: NextRequest) {
       let nextPageToken = "";
       do {
         const url = new URL(`https://mybusinessbusinessinformation.googleapis.com/v1/${accName}/locations`);
-        url.searchParams.set("readMask", "name,title,storefrontAddress,phoneNumbers,latlng");
+        url.searchParams.set("readMask", "name,title,storefrontAddress,phoneNumbers,latlng,categories");
         url.searchParams.set("pageSize", "100");
         if (nextPageToken) url.searchParams.set("pageToken", nextPageToken);
 
@@ -132,7 +132,23 @@ export async function GET(request: NextRequest) {
 
         for (const loc of locations) {
           const locName = loc.name || "";
-          if (!locName || existingNames.has(locName)) { skipped++; continue; }
+          if (!locName) { skipped++; continue; }
+
+          // 既存店舗のカテゴリを更新（カテゴリ未保存の場合のみ）
+          if (existingNames.has(locName) && loc.categories?.primaryCategory?.displayName) {
+            try {
+              await supabase.from("shops")
+                .update({
+                  gbp_main_category: loc.categories.primaryCategory.displayName,
+                  gbp_main_category_id: loc.categories.primaryCategory.name || null,
+                })
+                .eq("gbp_location_name", locName)
+                .is("gbp_main_category", null);
+            } catch {}
+            skipped++;
+            continue;
+          }
+          if (existingNames.has(locName)) { skipped++; continue; }
 
           try {
             await fetch(`${GO_API_URL}/api/shop`, {
