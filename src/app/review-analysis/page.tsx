@@ -10,6 +10,22 @@ interface AnalysisResult {
   status: string;
 }
 
+interface PersistedFailure {
+  shopId: string;
+  shopName: string;
+  status: string;
+  failedAt: string;
+}
+
+function loadPersistedFailures(): PersistedFailure[] {
+  if (typeof window === "undefined") return [];
+  try { return JSON.parse(localStorage.getItem("analysis-failed-shops") || "[]"); } catch { return []; }
+}
+
+function savePersistedFailures(failures: PersistedFailure[]) {
+  localStorage.setItem("analysis-failed-shops", JSON.stringify(failures));
+}
+
 export default function ReviewAnalysisPage() {
   const { shops, apiConnected } = useShop();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -18,6 +34,7 @@ export default function ReviewAnalysisPage() {
   const [results, setResults] = useState<AnalysisResult[]>([]);
   const [forceReanalyze, setForceReanalyze] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [persistedFailures, setPersistedFailures] = useState<PersistedFailure[]>(loadPersistedFailures);
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
@@ -63,9 +80,30 @@ export default function ReviewAnalysisPage() {
       }
     }
 
+    // 失敗店舗をlocalStorageに永続化（日付付き）
+    const failed = allResults.filter(r => r.status === "error" || r.status === "analysis_failed" || r.status === "db_error");
+    if (failed.length > 0) {
+      const now = new Date().toLocaleString("ja-JP");
+      const newFailures = failed.map(f => ({ shopId: f.shopId, shopName: f.shopName, status: f.status, failedAt: now }));
+      // 既存の失敗リストから今回成功した店舗を除去し、新しい失敗を追加
+      const successIds = new Set(allResults.filter(r => r.status === "success").map(r => r.shopId));
+      const updated = [
+        ...persistedFailures.filter(p => !successIds.has(p.shopId) && !failed.some(f => f.shopId === p.shopId)),
+        ...newFailures,
+      ];
+      setPersistedFailures(updated);
+      savePersistedFailures(updated);
+    } else if (allResults.some(r => r.status === "success")) {
+      // 全成功の場合、成功した分を失敗リストから除去
+      const successIds = new Set(allResults.filter(r => r.status === "success").map(r => r.shopId));
+      const updated = persistedFailures.filter(p => !successIds.has(p.shopId));
+      setPersistedFailures(updated);
+      savePersistedFailures(updated);
+    }
+
     setRunning(false);
     setProgress(null);
-  }, [selected, shops, forceReanalyze]);
+  }, [selected, shops, forceReanalyze, persistedFailures]);
 
   const successCount = results.filter((r) => r.status === "success").length;
   const failedResults = results.filter((r) => r.status === "error" || r.status === "analysis_failed" || r.status === "db_error");
@@ -131,7 +169,45 @@ export default function ReviewAnalysisPage() {
         </label>
       </div>
 
-      {/* 失敗店舗サマリー */}
+      {/* 永続化された失敗店舗リスト（リロードしても表示） */}
+      {persistedFailures.length > 0 && failedResults.length === 0 && (
+        <div className="bg-orange-50 rounded-xl p-4 shadow-sm border border-orange-200 mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-orange-700">前回の分析失敗店舗（{persistedFailures.length}件）</h3>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  const failedIds = new Set(persistedFailures.map(p => p.shopId));
+                  setSelected(failedIds);
+                  setTimeout(() => {
+                    const btn = document.querySelector("[data-run-analysis]") as HTMLButtonElement;
+                    if (btn && !btn.disabled) btn.click();
+                  }, 100);
+                }}
+                className="text-xs px-3 py-1 bg-orange-600 text-white rounded-lg hover:bg-orange-700 cursor-pointer"
+              >
+                失敗店舗だけ再実行
+              </button>
+              <button
+                onClick={() => { setPersistedFailures([]); savePersistedFailures([]); }}
+                className="text-xs px-3 py-1 bg-slate-200 text-slate-600 rounded-lg hover:bg-slate-300 cursor-pointer"
+              >
+                クリア
+              </button>
+            </div>
+          </div>
+          <div className="space-y-1 max-h-40 overflow-y-auto">
+            {persistedFailures.map((p, i) => (
+              <div key={i} className="flex items-center justify-between py-1 px-2 text-sm bg-white rounded">
+                <span className="text-slate-700">{p.shopName}</span>
+                <span className="text-[10px] text-orange-500">{p.failedAt}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 今回の失敗店舗サマリー */}
       {failedResults.length > 0 && (
         <div className="bg-red-50 rounded-xl p-4 shadow-sm border border-red-200 mb-6">
           <div className="flex items-center justify-between mb-3">
