@@ -681,7 +681,7 @@ export default function ReportClient({
           <div style={{ position: "absolute", top: 28, right: 36, background: "rgba(255,255,255,.12)", padding: "7px 18px", borderRadius: 8, fontSize: 13, fontWeight: 600 }}>{shop.period.start} - {shop.period.end}</div>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", padding: "10px 36px", background: "#e8eaf0", flexShrink: 0 }}>
-          {[{ lb: "対策開始日", vl: shop.startDate }, { lb: "レポート対象", vl: curLabel }, { lb: "口コミ合計", vl: `${shop.totalReviews.toLocaleString()}件` }, { lb: "評価", vl: String(shop.rating) }].map((b, i) => (
+          {[{ lb: "対策開始日", vl: shop.startDate }, { lb: "レポート対象", vl: curLabel }, ...(shop.category ? [{ lb: "業種", vl: shop.category }] : []), { lb: "口コミ合計", vl: `${shop.totalReviews.toLocaleString()}件` }, { lb: "評価", vl: String(shop.rating) }].map((b, i) => (
             <div key={i} style={{ background: "#fff", borderRadius: 10, padding: "7px 14px", fontSize: 12, display: "flex", alignItems: "center", gap: 5, boxShadow: "0 1px 3px rgba(0,0,0,.05)" }}>
               <span style={{ color: "#888" }}>{b.lb}</span><span style={{ fontWeight: 700 }}>{b.vl}</span>
             </div>

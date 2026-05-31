@@ -9,6 +9,7 @@ export interface ShopInfo {
   rating: number;
   lat: number;
   lng: number;
+  category?: string;
 }
 
 export interface KPI {
@@ -126,4 +127,6 @@ export interface ShopListItem {
   prevActionTotal?: number;
   /** "both" = 管理画面+シート両方, "sheet_only" = シートのみ */
   dataSource?: "both" | "sheet_only";
+  /** GBPメインカテゴリ（例：ラーメン屋、美容院） */
+  category?: string;
 }

@@ -668,12 +668,12 @@ export async function buildReportData(
   // 口コミ数はスプレッドシートを常に優先（DBは古い値の場合がある）
 
   // 店舗座標を取得（多地点グリッドマップ表示用）
-  let shopLat = 0, shopLng = 0;
+  let shopLat = 0, shopLng = 0, shopCategory = "";
   try {
     const { createClient: cc } = await import("@supabase/supabase-js");
     const sbc = cc(process.env.NEXT_PUBLIC_SUPABASE_URL || "", process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "");
-    const { data: coordRows } = await sbc.from("shops").select("gbp_latitude, gbp_longitude").eq("name", shopName).not("gbp_latitude", "is", null).gt("gbp_latitude", 0).limit(1);
-    if (coordRows && coordRows.length > 0) { shopLat = coordRows[0].gbp_latitude || 0; shopLng = coordRows[0].gbp_longitude || 0; }
+    const { data: coordRows } = await sbc.from("shops").select("gbp_latitude, gbp_longitude, gbp_main_category").eq("name", shopName).not("gbp_latitude", "is", null).gt("gbp_latitude", 0).limit(1);
+    if (coordRows && coordRows.length > 0) { shopLat = coordRows[0].gbp_latitude || 0; shopLng = coordRows[0].gbp_longitude || 0; shopCategory = coordRows[0].gbp_main_category || ""; }
   } catch {}
 
   return {
@@ -686,6 +686,7 @@ export async function buildReportData(
       rating: currentRating,
       lat: shopLat,
       lng: shopLng,
+      category: shopCategory || undefined,
     },
     kpis,
     monthlyLabels,
@@ -808,6 +809,20 @@ export async function getShopsFromSpreadsheet(): Promise<ShopListItem[] | null> 
       prevActionTotal,
     });
   });
+
+  // Supabaseからカテゴリを取得して付与
+  try {
+    const { createClient } = await import("@supabase/supabase-js");
+    const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL || "", process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "");
+    const { data: catRows } = await sb.from("shops").select("name, gbp_main_category").not("gbp_main_category", "is", null);
+    if (catRows) {
+      const catMap = new Map(catRows.map((r: any) => [r.name, r.gbp_main_category]));
+      for (const shop of shops) {
+        const cat = catMap.get(shop.name);
+        if (cat) shop.category = cat;
+      }
+    }
+  } catch {}
 
   // 既存店舗名のセット
   const existingNames = new Set(shops.map(s => s.name));

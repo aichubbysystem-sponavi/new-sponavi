@@ -505,6 +505,7 @@ export default function ReportListClient({
                   <th className="w-8 p-2">★</th>
                   <th className="text-left p-2 font-semibold text-slate-600">店舗名</th>
                   <th className="text-left p-2 font-semibold text-slate-600 hidden xl:table-cell">住所</th>
+                  <th className="p-2 font-semibold text-slate-600 text-center hidden lg:table-cell">業種</th>
                   <th className="p-2 font-semibold text-slate-600 text-center">評価</th>
                   <th className="p-2 font-semibold text-slate-600 text-center">口コミ</th>
                   <th className="p-2 font-semibold text-slate-600 text-center hidden md:table-cell" title="前月との口コミ数の比較">口コミ前月比</th>
@@ -528,6 +529,9 @@ export default function ReportListClient({
                       <Link href={`/report/${encodeURIComponent(shop.id)}`} className="text-slate-800 font-medium hover:text-[#003D6B] hover:underline">{shop.name}</Link>
                     </td>
                     <td className="p-2 text-slate-400 truncate max-w-[200px] hidden xl:table-cell">{shop.address}</td>
+                    <td className="p-2 text-center hidden lg:table-cell">
+                      {shop.category ? <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-indigo-50 text-indigo-600">{shop.category}</span> : <span className="text-slate-300">-</span>}
+                    </td>
                     <td className="p-2 text-center">
                       {shop.rating > 0 ? <><Stars rating={shop.rating} /> <span className="text-slate-600 font-semibold ml-0.5">{shop.rating}</span></> : <span className="text-slate-300">-</span>}
                     </td>
@@ -657,6 +661,11 @@ function ShopCard({ shop, checked, onToggle, isFavorite, onToggleFav, isAlert }:
         {shop.rating > 0 && (
           <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[11px] font-semibold border ${ratingBadge}`}>
             <Stars rating={shop.rating} /> {shop.rating}
+          </span>
+        )}
+        {shop.category && (
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-indigo-50 text-indigo-600 border border-indigo-100">
+            {shop.category}
           </span>
         )}
         {shop.totalReviews > 0 && (
