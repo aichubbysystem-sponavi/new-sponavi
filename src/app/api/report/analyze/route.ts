@@ -372,7 +372,34 @@ export async function POST(request: NextRequest) {
                   totalSearch += search; totalMap += map; totalAction += action; count++;
                 }
                 if (count > 0) {
-                  kpiText += `\n\n【同グループ平均（${count}店舗）】\nGoogle検索平均: ${Math.round(totalSearch / count).toLocaleString()}回\nGoogleマップ平均: ${Math.round(totalMap / count).toLocaleString()}回`;
+                  kpiText += `\n\n【同グループ平均（${count}店舗）※店舗名は記載しないこと】\nGoogle検索平均: ${Math.round(totalSearch / count).toLocaleString()}回\nGoogleマップ平均: ${Math.round(totalMap / count).toLocaleString()}回`;
+                }
+              }
+            }
+          }
+
+          // 同業種（カテゴリ）店舗の平均を取得
+          const { data: catInfo } = await supabase.from("shops").select("gbp_main_category").eq("name", shop.name).not("gbp_main_category", "is", null).maybeSingle();
+          if (catInfo?.gbp_main_category) {
+            const category = catInfo.gbp_main_category;
+            const { data: catShops } = await supabase.from("shops").select("name").eq("gbp_main_category", category).neq("name", shop.name).limit(200);
+            if (catShops && catShops.length > 0) {
+              const catNames = catShops.map((s: any) => s.name);
+              const { data: catCaches } = await supabase.from("report_data_cache").select("report_json").in("shop_name", catNames.slice(0, 50));
+              if (catCaches && catCaches.length > 0) {
+                let tSearch = 0, tMap = 0, tReviews = 0, tRating = 0, cnt = 0;
+                for (const cc of catCaches) {
+                  const ck = cc.report_json?.kpis || [];
+                  const s = ck.find((k: any) => k.label?.includes("検索"))?.value || 0;
+                  const m = ck.find((k: any) => k.label?.includes("マップ"))?.value || 0;
+                  const shopData = cc.report_json?.shop;
+                  tSearch += s; tMap += m;
+                  if (shopData?.totalReviews) tReviews += shopData.totalReviews;
+                  if (shopData?.rating) tRating += shopData.rating;
+                  cnt++;
+                }
+                if (cnt > 0) {
+                  kpiText += `\n\n【同業種平均（${category} ${cnt}店舗）※店舗名は記載しないこと】\nGoogle検索平均: ${Math.round(tSearch / cnt).toLocaleString()}回\nGoogleマップ平均: ${Math.round(tMap / cnt).toLocaleString()}回\n口コミ数平均: ${Math.round(tReviews / cnt)}件\n評価平均: ${(tRating / cnt).toFixed(1)}`;
                 }
               }
             }
