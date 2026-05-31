@@ -500,7 +500,7 @@ export default function ReviewsPage() {
     setSyncMsg("同期済み店舗を確認中...");
     let alreadySynced = new Set<string>();
     try {
-      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
       // ページネーションで全shop_idを収集（1店舗に数百件レビューがあるため）
       const PAGE = 5000;
       let from = 0;
@@ -521,7 +521,7 @@ export default function ReviewsPage() {
     const skippedCount = allShopIds.length - remainingIds.length;
 
     if (remainingIds.length === 0) {
-      setSyncMsg(`✓ 全${allShopIds.length}店舗が同期済みです（過去24時間以内）`);
+      setSyncMsg(`✓ 全${allShopIds.length}店舗が同期済みです（過去7日以内）`);
       setSyncing(false);
       return;
     }
