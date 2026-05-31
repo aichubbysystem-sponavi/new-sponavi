@@ -68,6 +68,8 @@ export default function ReportListClient({
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
+  const [showMemoModal, setShowMemoModal] = useState(false);
+  const [memoAdding, startMemoAdd] = useTransition();
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
   const [showOnlyAlert, setShowOnlyAlert] = useState(false);
@@ -169,6 +171,53 @@ export default function ReportListClient({
 
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 4000); }
 
+  const MEMO_TEMPLATES = [
+    { label: "写真全般", text: "投稿用のお写真が不足しているため、現状のままですと文章のみの投稿となります。写真付きの方が閲覧数・反応率が高いため、横向きの写真を最低20枚ご提供いただけますようお願いいたします。" },
+    { label: "料理写真", text: "投稿用のお料理写真が不足しているため、現状のままですと文章のみの投稿となります。写真付きの方が閲覧数・反応率が高いため、メニューや料理の横向き写真を最低20枚ご提供いただけますようお願いいたします。" },
+    { label: "カスタム", text: "" },
+  ];
+
+  function handleAddMemo(templateText: string) {
+    if (selected.size === 0) { showToast("店舗を選択してください"); return; }
+    if (!templateText.trim()) { showToast("メモ内容を入力してください"); return; }
+    setShowMemoModal(false);
+    startMemoAdd(async () => {
+      try {
+        const ids = Array.from(selected);
+        let added = 0;
+        for (const shopName of ids) {
+          // 店舗のperiodから月を取得（"2026年4月" → "2026/4"）
+          const shop = shops.find(s => s.name === shopName || s.id === shopName);
+          const period = shop?.period || "";
+          const m = period.match(/(\d{4})\D+(\d{1,2})/);
+          const month = m ? `${m[1]}/${parseInt(m[2])}` : new Date().getFullYear() + "/" + (new Date().getMonth() + 1);
+
+          // 既存メモを取得して追記
+          let existingMemo = "";
+          try {
+            const getRes = await fetch(`/api/report/memo?shopName=${encodeURIComponent(shopName)}&month=${encodeURIComponent(month)}`);
+            if (getRes.ok) {
+              const data = await getRes.json();
+              existingMemo = data.memo || "";
+            }
+          } catch {}
+
+          const newMemo = existingMemo ? `${existingMemo}\n\n${templateText}` : templateText;
+          const res = await fetch("/api/report/memo", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ shopName, month, memo: newMemo }),
+          });
+          if (res.ok) added++;
+        }
+        showToast(`${added}/${ids.length}店舗にメモを追加しました`);
+        setSelected(new Set());
+      } catch (e: any) {
+        showToast(`メモ追加エラー: ${e?.message || "不明"}`);
+      }
+    });
+  }
+
   function handleSyncAll() {
     startSync(async () => {
       try {
@@ -269,6 +318,10 @@ export default function ReportListClient({
                 <button onClick={handleSyncSelected} disabled={syncing}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing ? "bg-slate-200 text-slate-400" : "bg-emerald-600 text-white hover:bg-emerald-700"}`}>
                   {syncing ? "反映中..." : `${selected.size}店舗反映`}
+                </button>
+                <button onClick={() => setShowMemoModal(true)} disabled={memoAdding}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${memoAdding ? "bg-slate-200 text-slate-400" : "bg-orange-500 text-white hover:bg-orange-600"}`}>
+                  {memoAdding ? "追加中..." : "写真不足"}
                 </button>
                 <button
                   onClick={() => {
@@ -530,6 +583,35 @@ export default function ReportListClient({
         )}
 
         <footer className="text-center py-6 text-[11px] text-slate-300" suppressHydrationWarning>© {new Date().getFullYear()} SPOTLIGHT NAVIGATOR by 株式会社Chubby</footer>
+
+        {/* 写真不足メモモーダル */}
+        {showMemoModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowMemoModal(false)}>
+            <div className="bg-white rounded-2xl shadow-2xl p-6 w-[480px] max-w-[90vw]" onClick={e => e.stopPropagation()}>
+              <h3 className="text-base font-bold text-[#003D6B] mb-4">写真不足メモを追加（{selected.size}店舗）</h3>
+              <div className="flex flex-col gap-3">
+                {MEMO_TEMPLATES.filter(t => t.label !== "カスタム").map((t, i) => (
+                  <button key={i} onClick={() => handleAddMemo(t.text)}
+                    className="text-left p-4 rounded-xl border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50 transition-all">
+                    <div className="text-sm font-bold text-slate-700 mb-1">{t.label}</div>
+                    <div className="text-xs text-slate-500 leading-relaxed">{t.text}</div>
+                  </button>
+                ))}
+                <div className="p-4 rounded-xl border-2 border-slate-200">
+                  <div className="text-sm font-bold text-slate-700 mb-2">カスタム</div>
+                  <textarea id="custom-memo-input" className="w-full border border-slate-300 rounded-lg p-2 text-xs" rows={3} placeholder="自由入力..." />
+                  <button onClick={() => {
+                    const el = document.getElementById("custom-memo-input") as HTMLTextAreaElement;
+                    handleAddMemo(el?.value || "");
+                  }} className="mt-2 px-4 py-1.5 rounded-lg text-xs font-semibold bg-orange-500 text-white hover:bg-orange-600">
+                    追加
+                  </button>
+                </div>
+              </div>
+              <button onClick={() => setShowMemoModal(false)} className="mt-4 w-full py-2 text-xs text-slate-500 hover:text-slate-700">キャンセル</button>
+            </div>
+          </div>
+        )}
 
         {/* トースト */}
         {toast && (

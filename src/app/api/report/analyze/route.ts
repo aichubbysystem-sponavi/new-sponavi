@@ -87,7 +87,8 @@ async function analyzeWithClaude(
   reviews: GBPReview[],
   averageRating: number,
   totalReviewCount: number,
-  ratingDistribution?: Record<number, number>
+  ratingDistribution?: Record<number, number>,
+  kpiText?: string
 ): Promise<{
   positiveWords: string[];
   negativeWords: string[];
@@ -105,7 +106,7 @@ async function analyzeWithClaude(
   const limits = allFiltered.length > 50 ? [allFiltered.length, 50] : [allFiltered.length];
 
   for (const limit of limits) {
-    const result = await tryAnalyze(shopName, allFiltered.slice(0, limit), averageRating, totalReviewCount, ratingDistribution);
+    const result = await tryAnalyze(shopName, allFiltered.slice(0, limit), averageRating, totalReviewCount, ratingDistribution, kpiText);
     if (result) return result;
     console.log(`[analyze] ${shopName}: ${limit}件で失敗、リトライ...`);
   }
@@ -117,7 +118,8 @@ async function tryAnalyze(
   filteredReviews: GBPReview[],
   averageRating: number,
   totalReviewCount: number,
-  ratingDistribution?: Record<number, number>
+  ratingDistribution?: Record<number, number>,
+  kpiText?: string
 ): Promise<any | null> {
   const reviewTexts = filteredReviews
     .map((r, i) => `[#${i + 1}][${r.starRating}][${r.reviewer.displayName}][${r.createTime?.slice(0, 10) || "不明"}] ${r.comment.slice(0, 300)}`)
@@ -151,6 +153,7 @@ Google評価: ${averageRating} / 5.0（${totalReviewCount}件）
 
 【口コミテキスト（直近1年・${filteredReviews.length}件）】
 ${reviewTexts}
+${kpiText || ""}
 
 【重要ルール】
 - positiveWords・negativeWordsは、必ず口コミ原文に含まれる表現をそのまま抜き出してください。
@@ -179,7 +182,9 @@ ${reviewTexts}
 - コメント内に口コミの参照番号（#1, #6, [#10]等）を絶対に含めないでください。お客様に見せるレポートです。
 - 具体的な口コミ内容を引用する場合は「○○という声がある」のように表現してください。
 - 数値（件数、割合、評価値）は必ず上記の「正確な統計データ」セクションの値を使用してください。口コミテキストから独自に数えた数値は使わないでください。
-- Google評価の数値もそのまま使用してください。`;
+- Google評価の数値もそのまま使用してください。
+- 【レポートKPIデータ】が提供されている場合、commentsでKPI（検索数、マップ表示数等）の増減にも言及してください。
+- 【同グループ平均】が提供されている場合、グループ平均と比較して良い点・改善点を具体的に記載してください。`;
 
   try {
     const controller = new AbortController();
@@ -332,13 +337,57 @@ export async function POST(request: NextRequest) {
         console.warn(`[analyze] ${shop.name}: shopsテーブルにrating未保存。DB口コミから算出した${officialRating}を使用。口コミ再同期でshops.ratingが更新されます。`);
       }
 
+      // KPIデータとグループ平均を取得
+      let kpiText = "";
+      try {
+        // キャッシュからKPIデータ取得
+        const { data: cache } = await supabase.from("report_data_cache").select("report_json").eq("shop_name", shop.name).maybeSingle();
+        if (cache?.report_json) {
+          const report = cache.report_json;
+          const kpis = report.kpis || [];
+          const labels = report.monthlyLabels || [];
+          const curMonth = labels[labels.length - 1] || "";
+          if (kpis.length > 0) {
+            const kpiLines = kpis.map((k: any) => {
+              const mom = k.momValue ? ` (前月: ${k.momValue.toLocaleString()})` : "";
+              return `${k.label}: ${k.value?.toLocaleString() || 0}${k.unit || ""}${mom}`;
+            });
+            kpiText = `\n【レポートKPIデータ（${curMonth}）】\n${kpiLines.join("\n")}`;
+          }
+
+          // 同グループ店舗の平均を取得
+          const { data: shopInfo } = await supabase.from("shops").select("business_group_id").eq("name", shop.name).maybeSingle();
+          if (shopInfo?.business_group_id) {
+            const { data: groupShops } = await supabase.from("shops").select("name").eq("business_group_id", shopInfo.business_group_id).neq("name", shop.name).limit(100);
+            if (groupShops && groupShops.length > 0) {
+              const groupNames = groupShops.map((s: any) => s.name);
+              const { data: groupCaches } = await supabase.from("report_data_cache").select("report_json").in("shop_name", groupNames.slice(0, 50));
+              if (groupCaches && groupCaches.length > 0) {
+                let totalSearch = 0, totalMap = 0, totalAction = 0, count = 0;
+                for (const gc of groupCaches) {
+                  const gk = gc.report_json?.kpis || [];
+                  const search = gk.find((k: any) => k.label?.includes("検索"))?.value || 0;
+                  const map = gk.find((k: any) => k.label?.includes("マップ"))?.value || 0;
+                  const action = gk.find((k: any) => k.label?.includes("ルート") || k.label?.includes("通話") || k.label?.includes("ウェブ"))?.value || 0;
+                  totalSearch += search; totalMap += map; totalAction += action; count++;
+                }
+                if (count > 0) {
+                  kpiText += `\n\n【同グループ平均（${count}店舗）】\nGoogle検索平均: ${Math.round(totalSearch / count).toLocaleString()}回\nGoogleマップ平均: ${Math.round(totalMap / count).toLocaleString()}回`;
+                }
+              }
+            }
+          }
+        }
+      } catch {}
+
       // Claude APIで分析
       const analysis = await analyzeWithClaude(
         shop.name,
         reviewData.reviews,
         officialRating,
         officialCount,
-        reviewData.ratingDistribution
+        reviewData.ratingDistribution,
+        kpiText
       );
 
       if (!analysis) {

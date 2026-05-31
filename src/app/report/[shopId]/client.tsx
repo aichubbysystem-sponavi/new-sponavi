@@ -607,11 +607,12 @@ export default function ReportClient({
                         }
                       }
                       if (batch.length > 0) {
-                        await fetch("/api/report/grid-ranking-generate", {
+                        const res = await fetch("/api/report/grid-ranking-generate", {
                           method: "POST", headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({ shopName: shop.name, shopId, batch }),
                         });
-                        alert(`${batch.length}件生成しました`);
+                        const result = await res.json();
+                        alert(`${result.count || 0}件生成（${result.skipped || 0}件は既存データ保持）`);
                         window.location.reload();
                       }
                     } catch {} finally { setGridGenerating(false); }

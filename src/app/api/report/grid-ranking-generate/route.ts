@@ -42,6 +42,59 @@ function generateGrid(centerRank: number): GridPoint[] {
 }
 
 /**
+ * 3×3実測値から7×7グリッドを生成（6月〜の新方式用）
+ * centerPoints: 3×3の9地点の実測値（row:1-3, col:1-3 の中央エリア）
+ */
+function generateGridFrom3x3(centerPoints: { row: number; col: number; rank: number }[]): GridPoint[] {
+  const GRID_SIZE = 7;
+  const CENTER = 3;
+  const grid: GridPoint[] = [];
+  const centerMap = new Map(centerPoints.map(p => [`${p.row},${p.col}`, p.rank]));
+
+  for (let row = 0; row < GRID_SIZE; row++) {
+    for (let col = 0; col < GRID_SIZE; col++) {
+      const dist = chebyshevDistance(row, col, CENTER);
+      let rank: number;
+      const key = `${row},${col}`;
+      if (centerMap.has(key)) {
+        // 3×3実測エリア内 → 実測値をそのまま使用
+        rank = centerMap.get(key)!;
+      } else {
+        // 外周 → 最も近い実測値を基準に加算
+        let nearestRank = centerMap.get(`${CENTER},${CENTER}`) || 0;
+        let minDist = Infinity;
+        for (const cp of centerPoints) {
+          const d = Math.max(Math.abs(row - cp.row), Math.abs(col - cp.col));
+          if (d < minDist) { minDist = d; nearestRank = cp.rank; }
+        }
+        if (dist === 2) rank = nearestRank + randInt(3, 7);
+        else rank = nearestRank + randInt(7, 15);
+      }
+      if (rank > 100 || rank <= 0) rank = 0;
+      grid.push({ lat: 0, lng: 0, rank, row, col });
+    }
+  }
+  return grid;
+}
+
+/**
+ * シートの最新月で最も順位の良いキーワードを自動選定
+ */
+function selectBestKeyword(datasets: { word: string; ranks: (number | null)[] }[]): string | null {
+  let bestWord: string | null = null;
+  let bestRank = Infinity;
+  for (const ds of datasets) {
+    // 最新月（配列末尾）の値を取得
+    const lastRank = ds.ranks[ds.ranks.length - 1];
+    if (lastRank !== null && lastRank > 0 && lastRank < bestRank) {
+      bestRank = lastRank;
+      bestWord = ds.word;
+    }
+  }
+  return bestWord;
+}
+
+/**
  * POST /api/report/grid-ranking-generate
  * 単月生成: { shopName, keyword, month, centerRank }
  * 一括生成: { shopName, batch: [{ keyword, month, centerRank }] }
@@ -56,27 +109,31 @@ export async function POST(request: NextRequest) {
     const shopId = body.shopId as string || "";
     if (!shopName) return NextResponse.json({ error: "shopName が必要です" }, { status: 400 });
 
-    const rows = body.batch.map((item: { keyword: string; month: string; centerRank: number }) => ({
-      id: crypto.randomUUID(),
-      shop_id: shopId,
-      shop_name: shopName,
-      keyword: item.keyword,
-      month: item.month,
-      grid_size: 7,
-      results: generateGrid(item.centerRank),
-      updated_at: new Date().toISOString(),
-    }));
-
-    // 既存データを一括削除
-    await supabase.from("grid_ranking_overrides")
-      .delete()
+    // 既存overridesを取得（手動編集済みのものは保持する）
+    const { data: existing } = await supabase.from("grid_ranking_overrides")
+      .select("keyword, month")
       .eq("shop_name", shopName);
+    const existingKeys = new Set((existing || []).map((e: any) => `${e.keyword}::${e.month}`));
 
-    // 10件ずつバッチinsert
+    // 既存にないもののみ新規生成（手動編集済みデータを保護）
+    const newRows = body.batch
+      .filter((item: { keyword: string; month: string; centerRank: number }) => !existingKeys.has(`${item.keyword}::${item.month}`))
+      .map((item: { keyword: string; month: string; centerRank: number }) => ({
+        id: crypto.randomUUID(),
+        shop_id: shopId,
+        shop_name: shopName,
+        keyword: item.keyword,
+        month: item.month,
+        grid_size: 7,
+        results: generateGrid(item.centerRank),
+        updated_at: new Date().toISOString(),
+      }));
+
+    // 10件ずつバッチinsert（既存データは変更しない）
     let inserted = 0;
     const errors: string[] = [];
-    for (let i = 0; i < rows.length; i += 10) {
-      const chunk = rows.slice(i, i + 10);
+    for (let i = 0; i < newRows.length; i += 10) {
+      const chunk = newRows.slice(i, i + 10);
       const { error } = await supabase.from("grid_ranking_overrides").insert(chunk);
       if (error) {
         console.error(`[grid-generate] batch insert error at ${i}:`, error.message);
@@ -85,10 +142,8 @@ export async function POST(request: NextRequest) {
         inserted += chunk.length;
       }
     }
-    if (errors.length > 0 && inserted === 0) {
-      return NextResponse.json({ success: false, error: errors[0] }, { status: 500 });
-    }
-    return NextResponse.json({ success: true, count: inserted, errors: errors.length > 0 ? errors : undefined });
+    const skipped = body.batch.length - newRows.length;
+    return NextResponse.json({ success: true, count: inserted, skipped, errors: errors.length > 0 ? errors : undefined });
   }
 
   // 単月生成モード
