@@ -106,6 +106,7 @@ export default function ReviewAnalysisPage() {
             </span>
           </div>
           <button
+            data-run-analysis
             onClick={runAnalysis}
             disabled={running || selected.size === 0 || !apiConnected}
             className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-semibold transition-all ${
@@ -139,10 +140,15 @@ export default function ReviewAnalysisPage() {
               onClick={() => {
                 const failedIds = new Set(failedResults.map(r => r.shopId));
                 setSelected(failedIds);
+                // 選択後に自動で分析実行
+                setTimeout(() => {
+                  const btn = document.querySelector("[data-run-analysis]") as HTMLButtonElement;
+                  if (btn && !btn.disabled) btn.click();
+                }, 100);
               }}
               className="text-xs px-3 py-1 bg-red-600 text-white rounded-lg hover:bg-red-700 cursor-pointer"
             >
-              失敗店舗だけ選択して再実行
+              失敗店舗だけ再実行
             </button>
           </div>
           <div className="space-y-1 max-h-40 overflow-y-auto">
