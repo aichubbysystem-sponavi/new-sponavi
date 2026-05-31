@@ -517,12 +517,13 @@ export default function ReviewsPage() {
 
       // 個別店舗の同期済みチェック（7日以内に同期済みならスキップ）
       try {
-        const { count } = await supabase
+        const { data: syncCheck } = await supabase
           .from("reviews")
-          .select("id", { count: "exact", head: true })
+          .select("id")
           .eq("shop_id", shopId)
-          .gte("synced_at", since);
-        if (count && count > 0) {
+          .gte("synced_at", since)
+          .limit(1);
+        if (syncCheck && syncCheck.length > 0) {
           skippedCount++;
           continue;
         }
