@@ -496,45 +496,31 @@ export default function ReviewsPage() {
     const allShopIds = shops.map((s) => s.id);
     const shopNameMap = new Map(shops.map(s => [s.id, s.name]));
 
-    // 過去24時間以内に同期済みの店舗を取得してスキップ
-    setSyncMsg("同期済み店舗を確認中...");
-    let alreadySynced = new Set<string>();
-    try {
-      const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-      // ページネーションで全shop_idを収集（1店舗に数百件レビューがあるため）
-      const PAGE = 5000;
-      let from = 0;
-      while (true) {
-        const { data } = await supabase
-          .from("reviews")
-          .select("shop_id")
-          .gte("synced_at", since)
-          .range(from, from + PAGE - 1);
-        if (!data || data.length === 0) break;
-        data.forEach((r: any) => alreadySynced.add(r.shop_id));
-        if (data.length < PAGE) break;
-        from += PAGE;
-      }
-    } catch {}
+    // 同期済み店舗を確認中
+    setSyncMsg("同期開始...");
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    let skippedCount = 0;
 
-    const remainingIds = allShopIds.filter(id => !alreadySynced.has(id));
-    const skippedCount = allShopIds.length - remainingIds.length;
-
-    if (remainingIds.length === 0) {
-      setSyncMsg(`✓ 全${allShopIds.length}店舗が同期済みです（過去7日以内）`);
-      setSyncing(false);
-      return;
-    }
-
-    setSyncMsg(`${skippedCount}店舗スキップ（同期済み）/ 残り${remainingIds.length}店舗を同期開始...`);
-
-    // 1店舗ずつ順番に処理（確実にレート制限を回避）
-    for (let i = 0; i < remainingIds.length; i++) {
-      const shopId = remainingIds[i];
+    // 1店舗ずつ処理（同期済みチェックも各店舗ごとに実行）
+    for (let i = 0; i < allShopIds.length; i++) {
+      const shopId = allShopIds[i];
       const shopName = shopNameMap.get(shopId) || `店舗${i + 1}`;
-      const done = skippedCount + i;
-      const remaining = remainingIds.length - i;
-      setSyncMsg(`全店舗同期中... ${done}/${allShopIds.length}店舗完了（残り${remaining}店舗、${totalSynced}件取得）\n処理中: ${shopName}`);
+      const done = i;
+      const remaining = allShopIds.length - i;
+      setSyncMsg(`全店舗同期中... ${done}/${allShopIds.length}店舗完了（スキップ${skippedCount}、${totalSynced}件取得）\n処理中: ${shopName}`);
+
+      // 個別店舗の同期済みチェック（7日以内に同期済みならスキップ）
+      try {
+        const { count } = await supabase
+          .from("reviews")
+          .select("id", { count: "exact", head: true })
+          .eq("shop_id", shopId)
+          .gte("synced_at", since);
+        if (count && count > 0) {
+          skippedCount++;
+          continue;
+        }
+      } catch {}
 
       try {
         const res = await api.post("/api/report/sync-reviews", { shopIds: [shopId] }, { timeout: 60000 });
@@ -565,7 +551,7 @@ export default function ReviewsPage() {
       }
 
       // 次の店舗まで1秒待機（レート制限対策）
-      if (i < remainingIds.length - 1) {
+      if (i < allShopIds.length - 1) {
         await new Promise(r => setTimeout(r, 1000));
       }
     }
