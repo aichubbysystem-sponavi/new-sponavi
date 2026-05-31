@@ -19,6 +19,21 @@ export async function getShopList(): Promise<{
   try {
     const cached = await readShopListFromCache();
     if (cached && cached.length > 0) {
+      // カテゴリをshopsテーブルから付与
+      try {
+        const sb = createClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+          process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+        );
+        const { data: catRows } = await sb.from("shops").select("name, gbp_main_category").not("gbp_main_category", "is", null);
+        if (catRows) {
+          const catMap = new Map(catRows.map((r: any) => [r.name, r.gbp_main_category]));
+          for (const shop of cached) {
+            const cat = catMap.get(shop.name);
+            if (cat) shop.category = cat;
+          }
+        }
+      } catch {}
       return { shops: cached, source: "cache" };
     }
   } catch {}
@@ -187,6 +202,17 @@ export async function getReportData(shopId: string): Promise<{
         const gridRanking = await fetchGridRankingLive(dbIds.length > 0 ? dbIds : ["_"], shopName);
         if (gridRanking) cached.gridRanking = gridRanking;
       } catch {}
+      // カテゴリをshopsテーブルから付与
+      if (!cached.shop.category) {
+        try {
+          const sb = createClient(
+            process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+            process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+          );
+          const { data: catRow } = await sb.from("shops").select("gbp_main_category").eq("name", shopName).not("gbp_main_category", "is", null).limit(1).maybeSingle();
+          if (catRow?.gbp_main_category) cached.shop.category = catRow.gbp_main_category;
+        } catch {}
+      }
       // reviewAnalysisもDBからリアルタイム取得（再分析反映のため）
       try {
         const { getStoredAnalysis } = await import("./review-analyzer");
