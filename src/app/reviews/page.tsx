@@ -65,8 +65,14 @@ export default function ReviewsPage() {
   const [lastClickedIdx, setLastClickedIdx] = useState<number | null>(null);
   const [shopSyncStatus, setShopSyncStatus] = useState<Map<string, string>>(new Map());
   // 同期失敗店舗一覧
-  const [syncFailedShops, setSyncFailedShops] = useState<{ shopName: string; status: string }[]>([]);
-  const [showSyncFailed, setShowSyncFailed] = useState(false);
+  const [syncFailedShops, setSyncFailedShops] = useState<{ shopName: string; status: string }[]>(() => {
+    if (typeof window === "undefined") return [];
+    try { return JSON.parse(localStorage.getItem("sync-failed-shops") || "[]"); } catch { return []; }
+  });
+  const [showSyncFailed, setShowSyncFailed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try { return JSON.parse(localStorage.getItem("sync-failed-shops") || "[]").length > 0; } catch { return false; }
+  });
 
   const isAllMode = shopFilterMode === "all";
 
@@ -556,6 +562,7 @@ export default function ReviewsPage() {
       }
     }
     setSyncFailedShops(allFailed);
+    localStorage.setItem("sync-failed-shops", JSON.stringify(allFailed));
     if (allFailed.length > 0) setShowSyncFailed(true);
     setSyncMsg(`✓ ${totalSynced}件の口コミを同期しました（全${allShopIds.length}店舗完了、スキップ${skippedCount}件、エラー${totalErrors}件）`);
     await fetchReviews();
