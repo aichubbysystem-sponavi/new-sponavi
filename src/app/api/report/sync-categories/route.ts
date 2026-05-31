@@ -52,10 +52,9 @@ async function getOAuthToken(): Promise<string | null> {
  * 全店舗のGBPカテゴリを一括取得・保存
  */
 export async function POST(request: NextRequest) {
-  // 認証チェック（レポートサブドメインからも呼べるよう緩和）
-  // const { verifyAuth } = await import("@/lib/auth-verify");
-  // const auth = await verifyAuth(request.headers.get("authorization"));
-  // if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  const { verifyAuth } = await import("@/lib/auth-verify");
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
   const supabase = getSupabase();
   const accessToken = await getOAuthToken();
