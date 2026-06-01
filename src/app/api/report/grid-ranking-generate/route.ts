@@ -7,8 +7,9 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
-function getSupabase() {
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
+let _sb: any = null;
+function getSupabase(): any {
+  return _sb ||= createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
 }
 
 type GridPoint = { lat: number; lng: number; rank: number; row: number; col: number };
@@ -75,23 +76,6 @@ function generateGridFrom3x3(centerPoints: { row: number; col: number; rank: num
     }
   }
   return grid;
-}
-
-/**
- * シートの最新月で最も順位の良いキーワードを自動選定
- */
-function selectBestKeyword(datasets: { word: string; ranks: (number | null)[] }[]): string | null {
-  let bestWord: string | null = null;
-  let bestRank = Infinity;
-  for (const ds of datasets) {
-    // 最新月（配列末尾）の値を取得
-    const lastRank = ds.ranks[ds.ranks.length - 1];
-    if (lastRank !== null && lastRank > 0 && lastRank < bestRank) {
-      bestRank = lastRank;
-      bestWord = ds.word;
-    }
-  }
-  return bestWord;
 }
 
 /**
@@ -223,8 +207,8 @@ export async function PUT(request: NextRequest) {
   }
 
   const supabase = getSupabase();
-  const { data: existing, error: fetchErr } = await supabase
-    .from("grid_ranking_overrides")
+  const { data: existing, error: fetchErr } = await (supabase
+    .from("grid_ranking_overrides") as any)
     .select("id, results")
     .eq("shop_name", shopName).eq("keyword", keyword).eq("month", month)
     .single();

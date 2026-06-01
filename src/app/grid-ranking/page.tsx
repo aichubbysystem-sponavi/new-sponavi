@@ -772,16 +772,23 @@ export default function GridRankingPage() {
                   if (noCoord > 0) {
                     setBatchProgress("Phase 1/3: 座標を取得中...");
                     try {
-                      await api.post("/api/report/sync-coordinates", {}, { timeout: 300000 });
-                    } catch {}
+                      const coordRes = await api.post("/api/report/sync-coordinates", {}, { timeout: 300000 });
+                      const coordUpdated = coordRes.data?.updated || 0;
+                      const coordErrors = coordRes.data?.errors || 0;
+                      setBatchProgress(`Phase 1/3: 座標${coordUpdated}件取得${coordErrors > 0 ? `（${coordErrors}件失敗）` : ""}`);
+                    } catch (e: any) {
+                      setBatchProgress("Phase 1/3: 座標取得に失敗しました。計測を続行します...");
+                    }
+                    await new Promise(r => setTimeout(r, 1000));
                   }
 
                   // Phase 2: KWなし店舗のKWを取得
                   if (noKw > 0) {
                     const presetsNoKw = presets.filter(p => !p.keyword && !(p.all_keywords && p.all_keywords.length > 0));
+                    let kwUpdated = 0, kwFailed = 0;
                     for (let i = 0; i < presetsNoKw.length; i++) {
                       const p = presetsNoKw[i];
-                      setBatchProgress(`Phase 2/3: KW取得 ${i + 1}/${presetsNoKw.length}`);
+                      setBatchProgress(`Phase 2/3: KW取得 ${i + 1}/${presetsNoKw.length} ${p.shop_name}`);
                       try {
                         const res = await api.get(`/api/report/ranking-keywords?shopName=${encodeURIComponent(p.shop_name)}`);
                         if (res.data?.found && res.data.keywords?.length > 0) {
@@ -794,8 +801,13 @@ export default function GridRankingPage() {
                             body: JSON.stringify({ shops: [{ shopId: p.shop_id, shopName: p.shop_name, keyword: bestKw, gridSize: p.grid_size }] }),
                           });
                           await api.put("/api/report/shop-keywords", { shopId: p.shop_id, keywords: res.data.keywords, source: "sheet" });
-                        }
-                      } catch {}
+                          kwUpdated++;
+                        } else { kwFailed++; }
+                      } catch { kwFailed++; }
+                    }
+                    if (kwFailed > 0) {
+                      setBatchProgress(`Phase 2/3: KW${kwUpdated}件取得（${kwFailed}件見つからず）。計測を続行します...`);
+                      await new Promise(r => setTimeout(r, 1500));
                     }
                   }
 
