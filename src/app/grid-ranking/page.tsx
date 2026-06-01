@@ -10,6 +10,7 @@ interface GridPoint {
   lat: number;
   lng: number;
   rank: number; // 0 = 未計測, -1 = 圏外
+  estimated?: boolean; // true = 3×3推定による補間値
 }
 
 interface GridLog {
@@ -867,6 +868,7 @@ export default function GridRankingPage() {
                             rank: pt.rank,
                           }));
                           // API経由で7×7推定グリッド生成
+                          const measuredSet = new Set(centerPoints.map((cp: any) => `${cp.row},${cp.col}`));
                           try {
                             const genRes = await api.post("/api/report/grid-ranking-generate", {
                               shopId: p.shop_id,
@@ -876,12 +878,15 @@ export default function GridRankingPage() {
                               centerPoints,
                               useFrom3x3: true,
                             });
-                            // grid_ranking_logsにも保存（7×7の座標付き）
+                            // grid_ranking_logsにも保存（7×7の座標付き+推定フラグ）
                             const fullGrid = generateGrid(lat, lng, 7, 1000);
                             const generated = genRes.data?.results || [];
                             for (const g of generated) {
                               const idx = fullGrid.findIndex((fp: GridPoint) => fp.row === g.row && fp.col === g.col);
-                              if (idx >= 0) fullGrid[idx].rank = g.rank;
+                              if (idx >= 0) {
+                                fullGrid[idx].rank = g.rank;
+                                fullGrid[idx].estimated = !measuredSet.has(`${g.row},${g.col}`);
+                              }
                             }
                             await api.put("/api/report/grid-ranking", {
                               shopId: p.shop_id, keyword: kw, gridResults: fullGrid, gridSize: 7, interval: 1000,
@@ -1131,6 +1136,9 @@ export default function GridRankingPage() {
             <span className="flex items-center gap-1">
               <span className="w-3 h-3 inline-block" style={{ color: "#000" }}>▼</span> 店舗
             </span>
+            <span className="flex items-center gap-1 border-l pl-3 ml-1">
+              <span className="w-3 h-3 inline-block border opacity-60" style={{ backgroundImage: "repeating-linear-gradient(135deg, transparent, transparent 2px, rgba(0,0,0,0.1) 2px, rgba(0,0,0,0.1) 3px)" }} /> 推定値
+            </span>
           </div>
         </div>
 
@@ -1159,8 +1167,9 @@ export default function GridRankingPage() {
                             pt.row === Math.floor(gridSize / 2) && pt.col === Math.floor(gridSize / 2)
                               ? "ring-2 ring-black ring-inset"
                               : ""
-                          }`}
-                          title={`(${pt.lat.toFixed(4)}, ${pt.lng.toFixed(4)})`}
+                          } ${pt.estimated ? "opacity-60" : ""}`}
+                          title={`(${pt.lat.toFixed(4)}, ${pt.lng.toFixed(4)})${pt.estimated ? " [推定]" : ""}`}
+                          style={pt.estimated ? { backgroundImage: "repeating-linear-gradient(135deg, transparent, transparent 3px, rgba(0,0,0,0.06) 3px, rgba(0,0,0,0.06) 4px)" } : undefined}
                         >
                           {pt.rank > 0 ? pt.rank : pt.rank === 0 ? "" : "-"}
                         </td>
@@ -1247,7 +1256,16 @@ export default function GridRankingPage() {
                           minute: "2-digit",
                         })}
                       </td>
-                      <td className="px-4 py-2.5 font-medium">{log.keyword}</td>
+                      <td className="px-4 py-2.5 font-medium">
+                        {log.keyword}
+                        {(() => {
+                          const r = log.results || [];
+                          const hasEstimated = r.some((p: any) => p.estimated);
+                          return hasEstimated
+                            ? <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-600 font-semibold">3×3推定</span>
+                            : <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-600 font-semibold">実測</span>;
+                        })()}
+                      </td>
                       <td className="px-4 py-2.5">{log.grid_size}x{log.grid_size}</td>
                       <td className="px-4 py-2.5">
                         {log.interval_m >= 1000 ? `${log.interval_m / 1000}km` : `${log.interval_m}m`}
