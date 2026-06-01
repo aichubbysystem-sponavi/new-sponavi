@@ -31,8 +31,44 @@ export async function GET() {
   for (const kw of (kwData || [])) {
     kwMap.set(kw.shop_id, kw.keywords || []);
   }
+  // 座標ステータス取得
+  const { data: shopCoords } = shopIds.length > 0
+    ? await supabase.from("shops").select("id, gbp_latitude, gbp_longitude").in("id", shopIds)
+    : { data: [] };
+  const coordMap = new Map<string, boolean>();
+  for (const s of (shopCoords || [])) {
+    coordMap.set(s.id, !!(s.gbp_latitude && s.gbp_latitude !== 0));
+  }
+
+  // 最新計測結果を取得（各店舗の最新1件）
+  const { data: latestLogs } = shopIds.length > 0
+    ? await supabase.from("grid_ranking_logs")
+        .select("shop_id, keyword, measured_at, results")
+        .in("shop_id", shopIds)
+        .order("measured_at", { ascending: false })
+    : { data: [] };
+  const logMap = new Map<string, { measured_at: string; keyword: string; avg_rank: number | null; top3: number; total: number }>();
+  for (const log of (latestLogs || [])) {
+    if (!logMap.has(log.shop_id)) {
+      const results = log.results || [];
+      const ranked = results.filter((r: any) => r.rank > 0);
+      const avgRank = ranked.length > 0
+        ? ranked.reduce((sum: number, r: any) => sum + r.rank, 0) / ranked.length
+        : null;
+      logMap.set(log.shop_id, {
+        measured_at: log.measured_at,
+        keyword: log.keyword,
+        avg_rank: avgRank ? parseFloat(avgRank.toFixed(1)) : null,
+        top3: results.filter((r: any) => r.rank > 0 && r.rank <= 3).length,
+        total: results.length,
+      });
+    }
+  }
+
   for (const p of (data || [])) {
     (p as any).all_keywords = kwMap.get(p.shop_id) || [];
+    (p as any).has_coordinates = coordMap.get(p.shop_id) || false;
+    (p as any).last_measurement = logMap.get(p.shop_id) || null;
   }
 
   // 月額コスト見積もり

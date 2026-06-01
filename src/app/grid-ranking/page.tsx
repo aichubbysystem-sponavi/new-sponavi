@@ -88,6 +88,14 @@ interface Preset {
   keyword: string | null;
   grid_size: number;
   all_keywords?: string[];
+  has_coordinates?: boolean;
+  last_measurement?: {
+    measured_at: string;
+    keyword: string;
+    avg_rank: number | null;
+    top3: number;
+    total: number;
+  } | null;
 }
 
 interface CostEstimate {
@@ -128,17 +136,39 @@ export default function GridRankingPage() {
     }).catch(() => {});
   }, []);
 
-  // プリセットに追加
-  const addToPreset = async (shopId: string, shopName: string, kw?: string, size?: number) => {
-    await fetch("/api/report/grid-ranking-presets", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ shops: [{ shopId, shopName, keyword: kw, gridSize: size || 7 }] }),
-    });
-    const res = await fetch("/api/report/grid-ranking-presets");
-    const data = await res.json();
-    setPresets(data.presets || []);
-    setEstimate(data.estimate || null);
+  // プリセットに追加（シートからKW自動取得）
+  const [addingPreset, setAddingPreset] = useState(false);
+  const addToPreset = async (shopId: string, shopName: string, size?: number) => {
+    setAddingPreset(true);
+    try {
+      // シートからKW自動取得
+      let bestKw: string | null = null;
+      let allKws: string[] = [];
+      try {
+        const kwRes = await api.get(`/api/report/ranking-keywords?shopName=${encodeURIComponent(shopName)}`);
+        if (kwRes.data?.found && kwRes.data.keywords?.length > 0) {
+          allKws = kwRes.data.keywords;
+          bestKw = kwRes.data.ranks?.length > 0
+            ? [...kwRes.data.ranks].sort((a: any, b: any) => (a.rank || 999) - (b.rank || 999))[0]?.word || allKws[0]
+            : allKws[0];
+          // shop_keywordsにも保存
+          await api.put("/api/report/shop-keywords", { shopId, keywords: allKws, source: "sheet" });
+        }
+      } catch {}
+      // プリセット登録
+      await fetch("/api/report/grid-ranking-presets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shops: [{ shopId, shopName, keyword: bestKw, gridSize: size || 7 }] }),
+      });
+      const res = await fetch("/api/report/grid-ranking-presets");
+      const data = await res.json();
+      setPresets(data.presets || []);
+      setEstimate(data.estimate || null);
+      setShowPresetPanel(true);
+    } finally {
+      setAddingPreset(false);
+    }
   };
 
   // プリセットから削除
@@ -534,14 +564,30 @@ export default function GridRankingPage() {
           </div>
 
           {presets.length > 0 ? (
-            <div className="space-y-2 max-h-60 overflow-y-auto">
+            <div className="space-y-1.5 max-h-[400px] overflow-y-auto">
+              {/* ヘッダー */}
+              <div className="grid grid-cols-[1fr_auto_auto_auto] gap-2 px-3 py-1 text-xs text-slate-400 font-medium border-b">
+                <span>店舗名</span>
+                <span className="w-[200px]">計測KW</span>
+                <span className="w-[140px] text-center">前回結果</span>
+                <span className="w-8"></span>
+              </div>
               {presets.map(p => {
                 const allKws = p.all_keywords && p.all_keywords.length > 0 ? p.all_keywords : (p.keyword ? [p.keyword] : []);
+                const hasCoord = p.has_coordinates;
+                const lm = p.last_measurement;
+                const daysSince = lm ? Math.floor((Date.now() - new Date(lm.measured_at).getTime()) / 86400000) : null;
                 return (
-                  <div key={p.id} className="flex items-center justify-between py-2 px-3 bg-slate-50 rounded-lg gap-2">
-                    <div className="flex items-center gap-2 flex-wrap min-w-0">
-                      <span className="text-sm font-medium text-slate-800 whitespace-nowrap">{p.shop_name}</span>
-                      <span className="text-xs text-slate-400">{p.grid_size}×{p.grid_size}</span>
+                  <div key={p.id} className="grid grid-cols-[1fr_auto_auto_auto] gap-2 items-center py-2 px-3 bg-slate-50 rounded-lg">
+                    {/* 店舗名 + ステータスドット */}
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${hasCoord && (p.keyword || allKws.length > 0) ? "bg-emerald-500" : hasCoord ? "bg-yellow-400" : "bg-red-400"}`}
+                        title={!hasCoord ? "座標なし" : !(p.keyword || allKws.length > 0) ? "KW未設定" : "準備OK"} />
+                      <span className="text-sm font-medium text-slate-800 truncate">{p.shop_name}</span>
+                      <span className="text-xs text-slate-400 flex-shrink-0">{p.grid_size}x{p.grid_size}</span>
+                    </div>
+                    {/* KW選択 */}
+                    <div className="w-[200px]">
                       {allKws.length > 1 ? (
                         <select
                           value={p.keyword || ""}
@@ -557,20 +603,36 @@ export default function GridRankingPage() {
                             setPresets(data.presets || []);
                             setEstimate(data.estimate || null);
                           }}
-                          className="text-xs border rounded px-1.5 py-0.5 text-indigo-600 max-w-[200px]"
+                          className="w-full text-xs border rounded px-1.5 py-1 text-indigo-600"
                         >
                           {allKws.map(kw => (
                             <option key={kw} value={kw}>{kw}</option>
                           ))}
                         </select>
                       ) : p.keyword ? (
-                        <span className="text-xs text-indigo-500">KW: {p.keyword}</span>
+                        <span className="text-xs text-indigo-500 truncate block">{p.keyword}</span>
                       ) : (
-                        <span className="text-xs text-slate-400">KW未設定</span>
+                        <span className="text-xs text-red-400">KW未設定</span>
                       )}
                     </div>
+                    {/* 前回結果 */}
+                    <div className="w-[140px] text-center">
+                      {lm ? (
+                        <div className="flex items-center justify-center gap-1.5">
+                          <span className={`text-xs font-bold ${lm.avg_rank && lm.avg_rank <= 10 ? "text-emerald-600" : lm.avg_rank && lm.avg_rank <= 20 ? "text-blue-600" : "text-orange-600"}`}>
+                            平均{lm.avg_rank ?? "-"}位
+                          </span>
+                          <span className="text-xs text-slate-400">
+                            {daysSince === 0 ? "今日" : daysSince === 1 ? "昨日" : `${daysSince}日前`}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-slate-400">未計測</span>
+                      )}
+                    </div>
+                    {/* 削除 */}
                     <button onClick={() => removeFromPreset(p.shop_id)}
-                      className="text-xs text-red-400 hover:text-red-600 whitespace-nowrap">削除</button>
+                      className="w-8 text-center text-xs text-red-400 hover:text-red-600">✕</button>
                   </div>
                 );
               })}
@@ -579,166 +641,217 @@ export default function GridRankingPage() {
             <p className="text-sm text-slate-400">店舗が登録されていません。下の計測画面で店舗を選択し「いつもの店舗に追加」で登録できます。</p>
           )}
 
-          {presets.length > 0 && (
-            <div className="flex gap-3">
-              <button
-                onClick={async () => {
-                  if (coordSyncing) return;
-                  setCoordSyncing(true);
-                  setCoordSyncResult("座標取得中...");
-                  try {
-                    const res = await api.post("/api/report/sync-coordinates", {}, { timeout: 300000 });
-                    const totalUpdated = res.data?.updated || 0;
-                    const totalErrors = res.data?.errors || 0;
-                    if (totalUpdated > 0) {
-                      setCoordSyncResult(`${totalUpdated}店舗の座標を取得しました${totalErrors > 0 ? `（${totalErrors}件失敗）` : ""}`);
-                    } else {
-                      setCoordSyncResult("座標未設定の店舗はありません（全店舗設定済み）");
-                    }
-                  } catch (e: any) {
-                    setCoordSyncResult("座標取得エラー: " + (e?.message || "不明"));
-                  } finally {
-                    setCoordSyncing(false);
-                  }
-                }}
-                disabled={coordSyncing || batchRunning}
-                className={`px-4 py-3 rounded-lg text-sm font-bold transition-all ${coordSyncing ? "bg-slate-200 text-slate-400" : "bg-blue-600 text-white hover:bg-blue-700"}`}
-              >
-                {coordSyncing ? "座標取得中..." : "座標一括取得"}
-              </button>
-              <button
-                onClick={async () => {
-                  if (kwSyncing) return;
-                  setKwSyncing(true);
-                  setKwSyncResult("KW取得中...");
-                  let updated = 0;
-                  let failed = 0;
-                  for (let i = 0; i < presets.length; i++) {
-                    const p = presets[i];
-                    setKwSyncResult(`KW取得中... ${i + 1}/${presets.length} ${p.shop_name}`);
-                    try {
-                      const res = await api.get(`/api/report/ranking-keywords?shopName=${encodeURIComponent(p.shop_name)}`);
-                      if (res.data?.found && res.data.keywords?.length > 0) {
-                        const bestKw = res.data.ranks?.length > 0
-                          ? [...res.data.ranks].sort((a: any, b: any) => (a.rank || 999) - (b.rank || 999))[0]?.word || res.data.keywords[0]
-                          : res.data.keywords[0];
-                        // プリセットのキーワードを更新
-                        await fetch("/api/report/grid-ranking-presets", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ shops: [{ shopId: p.shop_id, shopName: p.shop_name, keyword: bestKw, gridSize: p.grid_size }] }),
-                        });
-                        // shop_keywordsにも保存
-                        await api.put("/api/report/shop-keywords", {
-                          shopId: p.shop_id,
-                          keywords: res.data.keywords,
-                          source: "sheet",
-                        });
-                        updated++;
-                      } else {
-                        failed++;
-                      }
-                    } catch {
-                      failed++;
-                    }
-                  }
-                  // プリセット再取得
-                  const refreshRes = await fetch("/api/report/grid-ranking-presets");
-                  const refreshData = await refreshRes.json();
-                  setPresets(refreshData.presets || []);
-                  setEstimate(refreshData.estimate || null);
-                  setKwSyncResult(`${updated}店舗のKWを更新しました${failed > 0 ? `（${failed}件見つからず）` : ""}`);
-                  setKwSyncing(false);
-                }}
-                disabled={kwSyncing || batchRunning}
-                className={`px-4 py-3 rounded-lg text-sm font-bold transition-all ${kwSyncing ? "bg-slate-200 text-slate-400" : "bg-purple-600 text-white hover:bg-purple-700"}`}
-              >
-                {kwSyncing ? "KW取得中..." : "KW一括取得"}
-              </button>
-            </div>
-          )}
-          {(coordSyncResult || kwSyncResult) && (
-            <div className="space-y-1">
-              {coordSyncResult && <p className={`text-sm font-medium ${coordSyncResult.includes("エラー") ? "text-red-600" : "text-blue-600"}`}>{coordSyncResult}</p>}
-              {kwSyncResult && <p className={`text-sm font-medium ${kwSyncResult.includes("見つからず") ? "text-orange-600" : "text-purple-600"}`}>{kwSyncResult}</p>}
-            </div>
-          )}
+          {/* ステータスサマリー */}
+          {presets.length > 0 && (() => {
+            const noCoord = presets.filter(p => !p.has_coordinates).length;
+            const noKw = presets.filter(p => !p.keyword && !(p.all_keywords && p.all_keywords.length > 0)).length;
+            return (noCoord > 0 || noKw > 0) ? (
+              <div className="flex gap-3 text-xs">
+                {noCoord > 0 && <span className="text-red-500">座標なし: {noCoord}件</span>}
+                {noKw > 0 && <span className="text-orange-500">KW未設定: {noKw}件</span>}
+              </div>
+            ) : null;
+          })()}
 
+          {/* アクションボタン */}
           {presets.length > 0 && (
-            <button
-              onClick={async () => {
-                if (batchRunning) return;
-                if (!confirm(`${presets.length}店舗の計測を開始します。約${Math.ceil(presets.length * 50 / 60)}分かかります。よろしいですか？`)) return;
-                setBatchRunning(true);
-                setBatchProgress(`0/${presets.length} 準備中...`);
-                for (let i = 0; i < presets.length; i++) {
-                  const p = presets[i];
-                  setBatchProgress(`${i + 1}/${presets.length} ${p.shop_name}`);
-                  try {
-                    // 店舗座標を取得
-                    // Supabaseから座標取得（Go API経由だと失敗するケースがあるため）
-                    let lat = 0, lng = 0;
+            <div className="space-y-3">
+              {/* 補助ボタン（座標・KW個別取得） */}
+              <div className="flex gap-2">
+                <button
+                  onClick={async () => {
+                    if (coordSyncing) return;
+                    setCoordSyncing(true);
+                    setCoordSyncResult("座標取得中...");
                     try {
-                      const { createClient } = await import("@supabase/supabase-js");
-                      const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL || "", process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "");
-                      const { data: coordRow } = await sb.from("shops").select("gbp_latitude, gbp_longitude").eq("name", p.shop_name).not("gbp_latitude", "is", null).gt("gbp_latitude", 0).limit(1).maybeSingle();
-                      if (coordRow) { lat = coordRow.gbp_latitude || 0; lng = coordRow.gbp_longitude || 0; }
-                    } catch {}
-                    // Supabaseで見つからなければGo APIにフォールバック
-                    if (!lat || !lng) {
+                      const res = await api.post("/api/report/sync-coordinates", {}, { timeout: 300000 });
+                      const totalUpdated = res.data?.updated || 0;
+                      const totalErrors = res.data?.errors || 0;
+                      setCoordSyncResult(totalUpdated > 0
+                        ? `${totalUpdated}店舗の座標を取得${totalErrors > 0 ? `（${totalErrors}件失敗）` : ""}`
+                        : "全店舗設定済み");
+                      // プリセット再取得（ステータス更新）
+                      const refreshRes = await fetch("/api/report/grid-ranking-presets");
+                      const refreshData = await refreshRes.json();
+                      setPresets(refreshData.presets || []);
+                    } catch (e: any) {
+                      setCoordSyncResult("エラー: " + (e?.message || "不明"));
+                    } finally { setCoordSyncing(false); }
+                  }}
+                  disabled={coordSyncing || batchRunning}
+                  className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all ${coordSyncing ? "bg-slate-100 text-slate-400" : "bg-slate-100 text-blue-600 hover:bg-blue-50 border border-blue-200"}`}
+                >
+                  {coordSyncing ? "座標取得中..." : "座標一括取得"}
+                </button>
+                <button
+                  onClick={async () => {
+                    if (kwSyncing) return;
+                    setKwSyncing(true);
+                    setKwSyncResult("KW取得中...");
+                    let updated = 0, failed = 0;
+                    for (let i = 0; i < presets.length; i++) {
+                      const p = presets[i];
+                      setKwSyncResult(`KW取得中... ${i + 1}/${presets.length}`);
                       try {
-                        const coordRes = await api.get(`/api/shop/${p.shop_id}`);
-                        lat = coordRes.data?.gbp_latitude || coordRes.data?.GbpLatitude || 0;
-                        lng = coordRes.data?.gbp_longitude || coordRes.data?.GbpLongitude || 0;
+                        const res = await api.get(`/api/report/ranking-keywords?shopName=${encodeURIComponent(p.shop_name)}`);
+                        if (res.data?.found && res.data.keywords?.length > 0) {
+                          const bestKw = res.data.ranks?.length > 0
+                            ? [...res.data.ranks].sort((a: any, b: any) => (a.rank || 999) - (b.rank || 999))[0]?.word || res.data.keywords[0]
+                            : res.data.keywords[0];
+                          await fetch("/api/report/grid-ranking-presets", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ shops: [{ shopId: p.shop_id, shopName: p.shop_name, keyword: bestKw, gridSize: p.grid_size }] }),
+                          });
+                          await api.put("/api/report/shop-keywords", { shopId: p.shop_id, keywords: res.data.keywords, source: "sheet" });
+                          updated++;
+                        } else { failed++; }
+                      } catch { failed++; }
+                    }
+                    const refreshRes = await fetch("/api/report/grid-ranking-presets");
+                    const refreshData = await refreshRes.json();
+                    setPresets(refreshData.presets || []);
+                    setEstimate(refreshData.estimate || null);
+                    setKwSyncResult(`${updated}件更新${failed > 0 ? `（${failed}件見つからず）` : ""}`);
+                    setKwSyncing(false);
+                  }}
+                  disabled={kwSyncing || batchRunning}
+                  className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all ${kwSyncing ? "bg-slate-100 text-slate-400" : "bg-slate-100 text-purple-600 hover:bg-purple-50 border border-purple-200"}`}
+                >
+                  {kwSyncing ? "KW取得中..." : "KW一括取得"}
+                </button>
+              </div>
+              {(coordSyncResult || kwSyncResult) && (
+                <div className="flex gap-3 text-xs">
+                  {coordSyncResult && <span className={coordSyncResult.includes("エラー") ? "text-red-500" : "text-blue-500"}>{coordSyncResult}</span>}
+                  {kwSyncResult && <span className={kwSyncResult.includes("見つからず") ? "text-orange-500" : "text-purple-500"}>{kwSyncResult}</span>}
+                </div>
+              )}
+
+              {/* メイン: スマート一括計測ボタン */}
+              <button
+                onClick={async () => {
+                  if (batchRunning) return;
+                  const noCoord = presets.filter(p => !p.has_coordinates).length;
+                  const noKw = presets.filter(p => !p.keyword && !(p.all_keywords && p.all_keywords.length > 0)).length;
+                  const steps = [];
+                  if (noCoord > 0) steps.push(`座標取得(${noCoord}件)`);
+                  if (noKw > 0) steps.push(`KW取得(${noKw}件)`);
+                  steps.push(`計測(${presets.length}店舗)`);
+                  if (!confirm(`${steps.join(" → ")} を実行します。\n約${Math.ceil(presets.length * 50 / 60)}分かかります。よろしいですか？`)) return;
+
+                  setBatchRunning(true);
+
+                  // Phase 1: 座標なし店舗の座標を取得
+                  if (noCoord > 0) {
+                    setBatchProgress("Phase 1/3: 座標を取得中...");
+                    try {
+                      await api.post("/api/report/sync-coordinates", {}, { timeout: 300000 });
+                    } catch {}
+                  }
+
+                  // Phase 2: KWなし店舗のKWを取得
+                  if (noKw > 0) {
+                    const presetsNoKw = presets.filter(p => !p.keyword && !(p.all_keywords && p.all_keywords.length > 0));
+                    for (let i = 0; i < presetsNoKw.length; i++) {
+                      const p = presetsNoKw[i];
+                      setBatchProgress(`Phase 2/3: KW取得 ${i + 1}/${presetsNoKw.length}`);
+                      try {
+                        const res = await api.get(`/api/report/ranking-keywords?shopName=${encodeURIComponent(p.shop_name)}`);
+                        if (res.data?.found && res.data.keywords?.length > 0) {
+                          const bestKw = res.data.ranks?.length > 0
+                            ? [...res.data.ranks].sort((a: any, b: any) => (a.rank || 999) - (b.rank || 999))[0]?.word || res.data.keywords[0]
+                            : res.data.keywords[0];
+                          await fetch("/api/report/grid-ranking-presets", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ shops: [{ shopId: p.shop_id, shopName: p.shop_name, keyword: bestKw, gridSize: p.grid_size }] }),
+                          });
+                          await api.put("/api/report/shop-keywords", { shopId: p.shop_id, keywords: res.data.keywords, source: "sheet" });
+                        }
                       } catch {}
                     }
-                    if (!lat || !lng) { setBatchProgress(`${i + 1}/${presets.length} ${p.shop_name} - 座標なしスキップ`); continue; }
+                  }
 
-                    // キーワード取得（プリセット設定 or シートから自動選定）
-                    let kw = p.keyword;
-                    if (!kw) {
-                      const kwRes = await api.get(`/api/report/ranking-keywords?shopName=${encodeURIComponent(p.shop_name)}`);
-                      const ranks = kwRes.data?.ranks || [];
-                      if (ranks.length > 0) {
-                        ranks.sort((a: any, b: any) => (a.rank || 999) - (b.rank || 999));
-                        kw = ranks[0].word;
-                      }
-                    }
-                    if (!kw) continue;
-
-                    // グリッド生成+計測
-                    const size = p.grid_size || 7;
-                    const points = generateGrid(lat, lng, size, 1000);
-                    for (let j = 0; j < points.length; j++) {
-                      const pt = points[j];
-                      setBatchProgress(`${i + 1}/${presets.length} ${p.shop_name} (${j + 1}/${points.length})`);
-                      try {
-                        const res = await api.post("/api/report/grid-ranking", {
-                          shopId: p.shop_id, keyword: kw, lat: pt.lat, lng: pt.lng,
-                        }, { timeout: 15000 });
-                        points[j] = { ...pt, rank: res.data?.rank || 0 };
-                      } catch { points[j] = { ...pt, rank: 0 }; }
-                      await new Promise(r => setTimeout(r, 300));
-                    }
-
-                    // 結果保存
-                    await api.put("/api/report/grid-ranking", {
-                      shopId: p.shop_id, keyword: kw, gridResults: points, gridSize: size, interval: 1000,
-                    });
+                  // プリセット再取得（座標・KW更新反映）
+                  let latestPresets = presets;
+                  try {
+                    const refreshRes = await fetch("/api/report/grid-ranking-presets");
+                    const refreshData = await refreshRes.json();
+                    latestPresets = refreshData.presets || [];
+                    setPresets(latestPresets);
+                    setEstimate(refreshData.estimate || null);
                   } catch {}
-                  await new Promise(r => setTimeout(r, 1000));
-                }
-                setBatchRunning(false);
-                setBatchProgress(`✓ ${presets.length}店舗の計測が完了しました`);
-              }}
-              disabled={batchRunning}
-              className={`w-full py-3 rounded-lg text-sm font-bold transition-all ${batchRunning ? "bg-slate-200 text-slate-400" : "bg-emerald-600 text-white hover:bg-emerald-700"}`}
-            >
-              {batchRunning ? batchProgress : `一括計測（${presets.length}店舗）`}
-            </button>
-          )}
-          {batchProgress && !batchRunning && batchProgress.startsWith("✓") && (
-            <p className="text-sm text-emerald-600 font-medium">{batchProgress}</p>
+
+                  // Phase 3: 計測
+                  let completed = 0, skipped = 0;
+                  for (let i = 0; i < latestPresets.length; i++) {
+                    const p = latestPresets[i];
+                    setBatchProgress(`Phase 3/3: ${i + 1}/${latestPresets.length} ${p.shop_name}`);
+                    try {
+                      let lat = 0, lng = 0;
+                      try {
+                        const { createClient } = await import("@supabase/supabase-js");
+                        const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL || "", process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "");
+                        const { data: coordRow } = await sb.from("shops").select("gbp_latitude, gbp_longitude").eq("id", p.shop_id).not("gbp_latitude", "is", null).gt("gbp_latitude", 0).limit(1).maybeSingle();
+                        if (coordRow) { lat = coordRow.gbp_latitude || 0; lng = coordRow.gbp_longitude || 0; }
+                      } catch {}
+                      if (!lat || !lng) { skipped++; continue; }
+
+                      let kw = p.keyword;
+                      if (!kw && p.all_keywords && p.all_keywords.length > 0) kw = p.all_keywords[0];
+                      if (!kw) { skipped++; continue; }
+
+                      const size = p.grid_size || 7;
+                      const points = generateGrid(lat, lng, size, 1000);
+                      for (let j = 0; j < points.length; j++) {
+                        const pt = points[j];
+                        setBatchProgress(`Phase 3/3: ${i + 1}/${latestPresets.length} ${p.shop_name} (${j + 1}/${points.length})`);
+                        try {
+                          const res = await api.post("/api/report/grid-ranking", {
+                            shopId: p.shop_id, keyword: kw, lat: pt.lat, lng: pt.lng,
+                          }, { timeout: 15000 });
+                          points[j] = { ...pt, rank: res.data?.rank || 0 };
+                        } catch { points[j] = { ...pt, rank: 0 }; }
+                        await new Promise(r => setTimeout(r, 300));
+                      }
+                      await api.put("/api/report/grid-ranking", {
+                        shopId: p.shop_id, keyword: kw, gridResults: points, gridSize: size, interval: 1000,
+                      });
+                      completed++;
+                    } catch {}
+                    await new Promise(r => setTimeout(r, 1000));
+                  }
+
+                  // 最終結果を反映
+                  try {
+                    const finalRes = await fetch("/api/report/grid-ranking-presets");
+                    const finalData = await finalRes.json();
+                    setPresets(finalData.presets || []);
+                    setEstimate(finalData.estimate || null);
+                  } catch {}
+
+                  setBatchRunning(false);
+                  setBatchProgress(`✓ ${completed}店舗の計測が完了しました${skipped > 0 ? `（${skipped}件スキップ）` : ""}`);
+                }}
+                disabled={batchRunning}
+                className={`w-full py-3.5 rounded-lg text-sm font-bold transition-all ${batchRunning ? "bg-slate-200 text-slate-500" : "bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm"}`}
+              >
+                {batchRunning ? batchProgress : (() => {
+                  const noCoord = presets.filter(p => !p.has_coordinates).length;
+                  const noKw = presets.filter(p => !p.keyword && !(p.all_keywords && p.all_keywords.length > 0)).length;
+                  const extras = [];
+                  if (noCoord > 0) extras.push(`座標${noCoord}件`);
+                  if (noKw > 0) extras.push(`KW${noKw}件`);
+                  return extras.length > 0
+                    ? `一括計測（${presets.length}店舗）— ${extras.join("+")}を自動取得`
+                    : `一括計測（${presets.length}店舗）`;
+                })()}
+              </button>
+              {batchProgress && !batchRunning && batchProgress.startsWith("✓") && (
+                <p className="text-sm text-emerald-600 font-medium text-center">{batchProgress}</p>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -885,10 +998,11 @@ export default function GridRankingPage() {
           {aborted && <span className="text-sm text-red-500">中断しました</span>}
           {selectedShopId && selectedShop && (
             <button
-              onClick={() => addToPreset(selectedShopId, (selectedShop as any).name || "", keyword, gridSize)}
-              className="bg-indigo-500 text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-indigo-600 transition"
+              onClick={() => addToPreset(selectedShopId, (selectedShop as any).name || "", gridSize)}
+              disabled={addingPreset}
+              className="bg-indigo-500 text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-indigo-600 transition disabled:opacity-50"
             >
-              いつもの店舗に追加
+              {addingPreset ? "追加中（KW取得中）..." : "いつもの店舗に追加"}
             </button>
           )}
         </div>
