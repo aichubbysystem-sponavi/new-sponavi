@@ -811,7 +811,7 @@ export default function GridRankingPage() {
                     setEstimate(refreshData.estimate || null);
                   } catch {}
 
-                  // Phase 3: 全キーワード計測
+                  // Phase 3: メインKW=7×7フル計測、サブKW=3×3実測→7×7推定生成
                   let completed = 0, skipped = 0, totalKws = 0;
                   for (let i = 0; i < latestPresets.length; i++) {
                     const p = latestPresets[i];
@@ -825,19 +825,25 @@ export default function GridRankingPage() {
                       } catch {}
                       if (!lat || !lng) { skipped++; continue; }
 
-                      // 全キーワードを計測（all_keywordsがあればそれを、なければprimary KWのみ）
                       const keywords = p.all_keywords && p.all_keywords.length > 0
                         ? p.all_keywords
                         : (p.keyword ? [p.keyword] : []);
                       if (keywords.length === 0) { skipped++; continue; }
 
+                      // メインKW = プリセットのkeyword or 最初のKW
+                      const mainKw = p.keyword || keywords[0];
+
                       for (let ki = 0; ki < keywords.length; ki++) {
                         const kw = keywords[ki];
-                        const size = p.grid_size || 7;
-                        const points = generateGrid(lat, lng, size, 1000);
+                        const isMain = kw === mainKw;
+                        const measureSize = isMain ? (p.grid_size || 7) : 3;
+
+                        // 実測グリッド生成
+                        const points = generateGrid(lat, lng, measureSize, 1000);
                         for (let j = 0; j < points.length; j++) {
                           const pt = points[j];
-                          setBatchProgress(`${i + 1}/${latestPresets.length} ${p.shop_name} [KW ${ki + 1}/${keywords.length}] (${j + 1}/${points.length})`);
+                          const label = isMain ? "7x7" : "3x3";
+                          setBatchProgress(`${i + 1}/${latestPresets.length} ${p.shop_name} [KW ${ki + 1}/${keywords.length} ${label}] (${j + 1}/${points.length})`);
                           try {
                             const res = await api.post("/api/report/grid-ranking", {
                               shopId: p.shop_id, keyword: kw, lat: pt.lat, lng: pt.lng,
@@ -846,9 +852,47 @@ export default function GridRankingPage() {
                           } catch { points[j] = { ...pt, rank: 0 }; }
                           await new Promise(r => setTimeout(r, 300));
                         }
-                        await api.put("/api/report/grid-ranking", {
-                          shopId: p.shop_id, keyword: kw, gridResults: points, gridSize: size, interval: 1000,
-                        });
+
+                        if (isMain) {
+                          // メインKW: 実測結果をそのまま保存
+                          await api.put("/api/report/grid-ranking", {
+                            shopId: p.shop_id, keyword: kw, gridResults: points, gridSize: measureSize, interval: 1000,
+                          });
+                        } else {
+                          // サブKW: 3×3実測→7×7推定生成してから保存
+                          // 3×3の実測結果を7×7の中央3×3（row:2-4, col:2-4）にマッピング
+                          const centerPoints = points.map(pt => ({
+                            row: pt.row + 2, // 3×3の(0,0)→7×7の(2,2)
+                            col: pt.col + 2,
+                            rank: pt.rank,
+                          }));
+                          // API経由で7×7推定グリッド生成
+                          try {
+                            const genRes = await api.post("/api/report/grid-ranking-generate", {
+                              shopId: p.shop_id,
+                              shopName: p.shop_name,
+                              keyword: kw,
+                              month: new Date().toISOString().slice(0, 7),
+                              centerPoints,
+                              useFrom3x3: true,
+                            });
+                            // grid_ranking_logsにも保存（7×7の座標付き）
+                            const fullGrid = generateGrid(lat, lng, 7, 1000);
+                            const generated = genRes.data?.results || [];
+                            for (const g of generated) {
+                              const idx = fullGrid.findIndex((fp: GridPoint) => fp.row === g.row && fp.col === g.col);
+                              if (idx >= 0) fullGrid[idx].rank = g.rank;
+                            }
+                            await api.put("/api/report/grid-ranking", {
+                              shopId: p.shop_id, keyword: kw, gridResults: fullGrid, gridSize: 7, interval: 1000,
+                            });
+                          } catch {
+                            // 推定生成に失敗したら3×3の実測結果だけ保存
+                            await api.put("/api/report/grid-ranking", {
+                              shopId: p.shop_id, keyword: kw, gridResults: points, gridSize: 3, interval: 1000,
+                            });
+                          }
+                        }
                         totalKws++;
                       }
                       completed++;
@@ -865,7 +909,7 @@ export default function GridRankingPage() {
                   } catch {}
 
                   setBatchRunning(false);
-                  setBatchProgress(`✓ ${completed}店舗 × ${totalKws}KWの計測が完了しました${skipped > 0 ? `（${skipped}件スキップ）` : ""}`);
+                  setBatchProgress(`✓ ${completed}店舗 × ${totalKws}KWの計測完了${skipped > 0 ? `（${skipped}件スキップ）` : ""}`);
                 }}
                 disabled={batchRunning}
                 className={`w-full py-3.5 rounded-lg text-sm font-bold transition-all ${batchRunning ? "bg-slate-200 text-slate-500" : "bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm"}`}

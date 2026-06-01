@@ -103,6 +103,29 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const supabase = getSupabase();
 
+  // 3×3実測→7×7推定モード
+  if (body.useFrom3x3 && body.centerPoints) {
+    const { shopId, shopName, keyword, month, centerPoints } = body;
+    if (!shopName || !keyword || !month) {
+      return NextResponse.json({ error: "shopName, keyword, month が必要です" }, { status: 400 });
+    }
+    const results = generateGridFrom3x3(centerPoints);
+    // overridesにも保存
+    await supabase.from("grid_ranking_overrides")
+      .delete().eq("shop_name", shopName).eq("keyword", keyword).eq("month", month);
+    await supabase.from("grid_ranking_overrides").insert({
+      id: crypto.randomUUID(),
+      shop_id: shopId || "",
+      shop_name: shopName,
+      keyword,
+      month,
+      grid_size: 7,
+      results,
+      updated_at: new Date().toISOString(),
+    });
+    return NextResponse.json({ success: true, results });
+  }
+
   // 一括生成モード
   if (body.batch && Array.isArray(body.batch)) {
     const shopName = body.shopName as string;
