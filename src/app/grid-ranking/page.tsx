@@ -81,8 +81,24 @@ function generateGrid(
   return points;
 }
 
+interface Preset {
+  id: string;
+  shop_id: string;
+  shop_name: string;
+  keyword: string | null;
+  grid_size: number;
+}
+
+interface CostEstimate {
+  totalShops: number;
+  totalRequests: number;
+  monthlyCost: string;
+  freeRequests: number;
+  withinFree: boolean;
+}
+
 export default function GridRankingPage() {
-  const { selectedShopId, selectedShop } = useShop();
+  const { selectedShopId, selectedShop, shops } = useShop();
   const [keyword, setKeyword] = useState("");
   const [savedKeywords, setSavedKeywords] = useState<string[]>([]);
   const [gridSize, setGridSize] = useState<number>(7);
@@ -91,6 +107,47 @@ export default function GridRankingPage() {
   const [progress, setProgress] = useState("");
   const [gridResults, setGridResults] = useState<GridPoint[]>([]);
   const [history, setHistory] = useState<GridLog[]>([]);
+
+  // プリセット管理
+  const [presets, setPresets] = useState<Preset[]>([]);
+  const [estimate, setEstimate] = useState<CostEstimate | null>(null);
+  const [showPresetPanel, setShowPresetPanel] = useState(false);
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchProgress, setBatchProgress] = useState("");
+
+  // プリセット読み込み
+  useEffect(() => {
+    fetch("/api/report/grid-ranking-presets").then(r => r.json()).then(data => {
+      setPresets(data.presets || []);
+      setEstimate(data.estimate || null);
+    }).catch(() => {});
+  }, []);
+
+  // プリセットに追加
+  const addToPreset = async (shopId: string, shopName: string, kw?: string, size?: number) => {
+    await fetch("/api/report/grid-ranking-presets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shops: [{ shopId, shopName, keyword: kw, gridSize: size || 7 }] }),
+    });
+    const res = await fetch("/api/report/grid-ranking-presets");
+    const data = await res.json();
+    setPresets(data.presets || []);
+    setEstimate(data.estimate || null);
+  };
+
+  // プリセットから削除
+  const removeFromPreset = async (shopId: string) => {
+    await fetch("/api/report/grid-ranking-presets", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shopIds: [shopId] }),
+    });
+    const res = await fetch("/api/report/grid-ranking-presets");
+    const data = await res.json();
+    setPresets(data.presets || []);
+    setEstimate(data.estimate || null);
+  };
   const [selectedHistory, setSelectedHistory] = useState<GridLog | null>(null);
   const [error, setError] = useState("");
   const [aborted, setAborted] = useState(false);
@@ -442,11 +499,119 @@ export default function GridRankingPage() {
 
   return (
     <div className="p-6 pt-20 max-w-[1400px] mx-auto space-y-6">
-      <h1 className="text-2xl font-bold text-[#003D6B]">多地点順位チェック</h1>
-      <p className="text-sm text-gray-500">
-        店舗を中心にグリッド状の地点を自動生成し、各地点でのキーワード順位を一括計測します。
-        Google Maps上に順位を色付きピンで可視化できます。
-      </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-[#003D6B]">多地点順位チェック</h1>
+          <p className="text-sm text-gray-500">
+            店舗を中心にグリッド状の地点を自動生成し、各地点でのキーワード順位を一括計測します。
+          </p>
+        </div>
+        <button onClick={() => setShowPresetPanel(!showPresetPanel)}
+          className="px-4 py-2 rounded-lg text-sm font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a]">
+          いつもの店舗（{presets.length}件）
+        </button>
+      </div>
+
+      {/* いつも計測する店舗パネル */}
+      {showPresetPanel && (
+        <div className="bg-white rounded-xl shadow-sm border p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-bold text-[#003D6B]">いつも計測する店舗</h2>
+            {estimate && (
+              <div className="text-xs text-slate-500">
+                月間: {estimate.totalRequests.toLocaleString()}リクエスト /
+                {estimate.withinFree
+                  ? <span className="text-emerald-600 font-bold ml-1">無料枠内</span>
+                  : <span className="text-red-600 font-bold ml-1">${estimate.monthlyCost}</span>
+                }
+              </div>
+            )}
+          </div>
+
+          {presets.length > 0 ? (
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {presets.map(p => (
+                <div key={p.id} className="flex items-center justify-between py-2 px-3 bg-slate-50 rounded-lg">
+                  <div>
+                    <span className="text-sm font-medium text-slate-800">{p.shop_name}</span>
+                    <span className="text-xs text-slate-400 ml-2">{p.grid_size}×{p.grid_size}</span>
+                    {p.keyword && <span className="text-xs text-indigo-500 ml-2">KW: {p.keyword}</span>}
+                  </div>
+                  <button onClick={() => removeFromPreset(p.shop_id)}
+                    className="text-xs text-red-400 hover:text-red-600">削除</button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-400">店舗が登録されていません。下の計測画面で店舗を選択し「いつもの店舗に追加」で登録できます。</p>
+          )}
+
+          {presets.length > 0 && (
+            <button
+              onClick={async () => {
+                if (batchRunning) return;
+                if (!confirm(`${presets.length}店舗の計測を開始します。約${Math.ceil(presets.length * 50 / 60)}分かかります。よろしいですか？`)) return;
+                setBatchRunning(true);
+                setBatchProgress(`0/${presets.length} 準備中...`);
+                for (let i = 0; i < presets.length; i++) {
+                  const p = presets[i];
+                  setBatchProgress(`${i + 1}/${presets.length} ${p.shop_name}`);
+                  try {
+                    // 店舗座標を取得
+                    const coordRes = await api.get(`/api/shop/${p.shop_id}`);
+                    const shopData = coordRes.data;
+                    const lat = shopData?.gbp_latitude || shopData?.GbpLatitude || 0;
+                    const lng = shopData?.gbp_longitude || shopData?.GbpLongitude || 0;
+                    if (!lat || !lng) continue;
+
+                    // キーワード取得（プリセット設定 or シートから自動選定）
+                    let kw = p.keyword;
+                    if (!kw) {
+                      const kwRes = await api.get(`/api/report/ranking-keywords?shopName=${encodeURIComponent(p.shop_name)}`);
+                      const ranks = kwRes.data?.ranks || [];
+                      if (ranks.length > 0) {
+                        ranks.sort((a: any, b: any) => (a.rank || 999) - (b.rank || 999));
+                        kw = ranks[0].word;
+                      }
+                    }
+                    if (!kw) continue;
+
+                    // グリッド生成+計測
+                    const size = p.grid_size || 7;
+                    const points = generateGrid(lat, lng, size, 1000);
+                    for (let j = 0; j < points.length; j++) {
+                      const pt = points[j];
+                      setBatchProgress(`${i + 1}/${presets.length} ${p.shop_name} (${j + 1}/${points.length})`);
+                      try {
+                        const res = await api.post("/api/report/grid-ranking", {
+                          shopId: p.shop_id, keyword: kw, lat: pt.lat, lng: pt.lng,
+                        }, { timeout: 15000 });
+                        points[j] = { ...pt, rank: res.data?.rank || 0 };
+                      } catch { points[j] = { ...pt, rank: 0 }; }
+                      await new Promise(r => setTimeout(r, 300));
+                    }
+
+                    // 結果保存
+                    await api.put("/api/report/grid-ranking", {
+                      shopId: p.shop_id, keyword: kw, gridResults: points, gridSize: size, interval: 1000,
+                    });
+                  } catch {}
+                  await new Promise(r => setTimeout(r, 1000));
+                }
+                setBatchRunning(false);
+                setBatchProgress(`✓ ${presets.length}店舗の計測が完了しました`);
+              }}
+              disabled={batchRunning}
+              className={`w-full py-3 rounded-lg text-sm font-bold transition-all ${batchRunning ? "bg-slate-200 text-slate-400" : "bg-emerald-600 text-white hover:bg-emerald-700"}`}
+            >
+              {batchRunning ? batchProgress : `一括計測（${presets.length}店舗）`}
+            </button>
+          )}
+          {batchProgress && !batchRunning && batchProgress.startsWith("✓") && (
+            <p className="text-sm text-emerald-600 font-medium">{batchProgress}</p>
+          )}
+        </div>
+      )}
 
       {error && (
         <div className="bg-red-50 text-red-700 p-3 rounded-lg text-sm">{error}</div>
@@ -588,6 +753,14 @@ export default function GridRankingPage() {
           )}
           {progress && <span className="text-sm text-gray-500">{progress}</span>}
           {aborted && <span className="text-sm text-red-500">中断しました</span>}
+          {selectedShopId && selectedShop && (
+            <button
+              onClick={() => addToPreset(selectedShopId, (selectedShop as any).name || "", keyword, gridSize)}
+              className="bg-indigo-500 text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-indigo-600 transition"
+            >
+              いつもの店舗に追加
+            </button>
+          )}
         </div>
       </div>
 
