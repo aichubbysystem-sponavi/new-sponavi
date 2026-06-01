@@ -116,6 +116,8 @@ export default function GridRankingPage() {
   const [batchProgress, setBatchProgress] = useState("");
   const [coordSyncing, setCoordSyncing] = useState(false);
   const [coordSyncResult, setCoordSyncResult] = useState("");
+  const [kwSyncing, setKwSyncing] = useState(false);
+  const [kwSyncResult, setKwSyncResult] = useState("");
 
   // プリセット読み込み
   useEffect(() => {
@@ -556,14 +558,9 @@ export default function GridRankingPage() {
                   setCoordSyncing(true);
                   setCoordSyncResult("座標取得中...");
                   try {
-                    // プリセット店舗の座標を一括取得
-                    let totalUpdated = 0;
-                    let totalErrors = 0;
-                    const batchSize = 100;
-                    // shopIdを指定せず全店舗対象（API側でgbp_latitude=null/0のみ処理）
                     const res = await api.post("/api/report/sync-coordinates", {}, { timeout: 300000 });
-                    totalUpdated = res.data?.updated || 0;
-                    totalErrors = res.data?.errors || 0;
+                    const totalUpdated = res.data?.updated || 0;
+                    const totalErrors = res.data?.errors || 0;
                     if (totalUpdated > 0) {
                       setCoordSyncResult(`${totalUpdated}店舗の座標を取得しました${totalErrors > 0 ? `（${totalErrors}件失敗）` : ""}`);
                     } else {
@@ -580,10 +577,62 @@ export default function GridRankingPage() {
               >
                 {coordSyncing ? "座標取得中..." : "座標一括取得"}
               </button>
+              <button
+                onClick={async () => {
+                  if (kwSyncing) return;
+                  setKwSyncing(true);
+                  setKwSyncResult("KW取得中...");
+                  let updated = 0;
+                  let failed = 0;
+                  for (let i = 0; i < presets.length; i++) {
+                    const p = presets[i];
+                    setKwSyncResult(`KW取得中... ${i + 1}/${presets.length} ${p.shop_name}`);
+                    try {
+                      const res = await api.get(`/api/report/ranking-keywords?shopName=${encodeURIComponent(p.shop_name)}`);
+                      if (res.data?.found && res.data.keywords?.length > 0) {
+                        const bestKw = res.data.ranks?.length > 0
+                          ? [...res.data.ranks].sort((a: any, b: any) => (a.rank || 999) - (b.rank || 999))[0]?.word || res.data.keywords[0]
+                          : res.data.keywords[0];
+                        // プリセットのキーワードを更新
+                        await fetch("/api/report/grid-ranking-presets", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ shops: [{ shopId: p.shop_id, shopName: p.shop_name, keyword: bestKw, gridSize: p.grid_size }] }),
+                        });
+                        // shop_keywordsにも保存
+                        await api.put("/api/report/shop-keywords", {
+                          shopId: p.shop_id,
+                          keywords: res.data.keywords,
+                          source: "sheet",
+                        });
+                        updated++;
+                      } else {
+                        failed++;
+                      }
+                    } catch {
+                      failed++;
+                    }
+                  }
+                  // プリセット再取得
+                  const refreshRes = await fetch("/api/report/grid-ranking-presets");
+                  const refreshData = await refreshRes.json();
+                  setPresets(refreshData.presets || []);
+                  setEstimate(refreshData.estimate || null);
+                  setKwSyncResult(`${updated}店舗のKWを更新しました${failed > 0 ? `（${failed}件見つからず）` : ""}`);
+                  setKwSyncing(false);
+                }}
+                disabled={kwSyncing || batchRunning}
+                className={`px-4 py-3 rounded-lg text-sm font-bold transition-all ${kwSyncing ? "bg-slate-200 text-slate-400" : "bg-purple-600 text-white hover:bg-purple-700"}`}
+              >
+                {kwSyncing ? "KW取得中..." : "KW一括取得"}
+              </button>
             </div>
           )}
-          {coordSyncResult && (
-            <p className={`text-sm font-medium ${coordSyncResult.includes("エラー") ? "text-red-600" : "text-blue-600"}`}>{coordSyncResult}</p>
+          {(coordSyncResult || kwSyncResult) && (
+            <div className="space-y-1">
+              {coordSyncResult && <p className={`text-sm font-medium ${coordSyncResult.includes("エラー") ? "text-red-600" : "text-blue-600"}`}>{coordSyncResult}</p>}
+              {kwSyncResult && <p className={`text-sm font-medium ${kwSyncResult.includes("見つからず") ? "text-orange-600" : "text-purple-600"}`}>{kwSyncResult}</p>}
+            </div>
           )}
 
           {presets.length > 0 && (
