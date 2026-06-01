@@ -140,7 +140,7 @@ export async function POST(request: NextRequest) {
     query = query.or("gbp_latitude.is.null,gbp_latitude.eq.0");
   }
 
-  const { data: shops } = await query.limit(100);
+  const { data: shops } = await query.limit(500);
   if (!shops || shops.length === 0) {
     return NextResponse.json({
       message: "座標未設定の店舗なし",

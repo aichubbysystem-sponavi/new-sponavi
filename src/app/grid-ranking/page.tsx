@@ -114,6 +114,8 @@ export default function GridRankingPage() {
   const [showPresetPanel, setShowPresetPanel] = useState(false);
   const [batchRunning, setBatchRunning] = useState(false);
   const [batchProgress, setBatchProgress] = useState("");
+  const [coordSyncing, setCoordSyncing] = useState(false);
+  const [coordSyncResult, setCoordSyncResult] = useState("");
 
   // プリセット読み込み
   useEffect(() => {
@@ -544,6 +546,44 @@ export default function GridRankingPage() {
             </div>
           ) : (
             <p className="text-sm text-slate-400">店舗が登録されていません。下の計測画面で店舗を選択し「いつもの店舗に追加」で登録できます。</p>
+          )}
+
+          {presets.length > 0 && (
+            <div className="flex gap-3">
+              <button
+                onClick={async () => {
+                  if (coordSyncing) return;
+                  setCoordSyncing(true);
+                  setCoordSyncResult("座標取得中...");
+                  try {
+                    // プリセット店舗の座標を一括取得
+                    let totalUpdated = 0;
+                    let totalErrors = 0;
+                    const batchSize = 100;
+                    // shopIdを指定せず全店舗対象（API側でgbp_latitude=null/0のみ処理）
+                    const res = await api.post("/api/report/sync-coordinates", {}, { timeout: 300000 });
+                    totalUpdated = res.data?.updated || 0;
+                    totalErrors = res.data?.errors || 0;
+                    if (totalUpdated > 0) {
+                      setCoordSyncResult(`${totalUpdated}店舗の座標を取得しました${totalErrors > 0 ? `（${totalErrors}件失敗）` : ""}`);
+                    } else {
+                      setCoordSyncResult("座標未設定の店舗はありません（全店舗設定済み）");
+                    }
+                  } catch (e: any) {
+                    setCoordSyncResult("座標取得エラー: " + (e?.message || "不明"));
+                  } finally {
+                    setCoordSyncing(false);
+                  }
+                }}
+                disabled={coordSyncing || batchRunning}
+                className={`px-4 py-3 rounded-lg text-sm font-bold transition-all ${coordSyncing ? "bg-slate-200 text-slate-400" : "bg-blue-600 text-white hover:bg-blue-700"}`}
+              >
+                {coordSyncing ? "座標取得中..." : "座標一括取得"}
+              </button>
+            </div>
+          )}
+          {coordSyncResult && (
+            <p className={`text-sm font-medium ${coordSyncResult.includes("エラー") ? "text-red-600" : "text-blue-600"}`}>{coordSyncResult}</p>
           )}
 
           {presets.length > 0 && (
