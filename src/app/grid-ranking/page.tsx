@@ -536,7 +536,20 @@ export default function GridRankingPage() {
     <div className="p-6 pt-20 max-w-[1400px] mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-[#003D6B]">多地点順位チェック</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-[#003D6B]">多地点順位チェック</h1>
+            <div className="relative group">
+              <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-slate-200 text-slate-500 text-xs font-bold cursor-help">?</span>
+              <div className="absolute left-0 top-7 z-50 hidden group-hover:block w-80 bg-slate-800 text-white text-xs rounded-lg p-3 shadow-lg leading-relaxed">
+                <p className="font-bold mb-1">多地点順位チェックとは？</p>
+                <p>店舗を中心にグリッド状（例: 7×7=49地点）の地点を生成し、各地点でのGoogle検索順位を計測します。エリアごとの順位分布を可視化できます。</p>
+                <p className="mt-2 font-bold mb-1">基本の使い方</p>
+                <p>1. 店舗を選択してキーワードを入力</p>
+                <p>2.「計測開始」で個別計測 or「いつもの店舗」に追加して一括計測</p>
+                <p>3. 結果はマップ+グリッドで表示、CSV/PNGで保存可能</p>
+              </div>
+            </div>
+          </div>
           <p className="text-sm text-gray-500">
             店舗を中心にグリッド状の地点を自動生成し、各地点でのキーワード順位を一括計測します。
           </p>
@@ -551,7 +564,22 @@ export default function GridRankingPage() {
       {showPresetPanel && (
         <div className="bg-white rounded-xl shadow-sm border p-5 space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-base font-bold text-[#003D6B]">いつも計測する店舗</h2>
+            <div className="flex items-center gap-1.5">
+              <h2 className="text-base font-bold text-[#003D6B]">いつも計測する店舗</h2>
+              <div className="relative group">
+                <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-slate-200 text-slate-500 text-[10px] font-bold cursor-help">?</span>
+                <div className="absolute left-0 top-6 z-50 hidden group-hover:block w-72 bg-slate-800 text-white text-xs rounded-lg p-3 shadow-lg leading-relaxed">
+                  <p className="font-bold mb-1.5">使い方</p>
+                  <p>1. 下の計測画面で店舗を選び「いつもの店舗に追加」</p>
+                  <p>2.「一括計測」で全店舗をまとめて計測</p>
+                  <p className="mt-2 font-bold mb-1">ステータスの見方</p>
+                  <p><span className="inline-block w-2 h-2 rounded-full bg-emerald-400 mr-1"></span>準備OK（座標+KW設定済み）</p>
+                  <p><span className="inline-block w-2 h-2 rounded-full bg-yellow-400 mr-1"></span>KW未設定（一括計測時に自動取得）</p>
+                  <p><span className="inline-block w-2 h-2 rounded-full bg-red-400 mr-1"></span>座標なし（一括計測時に自動取得）</p>
+                  <p className="mt-2 text-slate-300">座標・KWが不足していても「一括計測」を押せば自動で取得してから計測します。</p>
+                </div>
+              </div>
+            </div>
             {estimate && (
               <div className="text-xs text-slate-500">
                 月間: {estimate.totalRequests.toLocaleString()}リクエスト /
