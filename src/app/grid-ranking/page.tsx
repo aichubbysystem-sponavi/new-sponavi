@@ -558,11 +558,23 @@ export default function GridRankingPage() {
                   setBatchProgress(`${i + 1}/${presets.length} ${p.shop_name}`);
                   try {
                     // 店舗座標を取得
-                    const coordRes = await api.get(`/api/shop/${p.shop_id}`);
-                    const shopData = coordRes.data;
-                    const lat = shopData?.gbp_latitude || shopData?.GbpLatitude || 0;
-                    const lng = shopData?.gbp_longitude || shopData?.GbpLongitude || 0;
-                    if (!lat || !lng) continue;
+                    // Supabaseから座標取得（Go API経由だと失敗するケースがあるため）
+                    let lat = 0, lng = 0;
+                    try {
+                      const { createClient } = await import("@supabase/supabase-js");
+                      const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL || "", process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "");
+                      const { data: coordRow } = await sb.from("shops").select("gbp_latitude, gbp_longitude").eq("name", p.shop_name).not("gbp_latitude", "is", null).gt("gbp_latitude", 0).limit(1).maybeSingle();
+                      if (coordRow) { lat = coordRow.gbp_latitude || 0; lng = coordRow.gbp_longitude || 0; }
+                    } catch {}
+                    // Supabaseで見つからなければGo APIにフォールバック
+                    if (!lat || !lng) {
+                      try {
+                        const coordRes = await api.get(`/api/shop/${p.shop_id}`);
+                        lat = coordRes.data?.gbp_latitude || coordRes.data?.GbpLatitude || 0;
+                        lng = coordRes.data?.gbp_longitude || coordRes.data?.GbpLongitude || 0;
+                      } catch {}
+                    }
+                    if (!lat || !lng) { setBatchProgress(`${i + 1}/${presets.length} ${p.shop_name} - 座標なしスキップ`); continue; }
 
                     // キーワード取得（プリセット設定 or シートから自動選定）
                     let kw = p.keyword;
