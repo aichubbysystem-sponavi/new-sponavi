@@ -158,24 +158,13 @@ export async function PUT(request: NextRequest) {
  * ?debug=1 で全grid_ranking_logsのshop_id一覧を返す
  */
 export async function GET(request: NextRequest) {
-  const supabase = getSupabase();
-  const debug = request.nextUrl.searchParams.get("debug");
-
-  if (debug === "1") {
-    const { data: allLogs } = await supabase
-      .from("grid_ranking_logs")
-      .select("shop_id, keyword, measured_at")
-      .order("measured_at", { ascending: false })
-      .limit(50);
-    // shop_idからshop名を逆引き
-    const shopIds = Array.from(new Set((allLogs || []).map(l => l.shop_id)));
-    const shopNames: Record<string, string> = {};
-    for (const id of shopIds) {
-      const { data: shop } = await supabase.from("shops").select("name").eq("id", id).maybeSingle();
-      shopNames[id] = shop?.name || "NOT_FOUND";
-    }
-    return NextResponse.json({ logs: allLogs, shopNames });
+  const { verifyAuth } = await import("@/lib/auth-verify");
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) {
+    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   }
+
+  const supabase = getSupabase();
 
   let shopId = request.nextUrl.searchParams.get("shopId");
   const shopName = request.nextUrl.searchParams.get("shopName");
