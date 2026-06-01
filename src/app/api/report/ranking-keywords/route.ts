@@ -277,21 +277,20 @@ function parseSheetData(headerText: string, dataText: string, targetMonth: strin
 
   const headerRow = parseCSVRow(headerLines[0]);
 
-  // 動的にKW列を検出（固定インデックスではなく、ヘッダー名で判定）
+  // KW列の範囲: R~V列(17~21), Z~AO列(25~40) のみ対象
+  const KW_RANGES: [number, number][] = [[17, 21], [25, 40]]; // 0始まり
+  const isKwCol = (col: number) => KW_RANGES.some(([start, end]) => col >= start && col <= end);
+
   const kwIndices: number[] = [];
   for (let i = 0; i < headerRow.length; i++) {
+    if (!isKwCol(i)) continue;
     const cell = (headerRow[i] || "").trim();
     if (!cell) continue;
     if (NON_KW_HEADERS.has(cell)) continue;
     if (cell.includes("前月比")) continue;
-    // 注記・記号セルを除外
     if (cell.includes("※") || cell.includes("#REF") || cell.includes("#VALUE") || cell.includes("#DIV")) continue;
-    // 数値列（座標等）を除外
     if (/^\d+(\.\d+)?$/.test(cell)) continue;
-    // 年月形式を除外（"2025年1月"等）
     if (/^\d{4}年\d{1,2}月$/.test(cell)) continue;
-    // A列は店舗名なのでスキップ（ただし名前でフィルタ済み）
-    if (i === 0) continue;
     kwIndices.push(i);
   }
 
