@@ -68,10 +68,16 @@ function generateGridFrom3x3(centerPoints: { row: number; col: number; rank: num
           const d = Math.max(Math.abs(row - cp.row), Math.abs(col - cp.col));
           if (d < minDist) { minDist = d; nearestRank = cp.rank; }
         }
-        if (dist === 2) rank = nearestRank + randInt(3, 7);
-        else rank = nearestRank + randInt(7, 15);
+        // 最寄りが圏外(0)なら推定も圏外
+        if (nearestRank <= 0) {
+          rank = 0;
+        } else if (dist === 2) {
+          rank = nearestRank + randInt(3, 7);
+        } else {
+          rank = nearestRank + randInt(7, 15);
+        }
       }
-      if (rank > 100 || rank <= 0) rank = 0;
+      if (rank > 100) rank = 0;
       grid.push({ lat: 0, lng: 0, rank, row, col });
     }
   }
