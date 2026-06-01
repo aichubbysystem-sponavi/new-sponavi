@@ -199,3 +199,34 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json(data || []);
 }
+
+/**
+ * DELETE /api/report/grid-ranking
+ * 計測履歴を削除
+ */
+export async function DELETE(request: NextRequest) {
+  const { verifyAuth } = await import("@/lib/auth-verify");
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) {
+    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  }
+
+  const body = await request.json();
+  const { id, shopId, keyword } = body as { id?: string; shopId?: string; keyword?: string };
+
+  const supabase = getSupabase();
+
+  if (id) {
+    const { error } = await supabase.from("grid_ranking_logs").delete().eq("id", id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ success: true });
+  }
+
+  if (shopId && keyword) {
+    const { error, count } = await supabase.from("grid_ranking_logs").delete().eq("shop_id", shopId).eq("keyword", keyword);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ success: true, deleted: count });
+  }
+
+  return NextResponse.json({ error: "idまたはshopId+keywordが必要です" }, { status: 400 });
+}

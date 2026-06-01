@@ -811,11 +811,10 @@ export default function GridRankingPage() {
                     setEstimate(refreshData.estimate || null);
                   } catch {}
 
-                  // Phase 3: 計測
-                  let completed = 0, skipped = 0;
+                  // Phase 3: 全キーワード計測
+                  let completed = 0, skipped = 0, totalKws = 0;
                   for (let i = 0; i < latestPresets.length; i++) {
                     const p = latestPresets[i];
-                    setBatchProgress(`Phase 3/3: ${i + 1}/${latestPresets.length} ${p.shop_name}`);
                     try {
                       let lat = 0, lng = 0;
                       try {
@@ -826,26 +825,32 @@ export default function GridRankingPage() {
                       } catch {}
                       if (!lat || !lng) { skipped++; continue; }
 
-                      let kw = p.keyword;
-                      if (!kw && p.all_keywords && p.all_keywords.length > 0) kw = p.all_keywords[0];
-                      if (!kw) { skipped++; continue; }
+                      // 全キーワードを計測（all_keywordsがあればそれを、なければprimary KWのみ）
+                      const keywords = p.all_keywords && p.all_keywords.length > 0
+                        ? p.all_keywords
+                        : (p.keyword ? [p.keyword] : []);
+                      if (keywords.length === 0) { skipped++; continue; }
 
-                      const size = p.grid_size || 7;
-                      const points = generateGrid(lat, lng, size, 1000);
-                      for (let j = 0; j < points.length; j++) {
-                        const pt = points[j];
-                        setBatchProgress(`Phase 3/3: ${i + 1}/${latestPresets.length} ${p.shop_name} (${j + 1}/${points.length})`);
-                        try {
-                          const res = await api.post("/api/report/grid-ranking", {
-                            shopId: p.shop_id, keyword: kw, lat: pt.lat, lng: pt.lng,
-                          }, { timeout: 15000 });
-                          points[j] = { ...pt, rank: res.data?.rank || 0 };
-                        } catch { points[j] = { ...pt, rank: 0 }; }
-                        await new Promise(r => setTimeout(r, 300));
+                      for (let ki = 0; ki < keywords.length; ki++) {
+                        const kw = keywords[ki];
+                        const size = p.grid_size || 7;
+                        const points = generateGrid(lat, lng, size, 1000);
+                        for (let j = 0; j < points.length; j++) {
+                          const pt = points[j];
+                          setBatchProgress(`${i + 1}/${latestPresets.length} ${p.shop_name} [KW ${ki + 1}/${keywords.length}] (${j + 1}/${points.length})`);
+                          try {
+                            const res = await api.post("/api/report/grid-ranking", {
+                              shopId: p.shop_id, keyword: kw, lat: pt.lat, lng: pt.lng,
+                            }, { timeout: 15000 });
+                            points[j] = { ...pt, rank: res.data?.rank || 0 };
+                          } catch { points[j] = { ...pt, rank: 0 }; }
+                          await new Promise(r => setTimeout(r, 300));
+                        }
+                        await api.put("/api/report/grid-ranking", {
+                          shopId: p.shop_id, keyword: kw, gridResults: points, gridSize: size, interval: 1000,
+                        });
+                        totalKws++;
                       }
-                      await api.put("/api/report/grid-ranking", {
-                        shopId: p.shop_id, keyword: kw, gridResults: points, gridSize: size, interval: 1000,
-                      });
                       completed++;
                     } catch {}
                     await new Promise(r => setTimeout(r, 1000));
@@ -860,7 +865,7 @@ export default function GridRankingPage() {
                   } catch {}
 
                   setBatchRunning(false);
-                  setBatchProgress(`✓ ${completed}店舗の計測が完了しました${skipped > 0 ? `（${skipped}件スキップ）` : ""}`);
+                  setBatchProgress(`✓ ${completed}店舗 × ${totalKws}KWの計測が完了しました${skipped > 0 ? `（${skipped}件スキップ）` : ""}`);
                 }}
                 disabled={batchRunning}
                 className={`w-full py-3.5 rounded-lg text-sm font-bold transition-all ${batchRunning ? "bg-slate-200 text-slate-500" : "bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm"}`}
@@ -1209,10 +1214,21 @@ export default function GridRankingPage() {
                           {top3}地点
                         </span>
                       </td>
-                      <td className="px-4 py-2.5">
+                      <td className="px-4 py-2.5 flex items-center gap-2">
                         {isSelected && (
                           <span className="text-xs text-blue-600 font-medium">表示中</span>
                         )}
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (!confirm(`この計測履歴を削除しますか？\nKW: ${log.keyword}`)) return;
+                            try {
+                              await api.delete("/api/report/grid-ranking", { data: { id: log.id } });
+                              fetchHistory();
+                            } catch {}
+                          }}
+                          className="text-xs text-red-400 hover:text-red-600"
+                        >削除</button>
                       </td>
                     </tr>
                   );
