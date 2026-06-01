@@ -129,13 +129,25 @@ export default function GridRankingPage() {
   const [kwSyncing, setKwSyncing] = useState(false);
   const [kwSyncResult, setKwSyncResult] = useState("");
 
-  // プリセット読み込み
-  useEffect(() => {
-    fetch("/api/report/grid-ranking-presets").then(r => r.json()).then(data => {
-      setPresets(data.presets || []);
-      setEstimate(data.estimate || null);
-    }).catch(() => {});
+  // プリセット読み込み（空データで上書きしないよう保護）
+  const refreshPresets = useCallback(async () => {
+    try {
+      const res = await fetch("/api/report/grid-ranking-presets");
+      const data = await res.json();
+      if (data.presets && data.presets.length > 0) {
+        setPresets(data.presets);
+        setEstimate(data.estimate || null);
+      } else if (data.presets && data.presets.length === 0) {
+        // 本当に0件の場合のみクリア（エラーレスポンスではないことを確認）
+        if (!data.error) {
+          setPresets([]);
+          setEstimate(data.estimate || null);
+        }
+      }
+    } catch {}
   }, []);
+
+  useEffect(() => { refreshPresets(); }, [refreshPresets]);
 
   // プリセットに追加（シートからKW自動取得）
   const [addingPreset, setAddingPreset] = useState(false);
@@ -162,10 +174,7 @@ export default function GridRankingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ shops: [{ shopId, shopName, keyword: bestKw, gridSize: size || 7 }] }),
       });
-      const res = await fetch("/api/report/grid-ranking-presets");
-      const data = await res.json();
-      setPresets(data.presets || []);
-      setEstimate(data.estimate || null);
+      await refreshPresets();
       setShowPresetPanel(true);
     } finally {
       setAddingPreset(false);
@@ -179,10 +188,7 @@ export default function GridRankingPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ shopIds: [shopId] }),
     });
-    const res = await fetch("/api/report/grid-ranking-presets");
-    const data = await res.json();
-    setPresets(data.presets || []);
-    setEstimate(data.estimate || null);
+    await refreshPresets();
   };
   const [selectedHistory, setSelectedHistory] = useState<GridLog | null>(null);
   const [error, setError] = useState("");
@@ -627,10 +633,7 @@ export default function GridRankingPage() {
                               headers: { "Content-Type": "application/json" },
                               body: JSON.stringify({ shops: [{ shopId: p.shop_id, shopName: p.shop_name, keyword: newKw, gridSize: p.grid_size }] }),
                             });
-                            const res = await fetch("/api/report/grid-ranking-presets");
-                            const data = await res.json();
-                            setPresets(data.presets || []);
-                            setEstimate(data.estimate || null);
+                            await refreshPresets();
                           }}
                           className="w-full text-xs border rounded px-1.5 py-1 text-indigo-600"
                         >
@@ -699,10 +702,7 @@ export default function GridRankingPage() {
                       setCoordSyncResult(totalUpdated > 0
                         ? `${totalUpdated}店舗の座標を取得${totalErrors > 0 ? `（${totalErrors}件失敗）` : ""}`
                         : "全店舗設定済み");
-                      // プリセット再取得（ステータス更新）
-                      const refreshRes = await fetch("/api/report/grid-ranking-presets");
-                      const refreshData = await refreshRes.json();
-                      setPresets(refreshData.presets || []);
+                      await refreshPresets();
                     } catch (e: any) {
                       setCoordSyncResult("エラー: " + (e?.message || "不明"));
                     } finally { setCoordSyncing(false); }
@@ -737,10 +737,7 @@ export default function GridRankingPage() {
                         } else { failed++; }
                       } catch { failed++; }
                     }
-                    const refreshRes = await fetch("/api/report/grid-ranking-presets");
-                    const refreshData = await refreshRes.json();
-                    setPresets(refreshData.presets || []);
-                    setEstimate(refreshData.estimate || null);
+                    await refreshPresets();
                     setKwSyncResult(`${updated}件更新${failed > 0 ? `（${failed}件見つからず）` : ""}`);
                     setKwSyncing(false);
                   }}
@@ -807,9 +804,11 @@ export default function GridRankingPage() {
                   try {
                     const refreshRes = await fetch("/api/report/grid-ranking-presets");
                     const refreshData = await refreshRes.json();
-                    latestPresets = refreshData.presets || [];
-                    setPresets(latestPresets);
-                    setEstimate(refreshData.estimate || null);
+                    if (refreshData.presets && refreshData.presets.length > 0) {
+                      latestPresets = refreshData.presets;
+                      setPresets(latestPresets);
+                      setEstimate(refreshData.estimate || null);
+                    }
                   } catch {}
 
                   // Phase 3: メインKW=7×7フル計測、サブKW=3×3実測→7×7推定生成
@@ -846,12 +845,23 @@ export default function GridRankingPage() {
                           const label = isMain ? "7x7" : "3x3";
                           setBatchProgress(`${i + 1}/${latestPresets.length} ${p.shop_name} [KW ${ki + 1}/${keywords.length} ${label}] (${j + 1}/${points.length})`);
                           try {
-                            const res = await api.post("/api/report/grid-ranking", {
-                              shopId: p.shop_id, keyword: kw, lat: pt.lat, lng: pt.lng,
-                            }, { timeout: 15000 });
-                            points[j] = { ...pt, rank: res.data?.rank || 0 };
+                            let res;
+                            for (let retry = 0; retry < 3; retry++) {
+                              try {
+                                res = await api.post("/api/report/grid-ranking", {
+                                  shopId: p.shop_id, keyword: kw, lat: pt.lat, lng: pt.lng,
+                                }, { timeout: 15000 });
+                                break;
+                              } catch (e: any) {
+                                if (e?.response?.status === 429 && retry < 2) {
+                                  setBatchProgress(`${i + 1}/${latestPresets.length} ${p.shop_name} [KW ${ki + 1}/${keywords.length}] レート制限待機中...`);
+                                  await new Promise(r => setTimeout(r, 10000 * (retry + 1)));
+                                } else { throw e; }
+                              }
+                            }
+                            points[j] = { ...pt, rank: res?.data?.rank || 0 };
                           } catch { points[j] = { ...pt, rank: 0 }; }
-                          await new Promise(r => setTimeout(r, 300));
+                          await new Promise(r => setTimeout(r, 1000));
                         }
 
                         if (isMain) {
@@ -906,12 +916,7 @@ export default function GridRankingPage() {
                   }
 
                   // 最終結果を反映
-                  try {
-                    const finalRes = await fetch("/api/report/grid-ranking-presets");
-                    const finalData = await finalRes.json();
-                    setPresets(finalData.presets || []);
-                    setEstimate(finalData.estimate || null);
-                  } catch {}
+                  await refreshPresets();
 
                   setBatchRunning(false);
                   setBatchProgress(`✓ ${completed}店舗 × ${totalKws}KWの計測完了${skipped > 0 ? `（${skipped}件スキップ）` : ""}`);
