@@ -76,7 +76,14 @@ export default function ReviewAnalysisPage() {
       } catch (err: any) {
         allResults.push({ shopId: shop.id, shopName: shop.name, status: "error" });
         setResults([...allResults]);
-        // 続行
+        // 429の場合は10秒待機してから続行
+        if (err?.response?.status === 429) {
+          await new Promise(r => setTimeout(r, 10000));
+        }
+      }
+      // レート制限回避: 3秒間隔
+      if (i < selectedShops.length - 1) {
+        await new Promise(r => setTimeout(r, 3000));
       }
     }
 
