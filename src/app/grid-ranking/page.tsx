@@ -191,6 +191,7 @@ export default function GridRankingPage() {
     await refreshPresets();
   };
   const [selectedHistory, setSelectedHistory] = useState<GridLog | null>(null);
+  const [historyMonth, setHistoryMonth] = useState("all");
   const [error, setError] = useState("");
   const [aborted, setAborted] = useState(false);
   const [sheetLoading, setSheetLoading] = useState(false);
@@ -1234,10 +1235,38 @@ export default function GridRankingPage() {
 
       {/* 計測履歴 */}
       <div className="bg-white rounded-xl border overflow-hidden">
-        <div className="p-4 border-b">
+        <div className="p-4 border-b flex items-center justify-between">
           <h3 className="font-semibold text-[#003D6B]">計測履歴</h3>
+          {history.length > 0 && (() => {
+            const months = Array.from(new Set(history.map(l => {
+              const d = new Date(l.measured_at);
+              return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+            }))).sort().reverse();
+            return (
+              <select
+                value={historyMonth}
+                onChange={(e) => setHistoryMonth(e.target.value)}
+                className="text-xs border rounded px-2 py-1.5 text-slate-600"
+              >
+                <option value="all">全期間（{history.length}件）</option>
+                {months.map(m => {
+                  const count = history.filter(l => {
+                    const d = new Date(l.measured_at);
+                    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}` === m;
+                  }).length;
+                  const [y, mo] = m.split("-");
+                  return <option key={m} value={m}>{y}年{parseInt(mo)}月（{count}件）</option>;
+                })}
+              </select>
+            );
+          })()}
         </div>
-        {history.length > 0 ? (
+        {(() => {
+          const filtered = historyMonth === "all" ? history : history.filter(l => {
+            const d = new Date(l.measured_at);
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}` === historyMonth;
+          });
+          return filtered.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50">
@@ -1252,7 +1281,7 @@ export default function GridRankingPage() {
                 </tr>
               </thead>
               <tbody>
-                {history.map((log) => {
+                {filtered.map((log) => {
                   const results = log.results || [];
                   const avg = avgRank(results);
                   const top3 = results.filter((r) => r.rank > 0 && r.rank <= 3).length;
@@ -1316,8 +1345,9 @@ export default function GridRankingPage() {
             </table>
           </div>
         ) : (
-          <p className="text-gray-400 text-sm text-center py-8">計測履歴はありません</p>
-        )}
+          <p className="text-gray-400 text-sm text-center py-8">{historyMonth === "all" ? "計測履歴はありません" : "この月の計測履歴はありません"}</p>
+        );
+        })()}
       </div>
     </div>
   );
