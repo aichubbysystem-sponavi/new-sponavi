@@ -273,8 +273,8 @@ function parseSheetData(headerText: string, dataText: string, targetMonth: strin
 
   const headerRow = parseCSVRow(headerLines[0]);
 
-  // KW列の範囲: R~V列(17~21), Z~AO列(25~40) のみ対象
-  const KW_RANGES: [number, number][] = [[17, 21], [25, 40]]; // 0始まり
+  // KW列の範囲: R~W列(17~22), Z~AO列(25~40) のみ対象
+  const KW_RANGES: [number, number][] = [[17, 22], [25, 40]]; // 0始まり
   const isKwCol = (col: number) => KW_RANGES.some(([start, end]) => col >= start && col <= end);
 
   const kwIndices: number[] = [];
