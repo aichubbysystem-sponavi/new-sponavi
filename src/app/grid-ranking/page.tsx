@@ -625,23 +625,26 @@ export default function GridRankingPage() {
                     {/* KW選択 */}
                     <div className="w-[200px]">
                       {allKws.length > 1 ? (
-                        <select
-                          value={p.keyword || ""}
-                          onChange={async (e) => {
-                            const newKw = e.target.value;
-                            await fetch("/api/report/grid-ranking-presets", {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ shops: [{ shopId: p.shop_id, shopName: p.shop_name, keyword: newKw, gridSize: p.grid_size }] }),
-                            });
-                            await refreshPresets();
-                          }}
-                          className="w-full text-xs border rounded px-1.5 py-1 text-indigo-600"
-                        >
-                          {allKws.map(kw => (
-                            <option key={kw} value={kw}>{kw}</option>
-                          ))}
-                        </select>
+                        <>
+                          <select
+                            value={p.keyword || ""}
+                            onChange={async (e) => {
+                              const newKw = e.target.value;
+                              await fetch("/api/report/grid-ranking-presets", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ shops: [{ shopId: p.shop_id, shopName: p.shop_name, keyword: newKw, gridSize: p.grid_size }] }),
+                              });
+                              await refreshPresets();
+                            }}
+                            className="w-full text-xs border rounded px-1.5 py-1 text-indigo-600"
+                          >
+                            {allKws.map(kw => (
+                              <option key={kw} value={kw}>{kw}</option>
+                            ))}
+                          </select>
+                          <span className="text-[10px] text-slate-400 mt-0.5 block">他{allKws.length - 1}KWは3×3で計測</span>
+                        </>
                       ) : p.keyword ? (
                         <span className="text-xs text-indigo-500 truncate block">{p.keyword}</span>
                       ) : (
