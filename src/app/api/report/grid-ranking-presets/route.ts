@@ -22,6 +22,19 @@ export async function GET() {
     .order("created_at", { ascending: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  // 各店舗のshop_keywordsも取得して付与
+  const shopIds = (data || []).map((p: any) => p.shop_id);
+  const { data: kwData } = shopIds.length > 0
+    ? await supabase.from("shop_keywords").select("shop_id, keywords").in("shop_id", shopIds)
+    : { data: [] };
+  const kwMap = new Map<string, string[]>();
+  for (const kw of (kwData || [])) {
+    kwMap.set(kw.shop_id, kw.keywords || []);
+  }
+  for (const p of (data || [])) {
+    (p as any).all_keywords = kwMap.get(p.shop_id) || [];
+  }
+
   // 月額コスト見積もり
   let totalRequests = 0;
   for (const p of (data || [])) {

@@ -87,6 +87,7 @@ interface Preset {
   shop_name: string;
   keyword: string | null;
   grid_size: number;
+  all_keywords?: string[];
 }
 
 interface CostEstimate {
@@ -534,17 +535,45 @@ export default function GridRankingPage() {
 
           {presets.length > 0 ? (
             <div className="space-y-2 max-h-60 overflow-y-auto">
-              {presets.map(p => (
-                <div key={p.id} className="flex items-center justify-between py-2 px-3 bg-slate-50 rounded-lg">
-                  <div>
-                    <span className="text-sm font-medium text-slate-800">{p.shop_name}</span>
-                    <span className="text-xs text-slate-400 ml-2">{p.grid_size}×{p.grid_size}</span>
-                    {p.keyword && <span className="text-xs text-indigo-500 ml-2">KW: {p.keyword}</span>}
+              {presets.map(p => {
+                const allKws = p.all_keywords && p.all_keywords.length > 0 ? p.all_keywords : (p.keyword ? [p.keyword] : []);
+                return (
+                  <div key={p.id} className="flex items-center justify-between py-2 px-3 bg-slate-50 rounded-lg gap-2">
+                    <div className="flex items-center gap-2 flex-wrap min-w-0">
+                      <span className="text-sm font-medium text-slate-800 whitespace-nowrap">{p.shop_name}</span>
+                      <span className="text-xs text-slate-400">{p.grid_size}×{p.grid_size}</span>
+                      {allKws.length > 1 ? (
+                        <select
+                          value={p.keyword || ""}
+                          onChange={async (e) => {
+                            const newKw = e.target.value;
+                            await fetch("/api/report/grid-ranking-presets", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ shops: [{ shopId: p.shop_id, shopName: p.shop_name, keyword: newKw, gridSize: p.grid_size }] }),
+                            });
+                            const res = await fetch("/api/report/grid-ranking-presets");
+                            const data = await res.json();
+                            setPresets(data.presets || []);
+                            setEstimate(data.estimate || null);
+                          }}
+                          className="text-xs border rounded px-1.5 py-0.5 text-indigo-600 max-w-[200px]"
+                        >
+                          {allKws.map(kw => (
+                            <option key={kw} value={kw}>{kw}</option>
+                          ))}
+                        </select>
+                      ) : p.keyword ? (
+                        <span className="text-xs text-indigo-500">KW: {p.keyword}</span>
+                      ) : (
+                        <span className="text-xs text-slate-400">KW未設定</span>
+                      )}
+                    </div>
+                    <button onClick={() => removeFromPreset(p.shop_id)}
+                      className="text-xs text-red-400 hover:text-red-600 whitespace-nowrap">削除</button>
                   </div>
-                  <button onClick={() => removeFromPreset(p.shop_id)}
-                    className="text-xs text-red-400 hover:text-red-600">削除</button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <p className="text-sm text-slate-400">店舗が登録されていません。下の計測画面で店舗を選択し「いつもの店舗に追加」で登録できます。</p>
