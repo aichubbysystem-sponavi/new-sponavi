@@ -900,7 +900,7 @@ export default function GridRankingPage() {
                               shopId: p.shop_id,
                               shopName: p.shop_name,
                               keyword: kw,
-                              month: new Date().toISOString().slice(0, 7),
+                              month: `${new Date().getFullYear()}/${new Date().getMonth() + 1}`,
                               centerPoints,
                               useFrom3x3: true,
                             });
