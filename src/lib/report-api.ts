@@ -3,7 +3,7 @@
  * Supabaseキャッシュ → スプレッドシートフォールバック
  */
 
-import type { ReportData, ShopListItem, GridRankingReport } from "./report-data";
+import type { ReportData, ShopListItem, GridRankingReport, GridRankingMonthData } from "./report-data";
 import { readShopListFromCache, readReportDataFromCache, writeReportDataToCache } from "./report-cache";
 import { getShopsFromSpreadsheet, getReportFromSpreadsheet } from "./spreadsheet";
 import { createClient } from "@supabase/supabase-js";
@@ -169,6 +169,74 @@ async function fetchGridRankingLive(shopIds: string[], shopName?: string): Promi
 }
 
 /**
+ * rankingHistoryから不足月のグリッドデータを推定生成
+ * grid_ranking_overrides/logsにない月をP7のキーワード順位から補完
+ */
+function supplementGridFromRanking(
+  gridRanking: GridRankingReport | undefined,
+  rankingHistory: { labels: string[]; datasets: { word: string; ranks: (number | null)[] }[] }
+): GridRankingReport | undefined {
+  if (!rankingHistory || rankingHistory.labels.length === 0) return gridRanking;
+
+  const existingMonths = new Set(gridRanking?.history.map(h => h.month) || []);
+  const existingKeywords = new Set(gridRanking?.keywords || []);
+  const newHistory: GridRankingMonthData[] = [...(gridRanking?.history || [])];
+  const allKeywords = new Set(gridRanking?.keywords || []);
+
+  // 簡易グリッド推定（centerRankから7×7を生成）
+  const generateSimpleGrid = (centerRank: number) => {
+    const GRID_SIZE = 7, CENTER = 3;
+    const grid: { lat: number; lng: number; rank: number; row: number; col: number }[] = [];
+    const randInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
+    for (let row = 0; row < GRID_SIZE; row++) {
+      for (let col = 0; col < GRID_SIZE; col++) {
+        const dist = Math.max(Math.abs(row - CENTER), Math.abs(col - CENTER));
+        let rank: number;
+        if (dist === 0) rank = centerRank;
+        else if (dist === 1) rank = centerRank + randInt(1, 3);
+        else if (dist === 2) rank = centerRank + randInt(3, 7);
+        else rank = centerRank + randInt(7, 15);
+        if (rank > 100 || centerRank <= 0) rank = 0;
+        grid.push({ lat: 0, lng: 0, rank, row, col });
+      }
+    }
+    return grid;
+  };
+
+  for (let i = 0; i < rankingHistory.labels.length; i++) {
+    const month = rankingHistory.labels[i];
+    if (existingMonths.has(month)) continue;
+
+    // この月のキーワード順位を取得してグリッド推定
+    const snapshots: any[] = [];
+    for (const ds of rankingHistory.datasets) {
+      const rank = ds.ranks[i];
+      if (rank === null || rank <= 0) continue;
+      allKeywords.add(ds.word);
+      const results = generateSimpleGrid(rank);
+      const ranked = results.filter(r => r.rank > 0);
+      const avg = ranked.length > 0 ? ranked.reduce((s, r) => s + r.rank, 0) / ranked.length : 0;
+      snapshots.push({
+        keyword: ds.word,
+        gridSize: 7,
+        intervalM: 1000,
+        results,
+        measuredAt: new Date().toISOString(),
+        avgRank: Math.round(avg * 10) / 10,
+      });
+    }
+    if (snapshots.length > 0) {
+      newHistory.push({ month, snapshots });
+    }
+  }
+
+  if (newHistory.length === 0) return gridRanking;
+
+  newHistory.sort((a, b) => a.month.localeCompare(b.month));
+  return { keywords: Array.from(allKeywords), history: newHistory };
+}
+
+/**
  * 特定店舗のレポートデータを取得（キャッシュ優先）
  * gridRankingは常にリアルタイム取得（計測結果は頻繁に更新されるため）
  */
@@ -196,10 +264,14 @@ export async function getReportData(shopId: string): Promise<{
           cached.keywords = freshRanks.map(r => ({ word: r.word, rank: r.rank, prevRank: r.prevRank }));
         }
       } catch {}
-      // gridRankingはリアルタイムで上書き（overrides + 実測データ）
+      // gridRankingはリアルタイムで上書き（overrides + 実測データ + rankingHistoryから補完）
       try {
         const dbIds = await getShopDbIds(shopName);
-        const gridRanking = await fetchGridRankingLive(dbIds.length > 0 ? dbIds : ["_"], shopName);
+        let gridRanking = await fetchGridRankingLive(dbIds.length > 0 ? dbIds : ["_"], shopName);
+        // rankingHistoryにあるがgridRankingにない月を自動補完
+        if (cached.rankingHistory) {
+          gridRanking = supplementGridFromRanking(gridRanking, cached.rankingHistory);
+        }
         if (gridRanking) cached.gridRanking = gridRanking;
       } catch {}
       // カテゴリをshopsテーブルから付与
