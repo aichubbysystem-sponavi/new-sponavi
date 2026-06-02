@@ -500,7 +500,7 @@ export default function ReportClient({
   };
 
   // ── Page count ──
-  let totalPages = 7; // P1,P2(月次),P3-P5(グラフ),口コミ分析,AIコメント
+  let totalPages = 8; // P1,P2(月次),P3-P5(グラフ),口コミ分析,AIコメント(2ページ)
   if (hasReviews) totalPages += 2; // P9(口コミ件数推移), P10(月間増加数)
   if (showKeywords) totalPages++;
   if (showRankingHistory) totalPages++;
@@ -1547,36 +1547,60 @@ export default function ReportClient({
         </div>
       </div>
 
-      {/* ════ P11: 担当者コメント ════ */}
+      {/* ════ P11: AIコメント前半（①②③） ════ */}
       {(() => { pageNum++; return null; })()}
       <div style={slideStyle} className="slide">
-        <div style={slideBarStyle}><span>{shop.name} — AIによるコメント</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBarStyle}><span>{shop.name} — AIによるコメント（1/2）</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={stitleStyle}>AIによるコメント</div>
           <div style={{ background: "linear-gradient(135deg,#f0f4ff,#fff)", border: "2px solid #0f3460", borderRadius: 14, padding: "28px 32px", flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", wordBreak: "break-word" }}>
             <h3 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", marginBottom: 16 }}>{curLabel} 総評</h3>
             <div style={{ margin: 0 }}>
-              {(comments || []).map((c, i) => {
-                // コメント内の評価値をshop.rating（P13と同じ公式値）で強制置換
+              {(comments || []).slice(0, 3).map((c, i) => {
                 let fixedComment = c;
                 if (shop.rating > 0) {
                   fixedComment = fixedComment.replace(/\d\.\d(\s*\/\s*5\.0)/g, `${shop.rating}$1`);
                 }
-                // コメント内の番号付きリストを改行して見やすくする
-                // ①②③④ 形式
                 fixedComment = fixedComment.replace(/([^（(])([①②③④⑤⑥⑦⑧⑨⑩])/g, "$1<br>$2");
-                // (1)(2)(3)(4) 形式（文頭以外）
                 fixedComment = fixedComment.replace(/(.)\s*(\(\d+\))/g, "$1<br>$2");
                 return (
-                <p key={i} style={{ fontSize: 14, lineHeight: 2, color: "#444", margin: "0 0 12px 0" }}>
+                <p key={i} style={{ fontSize: 14, lineHeight: 2, color: "#444", margin: "0 0 16px 0" }}>
                   <span style={{ fontWeight: 700, color: "#0f3460", marginRight: 8 }}>{"①②③④⑤⑥⑦⑧⑨⑩"[i] || `${i + 1}.`}</span>
                   <span dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(fixedComment, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
                 </p>
                 );
               })}
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ════ P12: AIコメント後半（④⑤）+ メモ ════ */}
+      {(() => { pageNum++; return null; })()}
+      <div style={slideStyle} className="slide">
+        <div style={slideBarStyle}><span>{shop.name} — AIによるコメント（2/2）</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBodyStyle}>
+          <div style={stitleStyle}>AIによるコメント（続き）</div>
+          <div style={{ background: "linear-gradient(135deg,#f0f4ff,#fff)", border: "2px solid #0f3460", borderRadius: 14, padding: "28px 32px", flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", wordBreak: "break-word" }}>
+            <div style={{ margin: 0 }}>
+              {(comments || []).slice(3).map((c, i) => {
+                const globalIdx = i + 3;
+                let fixedComment = c;
+                if (shop.rating > 0) {
+                  fixedComment = fixedComment.replace(/\d\.\d(\s*\/\s*5\.0)/g, `${shop.rating}$1`);
+                }
+                fixedComment = fixedComment.replace(/([^（(])([①②③④⑤⑥⑦⑧⑨⑩])/g, "$1<br>$2");
+                fixedComment = fixedComment.replace(/(.)\s*(\(\d+\))/g, "$1<br>$2");
+                return (
+                <p key={globalIdx} style={{ fontSize: 14, lineHeight: 2, color: "#444", margin: "0 0 16px 0" }}>
+                  <span style={{ fontWeight: 700, color: "#0f3460", marginRight: 8 }}>{"①②③④⑤⑥⑦⑧⑨⑩"[globalIdx] || `${globalIdx + 1}.`}</span>
+                  <span dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(fixedComment, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
+                </p>
+                );
+              })}
+            </div>
             {/* メモ欄 */}
-            <div style={{ marginTop: 16, borderTop: "1px solid #dde", paddingTop: 12 }}>
+            <div style={{ marginTop: "auto", borderTop: "1px solid #dde", paddingTop: 12 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                 <span style={{ fontSize: 12, fontWeight: 600, color: "#0f3460" }}>メモ（担当者用）</span>
                 <div style={{ display: "flex", gap: 6 }}>
