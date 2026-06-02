@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-// 順位計測シート（2つ）
+// 順位計測シート（3つ）
 const SHEETS = [
   { id: "1JpehMxL2I-fgef1sckNaY8RIUDIknvmT2OqhHj0my1k", label: "Sheet1", useSheetName: true },
   { id: "10hvP7iSEyst0Bp_96eVsjicM4_qxVfG0BmMkDgFyg-Q", label: "Sheet2", useSheetName: false },
+  { id: "1em-V1c4rJnoG-rqpdLGaFrqz8kQKepvHABt8NLOvvtE", label: "Sheet3", useSheetName: false }, // KW=F列〜
 ];
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
@@ -64,6 +65,27 @@ export async function GET(request: NextRequest) {
           matchedTab: matchedTab.name,
           matchedMonth: result.matchedMonth,
           source: "sheet2",
+        });
+      }
+    }
+  } catch {}
+
+  // Sheet3: KW=F列〜、地域別行あり（フォールバック）
+  try {
+    const tabMap3 = await fetchTabGidMap(SHEETS[2].id);
+    const matched3 = findMatchingTabs(shopName, tabMap3);
+    for (const matchedTab of matched3) {
+      const result = await fetchFromSheet3ByGid(SHEETS[2].id, matchedTab.gid, month);
+      if (result.success && (result.keywords.length > 0 || result.ranks.length > 0)) {
+        return NextResponse.json({
+          keywords: result.keywords,
+          ranks: result.ranks,
+          points: result.points,
+          shopName,
+          found: true,
+          matchedTab: matchedTab.name,
+          matchedMonth: result.matchedMonth,
+          source: "sheet3",
         });
       }
     }
@@ -157,11 +179,12 @@ async function fetchFromSheetByGid(sheetId: string, gid: string, targetMonth: st
 
 // ===== タブ名→gidマッピング取得 =====
 
-let tabMapCache: { map: Map<string, string>; ts: number } | null = null;
+const tabMapCaches = new Map<string, { map: Map<string, string>; ts: number }>();
 
 async function fetchTabGidMap(sheetId: string): Promise<Map<string, string>> {
-  // 30分キャッシュ
-  if (tabMapCache && Date.now() - tabMapCache.ts < 1800000) return tabMapCache.map;
+  // 30分キャッシュ（シートIDごと）
+  const cached = tabMapCaches.get(sheetId);
+  if (cached && Date.now() - cached.ts < 1800000) return cached.map;
 
   const url = `https://docs.google.com/spreadsheets/d/${sheetId}/htmlview`;
   const res = await fetch(url, { headers: { "User-Agent": UA }, redirect: "follow" });
@@ -177,7 +200,7 @@ async function fetchTabGidMap(sheetId: string): Promise<Map<string, string>> {
     map.set(match[1], match[2]);
   }
 
-  tabMapCache = { map, ts: Date.now() };
+  tabMapCaches.set(sheetId, { map, ts: Date.now() });
   return map;
 }
 
@@ -359,6 +382,90 @@ function parseSheetData(headerText: string, dataText: string, targetMonth: strin
     } else if (CITY_COORDS[cell]) {
       points.push(CITY_COORDS[cell]);
     }
+  }
+
+  return { success: true, keywords, ranks, matchedMonth, points };
+}
+
+// ===== Sheet3: KW=F列〜、地域別行あり =====
+
+async function fetchFromSheet3ByGid(sheetId: string, gid: string, targetMonth: string): Promise<FetchResult> {
+  try {
+    const headerUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}&range=A1:AZ1`;
+    const headerRes = await fetch(headerUrl, { headers: { "User-Agent": UA }, redirect: "follow" });
+    if (!headerRes.ok) return EMPTY_RESULT;
+    const headerText = await headerRes.text();
+    if (isHtml(headerText)) return EMPTY_RESULT;
+
+    const dataUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}`;
+    const dataRes = await fetch(dataUrl, { headers: { "User-Agent": UA }, redirect: "follow" });
+    if (!dataRes.ok) return EMPTY_RESULT;
+    const dataText = await dataRes.text();
+
+    return parseSheet3Data(headerText, dataText, targetMonth);
+  } catch {
+    return EMPTY_RESULT;
+  }
+}
+
+function parseSheet3Data(headerText: string, dataText: string, targetMonth: string): FetchResult {
+  const headerLines = headerText.split("\n").filter(l => l.trim());
+  if (headerLines.length < 1) return EMPTY_RESULT;
+  const headerRow = parseCSVRow(headerLines[0]);
+
+  // Sheet3: KW列はF(5)以降 — NON_KW_HEADERSや数値列を除外
+  const kwIndices: number[] = [];
+  for (let i = 5; i < headerRow.length; i++) {
+    const cell = (headerRow[i] || "").trim();
+    if (!cell) continue;
+    if (NON_KW_HEADERS.has(cell)) continue;
+    if (cell.includes("前月比") || cell.includes("※")) continue;
+    if (/^#(REF|VALUE|DIV)/.test(cell)) continue;
+    if (/^\d+(\.\d+)?$/.test(cell)) continue;
+    kwIndices.push(i);
+  }
+
+  const keywords = kwIndices.map(i => (headerRow[i] || "").trim()).filter(Boolean);
+
+  // データ行: [平均]行 or 地域指定なし行のみ使用
+  const dataLines = dataText.split("\n").filter(l => l.trim());
+  if (dataLines.length < 2) return { success: true, keywords, ranks: [], matchedMonth: "", points: [] };
+  const allRows = dataLines.slice(1).map(l => parseCSVRow(l));
+  const filtered = allRows.filter(row => {
+    const a = (row[0] || "").trim();
+    const b = (row[1] || "").trim();
+    if (a === "[平均]") return true;
+    if (!a && b && /\d{4}\//.test(b)) return true;
+    return false;
+  });
+
+  if (filtered.length === 0) return { success: true, keywords, ranks: [], matchedMonth: "", points: [] };
+
+  // 最新行と前月行
+  const targetRow = filtered[filtered.length - 1];
+  const prevRow = filtered.length >= 2 ? filtered[filtered.length - 2] : null;
+  const dateCell = (targetRow[1] || "").trim();
+  const dm = dateCell.match(/(\d{4})\/(\d{1,2})/);
+  const matchedMonth = dm ? `${dm[1]}-${String(parseInt(dm[2])).padStart(2, "0")}` : "";
+
+  const ranks: { word: string; rank: number; prevRank: number }[] = [];
+  for (const idx of kwIndices) {
+    const kwName = (headerRow[idx] || "").trim();
+    if (!kwName) continue;
+    const val = (targetRow[idx] || "").trim();
+    const rank = val === "圏外" ? 0 : (parseInt(val.replace(/,/g, "")) || 0);
+    const prevVal = prevRow ? (prevRow[idx] || "").trim() : "";
+    const prevRank = prevVal === "圏外" ? 0 : (parseInt(prevVal.replace(/,/g, "")) || 0);
+    ranks.push({ word: kwName, rank, prevRank: prevRank || rank });
+  }
+
+  // 計測地点（C=local, D=lat, E=lng）
+  const points: { label: string; lat: number; lng: number }[] = [];
+  const c = (headerRow[2] || "").trim().toLowerCase();
+  if (c === "local") {
+    const lat = parseFloat((headerRow[3] || "").trim());
+    const lng = parseFloat((headerRow[4] || "").trim());
+    if (!isNaN(lat) && !isNaN(lng)) points.push({ label: "店舗周辺", lat, lng });
   }
 
   return { success: true, keywords, ranks, matchedMonth, points };
