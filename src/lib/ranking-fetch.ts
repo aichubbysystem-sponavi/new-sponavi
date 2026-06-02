@@ -5,6 +5,7 @@
 const SHEETS = [
   { id: "1JpehMxL2I-fgef1sckNaY8RIUDIknvmT2OqhHj0my1k", label: "Sheet1" },
   { id: "10hvP7iSEyst0Bp_96eVsjicM4_qxVfG0BmMkDgFyg-Q", label: "Sheet2" },
+  { id: "1em-V1c4rJnoG-rqpdLGaFrqz8kQKepvHABt8NLOvvtE", label: "Sheet3" }, // KW=F列〜、地域別行あり
 ];
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 
@@ -29,6 +30,16 @@ export async function fetchRankingFromSheets(shopName: string): Promise<RankEntr
     const matchedTabs = findMatchingTabs(shopName, tabMap);
     for (const tab of matchedTabs) {
       const ranks = await trySheetByGid(SHEETS[1].id, tab.gid, shopName);
+      if (ranks.length > 0) return ranks;
+    }
+  } catch {}
+
+  // Sheet3: KW=F列〜、地域別行あり（フォールバック）
+  try {
+    const tabMap3 = await fetchTabGidMap(SHEETS[2].id);
+    const matched3 = findMatchingTabs(shopName, tabMap3);
+    for (const tab of matched3) {
+      const ranks = await trySheet3ByGid(SHEETS[2].id, tab.gid, shopName);
       if (ranks.length > 0) return ranks;
     }
   } catch {}
@@ -178,6 +189,16 @@ export async function fetchRankingHistoryFromSheets(shopName: string): Promise<R
     }
   } catch {}
 
+  // Sheet3: フォールバック
+  try {
+    const tabMap3 = await fetchTabGidMap(SHEETS[2].id);
+    const matched3 = findMatchingTabs(shopName, tabMap3);
+    for (const tab of matched3) {
+      const history = await trySheet3HistoryByGid(SHEETS[2].id, tab.gid, shopName);
+      if (history.labels.length > 0) return history;
+    }
+  } catch {}
+
   return { labels: [], datasets: [] };
 }
 
@@ -249,6 +270,144 @@ function parseRanksHistory(headerText: string, dataText: string): RankHistoryDat
     const word = (headerRow[idx] || "").trim();
     const ranks = recent.map(m => {
       const v = parseInt((m.row[idx] || "0").replace(/,/g, "")) || 0;
+      return v > 0 ? v : null;
+    });
+    return { word, ranks };
+  });
+
+  return { labels, datasets };
+}
+
+// ── Sheet3専用パーサー（KW=F列〜、地域別行あり） ──
+
+async function trySheet3ByGid(sheetId: string, gid: string, shopName: string): Promise<RankEntry[]> {
+  try {
+    const headerRes = await fetch(
+      `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}&range=A1:AZ1`,
+      { headers: { "User-Agent": UA }, redirect: "follow" }
+    );
+    if (!headerRes.ok) return [];
+    const headerText = await headerRes.text();
+    if (headerText.includes("<!DOCTYPE") || headerText.includes("<html")) return [];
+    const dataRes = await fetch(
+      `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}`,
+      { headers: { "User-Agent": UA }, redirect: "follow" }
+    );
+    if (!dataRes.ok) return [];
+    return parseRanksSheet3(headerText, await dataRes.text());
+  } catch { return []; }
+}
+
+async function trySheet3HistoryByGid(sheetId: string, gid: string, shopName: string): Promise<RankHistoryData> {
+  try {
+    const headerRes = await fetch(
+      `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}&range=A1:AZ1`,
+      { headers: { "User-Agent": UA }, redirect: "follow" }
+    );
+    if (!headerRes.ok) return { labels: [], datasets: [] };
+    const headerText = await headerRes.text();
+    if (headerText.includes("<!DOCTYPE") || headerText.includes("<html")) return { labels: [], datasets: [] };
+    const dataRes = await fetch(
+      `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}`,
+      { headers: { "User-Agent": UA }, redirect: "follow" }
+    );
+    if (!dataRes.ok) return { labels: [], datasets: [] };
+    return parseRanksHistorySheet3(headerText, await dataRes.text());
+  } catch { return { labels: [], datasets: [] }; }
+}
+
+/** Sheet3のデータ行をフィルタ: [平均]行 or 地域指定なし行のみ使用 */
+function filterSheet3Rows(dataRows: string[][]): string[][] {
+  return dataRows.filter(row => {
+    const a = (row[0] || "").trim();
+    const b = (row[1] || "").trim();
+    // [平均]行を優先
+    if (a === "[平均]") return true;
+    // A列が空でB列に日付がある行（地域指定なしの単独計測）
+    if (!a && b && /\d{4}\//.test(b)) return true;
+    return false;
+  });
+}
+
+/** Sheet3: 月ごとに最新の[平均]行を1つだけ残す（重複排除） */
+function dedupeByMonth(rows: { label: string; row: string[]; date: Date }[]): { label: string; row: string[] }[] {
+  const map = new Map<string, { label: string; row: string[]; date: Date }>();
+  for (const r of rows) {
+    const existing = map.get(r.label);
+    if (!existing || r.date > existing.date) {
+      map.set(r.label, r);
+    }
+  }
+  // 月の数値ソート
+  return Array.from(map.values()).sort((a, b) => {
+    const [ay, am] = a.label.split("/").map(Number);
+    const [by, bm] = b.label.split("/").map(Number);
+    return (ay * 100 + am) - (by * 100 + bm);
+  });
+}
+
+function parseRanksSheet3(headerText: string, dataText: string): RankEntry[] {
+  const headerRow = parseCSVRow(headerText.split("\n").filter(l => l.trim())[0] || "");
+  const kwIndices = getKwIndices(headerRow);
+  if (kwIndices.length === 0) return [];
+
+  const dataLines = dataText.split("\n").filter(l => l.trim());
+  if (dataLines.length < 2) return [];
+  const allRows = dataLines.slice(1).map(l => parseCSVRow(l));
+  const filtered = filterSheet3Rows(allRows);
+  if (filtered.length === 0) return [];
+
+  // 最新行と前月行
+  const targetRow = filtered[filtered.length - 1];
+  const prevRow = filtered.length >= 2 ? filtered[filtered.length - 2] : null;
+
+  const ranks: RankEntry[] = [];
+  for (const idx of kwIndices) {
+    const word = (headerRow[idx] || "").trim();
+    if (!word) continue;
+    const val = (targetRow[idx] || "").trim();
+    const rank = val === "圏外" ? 0 : (parseInt(val.replace(/,/g, "")) || 0);
+    const prevVal = prevRow ? (prevRow[idx] || "").trim() : "";
+    const prevRank = prevVal === "圏外" ? 0 : (parseInt(prevVal.replace(/,/g, "")) || 0);
+    if (rank > 0) ranks.push({ word, rank, prevRank: prevRank || rank });
+  }
+  return ranks;
+}
+
+function parseRanksHistorySheet3(headerText: string, dataText: string): RankHistoryData {
+  const headerRow = parseCSVRow(headerText.split("\n").filter(l => l.trim())[0] || "");
+  const kwIndices = getKwIndices(headerRow);
+  if (kwIndices.length === 0) return { labels: [], datasets: [] };
+
+  const dataLines = dataText.split("\n").filter(l => l.trim());
+  if (dataLines.length < 2) return { labels: [], datasets: [] };
+  const allRows = dataLines.slice(1).map(l => parseCSVRow(l));
+  const filtered = filterSheet3Rows(allRows);
+
+  // 月ラベル抽出（日付に時刻が含まれる場合あり: "2026/5/25 12:43"）
+  const allMonths: { label: string; row: string[]; date: Date }[] = [];
+  for (const row of filtered) {
+    const dateCell = (row[1] || "").trim();
+    const m = dateCell.match(/(\d{4})\/(\d{1,2})\/(\d{1,2})/);
+    if (m) {
+      allMonths.push({
+        label: `${m[1]}/${parseInt(m[2])}`,
+        row,
+        date: new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3])),
+      });
+    }
+  }
+
+  const deduped = dedupeByMonth(allMonths);
+  const recent = deduped.slice(-13);
+
+  const labels = recent.map(m => m.label);
+  const datasets = kwIndices.map(idx => {
+    const word = (headerRow[idx] || "").trim();
+    const ranks = recent.map(m => {
+      const val = (m.row[idx] || "").trim();
+      if (val === "圏外") return null;
+      const v = parseInt(val.replace(/,/g, "")) || 0;
       return v > 0 ? v : null;
     });
     return { word, ranks };
