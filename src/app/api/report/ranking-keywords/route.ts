@@ -70,7 +70,22 @@ export async function GET(request: NextRequest) {
     }
   } catch {}
 
-  // Sheet3: KW=F列〜、地域別行あり（フォールバック）
+  // Sheet3: タブ名=店舗名で直接アクセス → gidフォールバック
+  for (const tabName of variants) {
+    const result = await fetchFromSheet3ByName(SHEETS[2].id, tabName, month);
+    if (result.success && (result.keywords.length > 0 || result.ranks.length > 0)) {
+      return NextResponse.json({
+        keywords: result.keywords,
+        ranks: result.ranks,
+        points: result.points,
+        shopName,
+        found: true,
+        matchedTab: tabName,
+        matchedMonth: result.matchedMonth,
+        source: "sheet3",
+      });
+    }
+  }
   try {
     const tabMap3 = await fetchTabGidMap(SHEETS[2].id);
     const matched3 = findMatchingTabs(shopName, tabMap3);
@@ -388,6 +403,28 @@ function parseSheetData(headerText: string, dataText: string, targetMonth: strin
 }
 
 // ===== Sheet3: KW=F列〜、地域別行あり =====
+
+async function fetchFromSheet3ByName(sheetId: string, tabName: string, targetMonth: string): Promise<FetchResult> {
+  try {
+    const encoded = encodeURIComponent(tabName);
+    const headerUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encoded}&range=A1:AZ1`;
+    const headerRes = await fetch(headerUrl, { headers: { "User-Agent": UA }, redirect: "follow" });
+    if (!headerRes.ok) return EMPTY_RESULT;
+    const headerText = await headerRes.text();
+    if (isHtml(headerText)) return EMPTY_RESULT;
+    // A1検証
+    const a1 = (parseCSVRow(headerText.split("\n")[0] || "")[0] || "").trim();
+    if (a1 !== tabName && a1 !== tabName.replace(/\s+/g, " ").trim()) {
+      if (!tabName.includes(a1) && !a1.includes(tabName)) return EMPTY_RESULT;
+    }
+    const dataUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encoded}`;
+    const dataRes = await fetch(dataUrl, { headers: { "User-Agent": UA }, redirect: "follow" });
+    if (!dataRes.ok) return EMPTY_RESULT;
+    return parseSheet3Data(headerText, await dataRes.text(), targetMonth);
+  } catch {
+    return EMPTY_RESULT;
+  }
+}
 
 async function fetchFromSheet3ByGid(sheetId: string, gid: string, targetMonth: string): Promise<FetchResult> {
   try {

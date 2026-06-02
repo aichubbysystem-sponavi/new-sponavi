@@ -34,7 +34,11 @@ export async function fetchRankingFromSheets(shopName: string): Promise<RankEntr
     }
   } catch {}
 
-  // Sheet3: KW=F列〜、地域別行あり（フォールバック）
+  // Sheet3: タブ名=店舗名で直接アクセス → gidフォールバック
+  for (const tabName of variants) {
+    const ranks = await trySheetByName(SHEETS[2].id, tabName);
+    if (ranks.length > 0) return ranks;
+  }
   try {
     const tabMap3 = await fetchTabGidMap(SHEETS[2].id);
     const matched3 = findMatchingTabs(shopName, tabMap3);
@@ -189,7 +193,11 @@ export async function fetchRankingHistoryFromSheets(shopName: string): Promise<R
     }
   } catch {}
 
-  // Sheet3: フォールバック
+  // Sheet3: タブ名で直接アクセス → gidフォールバック
+  for (const tabName of variants) {
+    const history = await trySheet3HistoryByName(SHEETS[2].id, tabName);
+    if (history.labels.length > 0) return history;
+  }
   try {
     const tabMap3 = await fetchTabGidMap(SHEETS[2].id);
     const matched3 = findMatchingTabs(shopName, tabMap3);
@@ -279,6 +287,31 @@ function parseRanksHistory(headerText: string, dataText: string): RankHistoryDat
 }
 
 // ── Sheet3専用パーサー（KW=F列〜、地域別行あり） ──
+
+async function trySheet3HistoryByName(sheetId: string, tabName: string): Promise<RankHistoryData> {
+  try {
+    const encoded = encodeURIComponent(tabName);
+    const headerRes = await fetch(
+      `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encoded}&range=A1:AZ1`,
+      { headers: { "User-Agent": UA }, redirect: "follow" }
+    );
+    if (!headerRes.ok) return { labels: [], datasets: [] };
+    const headerText = await headerRes.text();
+    if (headerText.includes("<!DOCTYPE") || headerText.includes("<html")) return { labels: [], datasets: [] };
+    // A1が店舗名と一致するか検証
+    const headerRow = parseCSVRow(headerText.split("\n")[0] || "");
+    const a1 = (headerRow[0] || "").trim();
+    if (a1 !== tabName && a1 !== tabName.replace(/\s+/g, " ").trim()) {
+      if (!tabName.includes(a1) && !a1.includes(tabName)) return { labels: [], datasets: [] };
+    }
+    const dataRes = await fetch(
+      `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encoded}`,
+      { headers: { "User-Agent": UA }, redirect: "follow" }
+    );
+    if (!dataRes.ok) return { labels: [], datasets: [] };
+    return parseRanksHistorySheet3(headerText, await dataRes.text());
+  } catch { return { labels: [], datasets: [] }; }
+}
 
 async function trySheet3ByGid(sheetId: string, gid: string, shopName: string): Promise<RankEntry[]> {
   try {
