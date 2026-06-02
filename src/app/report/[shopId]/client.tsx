@@ -108,7 +108,113 @@ export default function ReportClient({
 }: {
   data: ReportData; shopId: string; dataSource?: "cache" | "spreadsheet" | "mock"; googleReviewUrl?: string | null;
 }) {
-  const { shop, kpis: rawKpis, monthlyLabels, charts, keywords, rankingHistory, reviewLabels, reviewCounts, reviewDelta, reviewAnalysis, comments, searchQueries, gridRanking } = data;
+  const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+  const targetMonth = searchParams?.get("month") || "";
+
+  // 対象月でデータを切り詰め
+  const trimmedData = useMemo(() => {
+    if (!targetMonth) return data;
+    const idx = data.monthlyLabels.indexOf(targetMonth);
+    if (idx < 0) return data; // 指定月が見つからなければそのまま
+
+    const endIdx = idx + 1;
+    const trimArray = <T,>(arr: T[]) => arr.slice(0, endIdx);
+
+    // KPIを対象月の値で再計算
+    const charts = data.charts;
+    const newCharts = {
+      searchMobile: trimArray(charts.searchMobile),
+      searchPC: trimArray(charts.searchPC),
+      mapMobile: trimArray(charts.mapMobile),
+      mapPC: trimArray(charts.mapPC),
+      calls: trimArray(charts.calls),
+      routes: trimArray(charts.routes),
+      websites: trimArray(charts.websites),
+      bookings: trimArray(charts.bookings),
+      foodMenus: trimArray(charts.foodMenus),
+    };
+
+    // searchTotal/mapTotalの合計を再計算
+    const searchTotal = (newCharts.searchMobile[idx] || 0) + (newCharts.searchPC[idx] || 0);
+    const mapTotal = (newCharts.mapMobile[idx] || 0) + (newCharts.mapPC[idx] || 0);
+
+    // KPIを対象月の値に差し替え
+    const prevIdx = idx > 0 ? idx - 1 : -1;
+    // 前年同月のインデックス
+    const yoyIdx = idx >= 12 ? idx - 12 : -1;
+    const getVal = (arr: number[], i: number) => i >= 0 && i < arr.length ? arr[i] : 0;
+
+    const newKpis = data.kpis.map(kpi => {
+      // KPIのlabelでチャートデータを特定
+      if (kpi.label.includes("検索")) {
+        const cur = searchTotal;
+        const prev = prevIdx >= 0 ? getVal(charts.searchMobile, prevIdx) + getVal(charts.searchPC, prevIdx) : 0;
+        const yoy = yoyIdx >= 0 ? getVal(charts.searchMobile, yoyIdx) + getVal(charts.searchPC, yoyIdx) : null;
+        return { ...kpi, value: cur, prevValue: prev, momValue: prev || null, yoyValue: yoy };
+      }
+      if (kpi.label.includes("マップ")) {
+        const cur = mapTotal;
+        const prev = prevIdx >= 0 ? getVal(charts.mapMobile, prevIdx) + getVal(charts.mapPC, prevIdx) : 0;
+        const yoy = yoyIdx >= 0 ? getVal(charts.mapMobile, yoyIdx) + getVal(charts.mapPC, yoyIdx) : null;
+        return { ...kpi, value: cur, prevValue: prev, momValue: prev || null, yoyValue: yoy };
+      }
+      if (kpi.label.includes("ウェブ")) return { ...kpi, value: getVal(charts.websites, idx), prevValue: getVal(charts.websites, prevIdx), momValue: prevIdx >= 0 ? getVal(charts.websites, prevIdx) : null, yoyValue: yoyIdx >= 0 ? getVal(charts.websites, yoyIdx) : null };
+      if (kpi.label.includes("ルート")) return { ...kpi, value: getVal(charts.routes, idx), prevValue: getVal(charts.routes, prevIdx), momValue: prevIdx >= 0 ? getVal(charts.routes, prevIdx) : null, yoyValue: yoyIdx >= 0 ? getVal(charts.routes, yoyIdx) : null };
+      if (kpi.label.includes("通話")) return { ...kpi, value: getVal(charts.calls, idx), prevValue: getVal(charts.calls, prevIdx), momValue: prevIdx >= 0 ? getVal(charts.calls, prevIdx) : null, yoyValue: yoyIdx >= 0 ? getVal(charts.calls, yoyIdx) : null };
+      if (kpi.label.includes("メニュー")) return { ...kpi, value: getVal(charts.foodMenus, idx), prevValue: getVal(charts.foodMenus, prevIdx), momValue: prevIdx >= 0 ? getVal(charts.foodMenus, prevIdx) : null, yoyValue: yoyIdx >= 0 ? getVal(charts.foodMenus, yoyIdx) : null };
+      if (kpi.label.includes("予約")) return { ...kpi, value: getVal(charts.bookings, idx), prevValue: getVal(charts.bookings, prevIdx), momValue: prevIdx >= 0 ? getVal(charts.bookings, prevIdx) : null, yoyValue: yoyIdx >= 0 ? getVal(charts.bookings, yoyIdx) : null };
+      return kpi;
+    });
+
+    // 期間を対象月に変更
+    const m = targetMonth.match(/(\d{4})\/(\d{1,2})/);
+    const newPeriod = m ? {
+      start: `${m[1]}/${String(m[2]).padStart(2, "0")}/01`,
+      end: `${m[1]}/${String(m[2]).padStart(2, "0")}/${new Date(parseInt(m[1]), parseInt(m[2]), 0).getDate()}`,
+    } : data.shop.period;
+
+    // rankingHistoryもフィルタ
+    const newRankingHistory = data.rankingHistory ? {
+      ...data.rankingHistory,
+      labels: data.rankingHistory.labels.filter(l => l <= targetMonth),
+      datasets: data.rankingHistory.datasets.map(ds => ({
+        ...ds,
+        ranks: ds.ranks.slice(0, data.rankingHistory.labels.filter(l => l <= targetMonth).length),
+      })),
+    } : data.rankingHistory;
+
+    // reviewLabels/reviewCountsもフィルタ
+    const reviewEndIdx = data.reviewLabels.findIndex(l => {
+      const m2 = l.match(/(\d{1,2})月/);
+      const tm = targetMonth.match(/(\d{4})\/(\d{1,2})/);
+      if (!m2 || !tm) return false;
+      // 年が分からないのでmonthlyLabelsの最後の年を参考に
+      return false; // 口コミ推移は全期間表示で問題ない
+    });
+
+    // searchQueriesもフィルタ
+    const newSearchQueries = data.searchQueries ? {
+      ...data.searchQueries,
+      history: data.searchQueries.history.filter(h => h.month <= targetMonth),
+      latest: (() => {
+        const filtered = data.searchQueries.history.filter(h => h.month <= targetMonth);
+        return filtered.length > 0 ? filtered[filtered.length - 1].keywords.slice(0, 30) : data.searchQueries.latest;
+      })(),
+      latestMonth: targetMonth,
+    } : data.searchQueries;
+
+    return {
+      ...data,
+      monthlyLabels: data.monthlyLabels.slice(0, endIdx),
+      charts: newCharts,
+      kpis: newKpis,
+      shop: { ...data.shop, period: newPeriod },
+      rankingHistory: newRankingHistory,
+      searchQueries: newSearchQueries,
+    };
+  }, [data, targetMonth]);
+
+  const { shop, kpis: rawKpis, monthlyLabels, charts, keywords, rankingHistory, reviewLabels, reviewCounts, reviewDelta, reviewAnalysis, comments, searchQueries, gridRanking } = trimmedData;
 
   // 全期間で値が0の指標を自動判定（業種によって「予約」「フードメニュー」等がない場合）
   const hasBookingsData = charts.bookings?.some(v => v > 0) ?? false;
@@ -1447,7 +1553,7 @@ export default function ReportClient({
         <div style={slideBarStyle}><span>{shop.name} — AIによるコメント</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={stitleStyle}>AIによるコメント</div>
-          <div style={{ background: "linear-gradient(135deg,#f0f4ff,#fff)", border: "2px solid #0f3460", borderRadius: 14, padding: "28px 32px", flex: 1, display: "flex", flexDirection: "column" }}>
+          <div style={{ background: "linear-gradient(135deg,#f0f4ff,#fff)", border: "2px solid #0f3460", borderRadius: 14, padding: "28px 32px", flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", wordBreak: "break-word" }}>
             <h3 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", marginBottom: 16 }}>{curLabel} 総評</h3>
             <div style={{ margin: 0 }}>
               {(comments || []).map((c, i) => {

@@ -74,11 +74,14 @@ export default function ReportListClient({
   const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
   const [showOnlyAlert, setShowOnlyAlert] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<"all" | "both" | "sheet_only">("all");
+  const [reportMonth, setReportMonth] = useState("");
 
-  // お気に入りをlocalStorageから読み込み
+  // お気に入り・対象月をlocalStorageから読み込み
   useEffect(() => {
     const saved = localStorage.getItem("report-favorites");
     if (saved) setFavorites(new Set(JSON.parse(saved)));
+    const savedMonth = localStorage.getItem("report-target-month");
+    if (savedMonth) setReportMonth(savedMonth);
   }, []);
 
   const saveFavorites = useCallback((next: Set<string>) => {
@@ -287,6 +290,20 @@ export default function ReportListClient({
   const prevTotalMap = shops.reduce((s, sh) => s + (sh.prevMapTotal || 0), 0);
   const sortArrow = (key: SortKey) => sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
 
+  // 対象月の選択肢（直近18ヶ月）
+  const monthOptions = useMemo(() => {
+    const opts: string[] = [];
+    const now = new Date();
+    for (let i = 0; i < 18; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      opts.push(`${d.getFullYear()}/${d.getMonth() + 1}`);
+    }
+    return opts;
+  }, []);
+
+  // 対象月のリンク用パラメータ
+  const monthParam = reportMonth ? `?month=${encodeURIComponent(reportMonth)}` : "";
+
   // 評価分布
   const ratingDist = useMemo(() => {
     const d = { "4.5+": 0, "4.0-4.4": 0, "3.5-3.9": 0, "3.0-3.4": 0, "<3.0": 0, "未評価": 0 };
@@ -330,7 +347,7 @@ export default function ReportListClient({
                     if (ids.length > 10) showToast(`最大10店舗ずつ開きます（${batch.length}/${ids.length}件）`);
                     batch.forEach((id, i) => {
                       setTimeout(() => {
-                        window.open(`/report/${encodeURIComponent(id)}`, `_report_${i}`);
+                        window.open(`/report/${encodeURIComponent(id)}${monthParam}`, `_report_${i}`);
                       }, i * 500);
                     });
                     showToast(`${batch.length}店舗のレポートを開いています。各タブでPDFダウンロードしてください。`);
@@ -446,6 +463,16 @@ export default function ReportListClient({
               </div>
             )}
 
+            {/* 対象月 */}
+            <select value={reportMonth} onChange={(e) => {
+              setReportMonth(e.target.value);
+              localStorage.setItem("report-target-month", e.target.value);
+            }}
+              className="px-3 py-2 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none font-semibold text-[#003D6B]">
+              <option value="">最新月</option>
+              {monthOptions.map((m) => <option key={m} value={m}>{m.replace(/(\d{4})\/(\d{1,2})/, "$1年$2月")}</option>)}
+            </select>
+
             {/* ソート */}
             <div className="flex gap-1 ml-auto">
               {([["name", "名前"], ["rating", "評価"], ["totalReviews", "口コミ"]] as [SortKey, string][]).map(([key, label]) => (
@@ -493,7 +520,7 @@ export default function ReportListClient({
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-6">
             {paged.map((shop) => (
               <ShopCard key={shop.id} shop={shop} checked={selected.has(shop.id)} onToggle={() => toggleSelect(shop.id)}
-                isFavorite={favorites.has(shop.id)} onToggleFav={() => toggleFavorite(shop.id)} isAlert={isAlertShop(shop)} />
+                isFavorite={favorites.has(shop.id)} onToggleFav={() => toggleFavorite(shop.id)} isAlert={isAlertShop(shop)} monthParam={monthParam} />
             ))}
           </div>
         ) : (
@@ -526,7 +553,7 @@ export default function ReportListClient({
                       <button onClick={() => toggleFavorite(shop.id)} className={`text-sm ${favorites.has(shop.id) ? "text-amber-400" : "text-slate-200 hover:text-amber-300"}`}>★</button>
                     </td>
                     <td className="p-2">
-                      <Link href={`/report/${encodeURIComponent(shop.id)}`} className="text-slate-800 font-medium hover:text-[#003D6B] hover:underline">{shop.name}</Link>
+                      <Link href={`/report/${encodeURIComponent(shop.id)}${monthParam}`} className="text-slate-800 font-medium hover:text-[#003D6B] hover:underline">{shop.name}</Link>
                     </td>
                     <td className="p-2 text-slate-400 truncate max-w-[200px] hidden xl:table-cell">{shop.address}</td>
                     <td className="p-2 text-center hidden lg:table-cell">
@@ -565,7 +592,7 @@ export default function ReportListClient({
                       {shop.analyzed ? <span className="text-emerald-500 text-[10px] font-bold">済</span> : <span className="text-slate-300 text-[10px]">未</span>}
                     </td>
                     <td className="p-2 text-center">
-                      <Link href={`/report/${encodeURIComponent(shop.id)}`} className="text-slate-300 hover:text-[#003D6B]">→</Link>
+                      <Link href={`/report/${encodeURIComponent(shop.id)}${monthParam}`} className="text-slate-300 hover:text-[#003D6B]">→</Link>
                     </td>
                   </tr>
                 ))}
@@ -631,8 +658,8 @@ export default function ReportListClient({
 
 // ── サブコンポーネント ──
 
-function ShopCard({ shop, checked, onToggle, isFavorite, onToggleFav, isAlert }: {
-  shop: ShopListItem; checked: boolean; onToggle: () => void; isFavorite: boolean; onToggleFav: () => void; isAlert: boolean;
+function ShopCard({ shop, checked, onToggle, isFavorite, onToggleFav, isAlert, monthParam = "" }: {
+  shop: ShopListItem; checked: boolean; onToggle: () => void; isFavorite: boolean; onToggleFav: () => void; isAlert: boolean; monthParam?: string;
 }) {
   const ratingBadge =
     shop.rating >= 4.5 ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
@@ -646,12 +673,12 @@ function ShopCard({ shop, checked, onToggle, isFavorite, onToggleFav, isAlert }:
         <input type="checkbox" checked={checked} onChange={onToggle} onClick={(e) => e.stopPropagation()}
           className="mt-1 w-3.5 h-3.5 rounded border-slate-300 flex-shrink-0 cursor-pointer" />
         <button onClick={onToggleFav} className={`mt-0.5 text-sm flex-shrink-0 ${isFavorite ? "text-amber-400" : "text-slate-200 hover:text-amber-300"}`}>★</button>
-        <Link href={`/report/${encodeURIComponent(shop.id)}`} className="min-w-0 flex-1 block">
+        <Link href={`/report/${encodeURIComponent(shop.id)}${monthParam}`} className="min-w-0 flex-1 block">
           <h3 className="text-sm font-bold text-slate-800 truncate group-hover:text-[#003D6B] transition-colors">{shop.name}</h3>
           <p className="text-[10px] text-slate-400 truncate mt-0.5">{shop.address}</p>
         </Link>
         {isAlert && <span className="text-[10px] text-red-500 font-bold flex-shrink-0" title="要注意">⚠</span>}
-        <Link href={`/report/${encodeURIComponent(shop.id)}`} className="flex-shrink-0">
+        <Link href={`/report/${encodeURIComponent(shop.id)}${monthParam}`} className="flex-shrink-0">
           <svg className="w-4 h-4 text-slate-200 group-hover:text-[#003D6B] transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
           </svg>
