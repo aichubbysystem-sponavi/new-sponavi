@@ -8,6 +8,15 @@ import { readShopListFromCache, readReportDataFromCache, writeReportDataToCache 
 import { getShopsFromSpreadsheet, getReportFromSpreadsheet } from "./spreadsheet";
 import { createClient } from "@supabase/supabase-js";
 
+/** "2025/10" → 202510 のように数値化して月ソート */
+function monthToNum(m: string): number {
+  const parts = m.split("/");
+  return (parseInt(parts[0]) || 0) * 100 + (parseInt(parts[1]) || 0);
+}
+function sortByMonth<T extends { month: string }>(arr: T[]): T[] {
+  return arr.sort((a, b) => monthToNum(a.month) - monthToNum(b.month));
+}
+
 /**
  * 店舗一覧を取得（キャッシュ優先）
  */
@@ -158,7 +167,7 @@ async function fetchGridRankingLive(shopIds: string[], shopName?: string): Promi
       }
       history.push({ month, snapshots: Array.from(byKw.values()) });
     }
-    history.sort((a: any, b: any) => a.month.localeCompare(b.month));
+    sortByMonth(history);
 
     const result: GridRankingReport = { keywords: Array.from(keywordSet), history };
     return result.keywords.length > 0 ? result : undefined;
@@ -232,7 +241,7 @@ function supplementGridFromRanking(
 
   if (newHistory.length === 0) return gridRanking;
 
-  newHistory.sort((a, b) => a.month.localeCompare(b.month));
+  sortByMonth(newHistory);
   return { keywords: Array.from(allKeywords), history: newHistory };
 }
 

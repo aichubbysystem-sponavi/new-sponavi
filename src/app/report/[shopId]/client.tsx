@@ -101,6 +101,12 @@ const lineOptions = {
   },
 };
 
+/** "2025/10" → 202510 の数値変換（月ソート・比較用） */
+function monthToNum(m: string): number {
+  const p = m.split("/");
+  return (parseInt(p[0]) || 0) * 100 + (parseInt(p[1]) || 0);
+}
+
 // ── Component ──
 
 export default function ReportClient({
@@ -331,7 +337,7 @@ export default function ReportClient({
   // マップ描画用: レポート対象月以前の直近6ヶ月（グリッドセクション描画と同じ基準）
   const gridRecentHistory = useMemo(() => {
     if (!gridRanking) return [];
-    return gridRanking.history.filter(h => h.month <= curLabel).slice(-6);
+    return gridRanking.history.filter(h => monthToNum(h.month) <= monthToNum(curLabel)).slice(-6);
   }, [gridRanking, curLabel]);
   const activeGridMonthI = gridMonthIdx >= 0 && gridMonthIdx < gridRecentHistory.length ? gridMonthIdx : gridRecentHistory.length - 1;
   const activeGridSnapshot = gridRecentHistory[activeGridMonthI]?.snapshots.find(s => s.keyword === activeGridKw);
@@ -1067,7 +1073,7 @@ export default function ReportClient({
       {showGridRanking && (() => { pageNum++;
         const gr = gridRanking!;
         // レポート対象月以前の直近6ヶ月に絞る（今月分は含めない）
-        const filteredHistory = gr.history.filter(h => h.month <= curLabel);
+        const filteredHistory = gr.history.filter(h => monthToNum(h.month) <= monthToNum(curLabel));
         const recentHistory = filteredHistory.slice(-6);
         const activeKw = gr.keywords[gridKwIdx] || gr.keywords[0];
         // デフォルト表示月をレポート対象月（curLabel）に合わせる
