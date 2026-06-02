@@ -140,7 +140,11 @@ async function tryAnalyze(
   const positiveCount = (dist[4] || 0) + (dist[5] || 0);
   const negativeCount = (dist[1] || 0) + (dist[2] || 0) + (dist[3] || 0);
 
-  const prompt = `あなたはMEO対策の専門家です。以下の店舗のレポート総評を作成してください。口コミだけでなく、KPIデータ・業績・同業種比較も含めた総合的な分析をJSON形式で返してください。
+  // KPIデータの有無でプロンプト構造を変える
+  const hasKpi = !!(kpiText && kpiText.trim());
+
+  const prompt = `あなたはMEO対策の専門家です。以下の店舗のレポート総評を作成してください。
+これは「口コミ分析」ではなく「MEOレポート全体の総評」です。KPIデータ（検索数・マップ表示数・アクション数）と口コミの両方を必ず分析してください。
 
 店舗名: ${shopName}
 Google評価: ${averageRating} / 5.0（${totalReviewCount}件）
@@ -150,10 +154,10 @@ Google評価: ${averageRating} / 5.0（${totalReviewCount}件）
 評価分布: ${statsText}
 高評価(★4-5): ${positiveCount}件(${pctOf(positiveCount)}%)
 低評価(★1-3): ${negativeCount}件(${pctOf(negativeCount)}%)
+${kpiText || ""}
 
 【口コミテキスト（直近1年・${filteredReviews.length}件）】
 ${reviewTexts}
-${kpiText || ""}
 
 【重要ルール（positiveWords / negativeWords）】
 - 必ず口コミ原文に含まれる表現をそのまま抜き出してください。要約・言い換え・意訳は禁止。
@@ -166,25 +170,24 @@ ${kpiText || ""}
 {
   "positiveWords": ["ポジ1", "ポジ2", ... "ポジ12"],
   "negativeWords": ["ネガ1", "ネガ2", ... "ネガ12"],
-  "summary": "レポート全体の総評を1行で要約（50文字以内。口コミだけでなくKPI・業績も含める）",
+  "summary": "レポート全体の総評を1行で要約（50文字以内。KPI動向+口コミ傾向を両方含める）",
   "comments": [
-    "コメント1: KPI・業績分析（検索数、マップ表示数、アクション数の前月比や傾向。同業種/同グループ平均との比較で何が強くて何が弱いか）",
-    "コメント2: 口コミ傾向分析（評価分布、高評価・低評価の傾向、具体的な声の紹介）",
-    "コメント3: 強み（KPI・口コミの両面から、この店舗が特に優れている点）",
-    "コメント4: 改善点（KPI・口コミの両面から、伸びしろがある点や注意すべき点）",
-    "コメント5: 来月の具体的な施策提案（KPIと口コミの分析に基づいた実行可能なアクション）"
+    "コメント1: ${hasKpi ? "【必須】上記のKPIデータを使って、検索数・マップ表示数・アクション数（ウェブサイト/ルート/通話）の前月比・前年比を具体的な数値で分析。同業種平均・同グループ平均との比較も必ず含める。数値は上記データをそのまま引用すること" : "パフォーマンス概況（KPIデータ未取得のため口コミ動向から推定）"}",
+    "コメント2: 口コミ傾向分析（評価分布の数値を引用し、高評価・低評価の傾向、具体的な声の紹介）",
+    "コメント3: 強み（${hasKpi ? "KPIで同業種平均を上回る指標と、" : ""}口コミで評価されている点を具体的に）",
+    "コメント4: 改善点（${hasKpi ? "KPIで前月比マイナスの指標や同業種平均を下回る指標と、" : ""}口コミで指摘されている課題）",
+    "コメント5: 来月の具体的な施策提案（${hasKpi ? "KPI改善と" : ""}口コミ改善の両面から実行可能なアクション3〜4つ）"
   ]
 }
 
 【commentsのルール（厳守）】
-- これはお客様に見せるレポートの総評です。口コミだけの分析ではなく、レポート全体の総評として書いてください。
-- コメント1は必ずKPI・パフォーマンスデータに触れてください。検索数やマップ表示数の増減、前月との比較、同業種平均との差を具体的な数値で言及。
-- コメント3・4では、同グループ平均や同業種平均と比較して「検索数は同業種平均を○○%上回っている」「マップ表示は平均以下」のように定量的に記載。
+- これはお客様に見せるMEOレポートの総評です。口コミ分析レポートではありません。
+${hasKpi ? `- ★最重要★ コメント1は「検索数○○回（前月比○%）」「マップ表示○○回（前月比○%）」のように、上記KPIデータの具体的な数値を必ず引用してください。数値なしの抽象的な記述は禁止。
+- コメント3・4でも、同グループ平均・同業種平均との比較を「検索数は同業種平均○○回に対し○○回で○%上回っている」のように定量的に記載。` : "- KPIデータが未取得のため、口コミデータを中心に分析してください（その旨は書かない）。"}
 - 数値は必ず上記の統計データ・KPIデータの値をそのまま使用。独自計算は禁止。
 - コメント内に口コミ参照番号（#1, #6等）を絶対に含めない。
 - 具体的な口コミ引用は「○○という声がある」のように表現。
-- 重要な数値や結論は<strong>タグで強調。
-- KPIデータが提供されていない場合は、口コミデータのみで分析（その旨は書かない）。`;
+- 重要な数値や結論は<strong>タグで強調。`;
 
   try {
     const controller = new AbortController();
@@ -339,73 +342,119 @@ export async function POST(request: NextRequest) {
 
       // KPIデータとグループ平均を取得
       let kpiText = "";
+      let hasKpiData = false;
       try {
         // キャッシュからKPIデータ取得
         const { data: cache } = await supabase.from("report_data_cache").select("report_json").eq("shop_name", shop.name).maybeSingle();
         if (cache?.report_json) {
-          const report = cache.report_json;
+          const report = cache.report_json as any;
           const kpis = report.kpis || [];
           const labels = report.monthlyLabels || [];
           const curMonth = labels[labels.length - 1] || "";
+
           if (kpis.length > 0) {
-            const kpiLines = kpis.map((k: any) => {
-              const mom = k.momValue ? ` (前月: ${k.momValue.toLocaleString()})` : "";
-              return `${k.label}: ${k.value?.toLocaleString() || 0}${k.unit || ""}${mom}`;
-            });
-            kpiText = `\n【レポートKPIデータ（${curMonth}）】\n${kpiLines.join("\n")}`;
+            hasKpiData = true;
+            // 前月比の増減率を計算
+            const pctChange = (cur: number, prev: number) => {
+              if (!prev || prev === 0) return "";
+              const pct = Math.round(((cur - prev) / prev) * 100);
+              return pct > 0 ? `+${pct}%` : `${pct}%`;
+            };
+            const kpiLines = kpis
+              .filter((k: any) => !k.label?.includes("口コミ増減")) // 口コミ増減は別で提供済み
+              .map((k: any) => {
+                const val = k.value?.toLocaleString() || "0";
+                const unit = k.unit || "";
+                let detail = "";
+                if (k.momValue != null && k.momValue !== 0) {
+                  detail += ` | 前月: ${k.momValue.toLocaleString()}${unit}（${pctChange(k.value, k.momValue)}）`;
+                }
+                if (k.yoyValue != null && k.yoyValue !== 0) {
+                  detail += ` | 前年同月: ${k.yoyValue.toLocaleString()}${unit}（${pctChange(k.value, k.yoyValue)}）`;
+                }
+                return `${k.label}: ${val}${unit}${detail}`;
+              });
+            kpiText = `\n【レポートKPIデータ（${curMonth}）※コメント①で必ず全て言及すること】\n${kpiLines.join("\n")}`;
+          } else {
+            console.warn(`[analyze] ${shop.name}: report_data_cacheにkpis配列が空`);
           }
 
-          // 同グループ店舗の平均を取得
-          const { data: shopInfo } = await supabase.from("shops").select("business_group_id").eq("name", shop.name).maybeSingle();
-          if (shopInfo?.business_group_id) {
-            const { data: groupShops } = await supabase.from("shops").select("name").eq("business_group_id", shopInfo.business_group_id).neq("name", shop.name).limit(100);
-            if (groupShops && groupShops.length > 0) {
-              const groupNames = groupShops.map((s: any) => s.name);
-              const { data: groupCaches } = await supabase.from("report_data_cache").select("report_json").in("shop_name", groupNames.slice(0, 50));
-              if (groupCaches && groupCaches.length > 0) {
-                let totalSearch = 0, totalMap = 0, totalAction = 0, count = 0;
-                for (const gc of groupCaches) {
-                  const gk = gc.report_json?.kpis || [];
-                  const search = gk.find((k: any) => k.label?.includes("検索"))?.value || 0;
-                  const map = gk.find((k: any) => k.label?.includes("マップ"))?.value || 0;
-                  const action = gk.find((k: any) => k.label?.includes("ルート") || k.label?.includes("通話") || k.label?.includes("ウェブ"))?.value || 0;
-                  totalSearch += search; totalMap += map; totalAction += action; count++;
-                }
-                if (count > 0) {
-                  kpiText += `\n\n【同グループ平均（${count}店舗）※店舗名は記載しないこと】\nGoogle検索平均: ${Math.round(totalSearch / count).toLocaleString()}回\nGoogleマップ平均: ${Math.round(totalMap / count).toLocaleString()}回`;
-                }
-              }
+          // chartsデータから月次推移も追加（増減傾向の分析用）
+          const charts = report.charts;
+          if (charts && labels.length >= 2) {
+            const recentLabels = labels.slice(-3);
+            const getRecent = (arr: number[]) => arr ? arr.slice(-3) : [];
+            const searchTrend = getRecent(charts.searchTotal);
+            const mapTrend = getRecent(charts.mapTotal);
+            if (searchTrend.length >= 2) {
+              kpiText += `\n\n【直近3ヶ月の推移】`;
+              kpiText += `\nGoogle検索: ${recentLabels.map((l: string, i: number) => `${l}=${searchTrend[i]?.toLocaleString() || 0}`).join(" → ")}`;
+              kpiText += `\nGoogleマップ: ${recentLabels.map((l: string, i: number) => `${l}=${mapTrend[i]?.toLocaleString() || 0}`).join(" → ")}`;
             }
           }
+        } else {
+          console.warn(`[analyze] ${shop.name}: report_data_cacheにデータなし`);
+        }
 
-          // 同業種（カテゴリ）店舗の平均を取得
-          const { data: catInfo } = await supabase.from("shops").select("gbp_main_category").eq("name", shop.name).not("gbp_main_category", "is", null).maybeSingle();
-          if (catInfo?.gbp_main_category) {
-            const category = catInfo.gbp_main_category;
-            const { data: catShops } = await supabase.from("shops").select("name").eq("gbp_main_category", category).neq("name", shop.name).limit(200);
-            if (catShops && catShops.length > 0) {
-              const catNames = catShops.map((s: any) => s.name);
-              const { data: catCaches } = await supabase.from("report_data_cache").select("report_json").in("shop_name", catNames.slice(0, 50));
-              if (catCaches && catCaches.length > 0) {
-                let tSearch = 0, tMap = 0, tReviews = 0, tRating = 0, cnt = 0;
-                for (const cc of catCaches) {
-                  const ck = cc.report_json?.kpis || [];
-                  const s = ck.find((k: any) => k.label?.includes("検索"))?.value || 0;
-                  const m = ck.find((k: any) => k.label?.includes("マップ"))?.value || 0;
-                  const shopData = cc.report_json?.shop;
-                  tSearch += s; tMap += m;
-                  if (shopData?.totalReviews) tReviews += shopData.totalReviews;
-                  if (shopData?.rating) tRating += shopData.rating;
-                  cnt++;
-                }
-                if (cnt > 0) {
-                  kpiText += `\n\n【同業種平均（${category} ${cnt}店舗）※店舗名は記載しないこと】\nGoogle検索平均: ${Math.round(tSearch / cnt).toLocaleString()}回\nGoogleマップ平均: ${Math.round(tMap / cnt).toLocaleString()}回\n口コミ数平均: ${Math.round(tReviews / cnt)}件\n評価平均: ${(tRating / cnt).toFixed(1)}`;
-                }
+        // 同グループ店舗の平均を取得（キャッシュ有無に関わらず実行）
+        const { data: shopInfo } = await supabase.from("shops").select("business_group_id").eq("name", shop.name).maybeSingle();
+        if (shopInfo?.business_group_id) {
+          const { data: groupShops } = await supabase.from("shops").select("name").eq("business_group_id", shopInfo.business_group_id).neq("name", shop.name).limit(100);
+          if (groupShops && groupShops.length > 0) {
+            const groupNames = groupShops.map((s: any) => s.name);
+            const { data: groupCaches } = await supabase.from("report_data_cache").select("report_json").in("shop_name", groupNames.slice(0, 50));
+            if (groupCaches && groupCaches.length > 0) {
+              let totalSearch = 0, totalMap = 0, totalAction = 0, gReviews = 0, gRating = 0, count = 0;
+              for (const gc of groupCaches) {
+                const gk = gc.report_json?.kpis || [];
+                const search = gk.find((k: any) => k.label?.includes("検索"))?.value || 0;
+                const map = gk.find((k: any) => k.label?.includes("マップ"))?.value || 0;
+                const action = gk.find((k: any) => k.label?.includes("ルート") || k.label?.includes("通話") || k.label?.includes("ウェブ"))?.value || 0;
+                const shopData = gc.report_json?.shop;
+                totalSearch += search; totalMap += map; totalAction += action;
+                if (shopData?.totalReviews) gReviews += shopData.totalReviews;
+                if (shopData?.rating) gRating += shopData.rating;
+                count++;
+              }
+              if (count > 0) {
+                kpiText += `\n\n【同グループ平均（${count}店舗）※店舗名は記載しないこと】\nGoogle検索平均: ${Math.round(totalSearch / count).toLocaleString()}回\nGoogleマップ平均: ${Math.round(totalMap / count).toLocaleString()}回\nアクション合計平均: ${Math.round(totalAction / count).toLocaleString()}回\n口コミ数平均: ${Math.round(gReviews / count)}件\n評価平均: ${count > 0 && gRating > 0 ? (gRating / count).toFixed(1) : "-"}`;
               }
             }
           }
         }
-      } catch {}
+
+        // 同業種（カテゴリ）店舗の平均を取得
+        const { data: catInfo } = await supabase.from("shops").select("gbp_main_category").eq("name", shop.name).not("gbp_main_category", "is", null).maybeSingle();
+        if (catInfo?.gbp_main_category) {
+          const category = catInfo.gbp_main_category;
+          const { data: catShops } = await supabase.from("shops").select("name").eq("gbp_main_category", category).neq("name", shop.name).limit(200);
+          if (catShops && catShops.length > 0) {
+            const catNames = catShops.map((s: any) => s.name);
+            const { data: catCaches } = await supabase.from("report_data_cache").select("report_json").in("shop_name", catNames.slice(0, 50));
+            if (catCaches && catCaches.length > 0) {
+              let tSearch = 0, tMap = 0, tAction = 0, tReviews = 0, tRating = 0, cnt = 0;
+              for (const cc of catCaches) {
+                const ck = cc.report_json?.kpis || [];
+                const s = ck.find((k: any) => k.label?.includes("検索"))?.value || 0;
+                const m = ck.find((k: any) => k.label?.includes("マップ"))?.value || 0;
+                const a = ck.find((k: any) => k.label?.includes("ルート") || k.label?.includes("通話") || k.label?.includes("ウェブ"))?.value || 0;
+                const shopData = cc.report_json?.shop;
+                tSearch += s; tMap += m; tAction += a;
+                if (shopData?.totalReviews) tReviews += shopData.totalReviews;
+                if (shopData?.rating) tRating += shopData.rating;
+                cnt++;
+              }
+              if (cnt > 0) {
+                kpiText += `\n\n【同業種平均（${category} ${cnt}店舗）※店舗名は記載しないこと】\nGoogle検索平均: ${Math.round(tSearch / cnt).toLocaleString()}回\nGoogleマップ平均: ${Math.round(tMap / cnt).toLocaleString()}回\nアクション合計平均: ${Math.round(tAction / cnt).toLocaleString()}回\n口コミ数平均: ${Math.round(tReviews / cnt)}件\n評価平均: ${cnt > 0 && tRating > 0 ? (tRating / cnt).toFixed(1) : "-"}`;
+              }
+            }
+          }
+        }
+      } catch (kpiErr) {
+        console.error(`[analyze] ${shop.name}: KPIデータ取得エラー:`, kpiErr);
+      }
+
+      console.log(`[analyze] ${shop.name}: kpiText=${kpiText ? `${kpiText.length}文字` : "空"}, hasKpiData=${hasKpiData}`);
 
       // Claude APIで分析
       const analysis = await analyzeWithClaude(
