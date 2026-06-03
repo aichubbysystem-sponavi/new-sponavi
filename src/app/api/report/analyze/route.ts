@@ -121,12 +121,8 @@ async function tryAnalyze(
   ratingDistribution?: Record<number, number>,
   kpiText?: string
 ): Promise<any | null> {
-  const starLabel = (s: string) => {
-    const m: Record<string, string> = { ONE: "★1", TWO: "★2", THREE: "★3", FOUR: "★4", FIVE: "★5" };
-    return m[s] || s;
-  };
   const reviewTexts = filteredReviews
-    .map((r) => `[${starLabel(r.starRating)}][${r.createTime?.slice(0, 10) || ""}] ${r.comment.slice(0, 300)}`)
+    .map((r) => `[${r.createTime?.slice(0, 10) || ""}] ${r.comment.slice(0, 300)}`)
     .join("\n");
 
   if (!reviewTexts) return null;
@@ -162,7 +158,7 @@ ${reviewTexts}
 - 必ず口コミ原文に含まれる表現をそのまま抜き出してください。要約・言い換え・意訳は禁止。
 - 例: 口コミに「スープが熱々で美味しかった」→ ○「スープが熱々」 ✕「温かいスープ」
 - 各ワードは2〜8文字程度の短いフレーズ。
-- positiveWordsは★4-5、negativeWordsは★1-3の口コミから抽出。
+- positiveWordsは好意的な口コミから、negativeWordsは批判的な口コミから抽出。
 - それぞれ最低12個以上の候補を出してください（後で自動フィルタします）。
 
 【出力形式】以下のJSON形式のみ出力してください。WordSourcesは不要です。
