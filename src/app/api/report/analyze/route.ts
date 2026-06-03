@@ -153,7 +153,6 @@ async function tryAnalyze(
 Google公式評価: ${averageRating} / 5.0（※この値を必ず使用。独自に平均を計算しないこと）
 
 【正確な統計データ（以下の数値をcommentsで使用すること。独自に数えないでください）】
-口コミ傾向: 高評価(★4-5)が${pctOf(positiveCount)}%、低評価(★1-3)が${pctOf(negativeCount)}%
 ${kpiText || ""}
 
 【口コミテキスト（分析用サンプル）】
