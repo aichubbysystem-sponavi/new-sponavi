@@ -173,17 +173,18 @@ ${reviewTexts}
   "negativeWords": ["ネガ1", "ネガ2", ... "ネガ12"],
   "summary": "レポート全体の総評を1行で要約（50文字以内。KPI動向+口コミ傾向を両方含める）",
   "comments": [
-    "コメント1: ${hasKpi ? "【必須】上記のKPIデータを使って、検索数・マップ表示数・アクション数（ウェブサイト/ルート/通話）の前月比・前年比を具体的な数値で分析。同業種平均・同グループ平均との比較も必ず含める。数値は上記データをそのまま引用すること" : "パフォーマンス概況（KPIデータ未取得のため口コミ動向から推定）"}",
-    "コメント2: 口コミ傾向分析（評価分布の数値を引用し、高評価・低評価の傾向、具体的な声の紹介）",
-    "コメント3: 強み（${hasKpi ? "KPIで同業種平均を上回る指標と、" : ""}口コミで評価されている点を具体的に）",
-    "コメント4: 改善点（${hasKpi ? "KPIで前月比マイナスの指標や同業種平均を下回る指標と、" : ""}口コミで指摘されている課題）",
-    "コメント5: 来月の具体的な施策提案（${hasKpi ? "KPI改善と" : ""}口コミ改善の両面から実行可能なアクション3〜4つ）"
+    "コメント1: ${hasKpi ? "【必須】KPI総合分析。検索数・マップ表示数・アクション数の前月比・前年比を数値で分析。アクション率（行動転換率）の変化も言及。同業種/同グループ平均との比較を全指標で行い、何が上回り何が下回るか明確に" : "パフォーマンス概況（KPIデータ未取得のため口コミ動向から推定）"}",
+    "コメント2: 口コミ・集客分析（評価分布、口コミ増加ペース、検索語句の指名/一般比率、キーワード順位変動を総合的に分析。具体的な口コミの声も紹介）",
+    "コメント3: 強み（${hasKpi ? "KPIで同業種平均を上回る指標、アクション率の高さ、キーワード順位の好調KW、" : ""}口コミで評価されている点を具体的に）",
+    "コメント4: 改善点（${hasKpi ? "KPIで前月比マイナスの指標、同業種平均を下回る指標、順位下落KW、" : ""}口コミで指摘されている課題）",
+    "コメント5: 来月の具体的な施策提案（${hasKpi ? "KPI改善（検索数回復・アクション率向上）、順位対策、" : ""}口コミ促進の各面から実行可能なアクション3〜4つ）"
   ]
 }
 
 【commentsのルール（厳守）】
 - これはお客様に見せるMEOレポートの総評です。口コミ分析レポートではありません。
-${hasKpi ? `- ★最重要★ コメント1は「検索数○○回（前月比○%）」「マップ表示○○回（前月比○%）」のように、上記KPIデータの具体的な数値を必ず引用してください。数値なしの抽象的な記述は禁止。
+${hasKpi ? `- ★最重要★ コメント1は「検索数○○回（前月比○%）」「マップ表示○○回（前月比○%）」「アクション率○%」のように、上記KPIデータの具体的な数値を必ず引用。数値なしの抽象的な記述は禁止。
+- コメント2ではキーワード順位変動・検索語句の指名/一般比率・口コミ増加ペースにも触れること。
 - コメント3・4でも、同グループ平均・同業種平均との比較を「検索数は同業種平均○○回に対し○○回で○%上回っている」のように定量的に記載。` : "- KPIデータが未取得のため、口コミデータを中心に分析してください（その旨は書かない）。"}
 - 数値は必ず上記の統計データ・KPIデータの値をそのまま使用。独自計算は禁止。
 - ★重要★ 口コミ数を同業種平均と比較する際は「累計口コミ数」（${totalReviewCount}件）を使うこと。「直近1年の口コミ」（${totalRated}件）は分析対象の件数であり、累計とは異なる。混同禁止。
@@ -386,13 +387,77 @@ export async function POST(request: NextRequest) {
           if (charts && labels.length >= 2) {
             const recentLabels = labels.slice(-3);
             const getRecent = (arr: number[]) => arr ? arr.slice(-3) : [];
-            const searchTrend = getRecent(charts.searchTotal);
-            const mapTrend = getRecent(charts.mapTotal);
+            const searchTrend = getRecent(charts.searchTotal || []);
+            const mapTrend = getRecent(charts.mapTotal || []);
             if (searchTrend.length >= 2) {
               kpiText += `\n\n【直近3ヶ月の推移】`;
               kpiText += `\nGoogle検索: ${recentLabels.map((l: string, i: number) => `${l}=${searchTrend[i]?.toLocaleString() || 0}`).join(" → ")}`;
               kpiText += `\nGoogleマップ: ${recentLabels.map((l: string, i: number) => `${l}=${mapTrend[i]?.toLocaleString() || 0}`).join(" → ")}`;
             }
+
+            // アクション率（アクション合計 ÷ マップ表示数）
+            const lastIdx = labels.length - 1;
+            const curMap = (charts.mapMobile?.[lastIdx] || 0) + (charts.mapPC?.[lastIdx] || 0);
+            const curActions = (charts.websites?.[lastIdx] || 0) + (charts.routes?.[lastIdx] || 0) + (charts.calls?.[lastIdx] || 0);
+            if (curMap > 0) {
+              const actionRate = (curActions / curMap * 100).toFixed(2);
+              kpiText += `\n\n【アクション率】\nアクション合計(Web+ルート+通話): ${curActions.toLocaleString()}件 ÷ マップ表示: ${curMap.toLocaleString()}回 = ${actionRate}%`;
+              if (lastIdx >= 1) {
+                const prevMap = (charts.mapMobile?.[lastIdx - 1] || 0) + (charts.mapPC?.[lastIdx - 1] || 0);
+                const prevActions = (charts.websites?.[lastIdx - 1] || 0) + (charts.routes?.[lastIdx - 1] || 0) + (charts.calls?.[lastIdx - 1] || 0);
+                if (prevMap > 0) {
+                  const prevRate = (prevActions / prevMap * 100).toFixed(2);
+                  kpiText += `（前月: ${prevRate}%）`;
+                }
+              }
+              kpiText += `\n※アクション率はマップで見た人のうち何%が行動（Web/ルート/通話）に繋がったかを示す重要指標`;
+            }
+          }
+
+          // 口コミ増加ペース（月間増加数の推移）
+          const reviewDelta = report.reviewDelta;
+          const reviewLabels = report.reviewLabels;
+          if (reviewDelta && reviewDelta.length > 0) {
+            const recentDeltas = reviewDelta.slice(-6).filter((d: number | null) => d !== null) as number[];
+            if (recentDeltas.length > 0) {
+              const avgDelta = (recentDeltas.reduce((a: number, b: number) => a + b, 0) / recentDeltas.length).toFixed(1);
+              const lastDelta = reviewDelta[reviewDelta.length - 1];
+              const recentLabelsRev = (reviewLabels || []).slice(-6);
+              kpiText += `\n\n【口コミ増加ペース】`;
+              kpiText += `\n直近6ヶ月の月間増加数: ${recentLabelsRev.map((l: string, i: number) => `${l}=${reviewDelta.slice(-6)[i] ?? 0}件`).join(", ")}`;
+              kpiText += `\n平均: 月${avgDelta}件 / 当月: ${lastDelta ?? 0}件`;
+            }
+          }
+
+          // キーワード順位データ
+          const kwData = report.keywords;
+          const rankHistory = report.rankingHistory;
+          if (kwData && kwData.length > 0) {
+            kpiText += `\n\n【キーワード順位（当月）】`;
+            for (const kw of kwData) {
+              const diff = kw.prevRank > 0 && kw.rank > 0 ? kw.prevRank - kw.rank : 0;
+              const arrow = diff > 0 ? `↑${diff}` : diff < 0 ? `↓${Math.abs(diff)}` : "→";
+              kpiText += `\n${kw.word}: ${kw.rank > 0 ? `${kw.rank}位` : "圏外"}（前月${kw.prevRank > 0 ? `${kw.prevRank}位` : "圏外"} ${arrow}）`;
+            }
+          }
+
+          // 検索語句の傾向（指名検索 vs 一般検索）
+          const sq = report.searchQueries;
+          if (sq?.latest && sq.latest.length > 0) {
+            const top10 = sq.latest.slice(0, 10);
+            const totalCount = sq.latest.reduce((s: number, q: any) => s + (q.count || 0), 0);
+            // 指名検索の判定（店舗名の一部を含む）
+            const shopWords = shop.name.toLowerCase().split(/[\s　]+/).filter((w: string) => w.length >= 2);
+            const brandQueries = sq.latest.filter((q: any) => shopWords.some((w: string) => q.word?.toLowerCase().includes(w)));
+            const brandCount = brandQueries.reduce((s: number, q: any) => s + (q.count || 0), 0);
+            const brandPct = totalCount > 0 ? Math.round(brandCount / totalCount * 100) : 0;
+
+            kpiText += `\n\n【検索語句分析（${sq.latestMonth || "当月"}）】`;
+            kpiText += `\n総検索数: ${totalCount.toLocaleString()}回`;
+            kpiText += `\nTOP5: ${top10.slice(0, 5).map((q: any) => `${q.word}(${q.count})`).join(", ")}`;
+            kpiText += `\n指名検索（店舗名含む）: ${brandCount.toLocaleString()}回（${brandPct}%）`;
+            kpiText += `\n一般検索: ${(totalCount - brandCount).toLocaleString()}回（${100 - brandPct}%）`;
+            kpiText += `\n※指名検索比率が高い=認知度◎、一般検索が多い=新規発見チャネルとして機能`;
           }
         } else {
           console.warn(`[analyze] ${shop.name}: report_data_cacheにデータなし`);
