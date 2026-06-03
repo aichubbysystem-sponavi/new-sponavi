@@ -425,7 +425,7 @@ export async function POST(request: NextRequest) {
               kpiText += `\n\n【口コミ月間増加ペース（新規投稿数/月）】`;
               kpiText += `\n直近6ヶ月: ${recentLabelsRev.map((l: string, i: number) => `${l}=+${reviewDelta.slice(-6)[i] ?? 0}`).join(", ")}`;
               kpiText += `\n月平均: +${avgDelta} / 当月: +${lastDelta ?? 0}`;
-              kpiText += `\n※これは月間の新規口コミ投稿数であり、累計口コミ数（${totalReviewCount}件）とは異なる`;
+              kpiText += `\n※これは月間の新規口コミ投稿数であり、累計口コミ数とは異なる`;
             }
           }
 
