@@ -122,7 +122,7 @@ async function tryAnalyze(
   kpiText?: string
 ): Promise<any | null> {
   const reviewTexts = filteredReviews
-    .map((r, i) => `[#${i + 1}][${r.starRating}][${r.reviewer.displayName}][${r.createTime?.slice(0, 10) || "不明"}] ${r.comment.slice(0, 300)}`)
+    .map((r) => `[${r.starRating}][${r.reviewer.displayName}][${r.createTime?.slice(0, 10) || "不明"}] ${r.comment.slice(0, 300)}`)
     .join("\n");
 
   if (!reviewTexts) return null;
@@ -422,9 +422,10 @@ export async function POST(request: NextRequest) {
               const avgDelta = (recentDeltas.reduce((a: number, b: number) => a + b, 0) / recentDeltas.length).toFixed(1);
               const lastDelta = reviewDelta[reviewDelta.length - 1];
               const recentLabelsRev = (reviewLabels || []).slice(-6);
-              kpiText += `\n\n【口コミ増加ペース】`;
-              kpiText += `\n直近6ヶ月の月間増加数: ${recentLabelsRev.map((l: string, i: number) => `${l}=${reviewDelta.slice(-6)[i] ?? 0}件`).join(", ")}`;
-              kpiText += `\n平均: 月${avgDelta}件 / 当月: ${lastDelta ?? 0}件`;
+              kpiText += `\n\n【口コミ月間増加ペース（新規投稿数/月）】`;
+              kpiText += `\n直近6ヶ月: ${recentLabelsRev.map((l: string, i: number) => `${l}=+${reviewDelta.slice(-6)[i] ?? 0}`).join(", ")}`;
+              kpiText += `\n月平均: +${avgDelta} / 当月: +${lastDelta ?? 0}`;
+              kpiText += `\n※これは月間の新規口コミ投稿数であり、累計口コミ数（${totalReviewCount}件）とは異なる`;
             }
           }
 
@@ -483,7 +484,7 @@ export async function POST(request: NextRequest) {
                 count++;
               }
               if (count > 0) {
-                kpiText += `\n\n【同グループ平均（${count}店舗）※店舗名は記載しないこと】\nGoogle検索平均: ${Math.round(totalSearch / count).toLocaleString()}回\nGoogleマップ平均: ${Math.round(totalMap / count).toLocaleString()}回\nアクション合計平均: ${Math.round(totalAction / count).toLocaleString()}回\n口コミ数平均: ${Math.round(gReviews / count)}件\n評価平均: ${count > 0 && gRating > 0 ? (gRating / count).toFixed(1) : "-"}`;
+                kpiText += `\n\n【同グループ平均（${count}店舗）※店舗名は記載しないこと】\nGoogle検索平均: ${Math.round(totalSearch / count).toLocaleString()}回\nGoogleマップ平均: ${Math.round(totalMap / count).toLocaleString()}回\nアクション合計平均: ${Math.round(totalAction / count).toLocaleString()}回\n累計口コミ数平均: ${Math.round(gReviews / count)}件\n評価平均: ${count > 0 && gRating > 0 ? (gRating / count).toFixed(1) : "-"}`;
               }
             }
           }
@@ -511,7 +512,7 @@ export async function POST(request: NextRequest) {
                 cnt++;
               }
               if (cnt > 0) {
-                kpiText += `\n\n【同業種平均（${category} ${cnt}店舗）※店舗名は記載しないこと】\nGoogle検索平均: ${Math.round(tSearch / cnt).toLocaleString()}回\nGoogleマップ平均: ${Math.round(tMap / cnt).toLocaleString()}回\nアクション合計平均: ${Math.round(tAction / cnt).toLocaleString()}回\n口コミ数平均: ${Math.round(tReviews / cnt)}件\n評価平均: ${cnt > 0 && tRating > 0 ? (tRating / cnt).toFixed(1) : "-"}`;
+                kpiText += `\n\n【同業種平均（${category} ${cnt}店舗）※店舗名は記載しないこと】\nGoogle検索平均: ${Math.round(tSearch / cnt).toLocaleString()}回\nGoogleマップ平均: ${Math.round(tMap / cnt).toLocaleString()}回\nアクション合計平均: ${Math.round(tAction / cnt).toLocaleString()}回\n累計口コミ数平均: ${Math.round(tReviews / cnt)}件\n評価平均: ${cnt > 0 && tRating > 0 ? (tRating / cnt).toFixed(1) : "-"}`;
               }
             }
           }
