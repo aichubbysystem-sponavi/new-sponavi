@@ -175,8 +175,9 @@ export default function ReportListClient({
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 4000); }
 
   const MEMO_TEMPLATES = [
-    { label: "写真全般", text: "投稿用のお写真が不足しているため、現状のままですと文章のみの投稿となります。写真付きの方が閲覧数・反応率が高いため、横向きの写真を最低20枚ご提供いただけますようお願いいたします。" },
-    { label: "料理写真", text: "投稿用のお料理写真が不足しているため、現状のままですと文章のみの投稿となります。写真付きの方が閲覧数・反応率が高いため、メニューや料理の横向き写真を最低20枚ご提供いただけますようお願いいたします。" },
+    { label: "他媒体写真の使用確認", text: "現在、最新情報の投稿に使用できるお写真が不足しているため、食べログやInstagram等の他媒体に掲載されているお写真を使用させていただくことは可能でしょうか。\n新しいお写真をご共有いただける場合は、そちらを優先して使用いたします。" },
+    { label: "過去写真の再利用確認", text: "最新情報の投稿に使用できるお写真が不足しているため、過去の最新情報投稿で使用したお写真を再利用して投稿を進めてもよろしいでしょうか。\n新しいお写真をご共有いただける場合は、そちらを優先して使用いたします。" },
+    { label: "文章のみ投稿のご案内", text: "最新情報の投稿に使用できるお写真がなく、他媒体掲載写真の使用および過去写真の再利用も難しい状況のため、今後の最新情報の投稿をお写真を使用せず、文章のみで進めさせていただければと思います。\n新しいお写真をご共有いただける場合は、引き続き、写真付きで投稿を進めさせていただきます。" },
     { label: "カスタム", text: "" },
   ];
 
@@ -338,7 +339,7 @@ export default function ReportListClient({
                 </button>
                 <button onClick={() => setShowMemoModal(true)} disabled={memoAdding}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${memoAdding ? "bg-slate-200 text-slate-400" : "bg-orange-500 text-white hover:bg-orange-600"}`}>
-                  {memoAdding ? "追加中..." : "写真不足"}
+                  {memoAdding ? "追加中..." : "メモ追加"}
                 </button>
                 <button
                   onClick={() => {
@@ -615,11 +616,11 @@ export default function ReportListClient({
 
         <footer className="text-center py-6 text-[11px] text-slate-300" suppressHydrationWarning>© {new Date().getFullYear()} SPOTLIGHT NAVIGATOR by 株式会社Chubby</footer>
 
-        {/* 写真不足メモモーダル */}
+        {/* メモ一括追加モーダル */}
         {showMemoModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowMemoModal(false)}>
             <div className="bg-white rounded-2xl shadow-2xl p-6 w-[480px] max-w-[90vw]" onClick={e => e.stopPropagation()}>
-              <h3 className="text-base font-bold text-[#003D6B] mb-4">写真不足メモを追加（{selected.size}店舗）</h3>
+              <h3 className="text-base font-bold text-[#003D6B] mb-4">メモを一括追加（{selected.size}店舗）</h3>
               <div className="flex flex-col gap-3">
                 {MEMO_TEMPLATES.filter(t => t.label !== "カスタム").map((t, i) => (
                   <button key={i} onClick={() => handleAddMemo(t.text)}
