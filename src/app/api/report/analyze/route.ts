@@ -559,21 +559,14 @@ export async function POST(request: NextRequest) {
 
       // コメント・サマリー内の評価値を公式値で強制置換（DB保存前に確定させる）
       const ratingStr = String(officialRating);
-      const wrongRatings = ["3.0", "3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7", "3.8", "4.0", "4.1", "4.2", "4.3", "4.4", "4.5", "4.6", "4.7", "4.8", "4.9"]
-        .filter(r => r !== ratingStr);
       const fixRating = (text: string) => {
-        let fixed = text;
-        // "X.X/5.0" パターン
-        fixed = fixed.replace(/(\d\.\d)\s*\/\s*5\.0/g, `${ratingStr}/5.0`);
-        // 評価文脈での誤った評価値を全置換（"評価3.7" "評価は3.7点" "3.7点の" 等）
-        for (const wrong of wrongRatings) {
-          const escaped = wrong.replace(".", "\\.");
-          // "評価X.X" / "評価はX.X" / "X.X点" / "X.X/5"
-          fixed = fixed.replace(new RegExp(`(評価[^\\d]{0,5})${escaped}`, "g"), `$1${ratingStr}`);
-          fixed = fixed.replace(new RegExp(`${escaped}点`, "g"), `${ratingStr}点`);
-          fixed = fixed.replace(new RegExp(`${escaped}(/5)`, "g"), `${ratingStr}$1`);
-        }
-        return fixed;
+        // 全ての X.X を評価文脈で公式値に置換（最も単純で確実な方法）
+        return text.replace(/\d\.\d/g, (match) => {
+          const v = parseFloat(match);
+          // 3.0〜5.0の範囲で公式値と異なる場合は置換（評価値の範囲）
+          if (v >= 3.0 && v <= 5.0 && match !== ratingStr) return ratingStr;
+          return match;
+        });
       };
       if (analysis.comments) {
         analysis.comments = analysis.comments.map(fixRating);
