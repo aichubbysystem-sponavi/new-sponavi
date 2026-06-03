@@ -147,20 +147,16 @@ async function tryAnalyze(
 これは「口コミ分析」ではなく「MEOレポート全体の総評」です。KPIデータ（検索数・マップ表示数・アクション数）と口コミの両方を必ず分析してください。
 
 店舗名: ${shopName}
-Google公式評価: ${averageRating} / 5.0（※この値を必ず使用。直近1年の口コミ分布から独自に平均を計算しないこと）
-累計口コミ数: ${totalReviewCount}件
+Google公式評価: ${averageRating} / 5.0（※この値を必ず使用。独自に平均を計算しないこと）
 
 【正確な統計データ（以下の数値をcommentsで使用すること。独自に数えないでください）】
-口コミ数: ${totalReviewCount}件（累計）
 評価分布（直近の口コミ傾向）: ${statsText}
 高評価(★4-5): ${pctOf(positiveCount)}%
 低評価(★1-3): ${pctOf(negativeCount)}%
 ${kpiText || ""}
 
-【口コミテキスト（全${totalReviewCount}件からの抜粋サンプル。以下のテキスト行数＝口コミ総数ではない）】
+【口コミテキスト（分析用サンプル）】
 ${reviewTexts}
-
-【注意】上記の口コミテキストは分析用のサンプル抜粋です。この店舗の累計口コミ総数は${totalReviewCount}件です。commentsで口コミ数に言及する場合は必ず${totalReviewCount}件と記載してください。
 
 【重要ルール（positiveWords / negativeWords）】
 - 必ず口コミ原文に含まれる表現をそのまま抜き出してください。要約・言い換え・意訳は禁止。
@@ -176,7 +172,7 @@ ${reviewTexts}
   "summary": "レポート全体の総評を1行で要約（50文字以内。KPI動向+口コミ傾向を両方含める）",
   "comments": [
     "コメント1: ${hasKpi ? "【必須】KPI総合分析。検索数・マップ表示数・アクション数の前月比・前年比を数値で分析。アクション率（行動転換率）の変化も言及。同業種/同グループ平均との比較を全指標で行い、何が上回り何が下回るか明確に" : "パフォーマンス概況（KPIデータ未取得のため口コミ動向から推定）"}",
-    "コメント2: 口コミ・集客分析（評価${averageRating}点、口コミ累計${totalReviewCount}件。評価分布、口コミ増加ペース、検索語句の指名/一般比率、キーワード順位変動を総合分析）",
+    "コメント2: 口コミ・集客分析（評価${averageRating}点。評価分布、口コミ増加ペース、検索語句の指名/一般比率、キーワード順位変動を総合分析。口コミの件数には言及しないこと）",
     "コメント3: 強み（${hasKpi ? "KPIで同業種平均を上回る指標、アクション率の高さ、キーワード順位の好調KW、" : ""}口コミで評価されている点を具体的に）",
     "コメント4: 改善点（${hasKpi ? "KPIで前月比マイナスの指標、同業種平均を下回る指標、順位下落KW、" : ""}口コミで指摘されている課題）",
     "コメント5: 来月の具体的な施策提案（${hasKpi ? "KPI改善（検索数回復・アクション率向上）、順位対策、" : ""}口コミ促進の各面から実行可能なアクション3〜4つ）"
@@ -188,7 +184,8 @@ ${reviewTexts}
 ${hasKpi ? `- ★最重要★ コメント1は「検索数○○回（前月比○%）」「マップ表示○○回（前月比○%）」「アクション率○%」のように、上記KPIデータの具体的な数値を必ず引用。数値なしの抽象的な記述は禁止。
 - コメント2ではキーワード順位変動・検索語句の指名/一般比率・口コミ増加ペースにも触れること。
 - コメント3・4でも、同グループ平均・同業種平均との比較を「検索数は同業種平均○○回に対し○○回で○%上回っている」のように定量的に記載。` : "- KPIデータが未取得のため、口コミデータを中心に分析してください（その旨は書かない）。"}
-- 数値は必ず上記の統計データ・KPIデータの値をそのまま使用。独自計算は禁止。評価は${averageRating}、口コミ数は${totalReviewCount}件。
+- 数値は必ず上記の統計データ・KPIデータの値をそのまま使用。独自計算は禁止。評価は${averageRating}。
+- 口コミの「件数」「○○件」には一切言及しないこと。件数比較は行わない。口コミの質・傾向のみ分析すること。
 - コメント内に口コミ参照番号（#1, #6等）を絶対に含めない。
 - 具体的な口コミ引用は「○○という声がある」のように表現。
 - 重要な数値や結論は<strong>タグで強調。`;
@@ -427,7 +424,7 @@ export async function POST(request: NextRequest) {
               kpiText += `\n\n【口コミ月間増加ペース（新規投稿数/月）】`;
               kpiText += `\n直近6ヶ月: ${recentLabelsRev.map((l: string, i: number) => `${l}=+${reviewDelta.slice(-6)[i] ?? 0}`).join(", ")}`;
               kpiText += `\n月平均: +${avgDelta} / 当月: +${lastDelta ?? 0}`;
-              kpiText += `\n※これは月間の新規口コミ投稿数であり、累計口コミ数とは異なる`;
+              kpiText += `\n※月間の新規投稿数の推移`;
             }
           }
 
@@ -486,7 +483,7 @@ export async function POST(request: NextRequest) {
                 count++;
               }
               if (count > 0) {
-                kpiText += `\n\n【同グループ平均（${count}店舗）※店舗名は記載しないこと】\nGoogle検索平均: ${Math.round(totalSearch / count).toLocaleString()}回\nGoogleマップ平均: ${Math.round(totalMap / count).toLocaleString()}回\nアクション合計平均: ${Math.round(totalAction / count).toLocaleString()}回\n累計口コミ数平均: ${Math.round(gReviews / count)}件\n評価平均: ${count > 0 && gRating > 0 ? (gRating / count).toFixed(1) : "-"}`;
+                kpiText += `\n\n【同グループ平均（${count}店舗）※店舗名は記載しないこと】\nGoogle検索平均: ${Math.round(totalSearch / count).toLocaleString()}回\nGoogleマップ平均: ${Math.round(totalMap / count).toLocaleString()}回\nアクション合計平均: ${Math.round(totalAction / count).toLocaleString()}回\n評価平均: ${count > 0 && gRating > 0 ? (gRating / count).toFixed(1) : "-"}`;
               }
             }
           }
@@ -514,7 +511,7 @@ export async function POST(request: NextRequest) {
                 cnt++;
               }
               if (cnt > 0) {
-                kpiText += `\n\n【同業種平均（${category} ${cnt}店舗）※店舗名は記載しないこと】\nGoogle検索平均: ${Math.round(tSearch / cnt).toLocaleString()}回\nGoogleマップ平均: ${Math.round(tMap / cnt).toLocaleString()}回\nアクション合計平均: ${Math.round(tAction / cnt).toLocaleString()}回\n累計口コミ数平均: ${Math.round(tReviews / cnt)}件\n評価平均: ${cnt > 0 && tRating > 0 ? (tRating / cnt).toFixed(1) : "-"}`;
+                kpiText += `\n\n【同業種平均（${category} ${cnt}店舗）※店舗名は記載しないこと】\nGoogle検索平均: ${Math.round(tSearch / cnt).toLocaleString()}回\nGoogleマップ平均: ${Math.round(tMap / cnt).toLocaleString()}回\nアクション合計平均: ${Math.round(tAction / cnt).toLocaleString()}回\n評価平均: ${cnt > 0 && tRating > 0 ? (tRating / cnt).toFixed(1) : "-"}`;
               }
             }
           }
