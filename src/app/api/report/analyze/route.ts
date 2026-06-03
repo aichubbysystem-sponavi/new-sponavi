@@ -324,18 +324,36 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      // Google公式評価をshopsテーブルから取得（AI独自計算より正確）
-      let shopRow = (await supabase.from("shops").select("rating, review_count").eq("id", shop.id).maybeSingle()).data;
-      // shop.idで見つからない場合、shop.nameでフォールバック検索
-      if (!shopRow?.rating) {
-        const { data: nameRow } = await supabase.from("shops").select("rating, review_count").eq("name", shop.name).not("rating", "is", null).maybeSingle();
-        if (nameRow?.rating) shopRow = nameRow;
+      // Google公式評価を取得（report_data_cache > shops > DB口コミ計算 の優先順）
+      let officialRating = reviewData.averageRating;
+      let officialCount = reviewData.totalReviewCount;
+
+      // 1. report_data_cacheから取得（スプレッドシート由来、最も正確）
+      try {
+        const { data: cache } = await supabase.from("report_data_cache").select("report_json").eq("shop_name", shop.name).maybeSingle();
+        if (cache?.report_json) {
+          const shopInfo = (cache.report_json as any).shop;
+          if (shopInfo?.rating && shopInfo.rating > 0) {
+            officialRating = shopInfo.rating;
+            if (shopInfo.totalReviews) officialCount = shopInfo.totalReviews;
+          }
+        }
+      } catch {}
+
+      // 2. shopsテーブルから取得（フォールバック）
+      if (officialRating === reviewData.averageRating) {
+        let shopRow = (await supabase.from("shops").select("rating, review_count").eq("id", shop.id).maybeSingle()).data;
+        if (!shopRow?.rating) {
+          const { data: nameRow } = await supabase.from("shops").select("rating, review_count").eq("name", shop.name).not("rating", "is", null).maybeSingle();
+          if (nameRow?.rating) shopRow = nameRow;
+        }
+        if (shopRow?.rating) {
+          officialRating = shopRow.rating;
+          if (shopRow.review_count) officialCount = shopRow.review_count;
+        }
       }
-      const officialRating = shopRow?.rating ?? reviewData.averageRating;
-      const officialCount = shopRow?.review_count ?? reviewData.totalReviewCount;
-      if (!shopRow?.rating) {
-        console.warn(`[analyze] ${shop.name}: shopsテーブルにrating未保存。DB口コミから算出した${officialRating}を使用。口コミ再同期でshops.ratingが更新されます。`);
-      }
+
+      console.log(`[analyze] ${shop.name}: officialRating=${officialRating}, officialCount=${officialCount}`);
 
       // KPIデータとグループ平均を取得
       let kpiText = "";
