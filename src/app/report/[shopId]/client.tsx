@@ -114,8 +114,11 @@ export default function ReportClient({
 }: {
   data: ReportData; shopId: string; dataSource?: "cache" | "spreadsheet" | "mock"; googleReviewUrl?: string | null;
 }) {
-  const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
-  const targetMonth = searchParams?.get("month") || "";
+  const [targetMonth, setTargetMonth] = useState("");
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setTargetMonth(params.get("month") || "");
+  }, []);
 
   // 対象月でデータを切り詰め
   const trimmedData = useMemo(() => {
