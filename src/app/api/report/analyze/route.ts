@@ -559,14 +559,20 @@ export async function POST(request: NextRequest) {
 
       // コメント・サマリー内の評価値を公式値で強制置換（DB保存前に確定させる）
       const ratingStr = String(officialRating);
+      const wrongRatings = ["3.0", "3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7", "3.8", "4.0", "4.1", "4.2", "4.3", "4.4", "4.5", "4.6", "4.7", "4.8", "4.9"]
+        .filter(r => r !== ratingStr);
       const fixRating = (text: string) => {
         let fixed = text;
         // "X.X/5.0" パターン
         fixed = fixed.replace(/(\d\.\d)\s*\/\s*5\.0/g, `${ratingStr}/5.0`);
-        // "X.X点" パターン（評価文脈: "評価X.X点", "公式評価X.X点", "Google評価X.X点" 等）
-        fixed = fixed.replace(/(評価[はが]?\s*)(\d\.\d)(点|で)/g, `$1${ratingStr}$3`);
-        // "評価X.X" パターン（「点」なし）
-        fixed = fixed.replace(/(評価[はが]?\s*)(\d\.\d)(\s|$|、|。|の)/g, `$1${ratingStr}$3`);
+        // 評価文脈での誤った評価値を全置換（"評価3.7" "評価は3.7点" "3.7点の" 等）
+        for (const wrong of wrongRatings) {
+          const escaped = wrong.replace(".", "\\.");
+          // "評価X.X" / "評価はX.X" / "X.X点" / "X.X/5"
+          fixed = fixed.replace(new RegExp(`(評価[^\\d]{0,5})${escaped}`, "g"), `$1${ratingStr}`);
+          fixed = fixed.replace(new RegExp(`${escaped}点`, "g"), `${ratingStr}点`);
+          fixed = fixed.replace(new RegExp(`${escaped}(/5)`, "g"), `${ratingStr}$1`);
+        }
         return fixed;
       };
       if (analysis.comments) {
