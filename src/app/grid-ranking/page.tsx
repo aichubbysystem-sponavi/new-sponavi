@@ -749,6 +749,7 @@ export default function GridRankingPage() {
                           updated++;
                         } else { failed++; }
                       } catch { failed++; }
+                      await new Promise(r => setTimeout(r, 500));
                     }
                     await refreshPresets();
                     setKwSyncResult(`${updated}件更新${failed > 0 ? `（${failed}件見つからず）` : ""}`);
@@ -1035,6 +1036,7 @@ export default function GridRankingPage() {
                           updated++;
                         } else { failed++; }
                       } catch { failed++; }
+                      await new Promise(r => setTimeout(r, 500));
                     }
                     setAllShopsKwResult(`${updated}件更新${failed > 0 ? `（${failed}件見つからず）` : ""}`);
                     setAllShopsKwSyncing(false);
@@ -1082,6 +1084,7 @@ export default function GridRankingPage() {
                         kwUpdated++;
                       } else { kwFailed++; }
                     } catch { kwFailed++; }
+                    await new Promise(r => setTimeout(r, 500));
                   }
                   if (kwFailed > 0) {
                     setAllShopsBatchProgress(`Phase 2/3: KW${kwUpdated}件取得（${kwFailed}件見つからず）`);
