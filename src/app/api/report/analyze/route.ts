@@ -121,8 +121,12 @@ async function tryAnalyze(
   ratingDistribution?: Record<number, number>,
   kpiText?: string
 ): Promise<any | null> {
+  const starLabel = (s: string) => {
+    const m: Record<string, string> = { ONE: "★1", TWO: "★2", THREE: "★3", FOUR: "★4", FIVE: "★5" };
+    return m[s] || s;
+  };
   const reviewTexts = filteredReviews
-    .map((r) => `[${r.starRating}][${r.reviewer.displayName}][${r.createTime?.slice(0, 10) || "不明"}] ${r.comment.slice(0, 300)}`)
+    .map((r) => `[${starLabel(r.starRating)}][${r.createTime?.slice(0, 10) || ""}] ${r.comment.slice(0, 300)}`)
     .join("\n");
 
   if (!reviewTexts) return null;
@@ -136,7 +140,6 @@ async function tryAnalyze(
   })();
   const totalRated = Object.values(dist).reduce((a, b) => a + b, 0);
   const pctOf = (n: number) => totalRated > 0 ? Math.round(n / totalRated * 100) : 0;
-  const statsText = `★5: ${pctOf(dist[5])}%, ★4: ${pctOf(dist[4])}%, ★3: ${pctOf(dist[3])}%, ★2: ${pctOf(dist[2])}%, ★1: ${pctOf(dist[1])}%`;
   const positiveCount = (dist[4] || 0) + (dist[5] || 0);
   const negativeCount = (dist[1] || 0) + (dist[2] || 0) + (dist[3] || 0);
 
@@ -150,9 +153,7 @@ async function tryAnalyze(
 Google公式評価: ${averageRating} / 5.0（※この値を必ず使用。独自に平均を計算しないこと）
 
 【正確な統計データ（以下の数値をcommentsで使用すること。独自に数えないでください）】
-評価分布（直近の口コミ傾向）: ${statsText}
-高評価(★4-5): ${pctOf(positiveCount)}%
-低評価(★1-3): ${pctOf(negativeCount)}%
+口コミ傾向: 高評価(★4-5)が${pctOf(positiveCount)}%、低評価(★1-3)が${pctOf(negativeCount)}%
 ${kpiText || ""}
 
 【口コミテキスト（分析用サンプル）】
