@@ -559,8 +559,16 @@ export async function POST(request: NextRequest) {
 
       // コメント・サマリー内の評価値を公式値で強制置換（DB保存前に確定させる）
       const ratingStr = String(officialRating);
-      const fixRating = (text: string) =>
-        text.replace(/(\d\.\d)\s*\/\s*5\.0/g, `${ratingStr}/5.0`);
+      const fixRating = (text: string) => {
+        let fixed = text;
+        // "X.X/5.0" パターン
+        fixed = fixed.replace(/(\d\.\d)\s*\/\s*5\.0/g, `${ratingStr}/5.0`);
+        // "X.X点" パターン（評価文脈: "評価X.X点", "公式評価X.X点", "Google評価X.X点" 等）
+        fixed = fixed.replace(/(評価[はが]?\s*)(\d\.\d)(点|で)/g, `$1${ratingStr}$3`);
+        // "評価X.X" パターン（「点」なし）
+        fixed = fixed.replace(/(評価[はが]?\s*)(\d\.\d)(\s|$|、|。|の)/g, `$1${ratingStr}$3`);
+        return fixed;
+      };
       if (analysis.comments) {
         analysis.comments = analysis.comments.map(fixRating);
       }
