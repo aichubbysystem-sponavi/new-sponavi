@@ -147,12 +147,13 @@ async function tryAnalyze(
 これは「口コミ分析」ではなく「MEOレポート全体の総評」です。KPIデータ（検索数・マップ表示数・アクション数）と口コミの両方を必ず分析してください。
 
 店舗名: ${shopName}
-Google評価: ${averageRating} / 5.0（${totalReviewCount}件）
+Google公式評価: ${averageRating} / 5.0（※この値を必ず使用。直近1年の口コミ分布から独自に平均を計算しないこと）
+累計口コミ数: ${totalReviewCount}件
 
 【正確な統計データ（以下の数値をcommentsで使用すること。独自に数えないでください）】
 累計口コミ数: ${totalReviewCount}件（※同業種平均との比較にはこの累計値を使うこと）
-直近1年の口コミ: ${totalRated}件（※口コミ傾向分析にはこの値を使うこと）
-評価分布（直近1年）: ${statsText}
+直近1年の口コミ: ${totalRated}件（※口コミ傾向分析にはこの値を使うこと。ただし評価点数は上記Google公式評価${averageRating}を使え）
+評価分布（直近1年）: ${statsText}（※この分布から平均点を独自計算するな。評価は必ず${averageRating}と記載）
 高評価(★4-5): ${positiveCount}件(${pctOf(positiveCount)}%)
 低評価(★1-3): ${negativeCount}件(${pctOf(negativeCount)}%)
 ${kpiText || ""}
