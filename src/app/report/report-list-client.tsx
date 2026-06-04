@@ -521,7 +521,7 @@ export default function ReportListClient({
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-6">
             {paged.map((shop) => (
               <ShopCard key={shop.id} shop={shop} checked={selected.has(shop.id)} onToggle={() => toggleSelect(shop.id)}
-                isFavorite={favorites.has(shop.id)} onToggleFav={() => toggleFavorite(shop.id)} isAlert={isAlertShop(shop)} monthParam={monthParam} />
+                isFavorite={favorites.has(shop.id)} onToggleFav={() => toggleFavorite(shop.id)} isAlert={isAlertShop(shop)} monthParam={monthParam} reportMonth={reportMonth} />
             ))}
           </div>
         ) : (
@@ -588,7 +588,7 @@ export default function ReportListClient({
                         </div>
                       ) : <span className="text-slate-300">-</span>}
                     </td>
-                    <td className="p-2 text-center text-slate-400">{shop.period}</td>
+                    <td className="p-2 text-center text-slate-400">{reportMonth ? reportMonth.replace(/(\d{4})\/(\d{1,2})/, "$1年$2月") : shop.period}</td>
                     <td className="p-2 text-center">
                       {shop.analyzed ? <span className="text-emerald-500 text-[10px] font-bold">済</span> : <span className="text-slate-300 text-[10px]">未</span>}
                     </td>
@@ -659,8 +659,8 @@ export default function ReportListClient({
 
 // ── サブコンポーネント ──
 
-function ShopCard({ shop, checked, onToggle, isFavorite, onToggleFav, isAlert, monthParam = "" }: {
-  shop: ShopListItem; checked: boolean; onToggle: () => void; isFavorite: boolean; onToggleFav: () => void; isAlert: boolean; monthParam?: string;
+function ShopCard({ shop, checked, onToggle, isFavorite, onToggleFav, isAlert, monthParam = "", reportMonth = "" }: {
+  shop: ShopListItem; checked: boolean; onToggle: () => void; isFavorite: boolean; onToggleFav: () => void; isAlert: boolean; monthParam?: string; reportMonth?: string;
 }) {
   const ratingBadge =
     shop.rating >= 4.5 ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
@@ -712,7 +712,7 @@ function ShopCard({ shop, checked, onToggle, isFavorite, onToggleFav, isAlert, m
         )}
         {shop.analyzed && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-50 text-purple-500 border border-purple-100">AI済</span>}
         {shop.dataSource === "sheet_only" && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-orange-50 text-orange-500 border border-orange-100">シートのみ</span>}
-        <span className="px-2 py-0.5 rounded-full text-[10px] text-slate-400 bg-slate-50 ml-auto">{shop.period}</span>
+        <span className="px-2 py-0.5 rounded-full text-[10px] text-slate-400 bg-slate-50 ml-auto">{reportMonth ? reportMonth.replace(/(\d{4})\/(\d{1,2})/, "$1年$2月") : shop.period}</span>
       </div>
     </div>
   );
