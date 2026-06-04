@@ -154,7 +154,8 @@ export default function ReportClient({
     const getVal = (arr: number[], i: number) => i >= 0 && i < arr.length ? arr[i] : 0;
 
     const newKpis = data.kpis.map(kpi => {
-      // KPIのlabelでチャートデータを特定
+      // KPIのlabelでチャートデータを特定（「ルート検索」が「検索」に先行マッチしないよう順序に注意）
+      if (kpi.label.includes("ルート")) return { ...kpi, value: getVal(charts.routes, idx), prevValue: getVal(charts.routes, prevIdx), momValue: prevIdx >= 0 ? getVal(charts.routes, prevIdx) : null, yoyValue: yoyIdx >= 0 ? getVal(charts.routes, yoyIdx) : null };
       if (kpi.label.includes("検索")) {
         const cur = searchTotal;
         const prev = prevIdx >= 0 ? getVal(charts.searchMobile, prevIdx) + getVal(charts.searchPC, prevIdx) : 0;
@@ -168,7 +169,6 @@ export default function ReportClient({
         return { ...kpi, value: cur, prevValue: prev, momValue: prev || null, yoyValue: yoy };
       }
       if (kpi.label.includes("ウェブ")) return { ...kpi, value: getVal(charts.websites, idx), prevValue: getVal(charts.websites, prevIdx), momValue: prevIdx >= 0 ? getVal(charts.websites, prevIdx) : null, yoyValue: yoyIdx >= 0 ? getVal(charts.websites, yoyIdx) : null };
-      if (kpi.label.includes("ルート")) return { ...kpi, value: getVal(charts.routes, idx), prevValue: getVal(charts.routes, prevIdx), momValue: prevIdx >= 0 ? getVal(charts.routes, prevIdx) : null, yoyValue: yoyIdx >= 0 ? getVal(charts.routes, yoyIdx) : null };
       if (kpi.label.includes("通話")) return { ...kpi, value: getVal(charts.calls, idx), prevValue: getVal(charts.calls, prevIdx), momValue: prevIdx >= 0 ? getVal(charts.calls, prevIdx) : null, yoyValue: yoyIdx >= 0 ? getVal(charts.calls, yoyIdx) : null };
       if (kpi.label.includes("メニュー")) return { ...kpi, value: getVal(charts.foodMenus, idx), prevValue: getVal(charts.foodMenus, prevIdx), momValue: prevIdx >= 0 ? getVal(charts.foodMenus, prevIdx) : null, yoyValue: yoyIdx >= 0 ? getVal(charts.foodMenus, yoyIdx) : null };
       if (kpi.label.includes("予約")) return { ...kpi, value: getVal(charts.bookings, idx), prevValue: getVal(charts.bookings, prevIdx), momValue: prevIdx >= 0 ? getVal(charts.bookings, prevIdx) : null, yoyValue: yoyIdx >= 0 ? getVal(charts.bookings, yoyIdx) : null };
