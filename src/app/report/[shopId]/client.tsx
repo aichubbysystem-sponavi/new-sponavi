@@ -120,11 +120,15 @@ export default function ReportClient({
     setTargetMonth(params.get("month") || "");
   }, []);
 
+  // 指定月がデータに存在するか
+  const monthNotFound = targetMonth && !data.monthlyLabels.includes(targetMonth);
+  const latestMonth = data.monthlyLabels[data.monthlyLabels.length - 1] || "";
+
   // 対象月でデータを切り詰め
   const trimmedData = useMemo(() => {
     if (!targetMonth) return data;
     const idx = data.monthlyLabels.indexOf(targetMonth);
-    if (idx < 0) return data; // 指定月が見つからなければそのまま
+    if (idx < 0) return data; // 指定月が見つからなければ最新月を表示
 
     const endIdx = idx + 1;
     const trimArray = <T,>(arr: T[]) => arr.slice(0, endIdx);
@@ -785,6 +789,16 @@ export default function ReportClient({
               );
             })()}
           </div>
+        </div>
+      )}
+
+      {/* 指定月データなしバナー */}
+      {monthNotFound && (
+        <div style={{ background: "#FEF3C7", border: "1px solid #F59E0B", borderRadius: 8, padding: "12px 20px", margin: "0 0 12px", display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 18 }}>⚠</span>
+          <span style={{ fontSize: 13, color: "#92400E" }}>
+            <strong>{targetMonth.replace(/(\d{4})\/(\d{1,2})/, "$1年$2月")}</strong>のデータがありません。最新月（{latestMonth.replace(/(\d{4})\/(\d{1,2})/, "$1年$2月")}）のデータを表示しています。レポート管理画面で「全店舗反映」を実行してください。
+          </span>
         </div>
       )}
 
