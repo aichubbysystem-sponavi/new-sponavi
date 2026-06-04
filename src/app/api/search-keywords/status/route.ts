@@ -98,5 +98,5 @@ export async function GET() {
     };
   });
 
-  return NextResponse.json({ shops, expectedMonth });
+  return NextResponse.json({ shops, expectedMonth, _debug: { shopsFromDb: allShops.length, cacheRows: cacheData.length } });
 }
