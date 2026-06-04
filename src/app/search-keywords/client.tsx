@@ -99,11 +99,11 @@ export default function SearchKeywordsClient() {
   const totalPages = Math.ceil(filtered.length / PER_PAGE);
   const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
-  // Selection
-  function toggleSelect(name: string) {
+  // Selection (id-based to handle duplicate shop names)
+  function toggleSelect(id: string) {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(name)) next.delete(name); else next.add(name);
+      if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
   }
@@ -112,8 +112,14 @@ export default function SearchKeywordsClient() {
     if (selected.size === filtered.length) {
       setSelected(new Set());
     } else {
-      setSelected(new Set(filtered.map((s) => s.name)));
+      setSelected(new Set(filtered.map((s) => s.id)));
     }
+  }
+
+  // Resolve selected IDs to shop names for sync API
+  function selectedToNames(): string[] {
+    const shopMap = new Map(shops.map((s) => [s.id, s.name]));
+    return Array.from(selected).map((id) => shopMap.get(id) || "").filter(Boolean);
   }
 
   // Sync one shop
@@ -210,7 +216,7 @@ export default function SearchKeywordsClient() {
             {syncing ? "同期中..." : `全店舗同期 (${shops.filter((s) => s.gbp_location_name).length})`}
           </button>
           <button
-            onClick={() => handleBulkSync(Array.from(selected))}
+            onClick={() => handleBulkSync(selectedToNames())}
             disabled={syncing || selected.size === 0}
             className="px-4 py-2 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
           >
@@ -362,7 +368,7 @@ export default function SearchKeywordsClient() {
             <tbody className="divide-y divide-slate-50">
               {paged.map((shop) => {
                 const st = statusLabel(shop.status);
-                const isSelected = selected.has(shop.name);
+                const isSelected = selected.has(shop.id);
                 const failResult = syncResults.find((r) => r.shopName === shop.name && !r.success);
                 return (
                   <tr key={shop.id} className={`hover:bg-slate-50/50 transition ${failResult ? "bg-red-50/30" : ""}`}>
@@ -370,7 +376,7 @@ export default function SearchKeywordsClient() {
                       <input
                         type="checkbox"
                         checked={isSelected}
-                        onChange={() => toggleSelect(shop.name)}
+                        onChange={() => toggleSelect(shop.id)}
                         className="w-3.5 h-3.5 rounded border-slate-300"
                       />
                     </td>
