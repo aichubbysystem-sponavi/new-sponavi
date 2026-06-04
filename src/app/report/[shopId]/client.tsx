@@ -196,14 +196,37 @@ export default function ReportClient({
       })),
     } : data.rankingHistory;
 
-    // reviewLabels/reviewCountsもフィルタ
-    const reviewEndIdx = data.reviewLabels.findIndex(l => {
-      const m2 = l.match(/(\d{1,2})月/);
-      const tm = targetMonth.match(/(\d{4})\/(\d{1,2})/);
-      if (!m2 || !tm) return false;
-      // 年が分からないのでmonthlyLabelsの最後の年を参考に
-      return false; // 口コミ推移は全期間表示で問題ない
-    });
+    // reviewLabels/reviewCounts/reviewDeltaをレポート対象月でトリム
+    // reviewLabelsは "4月","5月"等の形式（年情報なし）。monthlyLabelsの先頭年を基準に年を推定
+    const tmMatch = targetMonth.match(/(\d{4})\/(\d{1,2})/);
+    const targetYM = tmMatch ? parseInt(tmMatch[1]) * 100 + parseInt(tmMatch[2]) : 0;
+    let reviewTrimIdx = data.reviewLabels.length;
+    if (targetYM > 0 && data.reviewLabels.length > 0) {
+      // reviewLabelsが "2025/4" 形式か "4月" 形式かを判定
+      const isSlashFormat = data.reviewLabels[0].includes("/");
+      if (isSlashFormat) {
+        // "2025/4" 形式: 数値変換して比較
+        const toYM = (s: string) => { const p = s.split("/"); return (parseInt(p[0]) || 0) * 100 + (parseInt(p[1]) || 0); };
+        for (let ri = 0; ri < data.reviewLabels.length; ri++) {
+          if (toYM(data.reviewLabels[ri]) > targetYM) { reviewTrimIdx = ri; break; }
+        }
+      } else {
+        // "4月" 形式: 年推定が必要
+        const baseYear = parseInt((data.monthlyLabels[0] || "2026").split("/")[0]) || 2026;
+        let runningYear = baseYear;
+        for (let ri = 0; ri < data.reviewLabels.length; ri++) {
+          const rm = (data.reviewLabels[ri] || "").match(/(\d{1,2})/);
+          if (rm) {
+            const monthNum = parseInt(rm[1]);
+            if (ri > 0) {
+              const prev = (data.reviewLabels[ri - 1] || "").match(/(\d{1,2})/);
+              if (prev && parseInt(prev[1]) > monthNum) runningYear++;
+            }
+            if (runningYear * 100 + monthNum > targetYM) { reviewTrimIdx = ri; break; }
+          }
+        }
+      }
+    }
 
     // searchQueriesもフィルタ
     const newSearchQueries = data.searchQueries ? {
@@ -224,6 +247,9 @@ export default function ReportClient({
       shop: { ...data.shop, period: newPeriod },
       rankingHistory: newRankingHistory,
       searchQueries: newSearchQueries,
+      reviewLabels: data.reviewLabels.slice(0, reviewTrimIdx),
+      reviewCounts: data.reviewCounts.slice(0, reviewTrimIdx),
+      reviewDelta: data.reviewDelta.slice(0, reviewTrimIdx),
     };
   }, [data, targetMonth]);
 
