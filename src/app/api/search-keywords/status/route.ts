@@ -16,28 +16,48 @@ function getExpectedMonth(): string {
   return `${d.getFullYear()}/${d.getMonth() + 1}`;
 }
 
+/** Supabaseの1000行制限を回避してページネーションで全件取得 */
+async function fetchAll<T>(
+  supabase: any,
+  table: string,
+  select: string,
+  orderCol: string,
+  ascending: boolean
+): Promise<T[]> {
+  const PAGE = 1000;
+  const all: T[] = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(select)
+      .order(orderCol, { ascending })
+      .range(from, from + PAGE - 1);
+    if (error || !data || data.length === 0) break;
+    all.push(...(data as T[]));
+    if (data.length < PAGE) break;
+    from += PAGE;
+  }
+  return all;
+}
+
 export async function GET() {
   const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
   const expectedMonth = getExpectedMonth();
 
-  // 1. Get all shops (limit 2000 to cover large datasets)
-  const { data: allShops, error: shopErr } = await supabase
-    .from("shops")
-    .select("id, name, gbp_location_name")
-    .order("name", { ascending: true })
-    .limit(2000);
+  // 1. Get all shops (paginated to bypass 1000 row limit)
+  const allShops = await fetchAll<{ id: string; name: string; gbp_location_name: string | null }>(
+    supabase, "shops", "id, name, gbp_location_name", "name", true
+  );
 
-  if (shopErr || !allShops) {
-    return NextResponse.json({ error: shopErr?.message || "No shops" }, { status: 500 });
+  if (allShops.length === 0) {
+    return NextResponse.json({ error: "No shops found" }, { status: 500 });
   }
 
-  // 2. Get latest cache entry per shop (only fetch shop_id, month, updated_at + top keywords)
-  // Use RPC or fetch all but only select minimal columns — keywords is JSONB so select it
-  const { data: cacheData } = await supabase
-    .from("search_query_cache")
-    .select("shop_id, month, keywords, updated_at")
-    .order("month", { ascending: false })
-    .limit(10000);
+  // 2. Get latest cache entry per shop (paginated)
+  const cacheData = await fetchAll<{ shop_id: string; month: string; keywords: any[]; updated_at: string }>(
+    supabase, "search_query_cache", "shop_id, month, keywords, updated_at", "month", false
+  );
 
   // Build lookup: shop_id -> latest cache entry (first occurrence = latest due to DESC order)
   const cacheMap = new Map<string, { month: string; keywords: any[]; updated_at: string }>();
