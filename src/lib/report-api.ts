@@ -384,15 +384,91 @@ export async function getReportData(shopId: string): Promise<{
   } catch {}
 
   // 2. フォールバック: スプレッドシート+API取得 → 自動キャッシュ
+  let reportData: ReportData | null = null;
+  let dataSource: "cache" | "spreadsheet" | "mock" = "mock";
   try {
     const data = await getReportFromSpreadsheet(shopName);
     if (data) {
       try { await writeReportDataToCache(shopName, data); } catch {}
-      return { data, source: "spreadsheet" };
+      reportData = data;
+      dataSource = "spreadsheet";
     }
   } catch (e) {
     console.error("[report-api] getReportFromSpreadsheet error:", e);
   }
 
-  return { data: null, source: "mock" };
+  if (!reportData) return { data: null, source: "mock" };
+
+  // スプレッドシートパスでもパフォーマンス・検索語句のDBキャッシュを上書き
+  try {
+    const sb = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+    );
+    const { data: shopRow } = await sb.from("shops").select("id").eq("name", shopName).limit(1).maybeSingle();
+    if (shopRow?.id) {
+      // パフォーマンスメトリクス上書き
+      try {
+        const { getCachedPerformance } = await import("./gbp-performance");
+        const perfData = await getCachedPerformance(shopRow.id);
+        if (perfData.length > 0) {
+          const labels = perfData.map(p => p.month);
+          const cur = perfData[perfData.length - 1];
+          const prev = perfData.length >= 2 ? perfData[perfData.length - 2] : null;
+          const curParts = cur.month.split("/").map(Number);
+          const yoyMonth = `${curParts[0] - 1}/${curParts[1]}`;
+          const yoy = perfData.find(p => p.month === yoyMonth) || null;
+          const reviewKpi = reportData.kpis.find(k => k.label.includes("口コミ"));
+
+          reportData.monthlyLabels = labels;
+          reportData.charts = {
+            ...reportData.charts,
+            searchMobile: perfData.map(p => p.searchMobile),
+            searchPC: perfData.map(p => p.searchPC),
+            mapMobile: perfData.map(p => p.mapMobile),
+            mapPC: perfData.map(p => p.mapPC),
+            calls: perfData.map(p => p.calls),
+            routes: perfData.map(p => p.routes),
+            websites: perfData.map(p => p.websites),
+            foodMenus: perfData.map(p => p.foodMenus),
+            bookings: perfData.map(p => p.bookings),
+          };
+          reportData.kpis = [
+            { label: "Google検索 合計", value: cur.searchMobile + cur.searchPC, prevValue: prev ? prev.searchMobile + prev.searchPC : 0, unit: "回", momValue: prev ? prev.searchMobile + prev.searchPC : null, yoyValue: yoy ? yoy.searchMobile + yoy.searchPC : null },
+            { label: "Googleマップ 合計", value: cur.mapMobile + cur.mapPC, prevValue: prev ? prev.mapMobile + prev.mapPC : 0, unit: "回", momValue: prev ? prev.mapMobile + prev.mapPC : null, yoyValue: yoy ? yoy.mapMobile + yoy.mapPC : null },
+            { label: "ウェブサイトクリック", value: cur.websites, prevValue: prev?.websites ?? 0, unit: "件", momValue: prev?.websites ?? null, yoyValue: yoy?.websites ?? null },
+            { label: "ルート検索", value: cur.routes, prevValue: prev?.routes ?? 0, unit: "件", momValue: prev?.routes ?? null, yoyValue: yoy?.routes ?? null },
+            { label: "通話", value: cur.calls, prevValue: prev?.calls ?? 0, unit: "件", momValue: prev?.calls ?? null, yoyValue: yoy?.calls ?? null },
+            { label: "フードメニュークリック", value: cur.foodMenus, prevValue: prev?.foodMenus ?? 0, unit: "件", momValue: prev?.foodMenus ?? null, yoyValue: yoy?.foodMenus ?? null },
+            { label: "予約", value: cur.bookings, prevValue: prev?.bookings ?? 0, unit: "件", momValue: prev?.bookings ?? null, yoyValue: yoy?.bookings ?? null },
+            ...(reviewKpi ? [reviewKpi] : []),
+          ];
+          const lastDay = new Date(curParts[0], curParts[1], 0).getDate();
+          reportData.shop = {
+            ...reportData.shop,
+            period: {
+              start: `${curParts[0]}/${String(curParts[1]).padStart(2, "0")}/01`,
+              end: `${curParts[0]}/${String(curParts[1]).padStart(2, "0")}/${lastDay}`,
+            },
+          };
+        }
+      } catch {}
+
+      // 検索語句上書き
+      try {
+        const { getCachedSearchKeywords } = await import("./gbp-search-keywords");
+        const cachedKw = await getCachedSearchKeywords(shopRow.id);
+        if (cachedKw.length > 0) {
+          const latest = cachedKw[cachedKw.length - 1];
+          reportData.searchQueries = {
+            latest: latest.keywords.slice(0, 30),
+            latestMonth: latest.month,
+            history: cachedKw,
+          };
+        }
+      } catch {}
+    }
+  } catch {}
+
+  return { data: reportData, source: dataSource };
 }
