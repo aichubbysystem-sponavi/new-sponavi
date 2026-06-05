@@ -473,16 +473,29 @@ function parseRanks(headerText: string, dataText: string): RankEntry[] {
   if (dataLines.length < 2) return [];
   const dataRows = dataLines.slice(1).map(l => parseCSVRow(l));
 
-  // 最新行と前月行を取得
-  const targetRow = dataRows[dataRows.length - 1];
-  const prevRow = dataRows.length >= 2 ? dataRows[dataRows.length - 2] : null;
+  // 日付でソートして最新行と前月行を取得（シートの行順に依存しない）
+  const dated: { date: Date; row: string[] }[] = [];
+  for (const row of dataRows) {
+    const dateCell = (row[1] || "").trim();
+    const m = dateCell.match(/(\d{4})\/(\d{1,2})\/(\d{1,2})/);
+    if (m) {
+      dated.push({ date: new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3])), row });
+    }
+  }
+  if (dated.length === 0) return [];
+  dated.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+  const targetRow = dated[dated.length - 1].row;
+  const prevRow = dated.length >= 2 ? dated[dated.length - 2].row : null;
 
   const ranks: RankEntry[] = [];
   for (const idx of kwIndices) {
     const word = (headerRow[idx] || "").trim();
     if (!word) continue;
-    const rank = parseInt((targetRow[idx] || "0").replace(/,/g, "")) || 0;
-    const prevRank = prevRow ? (parseInt((prevRow[idx] || "0").replace(/,/g, "")) || 0) : 0;
+    const val = (targetRow[idx] || "").trim();
+    const rank = val === "圏外" ? 0 : (parseInt(val.replace(/,/g, "")) || 0);
+    const prevVal = prevRow ? (prevRow[idx] || "").trim() : "";
+    const prevRank = prevVal === "圏外" ? 0 : (parseInt(prevVal.replace(/,/g, "")) || 0);
     if (rank > 0) ranks.push({ word, rank, prevRank: prevRank || rank });
   }
 
