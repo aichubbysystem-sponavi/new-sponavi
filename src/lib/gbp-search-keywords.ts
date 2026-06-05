@@ -5,6 +5,7 @@
  * トークン: RPAchubbyプロジェクトのDBリフレッシュトークン（Quota 300/min）
  *
  * 修正: 並列フェッチ + タイムアウト対策 + ログ強化
+ * v2: JST固定 / IDベース / 月ソート修正 / syncShopSearchKeywords統一関数
  */
 
 import { createClient } from "@supabase/supabase-js";
@@ -19,9 +20,23 @@ function getSupabase() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
 }
 
-interface MonthlyKeywords {
-  month: string; // "2026/4"
+export interface MonthlyKeywords {
+  month: string; // "2026/5"
   keywords: { word: string; count: number }[];
+}
+
+/** "YYYY/M" 形式の月文字列を数値比較（localeCompareでは10月以降が壊れるため） */
+export function compareMonths(a: string, b: string): number {
+  const [ay, am] = a.split("/").map(Number);
+  const [by, bm] = b.split("/").map(Number);
+  return ay !== by ? ay - by : am - bm;
+}
+
+/** JST基準で前月を "YYYY/M" 形式で返す（Vercel=UTCでも正しく動作） */
+export function getExpectedMonthJST(): string {
+  const nowJST = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const d = new Date(nowJST.getUTCFullYear(), nowJST.getUTCMonth() - 1, 1);
+  return `${d.getFullYear()}/${d.getMonth() + 1}`;
 }
 
 /**
@@ -162,7 +177,7 @@ export async function fetchSearchKeywordsFromGBP(
     }
   }
 
-  results.sort((a, b) => a.month.localeCompare(b.month));
+  results.sort((a, b) => compareMonths(a.month, b.month));
   console.log(`[gbp-keywords] Fetched ${results.length}/${months} months for ${locPart}`);
   return results;
 }
@@ -208,15 +223,13 @@ export async function getCachedSearchKeywords(
   const { data, error } = await supabase
     .from("search_query_cache")
     .select("month, keywords")
-    .eq("shop_id", shopId)
-    .order("month", { ascending: true });
+    .eq("shop_id", shopId);
 
   if (error || !data) return [];
 
-  return data.map((row: any) => ({
-    month: row.month,
-    keywords: row.keywords || [],
-  }));
+  return data
+    .map((row: any) => ({ month: row.month as string, keywords: row.keywords || [] }))
+    .sort((a, b) => compareMonths(a.month, b.month));
 }
 
 /**
@@ -296,4 +309,57 @@ export async function getSearchKeywords(
 
   console.log(`[gbp-keywords] No data found for ${shopName}`);
   return empty;
+}
+
+/**
+ * 統一された同期関数: GBP API取得 → search_query_cache保存 → report_data_cache更新
+ * 手動sync・cron・report actionsの3箇所から呼ばれる唯一の同期ロジック
+ */
+export async function syncShopSearchKeywords(
+  shopId: string,
+  shopName: string,
+  gbpLocationName: string,
+  months: number = 12
+): Promise<{ success: boolean; latestMonth?: string; totalMonths?: number; topKeywords?: { word: string; count: number }[]; error?: string }> {
+  // 1. GBP API取得
+  const apiData = await fetchSearchKeywordsFromGBP(gbpLocationName, months);
+  if (apiData.length === 0) {
+    return { success: false, error: "API returned 0 months of data" };
+  }
+
+  // 2. search_query_cache に保存
+  await cacheSearchKeywords(shopId, shopName, apiData);
+
+  // 3. report_data_cache の searchQueries を更新（shop_idベース）
+  const supabase = getSupabase();
+  const latest = apiData[apiData.length - 1];
+  try {
+    const { data: reportCache } = await supabase
+      .from("report_data_cache")
+      .select("id, report_json")
+      .eq("shop_id", shopId)
+      .maybeSingle();
+
+    if (reportCache?.report_json) {
+      const reportJson = reportCache.report_json as any;
+      reportJson.searchQueries = {
+        latest: latest.keywords.slice(0, 30),
+        latestMonth: latest.month,
+        history: apiData,
+      };
+      await supabase
+        .from("report_data_cache")
+        .update({ report_json: reportJson, synced_at: new Date().toISOString() })
+        .eq("id", reportCache.id);
+    }
+  } catch (e) {
+    console.error(`[gbp-keywords] report_data_cache update error for ${shopName}:`, e);
+  }
+
+  return {
+    success: true,
+    latestMonth: latest.month,
+    totalMonths: apiData.length,
+    topKeywords: latest.keywords.slice(0, 5),
+  };
 }

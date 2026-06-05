@@ -28,7 +28,7 @@ export async function syncAllData() {
 export async function syncShopData(shopIds: string[]) {
   const { getReportFromSpreadsheet } = await import("@/lib/spreadsheet");
   const { writeReportDataToCache } = await import("@/lib/report-cache");
-  const { fetchSearchKeywordsFromGBP, cacheSearchKeywords } = await import("@/lib/gbp-search-keywords");
+  const { syncShopSearchKeywords } = await import("@/lib/gbp-search-keywords");
   const { createClient } = await import("@supabase/supabase-js");
 
   const supabase = createClient(
@@ -46,38 +46,19 @@ export async function syncShopData(shopIds: string[]) {
           synced++;
         }
 
-        // 検索語句API同期: shopsテーブルからlocationパスを取得して直接API取得
+        // 検索語句API同期: 共有lib の統一関数を使用（IDベース）
         try {
           const { data: shop } = await supabase
             .from("shops")
-            .select("id, gbp_location_name")
+            .select("id, name, gbp_location_name")
             .eq("name", shopName)
-            .maybeSingle();
+            .limit(1)
+            .single();
 
           if (shop?.gbp_location_name) {
-            const apiData = await fetchSearchKeywordsFromGBP(shop.gbp_location_name, 12);
-            if (apiData.length > 0) {
-              await cacheSearchKeywords(shop.id, shopName, apiData);
-              // report_data_cacheのsearchQueriesも更新
-              const latest = apiData[apiData.length - 1];
-              const { data: reportCache } = await supabase
-                .from("report_data_cache")
-                .select("report_json")
-                .eq("shop_name", shopName)
-                .maybeSingle();
-              if (reportCache?.report_json) {
-                const reportJson = reportCache.report_json as any;
-                reportJson.searchQueries = {
-                  latest: latest.keywords.slice(0, 30),
-                  latestMonth: latest.month,
-                  history: apiData,
-                };
-                await supabase
-                  .from("report_data_cache")
-                  .update({ report_json: reportJson, synced_at: new Date().toISOString() })
-                  .eq("shop_name", shopName);
-              }
-              console.log(`[sync] ${shopName}: 検索語句API同期完了 (${apiData.length}ヶ月)`);
+            const result = await syncShopSearchKeywords(shop.id, shop.name, shop.gbp_location_name, 12);
+            if (result.success) {
+              console.log(`[sync] ${shopName}: 検索語句API同期完了 (${result.totalMonths}ヶ月)`);
             }
           }
         } catch (e) {

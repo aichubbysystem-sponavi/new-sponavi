@@ -1,20 +1,16 @@
 /**
  * GET /api/search-keywords/status
  * 全店舗の検索語句同期ステータスを返す
+ * v2: JST固定 / 最新月のみ取得 / 数値月比較
  */
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getExpectedMonthJST, compareMonths } from "@/lib/gbp-search-keywords";
 
 export const dynamic = "force-dynamic";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-
-function getExpectedMonth(): string {
-  const now = new Date();
-  const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  return `${d.getFullYear()}/${d.getMonth() + 1}`;
-}
 
 /** Supabaseの1000行制限を回避してページネーションで全件取得 */
 async function fetchAll<T>(
@@ -43,7 +39,7 @@ async function fetchAll<T>(
 
 export async function GET() {
   const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-  const expectedMonth = getExpectedMonth();
+  const expectedMonth = getExpectedMonthJST();
 
   // 1. Get all shops (paginated to bypass 1000 row limit)
   const allShops = await fetchAll<{ id: string; name: string; gbp_location_name: string | null }>(
@@ -54,15 +50,17 @@ export async function GET() {
     return NextResponse.json({ error: "No shops found" }, { status: 500 });
   }
 
-  // 2. Get latest cache entry per shop (paginated)
+  // 2. 最新月のキャッシュのみ取得（keywordsはTOP3分だけ必要なので全件は不要）
+  //    shop_id + month + updated_at のみ取得し、TOP3用には別途最新月のkeywordsを取得
   const cacheData = await fetchAll<{ shop_id: string; month: string; keywords: any[]; updated_at: string }>(
-    supabase, "search_query_cache", "shop_id, month, keywords, updated_at", "month", false
+    supabase, "search_query_cache", "shop_id, month, keywords, updated_at", "updated_at", false
   );
 
-  // Build lookup: shop_id -> latest cache entry (first occurrence = latest due to DESC order)
+  // Build lookup: shop_id -> latest cache entry (数値比較で最新月を特定)
   const cacheMap = new Map<string, { month: string; keywords: any[]; updated_at: string }>();
   for (const row of cacheData || []) {
-    if (!cacheMap.has(row.shop_id)) {
+    const existing = cacheMap.get(row.shop_id);
+    if (!existing || compareMonths(row.month, existing.month) > 0) {
       cacheMap.set(row.shop_id, {
         month: row.month,
         keywords: row.keywords || [],

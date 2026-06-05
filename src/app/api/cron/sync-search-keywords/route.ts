@@ -1,11 +1,13 @@
 /**
  * GET /api/cron/sync-search-keywords
  * 全店舗の検索語句をGBP Performance APIから一括同期
- * Vercel Cron: 毎日5:00 JST (UTC 20:00)
+ * Vercel Cron: 毎月5日 5:00 JST (UTC 20:00)
+ *
+ * v2: 共有lib使用 / 未同期+古いのみ対象 / バッチ分割（タイムアウト対策）
  */
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { fetchSearchKeywordsFromGBP, cacheSearchKeywords } from "@/lib/gbp-search-keywords";
+import { syncShopSearchKeywords, getExpectedMonthJST, compareMonths } from "@/lib/gbp-search-keywords";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -21,8 +23,11 @@ export async function GET(request: NextRequest) {
   }
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+  const expectedMonth = getExpectedMonthJST();
+  const startTime = Date.now();
+  const TIME_LIMIT = 270_000; // 270秒（maxDuration=300の安全マージン）
 
-  // gbp_location_nameが設定されている全店舗を取得
+  // 1. GBP設定済みの全店舗を取得
   const { data: shops, error } = await supabase
     .from("shops")
     .select("id, name, gbp_location_name")
@@ -33,43 +38,63 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "No shops found", detail: error?.message }, { status: 200 });
   }
 
+  // 2. 既に当月同期済みの店舗をスキップ
+  const { data: cacheData } = await supabase
+    .from("search_query_cache")
+    .select("shop_id, month")
+    .eq("month", expectedMonth);
+
+  const syncedShopIds = new Set((cacheData || []).map(c => c.shop_id));
+
+  // 3. 同一 gbp_location_name の重複排除（最初の1件のみ同期、結果を他にも適用）
+  const seenLocations = new Map<string, string[]>(); // gbp_location_name → [shopId, ...]
+  const targets: typeof shops = [];
+
+  for (const shop of shops) {
+    if (syncedShopIds.has(shop.id)) continue;
+    const loc = shop.gbp_location_name;
+    if (seenLocations.has(loc)) {
+      seenLocations.get(loc)!.push(shop.id);
+    } else {
+      seenLocations.set(loc, [shop.id]);
+      targets.push(shop);
+    }
+  }
+
   let synced = 0;
+  let skipped = 0;
   let failed = 0;
   const errors: string[] = [];
 
-  for (const shop of shops) {
+  // 4. 順次処理（タイムアウト対策付き）
+  for (const shop of targets) {
+    if (Date.now() - startTime > TIME_LIMIT) {
+      console.log(`[cron/sync-search-keywords] Time limit reached at ${synced + failed}/${targets.length}`);
+      break;
+    }
+
     try {
-      const apiData = await fetchSearchKeywordsFromGBP(shop.gbp_location_name, 12);
-      if (apiData.length === 0) {
-        console.log(`[cron/sync-search-keywords] ${shop.name}: API returned 0 months`);
-        continue;
+      const result = await syncShopSearchKeywords(shop.id, shop.name, shop.gbp_location_name, 12);
+      if (result.success) {
+        synced++;
+
+        // 同一ロケーションの重複店舗にもキャッシュをコピー
+        const dupes = seenLocations.get(shop.gbp_location_name) || [];
+        if (dupes.length > 1) {
+          for (const dupeId of dupes) {
+            if (dupeId === shop.id) continue;
+            const dupeShop = shops.find(s => s.id === dupeId);
+            if (dupeShop) {
+              await syncShopSearchKeywords(dupeId, dupeShop.name, shop.gbp_location_name, 12);
+            }
+          }
+        }
+
+        console.log(`[cron/sync-search-keywords] ${shop.name}: ${result.totalMonths}ヶ月同期完了`);
+      } else {
+        skipped++;
+        console.log(`[cron/sync-search-keywords] ${shop.name}: ${result.error}`);
       }
-
-      await cacheSearchKeywords(shop.id, shop.name, apiData);
-
-      // report_data_cacheのsearchQueriesも更新
-      const latest = apiData[apiData.length - 1];
-      const { data: reportCache } = await supabase
-        .from("report_data_cache")
-        .select("report_json")
-        .eq("shop_name", shop.name)
-        .maybeSingle();
-
-      if (reportCache?.report_json) {
-        const reportJson = reportCache.report_json as any;
-        reportJson.searchQueries = {
-          latest: latest.keywords.slice(0, 30),
-          latestMonth: latest.month,
-          history: apiData,
-        };
-        await supabase
-          .from("report_data_cache")
-          .update({ report_json: reportJson, synced_at: new Date().toISOString() })
-          .eq("shop_name", shop.name);
-      }
-
-      synced++;
-      console.log(`[cron/sync-search-keywords] ${shop.name}: ${apiData.length}ヶ月同期完了`);
     } catch (e: any) {
       failed++;
       errors.push(`${shop.name}: ${e?.message || "unknown"}`);
@@ -77,12 +102,16 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  console.log(`[cron/sync-search-keywords] done: ${synced}/${shops.length} synced, ${failed} failed`);
+  console.log(`[cron/sync-search-keywords] done: ${synced} synced, ${skipped} no-data, ${failed} failed / ${targets.length} targets (${shops.length} total shops, ${syncedShopIds.size} already synced)`);
   return NextResponse.json({
     success: true,
     total: shops.length,
+    alreadySynced: syncedShopIds.size,
+    targets: targets.length,
     synced,
+    skipped,
     failed,
     errors: errors.slice(0, 10),
+    expectedMonth,
   });
 }

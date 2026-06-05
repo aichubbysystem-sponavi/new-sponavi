@@ -14,6 +14,7 @@ interface ShopKeywordStatus {
 }
 
 interface SyncResult {
+  shopId: string;
   shopName: string;
   success: boolean;
   latestMonth?: string;
@@ -32,17 +33,24 @@ function statusLabel(s: ShopKeywordStatus["status"]) {
   }
 }
 
-function getExpectedMonth(): string {
-  const now = new Date();
-  const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+/** JST基準で前月を "YYYY/M" 形式で返す */
+function getExpectedMonthJST(): string {
+  const nowJST = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const d = new Date(nowJST.getUTCFullYear(), nowJST.getUTCMonth() - 1, 1);
   return `${d.getFullYear()}/${d.getMonth() + 1}`;
+}
+
+async function getAuthToken(): Promise<string> {
+  const { supabase } = await import("@/lib/supabase");
+  const session = (await supabase.auth.getSession()).data.session;
+  return session?.access_token || "";
 }
 
 export default function SearchKeywordsClient() {
   const [shops, setShops] = useState<ShopKeywordStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "synced" | "stale" | "never" | "no_gbp" | "failed">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "synced" | "stale" | "never" | "no_gbp" | "failed" | "no_data">("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
   const [toast, setToast] = useState<string | null>(null);
@@ -53,17 +61,14 @@ export default function SearchKeywordsClient() {
   const [syncResults, setSyncResults] = useState<SyncResult[]>([]);
   const [showResults, setShowResults] = useState(false);
 
-  const expectedMonth = useMemo(() => getExpectedMonth(), []);
+  const expectedMonth = useMemo(() => getExpectedMonthJST(), []);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 4000);
   }, []);
 
-  // Load shop list + keyword status
-  useEffect(() => {
-    loadShops();
-  }, []);
+  useEffect(() => { loadShops(); }, []);
 
   async function loadShops() {
     setLoading(true);
@@ -87,8 +92,11 @@ export default function SearchKeywordsClient() {
       list = list.filter((s) => s.name.toLowerCase().includes(q));
     }
     if (statusFilter === "failed") {
-      const failedNames = new Set(syncResults.filter((r) => !r.success).map((r) => r.shopName));
-      list = list.filter((s) => failedNames.has(s.name));
+      const failedIds = new Set(syncResults.filter((r) => !r.success && r.error !== "API returned 0 months of data").map((r) => r.shopId));
+      list = list.filter((s) => failedIds.has(s.id));
+    } else if (statusFilter === "no_data") {
+      const noDataIds = new Set(syncResults.filter((r) => !r.success && r.error === "API returned 0 months of data").map((r) => r.shopId));
+      list = list.filter((s) => noDataIds.has(s.id));
     } else if (statusFilter !== "all") {
       list = list.filter((s) => s.status === statusFilter);
     }
@@ -99,7 +107,7 @@ export default function SearchKeywordsClient() {
   const totalPages = Math.ceil(filtered.length / PER_PAGE);
   const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
-  // Selection (id-based to handle duplicate shop names)
+  // Selection (id-based)
   function toggleSelect(id: string) {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -116,44 +124,58 @@ export default function SearchKeywordsClient() {
     }
   }
 
-  // Resolve selected IDs to shop names for sync API
-  function selectedToNames(): string[] {
-    const shopMap = new Map(shops.map((s) => [s.id, s.name]));
-    return Array.from(selected).map((id) => shopMap.get(id) || "").filter(Boolean);
-  }
-
-  // Sync one shop (with AbortSignal)
-  async function syncOne(shopName: string, signal?: AbortSignal): Promise<SyncResult> {
+  // Sync one shop by ID (with AbortSignal + auth)
+  async function syncOne(shopId: string, shopName: string, signal?: AbortSignal): Promise<SyncResult> {
     try {
-      const res = await fetch(`/api/report/sync-search-keywords?name=${encodeURIComponent(shopName)}&months=12`, { signal });
-      if (res.redirected || res.status === 401 || res.status === 403) {
-        return { shopName, success: false, error: "認証切れ" };
+      const token = await getAuthToken();
+      const res = await fetch("/api/report/sync-search-keywords", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ shopId }),
+        signal,
+      });
+      if (res.status === 401 || res.status === 403) {
+        return { shopId, shopName, success: false, error: "認証切れ" };
       }
       const data = await res.json();
       if (data.success) {
-        return { shopName, success: true, latestMonth: data.latestMonth, totalMonths: data.totalMonths };
+        return { shopId, shopName, success: true, latestMonth: data.latestMonth, totalMonths: data.totalMonths };
       }
-      return { shopName, success: false, error: data.error || "Unknown error" };
+      return { shopId, shopName, success: false, error: data.error || "Unknown error" };
     } catch (e: any) {
-      if (e?.name === "AbortError") return { shopName, success: false, error: "中断" };
-      return { shopName, success: false, error: e?.message || "Network error" };
+      if (e?.name === "AbortError") return { shopId, shopName, success: false, error: "中断" };
+      return { shopId, shopName, success: false, error: e?.message || "Network error" };
     }
   }
 
   const cancelRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
 
-  // Cleanup on unmount (page navigation)
   useEffect(() => {
-    return () => {
-      cancelRef.current = true;
-      abortRef.current?.abort();
-    };
+    return () => { cancelRef.current = true; abortRef.current?.abort(); };
   }, []);
 
-  // Bulk sync (1 at a time with 500ms delay to respect rate limits)
-  async function handleBulkSync(targets: string[]) {
-    if (targets.length === 0) { showToast("対象店舗を選択してください"); return; }
+  // Build sync targets: deduplicate by gbp_location_name, return { shopId, shopName, gbpLoc }[]
+  function buildSyncTargets(shopIds: string[]): { shopId: string; shopName: string; gbpLoc: string }[] {
+    const shopMap = new Map(shops.map((s) => [s.id, s]));
+    const seenLocations = new Set<string>();
+    const targets: { shopId: string; shopName: string; gbpLoc: string }[] = [];
+
+    for (const id of shopIds) {
+      const shop = shopMap.get(id);
+      if (!shop || !shop.gbp_location_name) continue;
+      if (seenLocations.has(shop.gbp_location_name)) continue;
+      seenLocations.add(shop.gbp_location_name);
+      targets.push({ shopId: shop.id, shopName: shop.name, gbpLoc: shop.gbp_location_name });
+    }
+    return targets;
+  }
+
+  // Bulk sync (ID-based, deduped, with consecutive error handling)
+  async function handleBulkSync(shopIds: string[]) {
+    const targets = buildSyncTargets(shopIds);
+    if (targets.length === 0) { showToast("対象店舗がありません"); return; }
+
     cancelRef.current = false;
     const controller = new AbortController();
     abortRef.current = controller;
@@ -169,25 +191,28 @@ export default function SearchKeywordsClient() {
         showToast(`中断しました (${i}/${targets.length})`);
         break;
       }
-      setSyncProgress({ current: i + 1, total: targets.length, shopName: targets[i] });
-      const result = await syncOne(targets[i], controller.signal);
+      const t = targets[i];
+      setSyncProgress({ current: i + 1, total: targets.length, shopName: t.shopName });
+      const result = await syncOne(t.shopId, t.shopName, controller.signal);
       results.push(result);
       setSyncResults([...results]);
 
-      // Auth error detection: stop immediately
       if (result.error === "認証切れ") {
         showToast("セッションが切れました。再ログインしてください。");
         break;
       }
 
-      // 10 consecutive errors → auto-stop
-      consecutiveErrors = result.success ? 0 : consecutiveErrors + 1;
+      // "no data" は連続エラーにカウントしない（実害なし）
+      if (result.success || result.error === "API returned 0 months of data") {
+        consecutiveErrors = 0;
+      } else {
+        consecutiveErrors++;
+      }
       if (consecutiveErrors >= 10) {
         showToast(`10件連続失敗のため中断しました (${i + 1}/${targets.length})`);
         break;
       }
 
-      // Rate limit: wait 500ms between requests
       if (i < targets.length - 1) {
         await new Promise((r) => setTimeout(r, 500));
       }
@@ -200,10 +225,10 @@ export default function SearchKeywordsClient() {
     setShowResults(true);
 
     const successCount = results.filter((r) => r.success).length;
-    const failCount = results.filter((r) => !r.success).length;
-    showToast(`完了: ${successCount}件成功 / ${failCount}件失敗`);
+    const failCount = results.filter((r) => !r.success && r.error !== "API returned 0 months of data").length;
+    const noDataCount = results.filter((r) => r.error === "API returned 0 months of data").length;
+    showToast(`完了: ${successCount}件成功 / ${failCount}件失敗 / ${noDataCount}件データなし`);
 
-    // Reload data
     await loadShops();
     setSelected(new Set());
   }
@@ -215,8 +240,9 @@ export default function SearchKeywordsClient() {
     const stale = shops.filter((s) => s.status === "stale").length;
     const never = shops.filter((s) => s.status === "never").length;
     const noGbp = shops.filter((s) => s.status === "no_gbp").length;
-    const failed = syncResults.filter((r) => !r.success).length;
-    return { total, synced, stale, never, noGbp, failed };
+    const realFailed = syncResults.filter((r) => !r.success && r.error !== "API returned 0 months of data").length;
+    const noData = syncResults.filter((r) => r.error === "API returned 0 months of data").length;
+    return { total, synced, stale, never, noGbp, failed: realFailed, noData };
   }, [shops, syncResults]);
 
   if (loading) {
@@ -239,16 +265,19 @@ export default function SearchKeywordsClient() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => {
-              const syncable = shops.filter((s) => s.gbp_location_name && s.status !== "no_gbp").map((s) => s.name);
+              // 未同期 + 古い のみ対象（済は除外）、GBP未設定も除外
+              const syncable = shops
+                .filter((s) => s.gbp_location_name && (s.status === "never" || s.status === "stale"))
+                .map((s) => s.id);
               handleBulkSync(syncable);
             }}
             disabled={syncing}
             className="px-4 py-2 rounded-lg text-sm font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-50 disabled:cursor-not-allowed transition"
           >
-            {syncing ? "同期中..." : `全店舗同期 (${shops.filter((s) => s.gbp_location_name).length})`}
+            {syncing ? "同期中..." : `未同期を一括同期 (${shops.filter((s) => s.gbp_location_name && (s.status === "never" || s.status === "stale")).length})`}
           </button>
           <button
-            onClick={() => handleBulkSync(selectedToNames())}
+            onClick={() => handleBulkSync(Array.from(selected))}
             disabled={syncing || selected.size === 0}
             className="px-4 py-2 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
           >
@@ -285,7 +314,7 @@ export default function SearchKeywordsClient() {
       )}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
         {[
           { label: "総店舗数", value: kpi.total, cls: "text-[#003D6B]" },
           { label: `最新月済 (${expectedMonth})`, value: kpi.synced, cls: "text-emerald-600" },
@@ -293,6 +322,7 @@ export default function SearchKeywordsClient() {
           { label: "未同期", value: kpi.never, cls: "text-slate-500" },
           { label: "GBP未設定", value: kpi.noGbp, cls: "text-red-600" },
           { label: "同期失敗", value: kpi.failed, cls: "text-red-600" },
+          { label: "データなし", value: kpi.noData, cls: "text-orange-500" },
         ].map((k) => (
           <div key={k.label} className="bg-white rounded-xl p-3 shadow-sm border border-slate-100">
             <p className="text-[11px] font-medium text-slate-400 mb-1">{k.label}</p>
@@ -318,6 +348,7 @@ export default function SearchKeywordsClient() {
             { key: "never", label: "未同期" },
             { key: "no_gbp", label: "GBP未設定" },
             { key: "failed", label: "失敗" },
+            { key: "no_data", label: "データなし" },
           ] as { key: typeof statusFilter; label: string }[]
         ).map((f) => (
           <button
@@ -333,6 +364,9 @@ export default function SearchKeywordsClient() {
             {f.key === "failed" && kpi.failed > 0 && (
               <span className="ml-1 bg-red-500 text-white text-[10px] px-1 rounded-full">{kpi.failed}</span>
             )}
+            {f.key === "no_data" && kpi.noData > 0 && (
+              <span className="ml-1 bg-orange-400 text-white text-[10px] px-1 rounded-full">{kpi.noData}</span>
+            )}
           </button>
         ))}
         <span className="text-xs text-slate-400 ml-auto">{filtered.length}件表示</span>
@@ -343,19 +377,19 @@ export default function SearchKeywordsClient() {
         <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-100">
             <h3 className="text-sm font-semibold text-slate-700">
-              同期結果: {syncResults.filter((r) => r.success).length}件成功 / {syncResults.filter((r) => !r.success).length}件失敗
+              同期結果: {syncResults.filter((r) => r.success).length}件成功 / {syncResults.filter((r) => !r.success && r.error !== "API returned 0 months of data").length}件失敗 / {syncResults.filter((r) => r.error === "API returned 0 months of data").length}件データなし
             </h3>
             <div className="flex items-center gap-2">
-              {syncResults.some((r) => !r.success) && (
+              {syncResults.some((r) => !r.success && r.error !== "API returned 0 months of data") && (
                 <button
                   onClick={() => {
-                    const failedNames = syncResults.filter((r) => !r.success).map((r) => r.shopName);
-                    handleBulkSync(failedNames);
+                    const failedIds = syncResults.filter((r) => !r.success && r.error !== "API returned 0 months of data" && r.error !== "認証切れ" && r.error !== "中断").map((r) => r.shopId);
+                    handleBulkSync(failedIds);
                   }}
                   disabled={syncing}
                   className="px-3 py-1 rounded-lg text-xs font-semibold bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 transition"
                 >
-                  失敗分を再実行 ({syncResults.filter((r) => !r.success).length})
+                  失敗分を再実行 ({syncResults.filter((r) => !r.success && r.error !== "API returned 0 months of data" && r.error !== "認証切れ" && r.error !== "中断").length})
                 </button>
               )}
               <button onClick={() => setShowResults(false)} className="text-slate-400 hover:text-slate-600 text-lg leading-none">&times;</button>
@@ -366,7 +400,7 @@ export default function SearchKeywordsClient() {
               {syncResults.filter((r) => !r.success).map((r, i) => (
                 <div key={i} className="flex items-center justify-between px-4 py-2 text-sm">
                   <span className="text-slate-700">{r.shopName}</span>
-                  <span className="text-red-500 text-xs truncate max-w-[50%]" title={r.error}>{r.error}</span>
+                  <span className={`text-xs truncate max-w-[50%] ${r.error === "API returned 0 months of data" ? "text-orange-500" : "text-red-500"}`} title={r.error}>{r.error}</span>
                 </div>
               ))}
             </div>
@@ -401,7 +435,7 @@ export default function SearchKeywordsClient() {
               {paged.map((shop) => {
                 const st = statusLabel(shop.status);
                 const isSelected = selected.has(shop.id);
-                const failResult = syncResults.find((r) => r.shopName === shop.name && !r.success);
+                const failResult = syncResults.find((r) => r.shopId === shop.id && !r.success);
                 return (
                   <tr key={shop.id} className={`hover:bg-slate-50/50 transition ${failResult ? "bg-red-50/30" : ""}`}>
                     <td className="pl-4 pr-2 py-2.5">
@@ -415,7 +449,7 @@ export default function SearchKeywordsClient() {
                     <td className="px-3 py-2.5">
                       <span className="font-medium text-slate-800">{shop.name}</span>
                       {failResult && (
-                        <p className="text-[10px] text-red-500 mt-0.5 truncate max-w-[250px]" title={failResult.error}>{failResult.error}</p>
+                        <p className={`text-[10px] mt-0.5 truncate max-w-[250px] ${failResult.error === "API returned 0 months of data" ? "text-orange-500" : "text-red-500"}`} title={failResult.error}>{failResult.error}</p>
                       )}
                     </td>
                     <td className="px-3 py-2.5 text-center">
@@ -435,7 +469,7 @@ export default function SearchKeywordsClient() {
                     </td>
                     <td className="px-3 py-2.5 text-center">
                       <button
-                        onClick={() => handleBulkSync([shop.name])}
+                        onClick={() => handleBulkSync([shop.id])}
                         disabled={syncing || shop.status === "no_gbp"}
                         className="px-2.5 py-1 rounded text-[11px] font-semibold bg-blue-50 text-blue-600 hover:bg-blue-100 disabled:opacity-40 disabled:cursor-not-allowed transition"
                       >
