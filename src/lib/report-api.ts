@@ -292,22 +292,30 @@ export async function getReportData(shopId: string): Promise<{
         );
         const { data: shopRow } = await sb.from("shops").select("id, gbp_location_name").eq("name", shopName).limit(1).maybeSingle();
         if (shopRow?.id) {
+          console.log(`[report-api] shopRow found: id=${shopRow.id}`);
           // 検索語句
-          const { getCachedSearchKeywords } = await import("./gbp-search-keywords");
-          const cachedKw = await getCachedSearchKeywords(shopRow.id);
-          if (cachedKw.length > 0) {
-            const latest = cachedKw[cachedKw.length - 1];
-            cached.searchQueries = {
-              latest: latest.keywords.slice(0, 30),
-              latestMonth: latest.month,
-              history: cachedKw,
-            };
+          try {
+            const { getCachedSearchKeywords } = await import("./gbp-search-keywords");
+            const cachedKw = await getCachedSearchKeywords(shopRow.id);
+            console.log(`[report-api] searchKw cache: ${cachedKw.length} months`);
+            if (cachedKw.length > 0) {
+              const latest = cachedKw[cachedKw.length - 1];
+              cached.searchQueries = {
+                latest: latest.keywords.slice(0, 30),
+                latestMonth: latest.month,
+                history: cachedKw,
+              };
+            }
+          } catch (kwErr: any) {
+            console.error(`[report-api] searchKw error:`, kwErr?.message);
           }
 
           // パフォーマンスメトリクス（performance_metrics_cache → 月次推移・KPIを上書き）
           try {
             const { getCachedPerformance } = await import("./gbp-performance");
+            console.log(`[report-api] calling getCachedPerformance(${shopRow.id})`);
             const perfData = await getCachedPerformance(shopRow.id);
+            console.log(`[report-api] perfData: ${perfData.length} months`);
             if (perfData.length > 0) {
               const labels = perfData.map(p => p.month);
               const cur = perfData[perfData.length - 1];
