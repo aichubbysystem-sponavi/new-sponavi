@@ -283,6 +283,26 @@ export async function getReportData(shopId: string): Promise<{
         }
         if (gridRanking) cached.gridRanking = gridRanking;
       } catch {}
+      // searchQueriesをsearch_query_cacheからリアルタイム取得
+      try {
+        const sb = createClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+          process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+        );
+        const { data: shopRow } = await sb.from("shops").select("id, gbp_location_name").eq("name", shopName).limit(1).maybeSingle();
+        if (shopRow?.id) {
+          const { getCachedSearchKeywords } = await import("./gbp-search-keywords");
+          const cachedKw = await getCachedSearchKeywords(shopRow.id);
+          if (cachedKw.length > 0) {
+            const latest = cachedKw[cachedKw.length - 1];
+            cached.searchQueries = {
+              latest: latest.keywords.slice(0, 30),
+              latestMonth: latest.month,
+              history: cachedKw,
+            };
+          }
+        }
+      } catch {}
       // カテゴリをshopsテーブルから付与
       if (!cached.shop.category) {
         try {
