@@ -43,7 +43,8 @@ async function handleSync(shopId: string) {
   const result = await syncShopSearchKeywords(shop.id, shop.name, shop.gbp_location_name, 12);
 
   if (!result.success) {
-    return NextResponse.json({ error: result.error, shopName: shop.name }, { status: 500 });
+    // "データなし"は正常応答（200）として返す（500だとブラウザコンソールにエラー表示される）
+    return NextResponse.json({ success: false, error: result.error, shopName: shop.name });
   }
 
   return NextResponse.json({

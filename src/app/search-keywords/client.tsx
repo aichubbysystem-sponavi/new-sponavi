@@ -125,22 +125,22 @@ export default function SearchKeywordsClient() {
   }
 
   // Sync one shop by ID (with AbortSignal + auth + 90s timeout)
-  async function syncOne(shopId: string, shopName: string, signal?: AbortSignal): Promise<SyncResult> {
+  async function syncOne(shopId: string, shopName: string, parentSignal?: AbortSignal): Promise<SyncResult> {
     try {
       const token = await getAuthToken();
-      const timeoutController = new AbortController();
-      const timeout = setTimeout(() => timeoutController.abort(), 90000);
-      // 外部signalとtimeoutの両方でabort可能にする
-      const combinedSignal = signal
-        ? AbortSignal.any([signal, timeoutController.signal])
-        : timeoutController.signal;
+      // 外部signal + 90秒タイムアウトの両方で中断可能にする
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 90000);
+      const onParentAbort = () => controller.abort();
+      parentSignal?.addEventListener("abort", onParentAbort);
       const res = await fetch("/api/report/sync-search-keywords", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ shopId }),
-        signal: combinedSignal,
+        signal: controller.signal,
       });
       clearTimeout(timeout);
+      parentSignal?.removeEventListener("abort", onParentAbort);
       if (res.status === 401 || res.status === 403) {
         return { shopId, shopName, success: false, error: "認証切れ" };
       }
