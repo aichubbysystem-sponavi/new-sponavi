@@ -259,6 +259,7 @@ export async function getReportData(shopId: string): Promise<{
   try {
     const cached = await readReportDataFromCache(shopName);
     if (cached) {
+      console.log(`[report-api] Cache HIT for "${shopName}", monthlyLabels: [${cached.monthlyLabels.join(",")}]`);
       // rankingHistory + keywords をシートからリアルタイム取得（キャッシュは古い値のままになるため）
       try {
         const { fetchRankingFromSheets, fetchRankingHistoryFromSheets } = await import("./ranking-fetch");
@@ -354,8 +355,8 @@ export async function getReportData(shopId: string): Promise<{
                 },
               };
             }
-          } catch (e) {
-            // performance_metrics_cache テーブルがまだない場合は無視
+          } catch (e: any) {
+            console.error("[report-api] perf overlay error (cache path):", e?.message || e);
           }
         }
       } catch {}
@@ -389,6 +390,7 @@ export async function getReportData(shopId: string): Promise<{
   try {
     const data = await getReportFromSpreadsheet(shopName);
     if (data) {
+      console.log(`[report-api] Spreadsheet path for "${shopName}", monthlyLabels: [${data.monthlyLabels.join(",")}]`);
       try { await writeReportDataToCache(shopName, data); } catch {}
       reportData = data;
       dataSource = "spreadsheet";
@@ -452,7 +454,9 @@ export async function getReportData(shopId: string): Promise<{
             },
           };
         }
-      } catch {}
+      } catch (e2: any) {
+        console.error("[report-api] perf overlay error (spreadsheet path):", e2?.message || e2);
+      }
 
       // 検索語句上書き
       try {
@@ -466,9 +470,13 @@ export async function getReportData(shopId: string): Promise<{
             history: cachedKw,
           };
         }
-      } catch {}
+      } catch (e3: any) {
+        console.error("[report-api] search kw overlay error (spreadsheet path):", e3?.message || e3);
+      }
     }
-  } catch {}
+  } catch (e4: any) {
+    console.error("[report-api] overlay shopRow lookup error:", e4?.message || e4);
+  }
 
   return { data: reportData, source: dataSource };
 }
