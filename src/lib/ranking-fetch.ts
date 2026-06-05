@@ -264,20 +264,48 @@ function parseRanksHistory(headerText: string, dataText: string): RankHistoryDat
   if (dataLines.length < 2) return { labels: [], datasets: [] };
   const dataRows = dataLines.slice(1).map(l => parseCSVRow(l));
 
-  // 月ラベルと順位を全行分取得（直近13ヶ月＝前年同月含む）
-  const allMonths: { label: string; row: string[] }[] = [];
+  // 日付パース+ソート（シートの行順に依存しない）
+  const allMonths: { label: string; row: string[]; date: Date }[] = [];
   for (const row of dataRows) {
     const dateCell = (row[1] || "").trim();
-    const m = dateCell.match(/(\d{4})[\/年](\d{1,2})/);
-    if (m) allMonths.push({ label: `${m[1]}/${parseInt(m[2])}`, row });
+    const m = dateCell.match(/(\d{4})\/(\d{1,2})\/(\d{1,2})/);
+    if (m) {
+      allMonths.push({
+        label: `${m[1]}/${parseInt(m[2])}`,
+        row,
+        date: new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3])),
+      });
+    } else {
+      // "2026/5" のような日なしフォーマットにも対応
+      const m2 = dateCell.match(/(\d{4})[\/年](\d{1,2})/);
+      if (m2) {
+        allMonths.push({
+          label: `${m2[1]}/${parseInt(m2[2])}`,
+          row,
+          date: new Date(parseInt(m2[1]), parseInt(m2[2]) - 1, 1),
+        });
+      }
+    }
   }
-  const recent = allMonths.slice(-13);
+
+  // 月ごとに最新の行だけ残す（重複排除）+ 日付順ソート
+  const monthMap = new Map<string, { label: string; row: string[]; date: Date }>();
+  for (const r of allMonths) {
+    const existing = monthMap.get(r.label);
+    if (!existing || r.date > existing.date) {
+      monthMap.set(r.label, r);
+    }
+  }
+  const sorted = Array.from(monthMap.values()).sort((a, b) => a.date.getTime() - b.date.getTime());
+  const recent = sorted.slice(-13);
 
   const labels = recent.map(m => m.label);
   const datasets = kwIndices.map(idx => {
     const word = (headerRow[idx] || "").trim();
     const ranks = recent.map(m => {
-      const v = parseInt((m.row[idx] || "0").replace(/,/g, "")) || 0;
+      const val = (m.row[idx] || "").trim();
+      if (val === "圏外") return null;
+      const v = parseInt(val.replace(/,/g, "")) || 0;
       return v > 0 ? v : null;
     });
     return { word, ranks };
