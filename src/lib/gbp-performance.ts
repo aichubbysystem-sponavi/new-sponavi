@@ -195,19 +195,31 @@ export async function cachePerformanceData(
   }
 }
 
-/** Supabaseキャッシュから読み込み */
-export async function getCachedPerformance(shopId: string): Promise<MonthlyPerformance[]> {
+/** Supabaseキャッシュから読み込み（shop_id → shop_name フォールバック、重複店舗対応） */
+export async function getCachedPerformance(shopId: string, shopName?: string): Promise<MonthlyPerformance[]> {
   if (!SUPABASE_URL) return [];
   const supabase = getSupabase();
 
+  // まず shop_id で検索
   const { data, error } = await supabase
     .from("performance_metrics_cache")
     .select("month, metrics")
     .eq("shop_id", shopId);
 
-  if (error || !data) return [];
+  let rows = (!error && data && data.length > 0) ? data : null;
 
-  return data
+  // shop_id でヒットしない場合、shop_name でフォールバック（重複店舗対応）
+  if (!rows && shopName) {
+    const { data: byName } = await supabase
+      .from("performance_metrics_cache")
+      .select("month, metrics")
+      .eq("shop_name", shopName);
+    if (byName && byName.length > 0) rows = byName;
+  }
+
+  if (!rows) return [];
+
+  return rows
     .map((row: any) => ({ ...row.metrics, month: row.month } as MonthlyPerformance))
     .sort((a, b) => compareMonths(a.month, b.month));
 }

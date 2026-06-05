@@ -313,8 +313,8 @@ export async function getReportData(shopId: string): Promise<{
           // パフォーマンスメトリクス（performance_metrics_cache → 月次推移・KPIを上書き）
           try {
             const { getCachedPerformance } = await import("./gbp-performance");
-            console.log(`[report-api] calling getCachedPerformance(${shopRow.id})`);
-            const perfData = await getCachedPerformance(shopRow.id);
+            console.log(`[report-api] calling getCachedPerformance(${shopRow.id}, "${shopName}")`);
+            const perfData = await getCachedPerformance(shopRow.id, shopName);
             console.log(`[report-api] perfData: ${perfData.length} months`);
             if (perfData.length > 0) {
               const labels = perfData.map(p => p.month);
@@ -420,7 +420,7 @@ export async function getReportData(shopId: string): Promise<{
       // パフォーマンスメトリクス上書き
       try {
         const { getCachedPerformance } = await import("./gbp-performance");
-        const perfData = await getCachedPerformance(shopRow.id);
+        const perfData = await getCachedPerformance(shopRow.id, shopName);
         if (perfData.length > 0) {
           const labels = perfData.map(p => p.month);
           const cur = perfData[perfData.length - 1];
