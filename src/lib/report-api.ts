@@ -278,12 +278,18 @@ export async function getReportData(shopId: string): Promise<{
       try {
         const dbIds = await getShopDbIds(shopName);
         let gridRanking = await fetchGridRankingLive(dbIds.length > 0 ? dbIds : ["_"], shopName);
+        const gridMonthsBefore = gridRanking?.history.map(h => h.month).join(",") || "none";
         // rankingHistoryにあるがgridRankingにない月を自動補完
         if (cached.rankingHistory) {
+          console.log(`[report-api] rankingHistory labels: [${cached.rankingHistory.labels.join(",")}]`);
           gridRanking = supplementGridFromRanking(gridRanking, cached.rankingHistory);
         }
+        const gridMonthsAfter = gridRanking?.history.map(h => h.month).join(",") || "none";
+        console.log(`[report-api] gridRanking months: before=[${gridMonthsBefore}] after=[${gridMonthsAfter}]`);
         if (gridRanking) cached.gridRanking = gridRanking;
-      } catch {}
+      } catch (gErr: any) {
+        console.error("[report-api] gridRanking error:", gErr?.message);
+      }
       // searchQueries + パフォーマンスメトリクスをDBキャッシュからリアルタイム取得
       try {
         const sb = createClient(
