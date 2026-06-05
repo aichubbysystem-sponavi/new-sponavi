@@ -275,20 +275,23 @@ export async function getReportData(shopId: string): Promise<{
         }
       } catch {}
       // gridRankingはリアルタイムで上書き（overrides + 実測データ + rankingHistoryから補完）
+      let gridRanking: GridRankingReport | undefined = cached.gridRanking;
       try {
         const dbIds = await getShopDbIds(shopName);
-        let gridRanking = await fetchGridRankingLive(dbIds.length > 0 ? dbIds : ["_"], shopName);
-        const gridMonthsBefore = gridRanking?.history.map(h => h.month).join(",") || "none";
-        // rankingHistoryにあるがgridRankingにない月を自動補完
+        gridRanking = await fetchGridRankingLive(dbIds.length > 0 ? dbIds : ["_"], shopName);
+      } catch (gErr: any) {
+        console.error("[report-api] fetchGridRankingLive error (continuing with cached):", gErr?.message?.slice(0, 100));
+      }
+      // rankingHistoryから補完（fetchGridRankingLiveが失敗しても実行）
+      try {
         if (cached.rankingHistory) {
           console.log(`[report-api] rankingHistory labels: [${cached.rankingHistory.labels.join(",")}]`);
           gridRanking = supplementGridFromRanking(gridRanking, cached.rankingHistory);
+          console.log(`[report-api] gridRanking months after supplement: [${gridRanking?.history.map(h => h.month).join(",") || "none"}]`);
         }
-        const gridMonthsAfter = gridRanking?.history.map(h => h.month).join(",") || "none";
-        console.log(`[report-api] gridRanking months: before=[${gridMonthsBefore}] after=[${gridMonthsAfter}]`);
         if (gridRanking) cached.gridRanking = gridRanking;
-      } catch (gErr: any) {
-        console.error("[report-api] gridRanking error:", gErr?.message);
+      } catch (sErr: any) {
+        console.error("[report-api] supplementGrid error:", sErr?.message);
       }
       // searchQueries + パフォーマンスメトリクスをDBキャッシュからリアルタイム取得
       try {
