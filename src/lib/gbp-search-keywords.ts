@@ -330,15 +330,32 @@ export async function syncShopSearchKeywords(
   // 2. search_query_cache に保存
   await cacheSearchKeywords(shopId, shopName, apiData);
 
-  // 3. report_data_cache の searchQueries を更新（shop_idベース）
+  // 3. report_data_cache の searchQueries を更新
+  // shop_id カラムがあればそちらを使い、なければ shop_name でフォールバック
   const supabase = getSupabase();
   const latest = apiData[apiData.length - 1];
   try {
-    const { data: reportCache } = await supabase
+    let reportCache: { id?: string; report_json?: any } | null = null;
+
+    // まず shop_id で検索（テーブルにカラムがある場合）
+    const { data: byId, error: idErr } = await supabase
       .from("report_data_cache")
       .select("id, report_json")
       .eq("shop_id", shopId)
       .maybeSingle();
+
+    if (!idErr && byId) {
+      reportCache = byId;
+    } else {
+      // shop_id カラムがない or ヒットしない場合、shop_name でフォールバック
+      const { data: byName } = await supabase
+        .from("report_data_cache")
+        .select("id, report_json")
+        .eq("shop_name", shopName)
+        .limit(1)
+        .maybeSingle();
+      reportCache = byName;
+    }
 
     if (reportCache?.report_json) {
       const reportJson = reportCache.report_json as any;
