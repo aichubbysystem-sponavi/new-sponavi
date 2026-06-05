@@ -122,40 +122,71 @@ export default function SearchKeywordsClient() {
     return Array.from(selected).map((id) => shopMap.get(id) || "").filter(Boolean);
   }
 
-  // Sync one shop
-  async function syncOne(shopName: string): Promise<SyncResult> {
+  // Sync one shop (with AbortSignal)
+  async function syncOne(shopName: string, signal?: AbortSignal): Promise<SyncResult> {
     try {
-      const res = await fetch(`/api/report/sync-search-keywords?name=${encodeURIComponent(shopName)}&months=12`);
+      const res = await fetch(`/api/report/sync-search-keywords?name=${encodeURIComponent(shopName)}&months=12`, { signal });
+      if (res.redirected || res.status === 401 || res.status === 403) {
+        return { shopName, success: false, error: "認証切れ" };
+      }
       const data = await res.json();
       if (data.success) {
         return { shopName, success: true, latestMonth: data.latestMonth, totalMonths: data.totalMonths };
       }
       return { shopName, success: false, error: data.error || "Unknown error" };
     } catch (e: any) {
+      if (e?.name === "AbortError") return { shopName, success: false, error: "中断" };
       return { shopName, success: false, error: e?.message || "Network error" };
     }
   }
 
   const cancelRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // Cleanup on unmount (page navigation)
+  useEffect(() => {
+    return () => {
+      cancelRef.current = true;
+      abortRef.current?.abort();
+    };
+  }, []);
 
   // Bulk sync (1 at a time with 500ms delay to respect rate limits)
   async function handleBulkSync(targets: string[]) {
     if (targets.length === 0) { showToast("対象店舗を選択してください"); return; }
     cancelRef.current = false;
+    const controller = new AbortController();
+    abortRef.current = controller;
     setSyncing(true);
     setSyncResults([]);
     setSyncProgress({ current: 0, total: targets.length, shopName: "" });
 
     const results: SyncResult[] = [];
+    let consecutiveErrors = 0;
+
     for (let i = 0; i < targets.length; i++) {
-      if (cancelRef.current) {
+      if (cancelRef.current || controller.signal.aborted) {
         showToast(`中断しました (${i}/${targets.length})`);
         break;
       }
       setSyncProgress({ current: i + 1, total: targets.length, shopName: targets[i] });
-      const result = await syncOne(targets[i]);
+      const result = await syncOne(targets[i], controller.signal);
       results.push(result);
       setSyncResults([...results]);
+
+      // Auth error detection: stop immediately
+      if (result.error === "認証切れ") {
+        showToast("セッションが切れました。再ログインしてください。");
+        break;
+      }
+
+      // 10 consecutive errors → auto-stop
+      consecutiveErrors = result.success ? 0 : consecutiveErrors + 1;
+      if (consecutiveErrors >= 10) {
+        showToast(`10件連続失敗のため中断しました (${i + 1}/${targets.length})`);
+        break;
+      }
+
       // Rate limit: wait 500ms between requests
       if (i < targets.length - 1) {
         await new Promise((r) => setTimeout(r, 500));
@@ -165,6 +196,7 @@ export default function SearchKeywordsClient() {
     setSyncProgress({ current: results.length, total: targets.length, shopName: "" });
     setSyncResults(results);
     setSyncing(false);
+    abortRef.current = null;
     setShowResults(true);
 
     const successCount = results.filter((r) => r.success).length;
@@ -236,7 +268,7 @@ export default function SearchKeywordsClient() {
             <div className="flex items-center gap-3">
               <span className="font-semibold text-[#003D6B]">{syncProgress.current}/{syncProgress.total}</span>
               <button
-                onClick={() => { cancelRef.current = true; }}
+                onClick={() => { cancelRef.current = true; abortRef.current?.abort(); }}
                 className="px-3 py-1 rounded text-xs font-semibold bg-red-50 text-red-600 hover:bg-red-100 transition"
               >
                 中断
