@@ -26,6 +26,10 @@
     {
       "path": "/api/cron/sync-search-keywords",
       "schedule": "0 20 5 * *"
+    },
+    {
+      "path": "/api/cron/sync-performance",
+      "schedule": "0 21 5 * *"
     }
   ],
   "headers": [

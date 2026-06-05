@@ -283,7 +283,7 @@ export async function getReportData(shopId: string): Promise<{
         }
         if (gridRanking) cached.gridRanking = gridRanking;
       } catch {}
-      // searchQueriesをsearch_query_cacheからリアルタイム取得
+      // searchQueries + パフォーマンスメトリクスをDBキャッシュからリアルタイム取得
       try {
         const sb = createClient(
           process.env.NEXT_PUBLIC_SUPABASE_URL || "",
@@ -291,6 +291,7 @@ export async function getReportData(shopId: string): Promise<{
         );
         const { data: shopRow } = await sb.from("shops").select("id, gbp_location_name").eq("name", shopName).limit(1).maybeSingle();
         if (shopRow?.id) {
+          // 検索語句
           const { getCachedSearchKeywords } = await import("./gbp-search-keywords");
           const cachedKw = await getCachedSearchKeywords(shopRow.id);
           if (cachedKw.length > 0) {
@@ -300,6 +301,61 @@ export async function getReportData(shopId: string): Promise<{
               latestMonth: latest.month,
               history: cachedKw,
             };
+          }
+
+          // パフォーマンスメトリクス（performance_metrics_cache → 月次推移・KPIを上書き）
+          try {
+            const { getCachedPerformance } = await import("./gbp-performance");
+            const perfData = await getCachedPerformance(shopRow.id);
+            if (perfData.length > 0) {
+              const labels = perfData.map(p => p.month);
+              const cur = perfData[perfData.length - 1];
+              const prev = perfData.length >= 2 ? perfData[perfData.length - 2] : null;
+              // 前年同月を探す
+              const curParts = cur.month.split("/").map(Number);
+              const yoyMonth = `${curParts[0] - 1}/${curParts[1]}`;
+              const yoy = perfData.find(p => p.month === yoyMonth) || null;
+
+              // charts 更新
+              cached.monthlyLabels = labels;
+              cached.charts = {
+                ...cached.charts,
+                searchMobile: perfData.map(p => p.searchMobile),
+                searchPC: perfData.map(p => p.searchPC),
+                mapMobile: perfData.map(p => p.mapMobile),
+                mapPC: perfData.map(p => p.mapPC),
+                calls: perfData.map(p => p.calls),
+                routes: perfData.map(p => p.routes),
+                websites: perfData.map(p => p.websites),
+                foodMenus: perfData.map(p => p.foodMenus),
+                bookings: perfData.map(p => p.bookings),
+              };
+
+              // KPIs 更新（KPI[] 配列形式、既存の口コミKPIは保持）
+              const reviewKpi = cached.kpis.find(k => k.label.includes("口コミ"));
+              cached.kpis = [
+                { label: "Google検索 合計", value: cur.searchMobile + cur.searchPC, prevValue: prev ? prev.searchMobile + prev.searchPC : 0, unit: "回", momValue: prev ? prev.searchMobile + prev.searchPC : null, yoyValue: yoy ? yoy.searchMobile + yoy.searchPC : null },
+                { label: "Googleマップ 合計", value: cur.mapMobile + cur.mapPC, prevValue: prev ? prev.mapMobile + prev.mapPC : 0, unit: "回", momValue: prev ? prev.mapMobile + prev.mapPC : null, yoyValue: yoy ? yoy.mapMobile + yoy.mapPC : null },
+                { label: "ウェブサイトクリック", value: cur.websites, prevValue: prev?.websites ?? 0, unit: "件", momValue: prev?.websites ?? null, yoyValue: yoy?.websites ?? null },
+                { label: "ルート検索", value: cur.routes, prevValue: prev?.routes ?? 0, unit: "件", momValue: prev?.routes ?? null, yoyValue: yoy?.routes ?? null },
+                { label: "通話", value: cur.calls, prevValue: prev?.calls ?? 0, unit: "件", momValue: prev?.calls ?? null, yoyValue: yoy?.calls ?? null },
+                { label: "フードメニュークリック", value: cur.foodMenus, prevValue: prev?.foodMenus ?? 0, unit: "件", momValue: prev?.foodMenus ?? null, yoyValue: yoy?.foodMenus ?? null },
+                { label: "予約", value: cur.bookings, prevValue: prev?.bookings ?? 0, unit: "件", momValue: prev?.bookings ?? null, yoyValue: yoy?.bookings ?? null },
+                ...(reviewKpi ? [reviewKpi] : []),
+              ];
+
+              // shop.period 更新
+              const lastDay = new Date(curParts[0], curParts[1], 0).getDate();
+              cached.shop = {
+                ...cached.shop,
+                period: {
+                  start: `${curParts[0]}/${String(curParts[1]).padStart(2, "0")}/01`,
+                  end: `${curParts[0]}/${String(curParts[1]).padStart(2, "0")}/${lastDay}`,
+                },
+              };
+            }
+          } catch (e) {
+            // performance_metrics_cache テーブルがまだない場合は無視
           }
         }
       } catch {}
