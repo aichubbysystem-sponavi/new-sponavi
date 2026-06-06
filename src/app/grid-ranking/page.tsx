@@ -116,7 +116,7 @@ interface CostEstimate {
 }
 
 export default function GridRankingPage() {
-  const { selectedShopId, selectedShop, shops } = useShop();
+  const { selectedShopId, selectedShop, shops, shopFilterMode } = useShop();
   const [keyword, setKeyword] = useState("");
   const [savedKeywords, setSavedKeywords] = useState<string[]>([]);
   const [gridSize, setGridSize] = useState<number>(7);
@@ -1256,7 +1256,7 @@ export default function GridRankingPage() {
       )}
 
       {/* 個別店舗選択時のみ表示: 計測設定・マップ・グリッド・履歴 */}
-      {selectedShopId ? (
+      {selectedShopId && shopFilterMode === "single" ? (
       <>
       {/* 設定パネル */}
       <div className="bg-white rounded-xl border p-5 space-y-4">
