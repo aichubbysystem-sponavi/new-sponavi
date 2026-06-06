@@ -31,17 +31,20 @@ interface StoredAnalysis {
  * Supabase DBから保存済みの分析結果を取得
  */
 export async function getStoredAnalysis(
-  shopName: string
+  shopName: string,
+  month?: string
 ): Promise<{ analysis: ReviewAnalysis; comments: string[]; rating?: number; reviewCount?: number; targetMonth?: string | null; source: "db" } | null> {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return null;
 
   try {
     const supabase = getSupabase();
-    const { data, error } = await supabase
-      .from("report_analysis")
-      .select("*")
-      .eq("shop_name", shopName)
-      .single();
+    let query = supabase.from("report_analysis").select("*").eq("shop_name", shopName);
+    if (month) {
+      query = query.eq("target_month", month);
+    } else {
+      query = query.order("analyzed_at", { ascending: false });
+    }
+    const { data, error } = await query.limit(1).maybeSingle();
 
     if (error || !data) return null;
 

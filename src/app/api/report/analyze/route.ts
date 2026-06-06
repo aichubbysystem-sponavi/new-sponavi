@@ -639,7 +639,7 @@ export async function POST(request: NextRequest) {
             analyzed_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           },
-          { onConflict: "shop_name" }
+          { onConflict: "shop_name,target_month" }
         );
 
       if (error) {
