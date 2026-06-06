@@ -157,6 +157,9 @@ export default function ReportClient({
     const yoyIdx = idx >= 12 ? idx - 12 : -1;
     const getVal = (arr: number[], i: number) => i >= 0 && i < arr.length ? arr[i] : 0;
 
+    // 期間パース（KPI再計算・ラベル変更で使用）
+    const m = targetMonth.match(/(\d{4})\/(\d{1,2})/);
+
     const newKpis = data.kpis.map(kpi => {
       // KPIのlabelでチャートデータを特定（「ルート検索」が「検索」に先行マッチしないよう順序に注意）
       if (kpi.label.includes("ルート")) return { ...kpi, value: getVal(charts.routes, idx), prevValue: getVal(charts.routes, prevIdx), momValue: prevIdx >= 0 ? getVal(charts.routes, prevIdx) : null, yoyValue: yoyIdx >= 0 ? getVal(charts.routes, yoyIdx) : null };
@@ -182,9 +185,6 @@ export default function ReportClient({
       }
       return kpi;
     });
-
-    // 期間を対象月に変更
-    const m = targetMonth.match(/(\d{4})\/(\d{1,2})/);
     const newPeriod = m ? {
       start: `${m[1]}/${String(m[2]).padStart(2, "0")}/01`,
       end: `${m[1]}/${String(m[2]).padStart(2, "0")}/${new Date(parseInt(m[1]), parseInt(m[2]), 0).getDate()}`,
