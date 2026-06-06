@@ -1255,6 +1255,9 @@ export default function GridRankingPage() {
         <div className="bg-red-50 text-red-700 p-3 rounded-lg text-sm">{error}</div>
       )}
 
+      {/* 個別店舗選択時のみ表示: 計測設定・マップ・グリッド・履歴 */}
+      {selectedShopId ? (
+      <>
       {/* 設定パネル */}
       <div className="bg-white rounded-xl border p-5 space-y-4">
         <h2 className="font-semibold text-[#003D6B]">計測設定</h2>
@@ -1644,6 +1647,12 @@ export default function GridRankingPage() {
         );
         })()}
       </div>
+      </>
+      ) : (
+        <div className="bg-white rounded-xl border p-8 text-center">
+          <p className="text-slate-500 text-sm">店舗を選択すると、計測設定・順位マップ・グリッド・履歴が表示されます。</p>
+        </div>
+      )}
     </div>
   );
 }
