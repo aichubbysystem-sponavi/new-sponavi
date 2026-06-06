@@ -125,15 +125,14 @@ export default function SearchKeywordsClient() {
   }
 
   // Sync one shop by ID (with AbortSignal + auth + 90s timeout)
-  async function syncOne(shopId: string, shopName: string, parentSignal?: AbortSignal): Promise<SyncResult> {
+  async function syncOne(shopId: string, shopName: string, parentSignal?: AbortSignal, apiPath = "/api/report/sync-search-keywords"): Promise<SyncResult> {
     try {
       const token = await getAuthToken();
-      // 外部signal + 90秒タイムアウトの両方で中断可能にする
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 90000);
       const onParentAbort = () => controller.abort();
       parentSignal?.addEventListener("abort", onParentAbort);
-      const res = await fetch("/api/report/sync-search-keywords", {
+      const res = await fetch(apiPath, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ shopId }),
@@ -179,7 +178,7 @@ export default function SearchKeywordsClient() {
   }
 
   // Bulk sync (ID-based, deduped, with consecutive error handling)
-  async function handleBulkSync(shopIds: string[]) {
+  async function handleBulkSync(shopIds: string[], apiPath = "/api/report/sync-search-keywords") {
     const targets = buildSyncTargets(shopIds);
     if (targets.length === 0) { showToast("対象店舗がありません"); return; }
 
@@ -200,7 +199,7 @@ export default function SearchKeywordsClient() {
       }
       const t = targets[i];
       setSyncProgress({ current: i + 1, total: targets.length, shopName: t.shopName });
-      const result = await syncOne(t.shopId, t.shopName, controller.signal);
+      const result = await syncOne(t.shopId, t.shopName, controller.signal, apiPath);
       results.push(result);
       setSyncResults([...results]);
 
@@ -289,6 +288,18 @@ export default function SearchKeywordsClient() {
             className="px-4 py-2 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
           >
             {selected.size > 0 ? `${selected.size}件同期` : "選択同期"}
+          </button>
+          <button
+            onClick={() => {
+              const syncable = shops
+                .filter((s) => s.gbp_location_name)
+                .map((s) => s.id);
+              handleBulkSync(syncable, "/api/report/sync-performance");
+            }}
+            disabled={syncing}
+            className="px-4 py-2 rounded-lg text-sm font-semibold bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+          >
+            {syncing ? "同期中..." : `パフォーマンス一括同期 (${shops.filter((s) => s.gbp_location_name).length})`}
           </button>
         </div>
       </div>
