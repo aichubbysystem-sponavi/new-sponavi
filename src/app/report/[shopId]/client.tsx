@@ -263,7 +263,7 @@ export default function ReportClient({
   const hasBookingsData = charts.bookings?.some(v => v > 0) ?? false;
   const hasFoodMenusData = charts.foodMenus?.some(v => v > 0) ?? false;
 
-  const hasKeywords = keywords.length > 0;
+  const hasKeywords = keywords.length > 0 || !!(gridRanking && gridRanking.history.length > 0);
   const hasRankingHistory = rankingHistory && rankingHistory.labels.length > 0;
   const hasReviews = reviewCounts.length > 0;
   const hasSearchQueries = searchQueries && searchQueries.latest.length > 0;
@@ -355,8 +355,36 @@ export default function ReportClient({
     return true;
   });
 
+  // gridRankingの中心点順位をキーワード順位として使用（あればスプレッドシートより優先）
+  const gridKeywords = useMemo(() => {
+    if (!gridRanking || gridRanking.history.length === 0) return null;
+    const history = gridRanking.history;
+    const latest = history[history.length - 1];
+    const prev = history.length >= 2 ? history[history.length - 2] : null;
+    if (!latest?.snapshots) return null;
+
+    const result: { word: string; rank: number; prevRank: number }[] = [];
+    for (const snap of latest.snapshots) {
+      const center = snap.results.find(r => r.row === Math.floor(snap.gridSize / 2) && r.col === Math.floor(snap.gridSize / 2));
+      const rank = center?.rank || 0;
+      let prevRank = rank;
+      if (prev?.snapshots) {
+        const prevSnap = prev.snapshots.find(s => s.keyword === snap.keyword);
+        if (prevSnap) {
+          const prevCenter = prevSnap.results.find(r => r.row === Math.floor(prevSnap.gridSize / 2) && r.col === Math.floor(prevSnap.gridSize / 2));
+          prevRank = prevCenter?.rank || 0;
+        }
+      }
+      if (rank > 0) result.push({ word: snap.keyword, rank, prevRank: prevRank || rank });
+    }
+    return result.length > 0 ? result : null;
+  }, [gridRanking]);
+
+  // gridRankingの中心点があればそちらを使用、なければスプレッドシートのkeywords
+  const effectiveKeywords = gridKeywords || keywords;
+
   // 表示するキーワードのみフィルタ
-  const visibleKeywords = keywords.filter(kw => kwVisibility[kw.word] !== false && (kw.rank > 0 || kw.prevRank > 0));
+  const visibleKeywords = effectiveKeywords.filter(kw => kwVisibility[kw.word] !== false && (kw.rank > 0 || kw.prevRank > 0));
   const visibleRankingDatasets = (rankingHistory?.datasets?.filter(ds => {
     if (kwVisibility[ds.word] === false) return false;
     // 全期間データなし（全て null）のキーワードを非表示
