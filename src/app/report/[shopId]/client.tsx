@@ -176,6 +176,10 @@ export default function ReportClient({
       if (kpi.label.includes("通話")) return { ...kpi, value: getVal(charts.calls, idx), prevValue: getVal(charts.calls, prevIdx), momValue: prevIdx >= 0 ? getVal(charts.calls, prevIdx) : null, yoyValue: yoyIdx >= 0 ? getVal(charts.calls, yoyIdx) : null };
       if (kpi.label.includes("メニュー")) return { ...kpi, value: getVal(charts.foodMenus, idx), prevValue: getVal(charts.foodMenus, prevIdx), momValue: prevIdx >= 0 ? getVal(charts.foodMenus, prevIdx) : null, yoyValue: yoyIdx >= 0 ? getVal(charts.foodMenus, yoyIdx) : null };
       if (kpi.label.includes("予約")) return { ...kpi, value: getVal(charts.bookings, idx), prevValue: getVal(charts.bookings, prevIdx), momValue: prevIdx >= 0 ? getVal(charts.bookings, prevIdx) : null, yoyValue: yoyIdx >= 0 ? getVal(charts.bookings, yoyIdx) : null };
+      // 口コミ増減ラベルを表示月に合わせる
+      if (kpi.label.includes("口コミ") && m) {
+        return { ...kpi, label: `口コミ増減【${m[1]}/${m[2]}】` };
+      }
       return kpi;
     });
 
@@ -1597,8 +1601,26 @@ export default function ReportClient({
         </div>
       </div>
 
-      {/* ════ AIコメント: 動的ページ分割 ════ */}
+      {/* ════ AIコメント: 動的ページ分割（表示月と分析対象月が一致する場合のみ表示） ════ */}
       {(() => {
+        // 分析対象月と表示月の一致チェック
+        const analysisMonth = trimmedData.analysisTargetMonth;
+        const displayMonth = monthlyLabels[monthlyLabels.length - 1] || curLabel;
+        if (analysisMonth && analysisMonth !== displayMonth) {
+          pageNum++;
+          return (
+            <div style={slideStyle} className="slide">
+              <div style={slideBarStyle}><span>{shop.name} — AIによるコメント</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+              <div style={slideBodyStyle}>
+                <div style={stitleStyle}>AIによるコメント</div>
+                <div style={{ background: "#f8f9fa", border: "1px solid #dee2e6", borderRadius: 12, padding: "40px 32px", textAlign: "center" }}>
+                  <p style={{ fontSize: 14, color: "#666", marginBottom: 8 }}>この月（{displayMonth}）のAI総評はまだ生成されていません。</p>
+                  <p style={{ fontSize: 12, color: "#999" }}>最新の分析は {analysisMonth} のデータに基づいています。</p>
+                </div>
+              </div>
+            </div>
+          );
+        }
         // コメントを2件ずつに分割（最終ページにメモ欄を付加）
         const allComments = comments || [];
         const commentPages: { start: number; end: number }[] = [];

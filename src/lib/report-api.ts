@@ -259,7 +259,6 @@ export async function getReportData(shopId: string): Promise<{
   try {
     const cached = await readReportDataFromCache(shopName);
     if (cached) {
-      console.log(`[report-api] Cache HIT for "${shopName}", monthlyLabels: [${cached.monthlyLabels.join(",")}]`);
       // rankingHistory + keywords をシートからリアルタイム取得（キャッシュは古い値のままになるため）
       try {
         const { fetchRankingFromSheets, fetchRankingHistoryFromSheets } = await import("./ranking-fetch");
@@ -285,9 +284,7 @@ export async function getReportData(shopId: string): Promise<{
       // rankingHistoryから補完（fetchGridRankingLiveが失敗しても実行）
       try {
         if (cached.rankingHistory) {
-          console.log(`[report-api] rankingHistory labels: [${cached.rankingHistory.labels.join(",")}]`);
           gridRanking = supplementGridFromRanking(gridRanking, cached.rankingHistory);
-          console.log(`[report-api] gridRanking months after supplement: [${gridRanking?.history.map(h => h.month).join(",") || "none"}]`);
         }
         if (gridRanking) cached.gridRanking = gridRanking;
       } catch (sErr: any) {
@@ -301,12 +298,10 @@ export async function getReportData(shopId: string): Promise<{
         );
         const { data: shopRow } = await sb.from("shops").select("id, gbp_location_name").eq("name", shopName).limit(1).maybeSingle();
         if (shopRow?.id) {
-          console.log(`[report-api] shopRow found: id=${shopRow.id}`);
           // 検索語句
           try {
             const { getCachedSearchKeywords } = await import("./gbp-search-keywords");
             const cachedKw = await getCachedSearchKeywords(shopRow.id);
-            console.log(`[report-api] searchKw cache: ${cachedKw.length} months`);
             if (cachedKw.length > 0) {
               const latest = cachedKw[cachedKw.length - 1];
               cached.searchQueries = {
@@ -322,9 +317,7 @@ export async function getReportData(shopId: string): Promise<{
           // パフォーマンスメトリクス（performance_metrics_cache → 月次推移・KPIを上書き）
           try {
             const { getCachedPerformance } = await import("./gbp-performance");
-            console.log(`[report-api] calling getCachedPerformance(${shopRow.id}, "${shopName}")`);
             const perfData = await getCachedPerformance(shopRow.id, shopName);
-            console.log(`[report-api] perfData: ${perfData.length} months`);
             if (perfData.length > 0) {
               const labels = perfData.map(p => p.month);
               const cur = perfData[perfData.length - 1];
@@ -395,6 +388,7 @@ export async function getReportData(shopId: string): Promise<{
         if (stored) {
           cached.reviewAnalysis = stored.analysis;
           cached.comments = stored.comments;
+          cached.analysisTargetMonth = stored.targetMonth || null;
         }
       } catch {}
       return { data: cached, source: "cache" };
@@ -407,7 +401,6 @@ export async function getReportData(shopId: string): Promise<{
   try {
     const data = await getReportFromSpreadsheet(shopName);
     if (data) {
-      console.log(`[report-api] Spreadsheet path for "${shopName}", monthlyLabels: [${data.monthlyLabels.join(",")}]`);
       try { await writeReportDataToCache(shopName, data); } catch {}
       reportData = data;
       dataSource = "spreadsheet";

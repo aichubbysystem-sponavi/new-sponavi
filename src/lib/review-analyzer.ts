@@ -24,6 +24,7 @@ interface StoredAnalysis {
   review_count: number;
   average_rating: number;
   analyzed_at: string;
+  target_month?: string;
 }
 
 /**
@@ -31,7 +32,7 @@ interface StoredAnalysis {
  */
 export async function getStoredAnalysis(
   shopName: string
-): Promise<{ analysis: ReviewAnalysis; comments: string[]; rating?: number; reviewCount?: number; source: "db" } | null> {
+): Promise<{ analysis: ReviewAnalysis; comments: string[]; rating?: number; reviewCount?: number; targetMonth?: string | null; source: "db" } | null> {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return null;
 
   try {
@@ -57,6 +58,7 @@ export async function getStoredAnalysis(
       comments: stored.comments || [],
       rating: stored.average_rating || 0,
       reviewCount: stored.review_count || 0,
+      targetMonth: stored.target_month || null,
       source: "db",
     };
   } catch {

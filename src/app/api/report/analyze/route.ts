@@ -369,6 +369,7 @@ export async function POST(request: NextRequest) {
       // KPIデータとグループ平均を取得
       let kpiText = "";
       let hasKpiData = false;
+      let curMonth = "";
       try {
         // キャッシュからKPIデータ取得
         const { data: cache } = await supabase.from("report_data_cache").select("report_json").eq("shop_name", shop.name).maybeSingle();
@@ -376,7 +377,7 @@ export async function POST(request: NextRequest) {
           const report = cache.report_json as any;
           const kpis = report.kpis || [];
           const labels = report.monthlyLabels || [];
-          const curMonth = labels[labels.length - 1] || "";
+          curMonth = labels[labels.length - 1] || "";
 
           if (kpis.length > 0) {
             hasKpiData = true;
@@ -634,6 +635,7 @@ export async function POST(request: NextRequest) {
             comments: analysis.comments,
             review_count: officialCount,
             average_rating: officialRating,
+            target_month: curMonth || null,
             analyzed_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           },

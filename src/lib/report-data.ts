@@ -105,6 +105,7 @@ export interface ReportData {
   comments: string[];
   searchQueries: { latest: SearchQueryEntry[]; latestMonth: string; history: SearchQueryMonthData[] };
   gridRanking?: GridRankingReport;
+  analysisTargetMonth?: string | null;
 }
 
 export interface ShopListItem {
