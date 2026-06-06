@@ -425,13 +425,13 @@ export async function POST(request: NextRequest) {
             // アクション率（アクション合計 ÷ マップ表示数）
             const lastIdx = labels.length - 1;
             const curMap = (charts.mapMobile?.[lastIdx] || 0) + (charts.mapPC?.[lastIdx] || 0);
-            const curActions = (charts.websites?.[lastIdx] || 0) + (charts.routes?.[lastIdx] || 0) + (charts.calls?.[lastIdx] || 0);
+            const curActions = (charts.websites?.[lastIdx] || 0) + (charts.routes?.[lastIdx] || 0) + (charts.calls?.[lastIdx] || 0) + (charts.foodMenus?.[lastIdx] || 0) + (charts.bookings?.[lastIdx] || 0);
             if (curMap > 0) {
               const actionRate = (curActions / curMap * 100).toFixed(2);
-              kpiText += `\n\n【アクション率】\nアクション合計(Web+ルート+通話): ${curActions.toLocaleString()}件 ÷ マップ表示: ${curMap.toLocaleString()}回 = ${actionRate}%`;
+              kpiText += `\n\n【アクション率】\nアクション合計(Web+ルート+通話+メニュー+予約): ${curActions.toLocaleString()}件 ÷ マップ表示: ${curMap.toLocaleString()}回 = ${actionRate}%`;
               if (lastIdx >= 1) {
                 const prevMap = (charts.mapMobile?.[lastIdx - 1] || 0) + (charts.mapPC?.[lastIdx - 1] || 0);
-                const prevActions = (charts.websites?.[lastIdx - 1] || 0) + (charts.routes?.[lastIdx - 1] || 0) + (charts.calls?.[lastIdx - 1] || 0);
+                const prevActions = (charts.websites?.[lastIdx - 1] || 0) + (charts.routes?.[lastIdx - 1] || 0) + (charts.calls?.[lastIdx - 1] || 0) + (charts.foodMenus?.[lastIdx - 1] || 0) + (charts.bookings?.[lastIdx - 1] || 0);
                 if (prevMap > 0) {
                   const prevRate = (prevActions / prevMap * 100).toFixed(2);
                   kpiText += `（前月: ${prevRate}%）`;
@@ -478,15 +478,29 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          // キーワード順位データ
-          const kwData = report.keywords;
-          const rankHistory = report.rankingHistory;
-          if (kwData && kwData.length > 0) {
-            kpiText += `\n\n【キーワード順位（当月）】`;
-            for (const kw of kwData) {
-              const diff = kw.prevRank > 0 && kw.rank > 0 ? kw.prevRank - kw.rank : 0;
-              const arrow = diff > 0 ? `↑${diff}` : diff < 0 ? `↓${Math.abs(diff)}` : "→";
-              kpiText += `\n${kw.word}: ${kw.rank > 0 ? `${kw.rank}位` : "圏外"}（前月${kw.prevRank > 0 ? `${kw.prevRank}位` : "圏外"} ${arrow}）`;
+          // キーワード順位データ（シートからリアルタイム取得 — report_data_cacheは古い可能性）
+          try {
+            const { fetchRankingFromSheets } = await import("@/lib/ranking-fetch");
+            const freshRanks = await fetchRankingFromSheets(shop.name);
+            const kwData = freshRanks.length > 0 ? freshRanks : report.keywords;
+            if (kwData && kwData.length > 0) {
+              kpiText += `\n\n【キーワード順位（当月）】`;
+              for (const kw of kwData) {
+                const diff = kw.prevRank > 0 && kw.rank > 0 ? kw.prevRank - kw.rank : 0;
+                const arrow = diff > 0 ? `↑${diff}` : diff < 0 ? `↓${Math.abs(diff)}` : "→";
+                kpiText += `\n${kw.word}: ${kw.rank > 0 ? `${kw.rank}位` : "圏外"}（前月${kw.prevRank > 0 ? `${kw.prevRank}位` : "圏外"} ${arrow}）`;
+              }
+            }
+          } catch {
+            // フォールバック: キャッシュのデータを使用
+            const kwData = report.keywords;
+            if (kwData && kwData.length > 0) {
+              kpiText += `\n\n【キーワード順位（当月）】`;
+              for (const kw of kwData) {
+                const diff = kw.prevRank > 0 && kw.rank > 0 ? kw.prevRank - kw.rank : 0;
+                const arrow = diff > 0 ? `↑${diff}` : diff < 0 ? `↓${Math.abs(diff)}` : "→";
+                kpiText += `\n${kw.word}: ${kw.rank > 0 ? `${kw.rank}位` : "圏外"}（前月${kw.prevRank > 0 ? `${kw.prevRank}位` : "圏外"} ${arrow}）`;
+              }
             }
           }
 
@@ -525,7 +539,7 @@ export async function POST(request: NextRequest) {
                 const gk = gc.report_json?.kpis || [];
                 const search = gk.find((k: any) => k.label?.includes("検索"))?.value || 0;
                 const map = gk.find((k: any) => k.label?.includes("マップ"))?.value || 0;
-                const action = gk.find((k: any) => k.label?.includes("ルート") || k.label?.includes("通話") || k.label?.includes("ウェブ"))?.value || 0;
+                const action = gk.filter((k: any) => k.label?.includes("ルート") || k.label?.includes("通話") || k.label?.includes("ウェブ") || k.label?.includes("メニュー") || k.label?.includes("予約")).reduce((s: number, k: any) => s + (k.value || 0), 0);
                 const shopData = gc.report_json?.shop;
                 totalSearch += search; totalMap += map; totalAction += action;
                 if (shopData?.totalReviews) gReviews += shopData.totalReviews;
@@ -553,7 +567,7 @@ export async function POST(request: NextRequest) {
                 const ck = cc.report_json?.kpis || [];
                 const s = ck.find((k: any) => k.label?.includes("検索"))?.value || 0;
                 const m = ck.find((k: any) => k.label?.includes("マップ"))?.value || 0;
-                const a = ck.find((k: any) => k.label?.includes("ルート") || k.label?.includes("通話") || k.label?.includes("ウェブ"))?.value || 0;
+                const a = ck.filter((k: any) => k.label?.includes("ルート") || k.label?.includes("通話") || k.label?.includes("ウェブ") || k.label?.includes("メニュー") || k.label?.includes("予約")).reduce((s: number, k: any) => s + (k.value || 0), 0);
                 const shopData = cc.report_json?.shop;
                 tSearch += s; tMap += m; tAction += a;
                 if (shopData?.totalReviews) tReviews += shopData.totalReviews;
