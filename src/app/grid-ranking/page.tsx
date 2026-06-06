@@ -985,8 +985,8 @@ export default function GridRankingPage() {
                   if (skipped > 0) skipMsg.push(`座標/KWなし${skipped}件`);
                   setBatchProgress(`✓ ${completed}店舗 × ${totalKws}KWの計測完了${skipMsg.length > 0 ? `（${skipMsg.join("・")}スキップ）` : ""}`);
                 }}
-                disabled={batchRunning}
-                className={`w-full py-3.5 rounded-lg text-sm font-bold transition-all ${batchRunning ? "bg-slate-200 text-slate-500" : "bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm"}`}
+                disabled={batchRunning || presets.filter(p => !isMeasuredThisMonth(p.last_measurement?.measured_at)).length === 0}
+                className={`w-full py-3.5 rounded-lg text-sm font-bold transition-all ${batchRunning ? "bg-slate-200 text-slate-500" : presets.filter(p => !isMeasuredThisMonth(p.last_measurement?.measured_at)).length === 0 ? "bg-slate-200 text-slate-500 cursor-not-allowed" : "bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm"}`}
               >
                 {batchRunning ? batchProgress : (() => {
                   const noCoord = presets.filter(p => !p.has_coordinates).length;
@@ -995,7 +995,7 @@ export default function GridRankingPage() {
                   const extras = [];
                   if (noCoord > 0) extras.push(`座標${noCoord}件`);
                   if (noKw > 0) extras.push(`KW${noKw}件`);
-                  if (unmeasured === 0) return `全店舗 今月計測済み`;
+                  if (unmeasured === 0) return `全店舗 今月計測済み ✓`;
                   return extras.length > 0
                     ? `未計測のみ一括計測（${unmeasured}/${presets.length}店舗）— ${extras.join("+")}を自動取得`
                     : `未計測のみ一括計測（${unmeasured}/${presets.length}店舗）`;
