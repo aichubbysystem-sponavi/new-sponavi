@@ -337,12 +337,13 @@ function generateComments(
     `口コミ件数は${totalReviews.toLocaleString()}件、評価${currentRating}を維持。${currentLabel}は+${latestReviewDelta}件の増加。`
   );
 
-  // アクション
-  const actions = kpis[7];
-  const actionPct = pctText(actions.value, actions.prevValue);
+  // アクション（kpis[2]〜kpis[6]: Web+ルート+通話+フードメニュー+予約）
+  const totalActionsComment = kpis.slice(2, 7).reduce((s, k) => s + k.value, 0);
+  const prevTotalActionsComment = kpis.slice(2, 7).reduce((s, k) => s + k.prevValue, 0);
+  const actionPct = pctText(totalActionsComment, prevTotalActionsComment);
   comments.push(
-    `ユーザーアクション合計${actions.value.toLocaleString()}件（${kpis[0].compareLabel || "前月比"}${actionPct}）。${
-      actions.value >= actions.prevValue
+    `ユーザーアクション合計${totalActionsComment.toLocaleString()}件（${kpis[0].compareLabel || "前月比"}${actionPct}）。${
+      totalActionsComment >= prevTotalActionsComment
         ? "ユーザーの反応が改善傾向にあります。"
         : "投稿頻度の向上やメニュー情報の充実で改善を図ります。"
     }`
