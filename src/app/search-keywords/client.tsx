@@ -126,12 +126,14 @@ export default function SearchKeywordsClient() {
 
   // Sync one shop by ID (with AbortSignal + auth + 90s timeout)
   async function syncOne(shopId: string, shopName: string, parentSignal?: AbortSignal, apiPath = "/api/report/sync-search-keywords"): Promise<SyncResult> {
+    // タイムアウトを最初に設定（getAuthToken含む全体をカバー）
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 90000);
+    const onParentAbort = () => controller.abort();
+    parentSignal?.addEventListener("abort", onParentAbort);
     try {
       const token = await getAuthToken();
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 90000);
-      const onParentAbort = () => controller.abort();
-      parentSignal?.addEventListener("abort", onParentAbort);
+      if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
       const res = await fetch(apiPath, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -149,7 +151,9 @@ export default function SearchKeywordsClient() {
       }
       return { shopId, shopName, success: false, error: data.error || "Unknown error" };
     } catch (e: any) {
-      if (e?.name === "AbortError") return { shopId, shopName, success: false, error: "中断" };
+      clearTimeout(timeout);
+      parentSignal?.removeEventListener("abort", onParentAbort);
+      if (e?.name === "AbortError") return { shopId, shopName, success: false, error: "タイムアウト" };
       return { shopId, shopName, success: false, error: e?.message || "Network error" };
     }
   }
