@@ -7,7 +7,7 @@ const MAIN_HOSTNAME = "new-spotlight-navigator.com";
 
 // === 壁10: APIレート制限 ===
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-const RATE_LIMIT = 60; // 1分あたり60リクエスト
+const RATE_LIMIT = 500; // 1分あたり500リクエスト
 const RATE_WINDOW = 60 * 1000; // 1分
 
 function checkRateLimit(ip: string): boolean {
