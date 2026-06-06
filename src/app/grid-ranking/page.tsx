@@ -52,6 +52,14 @@ function avgRank(results: GridPoint[]): string {
   return (total / results.length).toFixed(1);
 }
 
+/** 今月計測済みかどうか判定 */
+function isMeasuredThisMonth(measuredAt: string | undefined | null): boolean {
+  if (!measuredAt) return false;
+  const d = new Date(measuredAt);
+  const now = new Date();
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+}
+
 /** 中心座標からグリッド地点を生成 */
 function generateGrid(
   centerLat: number,
@@ -622,14 +630,19 @@ export default function GridRankingPage() {
                 const hasCoord = p.has_coordinates;
                 const lm = p.last_measurement;
                 const daysSince = lm ? Math.floor((Date.now() - new Date(lm.measured_at).getTime()) / 86400000) : null;
+                const measuredThisMonth = isMeasuredThisMonth(lm?.measured_at);
                 return (
-                  <div key={p.id} className="grid grid-cols-[1fr_auto_auto_auto] gap-2 items-center py-2 px-3 bg-slate-50 rounded-lg">
+                  <div key={p.id} className={`grid grid-cols-[1fr_auto_auto_auto] gap-2 items-center py-2 px-3 rounded-lg ${measuredThisMonth ? "bg-slate-50" : "bg-orange-50 border border-orange-200"}`}>
                     {/* 店舗名 + ステータスドット */}
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className={`w-2 h-2 rounded-full flex-shrink-0 ${hasCoord && (p.keyword || allKws.length > 0) ? "bg-emerald-500" : hasCoord ? "bg-yellow-400" : "bg-red-400"}`}
                         title={!hasCoord ? "座標なし" : !(p.keyword || allKws.length > 0) ? "KW未設定" : "準備OK"} />
                       <span className="text-sm font-medium text-slate-800 truncate">{p.shop_name}</span>
                       <span className="text-xs text-slate-400 flex-shrink-0">{p.grid_size}x{p.grid_size}</span>
+                      {measuredThisMonth
+                        ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-600 font-semibold flex-shrink-0">{new Date().getMonth() + 1}月済</span>
+                        : <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-600 font-semibold flex-shrink-0">未計測</span>
+                      }
                     </div>
                     {/* KW選択 */}
                     <div className="w-[200px]">
@@ -690,12 +703,18 @@ export default function GridRankingPage() {
           {presets.length > 0 && (() => {
             const noCoord = presets.filter(p => !p.has_coordinates).length;
             const noKw = presets.filter(p => !p.keyword && !(p.all_keywords && p.all_keywords.length > 0)).length;
-            return (noCoord > 0 || noKw > 0) ? (
-              <div className="flex gap-3 text-xs">
+            const unmeasured = presets.filter(p => !isMeasuredThisMonth(p.last_measurement?.measured_at)).length;
+            const measured = presets.length - unmeasured;
+            return (
+              <div className="flex gap-3 text-xs flex-wrap">
+                <span className={unmeasured > 0 ? "text-orange-600 font-bold" : "text-emerald-600 font-bold"}>
+                  今月: {measured}/{presets.length}件 計測済み
+                  {unmeasured > 0 && `（残り${unmeasured}件）`}
+                </span>
                 {noCoord > 0 && <span className="text-red-500">座標なし: {noCoord}件</span>}
                 {noKw > 0 && <span className="text-orange-500">KW未設定: {noKw}件</span>}
               </div>
-            ) : null;
+            );
           })()}
 
           {/* アクションボタン */}
@@ -772,13 +791,15 @@ export default function GridRankingPage() {
               <button
                 onClick={async () => {
                   if (batchRunning) return;
+                  const unmeasuredPresets = presets.filter(p => !isMeasuredThisMonth(p.last_measurement?.measured_at));
+                  if (unmeasuredPresets.length === 0) { alert("全店舗 今月計測済みです"); return; }
                   const noCoord = presets.filter(p => !p.has_coordinates).length;
                   const noKw = presets.filter(p => !p.keyword && !(p.all_keywords && p.all_keywords.length > 0)).length;
                   const steps = [];
                   if (noCoord > 0) steps.push(`座標取得(${noCoord}件)`);
                   if (noKw > 0) steps.push(`KW取得(${noKw}件)`);
-                  steps.push(`計測(${presets.length}店舗)`);
-                  if (!confirm(`${steps.join(" → ")} を実行します。\n約${Math.ceil(presets.length * 50 / 60)}分かかります。よろしいですか？`)) return;
+                  steps.push(`計測(${unmeasuredPresets.length}/${presets.length}店舗 — 今月計測済みはスキップ)`);
+                  if (!confirm(`${steps.join(" → ")} を実行します。\n約${Math.ceil(unmeasuredPresets.length * 50 / 60)}分かかります。よろしいですか？`)) return;
 
                   setBatchRunning(true);
 
@@ -837,10 +858,24 @@ export default function GridRankingPage() {
                     }
                   } catch {}
 
-                  // Phase 3: メインKW=7×7フル計測、サブKW=3×3実測→7×7推定生成
+                  // Phase 3: メインKW=7×7フル計測、サブKW=3×3実測→7×7推定生成（今月計測済みスキップ）
+                  // 最新のlast_measurementを再チェック（Phase 1,2で更新された可能性）
+                  const measuredThisMonthIds = new Set<string>();
+                  for (const p of latestPresets) {
+                    const lm = (p as any).last_measurement;
+                    if (lm && isMeasuredThisMonth(lm.measured_at)) {
+                      measuredThisMonthIds.add(p.shop_id);
+                    }
+                  }
+                  const targetPresets = latestPresets.filter((p: any) => !measuredThisMonthIds.has(p.shop_id));
                   let completed = 0, skipped = 0, totalKws = 0;
-                  for (let i = 0; i < latestPresets.length; i++) {
-                    const p = latestPresets[i];
+                  const skippedCount = latestPresets.length - targetPresets.length;
+                  if (skippedCount > 0) {
+                    setBatchProgress(`Phase 3/3: 今月計測済み${skippedCount}店舗をスキップ`);
+                    await new Promise(r => setTimeout(r, 1000));
+                  }
+                  for (let i = 0; i < targetPresets.length; i++) {
+                    const p = targetPresets[i];
                     try {
                       let lat = 0, lng = 0;
                       try {
@@ -869,7 +904,7 @@ export default function GridRankingPage() {
                         for (let j = 0; j < points.length; j++) {
                           const pt = points[j];
                           const label = isMain ? "7x7" : "3x3";
-                          setBatchProgress(`${i + 1}/${latestPresets.length} ${p.shop_name} [KW ${ki + 1}/${keywords.length} ${label}] (${j + 1}/${points.length})`);
+                          setBatchProgress(`${i + 1}/${targetPresets.length} ${p.shop_name} [KW ${ki + 1}/${keywords.length} ${label}] (${j + 1}/${points.length})`);
                           try {
                             let res;
                             for (let retry = 0; retry < 3; retry++) {
@@ -880,7 +915,7 @@ export default function GridRankingPage() {
                                 break;
                               } catch (e: any) {
                                 if (e?.response?.status === 429 && retry < 2) {
-                                  setBatchProgress(`${i + 1}/${latestPresets.length} ${p.shop_name} [KW ${ki + 1}/${keywords.length}] レート制限待機中...`);
+                                  setBatchProgress(`${i + 1}/${targetPresets.length} ${p.shop_name} [KW ${ki + 1}/${keywords.length}] レート制限待機中...`);
                                   await new Promise(r => setTimeout(r, 10000 * (retry + 1)));
                                 } else { throw e; }
                               }
@@ -945,7 +980,10 @@ export default function GridRankingPage() {
                   await refreshPresets();
 
                   setBatchRunning(false);
-                  setBatchProgress(`✓ ${completed}店舗 × ${totalKws}KWの計測完了${skipped > 0 ? `（${skipped}件スキップ）` : ""}`);
+                  const skipMsg = [];
+                  if (skippedCount > 0) skipMsg.push(`計測済み${skippedCount}件`);
+                  if (skipped > 0) skipMsg.push(`座標/KWなし${skipped}件`);
+                  setBatchProgress(`✓ ${completed}店舗 × ${totalKws}KWの計測完了${skipMsg.length > 0 ? `（${skipMsg.join("・")}スキップ）` : ""}`);
                 }}
                 disabled={batchRunning}
                 className={`w-full py-3.5 rounded-lg text-sm font-bold transition-all ${batchRunning ? "bg-slate-200 text-slate-500" : "bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm"}`}
@@ -953,12 +991,14 @@ export default function GridRankingPage() {
                 {batchRunning ? batchProgress : (() => {
                   const noCoord = presets.filter(p => !p.has_coordinates).length;
                   const noKw = presets.filter(p => !p.keyword && !(p.all_keywords && p.all_keywords.length > 0)).length;
+                  const unmeasured = presets.filter(p => !isMeasuredThisMonth(p.last_measurement?.measured_at)).length;
                   const extras = [];
                   if (noCoord > 0) extras.push(`座標${noCoord}件`);
                   if (noKw > 0) extras.push(`KW${noKw}件`);
+                  if (unmeasured === 0) return `全店舗 今月計測済み`;
                   return extras.length > 0
-                    ? `一括計測（${presets.length}店舗）— ${extras.join("+")}を自動取得`
-                    : `一括計測（${presets.length}店舗）`;
+                    ? `未計測のみ一括計測（${unmeasured}/${presets.length}店舗）— ${extras.join("+")}を自動取得`
+                    : `未計測のみ一括計測（${unmeasured}/${presets.length}店舗）`;
                 })()}
               </button>
               {batchProgress && !batchRunning && batchProgress.startsWith("✓") && (
@@ -1060,7 +1100,7 @@ export default function GridRankingPage() {
               <button
                 onClick={async () => {
                   if (allShopsBatchRunning) return;
-                  if (!confirm(`全${allShopsFiltered.length}店舗（いつもの店舗を除く）を計測します。\n座標・KW未取得の店舗は自動取得します。\n約${Math.ceil(allShopsFiltered.length * 50 / 60)}分かかります。よろしいですか？`)) return;
+                  if (!confirm(`全${allShopsFiltered.length}店舗（いつもの店舗を除く）を計測します。\n今月計測済みの店舗は自動スキップします。\n座標・KW未取得の店舗は自動取得します。\n約${Math.ceil(allShopsFiltered.length * 50 / 60)}分かかります。よろしいですか？`)) return;
 
                   setAllShopsBatchRunning(true);
 
@@ -1091,13 +1131,28 @@ export default function GridRankingPage() {
                     await new Promise(r => setTimeout(r, 1500));
                   }
 
-                  // Phase 3: 計測（座標+KWがある店舗のみ）
+                  // Phase 3: 計測（座標+KWがある店舗のみ、今月計測済みスキップ）
                   const { createClient } = await import("@supabase/supabase-js");
                   const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL || "", process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "");
+
+                  // 今月計測済みshop_idを一括取得
+                  const now = new Date();
+                  const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01T00:00:00`;
+                  const { data: measuredRows } = await sb
+                    .from("grid_ranking_logs")
+                    .select("shop_id")
+                    .gte("measured_at", monthStart);
+                  const allMeasuredIds = new Set((measuredRows || []).map((r: any) => r.shop_id));
+                  const allTargetShops = allShopsFiltered.filter(s => !allMeasuredIds.has(s.id));
+                  const allSkippedMeasured = allShopsFiltered.length - allTargetShops.length;
+                  if (allSkippedMeasured > 0) {
+                    setAllShopsBatchProgress(`Phase 3/3: 今月計測済み${allSkippedMeasured}店舗をスキップ`);
+                    await new Promise(r => setTimeout(r, 1000));
+                  }
                   let completed = 0, skipped = 0, totalKws = 0;
 
-                  for (let i = 0; i < allShopsFiltered.length; i++) {
-                    const s = allShopsFiltered[i];
+                  for (let i = 0; i < allTargetShops.length; i++) {
+                    const s = allTargetShops[i];
                     const shopName = s.name || s.id;
                     try {
                       // 座標取得
@@ -1121,7 +1176,7 @@ export default function GridRankingPage() {
                         for (let j = 0; j < points.length; j++) {
                           const pt = points[j];
                           const label = isMain ? "7x7" : "3x3";
-                          setAllShopsBatchProgress(`${i + 1}/${allShopsFiltered.length} ${shopName} [KW ${ki + 1}/${keywords.length} ${label}] (${j + 1}/${points.length})`);
+                          setAllShopsBatchProgress(`${i + 1}/${allTargetShops.length} ${shopName} [KW ${ki + 1}/${keywords.length} ${label}] (${j + 1}/${points.length})`);
                           try {
                             let res;
                             for (let retry = 0; retry < 3; retry++) {
@@ -1132,7 +1187,7 @@ export default function GridRankingPage() {
                                 break;
                               } catch (e: any) {
                                 if (e?.response?.status === 429 && retry < 2) {
-                                  setAllShopsBatchProgress(`${i + 1}/${allShopsFiltered.length} ${shopName} レート制限待機中...`);
+                                  setAllShopsBatchProgress(`${i + 1}/${allTargetShops.length} ${shopName} レート制限待機中...`);
                                   await new Promise(r => setTimeout(r, 10000 * (retry + 1)));
                                 } else { throw e; }
                               }
@@ -1178,12 +1233,15 @@ export default function GridRankingPage() {
                   }
 
                   setAllShopsBatchRunning(false);
-                  setAllShopsBatchProgress(`✓ ${completed}店舗 × ${totalKws}KWの計測完了${skipped > 0 ? `（${skipped}件スキップ）` : ""}`);
+                  const allSkipMsg = [];
+                  if (allSkippedMeasured > 0) allSkipMsg.push(`計測済み${allSkippedMeasured}件`);
+                  if (skipped > 0) allSkipMsg.push(`座標/KWなし${skipped}件`);
+                  setAllShopsBatchProgress(`✓ ${completed}店舗 × ${totalKws}KWの計測完了${allSkipMsg.length > 0 ? `（${allSkipMsg.join("・")}スキップ）` : ""}`);
                 }}
                 disabled={allShopsBatchRunning}
                 className={`w-full py-3.5 rounded-lg text-sm font-bold transition-all ${allShopsBatchRunning ? "bg-slate-200 text-slate-500" : "bg-orange-500 text-white hover:bg-orange-600 shadow-sm"}`}
               >
-                {allShopsBatchRunning ? allShopsBatchProgress : `全店舗一括計測（${allShopsFiltered.length}店舗 — いつもの店舗を除く）`}
+                {allShopsBatchRunning ? allShopsBatchProgress : `未計測のみ一括計測（${allShopsFiltered.length}店舗 — いつもの店舗を除く）`}
               </button>
               {allShopsBatchProgress && !allShopsBatchRunning && allShopsBatchProgress.startsWith("✓") && (
                 <p className="text-sm text-emerald-600 font-medium text-center">{allShopsBatchProgress}</p>
