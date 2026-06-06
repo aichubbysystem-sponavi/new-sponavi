@@ -1141,7 +1141,8 @@ export default function GridRankingPage() {
                   const { data: measuredRows } = await sb
                     .from("grid_ranking_logs")
                     .select("shop_id")
-                    .gte("measured_at", monthStart);
+                    .gte("measured_at", monthStart)
+                    .limit(10000);
                   const allMeasuredIds = new Set((measuredRows || []).map((r: any) => r.shop_id));
                   const allTargetShops = allShopsFiltered.filter(s => !allMeasuredIds.has(s.id));
                   const allSkippedMeasured = allShopsFiltered.length - allTargetShops.length;
