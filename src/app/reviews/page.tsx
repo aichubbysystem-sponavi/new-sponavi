@@ -42,7 +42,7 @@ export default function ReviewsPage() {
   const [unrepliedCount, setUnrepliedCount] = useState(0);
   const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
   const [availableMonths, setAvailableMonths] = useState<string[]>([]);
-  const { startMonth: drStart, endMonth: drEnd, setRange: drSetRange } = useDateRange(6);
+  const { startMonth: drStart, endMonth: drEnd, setRange: drSetRange } = useDateRange(18);
   // DateRangePickerの値をSupabaseクエリ用の期間に変換
   const dateRangeStart = `${drStart.replace("/", "-").replace(/^(\d{4})-(\d)$/, "$1-0$2")}-01T00:00:00`;
   const dateRangeEnd = (() => {

@@ -91,6 +91,7 @@ export default function DateRangePicker({
       { label: "3ヶ月", start: prev(3), end: thisMonth },
       { label: "6ヶ月", start: prev(6), end: thisMonth },
       { label: "1年", start: prev(12), end: thisMonth },
+      { label: "全期間", start: min, end: thisMonth },
     ].filter(p => monthToNum(p.start) >= monthToNum(min));
   }, [min]);
 
