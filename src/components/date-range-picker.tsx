@@ -34,10 +34,10 @@ function generateMonthOptions(min: string, max: string): string[] {
   return opts;
 }
 
-/** デフォルトの最小月（18ヶ月前） */
+/** デフォルトの最小月（36ヶ月前） */
 function defaultMinMonth(): string {
   const d = new Date();
-  d.setMonth(d.getMonth() - 17);
+  d.setMonth(d.getMonth() - 35);
   return `${d.getFullYear()}/${d.getMonth() + 1}`;
 }
 

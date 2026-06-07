@@ -41,7 +41,6 @@ export default function ReviewsPage() {
   const [replyFilter, setReplyFilter] = useState<ReplyFilter>("all");
   const [unrepliedCount, setUnrepliedCount] = useState(0);
   const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
-  const [availableMonths, setAvailableMonths] = useState<string[]>([]);
   const { startMonth: drStart, endMonth: drEnd, setRange: drSetRange } = useDateRange(18);
   // DateRangePickerの値をSupabaseクエリ用の期間に変換
   const dateRangeStart = `${drStart.replace("/", "-").replace(/^(\d{4})-(\d)$/, "$1-0$2")}-01T00:00:00`;
@@ -161,11 +160,11 @@ export default function ReviewsPage() {
   // 月別口コミ統計取得 + 利用可能月一覧 — 全店舗モードでは無効（混合データ防止）
   useEffect(() => {
     const fetchMonthlyStats = async () => {
-      if (isAllMode || !selectedShopId) { setMonthlyStats([]); setAvailableMonths([]); return; }
+      if (isAllMode || !selectedShopId) { setMonthlyStats([]); return; }
       let query = supabase.from("reviews").select("create_time, star_rating");
       query = query.eq("shop_id", selectedShopId);
       const { data } = await query.order("create_time", { ascending: true }).limit(5000);
-      if (!data || data.length === 0) { setMonthlyStats([]); setAvailableMonths([]); return; }
+      if (!data || data.length === 0) { setMonthlyStats([]); return; }
 
       const ratingMap: Record<string, number> = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5, ONE_STAR: 1, TWO_STARS: 2, THREE_STARS: 3, FOUR_STARS: 4, FIVE_STARS: 5 };
       const byMonth = new Map<string, { count: number; totalRating: number }>();
@@ -182,8 +181,6 @@ export default function ReviewsPage() {
 
       // 利用可能な月一覧（新しい順）
       const months = Array.from(byMonth.keys()).sort((a, b) => b.localeCompare(a));
-      setAvailableMonths(months);
-
       let cumulative = 0;
       const stats = Array.from(byMonth.entries())
         .sort(([a], [b]) => a.localeCompare(b))
