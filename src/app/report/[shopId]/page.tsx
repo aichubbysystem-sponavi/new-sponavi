@@ -26,12 +26,15 @@ async function getGoogleReviewUrl(shopName: string): Promise<string> {
 
 export default async function ReportPage({
   params,
+  searchParams,
 }: {
   params: { shopId: string };
+  searchParams: { month?: string };
 }) {
   const shopName = decodeURIComponent(params.shopId);
+  const targetMonth = searchParams.month || undefined;
   const [{ data, source }, reviewUrl] = await Promise.all([
-    getReportData(params.shopId),
+    getReportData(params.shopId, targetMonth),
     getGoogleReviewUrl(shopName),
   ]);
 

@@ -249,11 +249,16 @@ function supplementGridFromRanking(
  * 特定店舗のレポートデータを取得（キャッシュ優先）
  * gridRankingは常にリアルタイム取得（計測結果は頻繁に更新されるため）
  */
-export async function getReportData(shopId: string): Promise<{
+export async function getReportData(shopId: string, targetMonth?: string): Promise<{
   data: ReportData | null;
   source: "cache" | "spreadsheet" | "mock";
 }> {
   const shopName = decodeURIComponent(shopId);
+
+  // targetMonthのゼロパディング正規化: "2026/04" → "2026/4"（perfDataの月フォーマットに合わせる）
+  const normalizedMonth = targetMonth
+    ? targetMonth.replace(/\/0+(\d)/, "/$1")
+    : undefined;
 
   // 1. Supabaseキャッシュから取得（高速）
   try {
@@ -320,8 +325,11 @@ export async function getReportData(shopId: string): Promise<{
             const perfData = await getCachedPerformance(shopRow.id, shopName);
             if (perfData.length > 0) {
               const labels = perfData.map(p => p.month);
-              const cur = perfData[perfData.length - 1];
-              const prev = perfData.length >= 2 ? perfData[perfData.length - 2] : null;
+              // targetMonth指定時: 該当月をcurとして使用、なければ最新月
+              const curIdx = normalizedMonth ? perfData.findIndex(p => p.month === normalizedMonth) : perfData.length - 1;
+              const effectiveIdx = curIdx >= 0 ? curIdx : perfData.length - 1;
+              const cur = perfData[effectiveIdx];
+              const prev = effectiveIdx >= 1 ? perfData[effectiveIdx - 1] : null;
               // 前年同月を探す
               const curParts = cur.month.split("/").map(Number);
               const yoyMonth = `${curParts[0] - 1}/${curParts[1]}`;
@@ -425,8 +433,11 @@ export async function getReportData(shopId: string): Promise<{
         const perfData = await getCachedPerformance(shopRow.id, shopName);
         if (perfData.length > 0) {
           const labels = perfData.map(p => p.month);
-          const cur = perfData[perfData.length - 1];
-          const prev = perfData.length >= 2 ? perfData[perfData.length - 2] : null;
+          // targetMonth指定時: 該当月をcurとして使用、なければ最新月
+          const curIdx2 = normalizedMonth ? perfData.findIndex(p => p.month === normalizedMonth) : perfData.length - 1;
+          const effectiveIdx2 = curIdx2 >= 0 ? curIdx2 : perfData.length - 1;
+          const cur = perfData[effectiveIdx2];
+          const prev = effectiveIdx2 >= 1 ? perfData[effectiveIdx2 - 1] : null;
           const curParts = cur.month.split("/").map(Number);
           const yoyMonth = `${curParts[0] - 1}/${curParts[1]}`;
           const yoy = perfData.find(p => p.month === yoyMonth) || null;
