@@ -63,7 +63,7 @@ async function getShopDbIds(shopName: string): Promise<string[]> {
   try {
     const sb = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
     );
     // 完全一致で取得（重複時は1件に絞る）
     const { data } = await sb
@@ -101,7 +101,7 @@ async function fetchGridRankingLive(shopIds: string[], shopName?: string): Promi
   try {
     const sb = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
     );
 
     const keywordSet = new Set<string>();
@@ -300,7 +300,7 @@ export async function getReportData(shopId: string, targetMonth?: string): Promi
       try {
         const sb = createClient(
           process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-          process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+          process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
         );
         const { data: shopRow } = await sb.from("shops").select("id, gbp_location_name").eq("name", shopName).limit(1).maybeSingle();
         if (shopRow?.id) {
@@ -384,7 +384,7 @@ export async function getReportData(shopId: string, targetMonth?: string): Promi
         try {
           const sb = createClient(
             process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-            process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+            process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
           );
           const { data: catRow } = await sb.from("shops").select("gbp_main_category").eq("name", shopName).not("gbp_main_category", "is", null).limit(1).maybeSingle();
           if (catRow?.gbp_main_category) cached.shop.category = catRow.gbp_main_category;
@@ -424,7 +424,7 @@ export async function getReportData(shopId: string, targetMonth?: string): Promi
   try {
     const sb = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
     );
     const { data: shopRow } = await sb.from("shops").select("id").eq("name", shopName).limit(1).maybeSingle();
     if (shopRow?.id) {

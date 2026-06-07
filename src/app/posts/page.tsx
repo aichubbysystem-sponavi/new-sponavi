@@ -116,14 +116,14 @@ export default function PostsPage() {
     if (typeof window !== "undefined") return localStorage.getItem("auto-post-sheet") || "1bF-gXP05a3yoi1ZRnBTH6bnKCZRfStOBEucMKYY2eNA";
     return "1bF-gXP05a3yoi1ZRnBTH6bnKCZRfStOBEucMKYY2eNA";
   });
-  const [autoPostDate, setAutoPostDate] = useState(new Date().toISOString().slice(0, 10));
+  const [autoPostDate, setAutoPostDate] = useState("");
   const [autoPosting, setAutoPosting] = useState(false);
   const [autoPostResult, setAutoPostResult] = useState<any>(null);
   const [autoPostAttempt, setAutoPostAttempt] = useState(1); // 実行回数
   const [autoPostFailedShops, setAutoPostFailedShops] = useState<string[]>([]); // 失敗店舗名一覧（再実行用）
   const [photoPopup, setPhotoPopup] = useState<string | null>(null); // 写真ポップアップURL
   const [gbpUrlMap, setGbpUrlMap] = useState<Record<string, string>>({}); // 店舗名→GBP URL
-  const [scheduleDate, setScheduleDate] = useState(new Date().toISOString().slice(0, 10)); // 予約日付
+  const [scheduleDate, setScheduleDate] = useState(""); // 予約日付
   const [scheduleHour, setScheduleHour] = useState("9"); // 予約時（0-23）
   const [showAutoPost, setShowAutoPost] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -133,7 +133,7 @@ export default function PostsPage() {
   const [viewMode, setViewMode] = useState<"list" | "calendar" | "shops" | "plan">("list");
   const [confirmMap, setConfirmMap] = useState<Record<string, ConfirmStatus>>({});
   const [shopPostCounts, setShopPostCounts] = useState<{ name: string; count: number; lastPost: string }[]>([]);
-  const [planMonth, setPlanMonth] = useState(new Date().toISOString().slice(0, 7)); // "2026-04"
+  const [planMonth, setPlanMonth] = useState(""); // "2026-04"
   const [planItems, setPlanItems] = useState<{ id?: string; date: string; post_type: string; note: string }[]>([]);
   const [planLoading, setPlanLoading] = useState(false);
   const [planEditDay, setPlanEditDay] = useState<number | null>(null);
@@ -145,7 +145,7 @@ export default function PostsPage() {
   const [proofResult, setProofResult] = useState<string | null>(null);
   const [proofing, setProofing] = useState(false);
   const [showBulkGen, setShowBulkGen] = useState(false);
-  const [bulkGenStart, setBulkGenStart] = useState(new Date().toISOString().slice(0, 10));
+  const [bulkGenStart, setBulkGenStart] = useState("");
   const [bulkGenCount, setBulkGenCount] = useState(4);
   const [bulkGenning, setBulkGenning] = useState(false);
   const [bulkGenResult, setBulkGenResult] = useState<any>(null);
@@ -172,6 +172,16 @@ export default function PostsPage() {
   }, [showInsertMenu]);
 
   const isAllMode = shopFilterMode === "all";
+
+  // SSR安全な日付初期化（hydration不一致防止）
+  useEffect(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    const month = new Date().toISOString().slice(0, 7);
+    if (!autoPostDate) setAutoPostDate(today);
+    if (!scheduleDate) setScheduleDate(today);
+    if (!planMonth) setPlanMonth(month);
+    if (!bulkGenStart) setBulkGenStart(today);
+  }, []);
 
   // 差し込み文字列取得（Supabase直接）
   useEffect(() => {

@@ -171,7 +171,7 @@ export async function GET(request: NextRequest) {
   const shopName = request.nextUrl.searchParams.get("shopName");
 
   if (!shopId && shopName) {
-    const { data: shop } = await supabase.from("shops").select("id").eq("name", shopName).maybeSingle();
+    const { data: shop } = await supabase.from("shops").select("id").eq("name", shopName).limit(1).maybeSingle();
     if (shop) shopId = shop.id;
     else return NextResponse.json({ error: "店舗が見つかりません", searchedName: shopName }, { status: 404 });
   }

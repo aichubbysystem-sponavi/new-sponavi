@@ -389,7 +389,7 @@ async function fetchGridRankingData(
     const { createClient } = await import("@supabase/supabase-js");
     const sb = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
     );
     console.log(`[grid-ranking] fetching for shopId=${shopId}`);
     const { data: logs, error } = await sb
@@ -492,7 +492,7 @@ async function fetchAllExternalData(
         const { createClient } = await import("@supabase/supabase-js");
         const sb = createClient(
           process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-          process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+          process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
         );
         const { data: overrides } = await sb
           .from("grid_ranking_overrides")
@@ -872,7 +872,7 @@ export async function getShopsFromSpreadsheet(): Promise<ShopListItem[] | null> 
       // Supabaseからキャッシュ済みマッピングを取得
       const supabase = createClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-        process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+        process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
       );
       const { data: cachedMappings } = await supabase
         .from("sheet_tab_mapping")
@@ -969,7 +969,7 @@ export async function getReportFromSpreadsheet(
   try {
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
     );
     // 完全一致 → 部分一致の順で検索（スプレッドシート名とDB名の表記揺れ対応）
     let shop: any = null;

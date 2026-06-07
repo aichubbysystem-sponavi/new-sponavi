@@ -46,8 +46,11 @@ export default function AuthGuard({ children, skipAuth }: { children: React.Reac
     };
   }, [authenticated, pathname, resetTimeout]);
 
-  // レポートサブドメイン検出（AuthGuard内で直接チェック）
-  const isReportDomain = typeof window !== "undefined" && window.location.hostname.startsWith("report.");
+  // レポートサブドメイン検出（useEffect内でのみ判定 — hydration安全）
+  const [isReportDomain, setIsReportDomain] = useState(false);
+  useEffect(() => {
+    setIsReportDomain(window.location.hostname.startsWith("report."));
+  }, []);
 
   useEffect(() => {
     if (skipAuth || isReportDomain) return; // レポートサブドメインでは認証スキップ

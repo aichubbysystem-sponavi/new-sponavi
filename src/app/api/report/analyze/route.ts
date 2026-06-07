@@ -341,7 +341,7 @@ export async function POST(request: NextRequest) {
 
       // 1. report_data_cacheから取得（スプレッドシート由来、最も正確）
       try {
-        const { data: cache } = await supabase.from("report_data_cache").select("report_json").eq("shop_name", shop.name).maybeSingle();
+        const { data: cache } = await supabase.from("report_data_cache").select("report_json").eq("shop_name", shop.name).limit(1).maybeSingle();
         if (cache?.report_json) {
           const shopInfo = (cache.report_json as any).shop;
           if (shopInfo?.rating && shopInfo.rating > 0) {
@@ -355,7 +355,7 @@ export async function POST(request: NextRequest) {
       if (officialRating === reviewData.averageRating) {
         let shopRow = (await supabase.from("shops").select("rating, review_count").eq("id", shop.id).maybeSingle()).data;
         if (!shopRow?.rating) {
-          const { data: nameRow } = await supabase.from("shops").select("rating, review_count").eq("name", shop.name).not("rating", "is", null).maybeSingle();
+          const { data: nameRow } = await supabase.from("shops").select("rating, review_count").eq("name", shop.name).not("rating", "is", null).limit(1).maybeSingle();
           if (nameRow?.rating) shopRow = nameRow;
         }
         if (shopRow?.rating) {
@@ -372,7 +372,7 @@ export async function POST(request: NextRequest) {
       let curMonth = "";
       try {
         // キャッシュからKPIデータ取得
-        const { data: cache } = await supabase.from("report_data_cache").select("report_json").eq("shop_name", shop.name).maybeSingle();
+        const { data: cache } = await supabase.from("report_data_cache").select("report_json").eq("shop_name", shop.name).limit(1).maybeSingle();
         if (cache?.report_json) {
           const report = cache.report_json as any;
           const kpis = report.kpis || [];
@@ -528,7 +528,7 @@ export async function POST(request: NextRequest) {
         }
 
         // 同グループ店舗の平均を取得（キャッシュ有無に関わらず実行）
-        const { data: shopInfo } = await supabase.from("shops").select("business_group_id").eq("name", shop.name).maybeSingle();
+        const { data: shopInfo } = await supabase.from("shops").select("business_group_id").eq("name", shop.name).limit(1).maybeSingle();
         if (shopInfo?.business_group_id) {
           const { data: groupShops } = await supabase.from("shops").select("name").eq("business_group_id", shopInfo.business_group_id).neq("name", shop.name).limit(100);
           if (groupShops && groupShops.length > 0) {
@@ -555,7 +555,7 @@ export async function POST(request: NextRequest) {
         }
 
         // 同業種（カテゴリ）店舗の平均を取得
-        const { data: catInfo } = await supabase.from("shops").select("gbp_main_category").eq("name", shop.name).not("gbp_main_category", "is", null).maybeSingle();
+        const { data: catInfo } = await supabase.from("shops").select("gbp_main_category").eq("name", shop.name).not("gbp_main_category", "is", null).limit(1).maybeSingle();
         if (catInfo?.gbp_main_category) {
           const category = catInfo.gbp_main_category;
           const { data: catShops } = await supabase.from("shops").select("name").eq("gbp_main_category", category).neq("name", shop.name).limit(200);

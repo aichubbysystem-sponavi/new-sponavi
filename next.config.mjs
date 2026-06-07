@@ -44,6 +44,14 @@ const nextConfig = {
       },
     ];
   },
+  // wsモジュールのESM問題回避（サーバーサイドではNode.js組み込みを使用）
+  webpack: (config, { isServer }) => {
+    if (isServer) {
+      config.externals = config.externals || [];
+      config.externals.push({ ws: "commonjs ws" });
+    }
+    return config;
+  },
   // 画像の外部ドメイン許可（Supabase Storage等）
   images: {
     remotePatterns: [
