@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useCallback, useState, useRef } from "react";
+import { useEffect, useCallback, useState, useRef, useMemo } from "react";
 import api from "@/lib/api";
 import { useShop } from "@/components/shop-provider";
+import DateRangePicker, { useDateRange } from "@/components/date-range-picker";
 
 interface GridPoint {
   row: number;
@@ -208,7 +209,7 @@ export default function GridRankingPage() {
     await refreshPresets();
   };
   const [selectedHistory, setSelectedHistory] = useState<GridLog | null>(null);
-  const [historyMonth, setHistoryMonth] = useState("all");
+  const { startMonth: grStart, endMonth: grEnd, setRange: grSetRange, isInRange: grIsInRange } = useDateRange(6);
   const [error, setError] = useState("");
   const [aborted, setAborted] = useState(false);
   const [sheetLoading, setSheetLoading] = useState(false);
@@ -1536,34 +1537,13 @@ export default function GridRankingPage() {
       <div className="bg-white rounded-xl border overflow-hidden">
         <div className="p-4 border-b flex items-center justify-between">
           <h3 className="font-semibold text-[#003D6B]">計測履歴</h3>
-          {history.length > 0 && (() => {
-            const months = Array.from(new Set(history.map(l => {
-              const d = new Date(l.measured_at);
-              return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-            }))).sort().reverse();
-            return (
-              <select
-                value={historyMonth}
-                onChange={(e) => setHistoryMonth(e.target.value)}
-                className="text-xs border rounded px-2 py-1.5 text-slate-600"
-              >
-                <option value="all">全期間（{history.length}件）</option>
-                {months.map(m => {
-                  const count = history.filter(l => {
-                    const d = new Date(l.measured_at);
-                    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}` === m;
-                  }).length;
-                  const [y, mo] = m.split("-");
-                  return <option key={m} value={m}>{y}年{parseInt(mo)}月（{count}件）</option>;
-                })}
-              </select>
-            );
-          })()}
+          {history.length > 0 && (
+            <DateRangePicker startMonth={grStart} endMonth={grEnd} onChange={grSetRange} compact />
+          )}
         </div>
         {(() => {
-          const filtered = historyMonth === "all" ? history : history.filter(l => {
-            const d = new Date(l.measured_at);
-            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}` === historyMonth;
+          const filtered = history.filter(l => {
+            return l.measured_at && grIsInRange(l.measured_at);
           });
           return filtered.length > 0 ? (
           <div className="overflow-x-auto">
@@ -1644,7 +1624,7 @@ export default function GridRankingPage() {
             </table>
           </div>
         ) : (
-          <p className="text-gray-400 text-sm text-center py-8">{historyMonth === "all" ? "計測履歴はありません" : "この月の計測履歴はありません"}</p>
+          <p className="text-gray-400 text-sm text-center py-8">この期間の計測履歴はありません</p>
         );
         })()}
       </div>

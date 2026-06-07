@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useState, useMemo } from "react";
 import api from "@/lib/api";
 import { useShop } from "@/components/shop-provider";
+import DateRangePicker, { useDateRange } from "@/components/date-range-picker";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -79,6 +80,7 @@ export default function RankingPage() {
   const [bulkMeasuring, setBulkMeasuring] = useState(false);
   const [bulkProgress, setBulkProgress] = useState("");
   const [bulkResult, setBulkResult] = useState<any>(null);
+  const { startMonth: rStart, endMonth: rEnd, setRange: rSetRange, isInRange: rIsInRange } = useDateRange(6);
 
   // 店舗ごとの保存済みキーワードをDBから読み込み
   useEffect(() => {
@@ -136,6 +138,10 @@ export default function RankingPage() {
   }, [selectedShopId]);
 
   useEffect(() => { fetchHistory(); }, [fetchHistory]);
+
+  const filteredHistory = useMemo(() =>
+    history.filter(h => h.searched_at && rIsInRange(h.searched_at)),
+  [history, rIsInRange]);
 
   // 順位変動アラート+最適投稿時間帯取得
   useEffect(() => {
@@ -294,11 +300,12 @@ export default function RankingPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-2 flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">店舗検索ランキング</h1>
           <p className="text-sm text-slate-500 mt-1">キーワード順位を計測（最大100位まで・複数地点対応）</p>
         </div>
+        <DateRangePicker startMonth={rStart} endMonth={rEnd} onChange={rSetRange} compact />
         <button onClick={async () => {
           if (!confirm(`全${shops.length}店舗のKW順位を一括計測しますか？\n10店舗ずつバッチ処理します。`)) return;
           setBulkMeasuring(true); setBulkResult(null);
@@ -591,12 +598,12 @@ export default function RankingPage() {
           )}
 
           {/* 順位サマリーテーブル（キーワード×地点、最新のみ） */}
-          {history.length > 0 && (() => {
+          {filteredHistory.length > 0 && (() => {
             const nkw = normalizeKw;
 
             // キーワード+地点でグループ化し、最新と前回を抽出
             const groups = new Map<string, { kw: string; point: string; latest: RankLog; prev: RankLog | null }>();
-            const sorted = [...history].sort((a, b) => new Date(b.searched_at).getTime() - new Date(a.searched_at).getTime());
+            const sorted = [...filteredHistory].sort((a, b) => new Date(b.searched_at).getTime() - new Date(a.searched_at).getTime());
             for (const log of sorted) {
               const kw = nkw(log.search_words);
               const point = (log as any).point_label || "default";
@@ -661,12 +668,12 @@ export default function RankingPage() {
           })()}
 
           {/* 順位推移チャート（折れ線グラフ） */}
-          {history.length > 0 && (() => {
+          {filteredHistory.length > 0 && (() => {
             const nkw = normalizeKw;
 
             // キーワード名でユニークに統合（地点違いは同一キーワードとして統合、ベスト順位を採用）
             const dateRankMap = new Map<string, Map<string, number>>(); // kw → { date → bestRank }
-            history.forEach((log) => {
+            filteredHistory.forEach((log) => {
               if (log.rank === 0) return;
               const kw = nkw(log.search_words);
               const date = new Date(log.searched_at).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" });
@@ -679,7 +686,7 @@ export default function RankingPage() {
 
             // 日付ラベル（古い順、重複排除）
             const dateSet = new Set<string>();
-            [...history].sort((a, b) => new Date(a.searched_at).getTime() - new Date(b.searched_at).getTime()).forEach((log) => {
+            [...filteredHistory].sort((a, b) => new Date(a.searched_at).getTime() - new Date(b.searched_at).getTime()).forEach((log) => {
               dateSet.add(new Date(log.searched_at).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" }));
             });
             const dateLabels = Array.from(dateSet).slice(-10);
@@ -927,7 +934,7 @@ export default function RankingPage() {
                 {historyDateSort === "desc" ? "新しい順 ↓" : "古い順 ↑"}
               </button>
             </div>
-            {history.length === 0 ? (
+            {filteredHistory.length === 0 ? (
               <p className="text-slate-400 text-sm text-center py-6">計測履歴がありません</p>
             ) : (
               <table className="w-full text-sm">
@@ -940,7 +947,7 @@ export default function RankingPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {[...history].sort((a, b) => {
+                  {[...filteredHistory].sort((a, b) => {
                     const ta = new Date(a.searched_at).getTime();
                     const tb = new Date(b.searched_at).getTime();
                     return historyDateSort === "desc" ? tb - ta : ta - tb;

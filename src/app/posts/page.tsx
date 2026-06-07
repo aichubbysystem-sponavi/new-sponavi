@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useShop } from "@/components/shop-provider";
 import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
 import { logAudit } from "@/lib/audit-log";
+import DateRangePicker, { useDateRange } from "@/components/date-range-picker";
 
 interface LocalPost {
   name?: string;
@@ -422,18 +423,24 @@ export default function PostsPage() {
 
   const postKey = (p: LocalPost, i: number) => p.name || `${p.summary?.slice(0, 20)}_${i}`;
 
-  // 統計
-  const last30Days = localPosts.filter((p) => p.createTime && Date.now() - new Date(p.createTime).getTime() < 30 * 24 * 60 * 60 * 1000).length;
+  // 期間フィルタ
+  const { startMonth: pStart, endMonth: pEnd, setRange: pSetRange, isInRange: pIsInRange } = useDateRange(6);
+  const filteredPosts = useMemo(() =>
+    localPosts.filter(p => p.createTime && pIsInRange(p.createTime)),
+  [localPosts, pIsInRange]);
+
+  // 統計（フィルタ適用）
+  const last30Days = filteredPosts.filter((p) => p.createTime && Date.now() - new Date(p.createTime).getTime() < 30 * 24 * 60 * 60 * 1000).length;
   const frequencyLabel = last30Days >= 8 ? "優秀" : last30Days >= 4 ? "良好" : last30Days >= 1 ? "改善余地あり" : "要改善";
   const frequencyColor = last30Days >= 8 ? "text-emerald-600" : last30Days >= 4 ? "text-blue-600" : last30Days >= 1 ? "text-amber-600" : "text-red-600";
-  const typeStats = localPosts.reduce((a, p) => { const t = p.topicType || "STANDARD"; a[t] = (a[t] || 0) + 1; return a; }, {} as Record<string, number>);
-  const unconfirmed = localPosts.filter((_, i) => !confirmMap[postKey(localPosts[i], i)] || confirmMap[postKey(localPosts[i], i)] === "unconfirmed").length;
+  const typeStats = filteredPosts.reduce((a, p) => { const t = p.topicType || "STANDARD"; a[t] = (a[t] || 0) + 1; return a; }, {} as Record<string, number>);
+  const unconfirmed = filteredPosts.filter((_, i) => !confirmMap[postKey(filteredPosts[i], i)] || confirmMap[postKey(filteredPosts[i], i)] === "unconfirmed").length;
 
   // カレンダー
   const now = new Date();
   const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
   const firstDayOfWeek = new Date(now.getFullYear(), now.getMonth(), 1).getDay();
-  const postsByDay = localPosts.reduce((a, p) => {
+  const postsByDay = filteredPosts.reduce((a, p) => {
     if (!p.createTime) return a;
     const d = new Date(p.createTime);
     if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()) {
@@ -444,7 +451,7 @@ export default function PostsPage() {
     return a;
   }, {} as Record<number, LocalPost[]>);
 
-  const sorted = [...localPosts].sort((a, b) => {
+  const sorted = [...filteredPosts].sort((a, b) => {
     const ta = a.createTime ? new Date(a.createTime).getTime() : 0;
     const tb = b.createTime ? new Date(b.createTime).getTime() : 0;
     return dateSort === "desc" ? tb - ta : ta - tb;
@@ -453,7 +460,7 @@ export default function PostsPage() {
   return (
     <>
     <div className="animate-fade-in">
-      <div className="mb-4 mt-2 flex items-center justify-between">
+      <div className="mb-4 mt-2 flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">投稿管理・分析</h1>
           <p className="text-sm text-slate-500 mt-1">GBP投稿の作成・確認・分析・カレンダー</p>
@@ -465,6 +472,10 @@ export default function PostsPage() {
             + 新規投稿
           </button>
         )}
+      </div>
+
+      <div className="mb-4">
+        <DateRangePicker startMonth={pStart} endMonth={pEnd} onChange={pSetRange} />
       </div>
 
       {msg && (
@@ -481,7 +492,7 @@ export default function PostsPage() {
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
             <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
               <p className="text-[11px] font-medium text-slate-400 mb-1">総投稿数</p>
-              <p className="text-2xl font-bold text-[#003D6B]">{localPosts.length}<span className="text-xs font-normal text-slate-400 ml-1">件</span></p>
+              <p className="text-2xl font-bold text-[#003D6B]">{filteredPosts.length}<span className="text-xs font-normal text-slate-400 ml-1">件</span></p>
             </div>
             <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
               <p className="text-[11px] font-medium text-slate-400 mb-1">直近30日</p>
@@ -1212,7 +1223,7 @@ export default function PostsPage() {
                 </div>
               )}
             </div>
-            <p className="text-xs text-slate-400">{localPosts.length}件</p>
+            <p className="text-xs text-slate-400">{filteredPosts.length}件</p>
           </div>
 
           {/* 予約投稿一覧 */}
@@ -1569,7 +1580,7 @@ export default function PostsPage() {
                 })}
               </div>
             </div>
-          ) : localPosts.length === 0 ? (
+          ) : filteredPosts.length === 0 ? (
             <div className="bg-white rounded-xl p-12 shadow-sm border border-slate-100 text-center">
               <p className="text-slate-400 text-sm">GBP投稿がありません。「+ 新規投稿」から作成してください。</p>
             </div>

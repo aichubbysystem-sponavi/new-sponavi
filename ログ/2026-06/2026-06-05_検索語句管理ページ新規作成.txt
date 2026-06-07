@@ -1,0 +1,61 @@
+## 2026-06-05
+
+### 決定事項
+- 検索語句管理ページを /search-keywords に新規作成
+- サイドバー「店舗情報管理」セクション内、「店舗検索ランキング」と「多地点順位チェック」の間に配置
+- president/manager権限でアクセス可能（part_timeは不可）
+- GBP Performance API の searchkeywords/impressions/monthly エンドポイントで検索語句を取得
+- 6/5時点で5月分データが取得可能であることを実機確認済み（CHILLRIで検証）
+- cronスケジュール（毎月1日 UTC 20:00）は今回変更せず（5日以降への変更は未実施）
+
+### 変更内容（具体的に）
+- src/app/search-keywords/page.tsx: 新規作成（サーバーコンポーネント、force-dynamic）
+- src/app/search-keywords/client.tsx: 新規作成（メインUI）
+  - KPIカード6種（総店舗/最新月済/古い/未同期/GBP未設定/同期失敗）
+  - 全店舗一括同期ボタン / 複数選択同期ボタン / 個別同期ボタン
+  - プログレスバー + 中断ボタン（AbortController連動）
+  - ステータスフィルタ（すべて/済/古い/未同期/GBP未設定/失敗）
+  - 店舗名テキスト検索
+  - TOP3キーワードプレビュー / 最終同期日時表示
+  - 失敗一覧パネル + 失敗分のみ再実行ボタン
+  - ページネーション（50件/ページ）
+- src/app/api/search-keywords/status/route.ts: 新規作成（全店舗の同期ステータスAPI）
+  - fetchAll関数でrangeベースページネーション（Supabase 1000行制限回避）
+  - shops + search_query_cache を結合してステータス判定
+- src/components/sidebar.tsx: 「検索語句管理」リンク追加（店舗情報管理セクション）
+- src/lib/roles.ts: president/manager両方に /search-keywords 権限追加
+
+### 数値・設定値
+- 同期間隔: 500ms（1店舗ずつ順次実行、レート制限回避）
+- 連続エラー自動停止: 10件連続失敗で中断
+- fetchAllページサイズ: 1000行ずつrange取得
+- PER_PAGE（テーブル表示）: 50件/ページ
+- sync-search-keywords API: 1店舗あたり12ヶ月分取得、4並列バッチ
+- 全店舗同期の推定時間: 949店舗 x 500ms = 約8分
+
+### 未解決・次回やること
+1. 全店舗同期の実運用テスト（今回641エラーが出た。AbortController修正後に再テスト必要）
+2. cronスケジュールを毎月5日以降に変更する検討（現在1日→5月分が未確定の可能性）
+3. 同名店舗の重複問題（DBに同じ店舗名が複数存在 例: みそラーメンのよし乃 札幌アピア店 x3）→ データクレンジングが必要
+4. sync-search-keywords APIの認証追加（現在GETで認証なし、外部から直接叩ける）
+5. React hydrationエラー #419（既存問題、未解決）
+6. GBP投稿削除404 / アクセストークン401（既存問題）
+7. 「しゃぶしゃぶ れたす 中目黒本店」が店舗セレクターで「該当なし」（既存問題）
+8. 口コミ管理の未返信フィルタ500エラー（既存問題）
+9. AI総評の全店舗再分析（289/601完了、既存問題）
+10. Google Maps AdvancedMarkerElement移行（既存問題）
+
+### 注意点・ハマったこと
+- Supabaseのデフォルト行数制限が1000行 → .limit(2000)でも超えられない（サーバー側のdb-max-rows設定）→ rangeベースのページネーションで解決
+- 選択をnameベースのSetで管理すると同名店舗が重複排除される → idベースに変更（1073件中581ユニーク名しかなかった）
+- 全店舗同期中にセッション切れ → fetchが止まらず641件のエラーリクエストが発生 → AbortController + 認証切れ検出 + 連続エラー自動停止で対策
+- 本番Supabase(kxxwspavskhhjtiixcep)のanon keyはローカル.env.localにない → APIテストは本番エンドポイント経由で実施
+- GBP Performance APIのデータ確定タイミング: 公式ドキュメントに明記なし。実機検証で6/5に5月分取得可能を確認
+
+### コミット履歴
+1. 3e01dc3 - 検索語句管理ページ新規追加: 一括取得・複数選択・失敗一覧・中断機能
+2. 57f060d - 検索語句管理: Supabase 1000行制限をページネーションで回避
+3. cbd85cb - debug: shop count logging（デバッグ用、次のコミットで除去）
+4. bea997d - remove debug logging
+5. 6ad34c0 - 検索語句管理: 選択をnameベースからidベースに変更
+6. aae1bf3 - 検索語句管理: AbortController追加+連続エラー自動停止+認証切れ検出

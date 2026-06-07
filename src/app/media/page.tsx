@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useShop } from "@/components/shop-provider";
 import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
+import DateRangePicker, { useDateRange } from "@/components/date-range-picker";
 
 interface MediaRow {
   id: string;
@@ -48,6 +49,7 @@ export default function MediaPage() {
   const [bulkUploading, setBulkUploading] = useState(false);
   const [bulkResult, setBulkResult] = useState<string | null>(null);
   const [showBulk, setShowBulk] = useState(false);
+  const { startMonth: mStart, endMonth: mEnd, setRange: mSetRange, isInRange: mIsInRange } = useDateRange(12);
 
   const fetchMedia = useCallback(async () => {
     if (!selectedShopId) return;
@@ -103,9 +105,12 @@ export default function MediaPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="mb-4">
-        <h1 className="text-2xl font-bold text-slate-800">写真管理</h1>
-        <p className="text-sm text-slate-500 mt-1">GBP写真の一覧・カテゴリ管理</p>
+      <div className="mb-4 flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">写真管理</h1>
+          <p className="text-sm text-slate-500 mt-1">GBP写真の一覧・カテゴリ管理</p>
+        </div>
+        <DateRangePicker startMonth={mStart} endMonth={mEnd} onChange={mSetRange} compact />
       </div>
 
       {syncMsg && (
@@ -253,13 +258,15 @@ export default function MediaPage() {
             <div className="bg-white rounded-xl p-12 shadow-sm border border-slate-100 text-center">
               <p className="text-slate-400 text-sm">読み込み中...</p>
             </div>
-          ) : media.length === 0 ? (
+          ) : (() => {
+            const filteredMedia = media.filter(m => !m.create_time || mIsInRange(m.create_time));
+            return filteredMedia.length === 0 ? (
             <div className="bg-white rounded-xl p-12 shadow-sm border border-slate-100 text-center">
-              <p className="text-slate-400 text-sm">写真がありません。「写真を同期」でGBPから取得してください。</p>
+              <p className="text-slate-400 text-sm">この期間の写真がありません。</p>
             </div>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
-              {media.map((m) => (
+              {filteredMedia.map((m) => (
                 <div
                   key={m.id}
                   className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden hover:shadow-md transition-shadow cursor-pointer"
@@ -289,7 +296,8 @@ export default function MediaPage() {
                 </div>
               ))}
             </div>
-          )}
+          );
+          })()}
 
           {/* 画像プレビューモーダル */}
           {selectedImg && (

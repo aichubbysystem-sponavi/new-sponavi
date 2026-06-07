@@ -1,0 +1,104 @@
+===================================================
+2026-06-02〜03 AI総評KPI反映 + レポート対象月設定 + Sheet3対応
+===================================================
+
+## 【2026-06-02〜03】
+
+### 決定事項
+- AI総評（P14-15）は口コミだけでなくKPI・同業種比較も含めた「レポート全体の総評」にする
+- AIコメントは2ページに分割（①②③ / ④⑤+メモ）
+- レポート一覧ページに「対象月」設定を追加（月を選べば未来のデータは非表示）
+- 順位計測シート3つ目（1em-V1c4r...、KW=F列〜）をフォールバック参照先に追加
+
+### 変更内容（具体的に）
+
+■ src/app/api/report/analyze/route.ts
+- KPIデータに前月比・前年比の増減率（%）を追加
+- 直近3ヶ月のchartsデータ推移をプロンプトに追加
+- 同グループ/同業種平均にアクション合計・口コミ数・評価も追加
+- kpiTextの位置を口コミテキストの前に移動（AI認識向上）
+- KPI有無でプロンプト構造を条件分岐（hasKpi）
+- コメント①でKPI数値引用を「★最重要★」として強制指示
+- 同業種比較の取得をcache?.report_jsonのif文から外に移動
+- デバッグログ追加（kpiText文字数、hasKpiData）
+
+■ src/app/report/[shopId]/client.tsx
+- AIコメントを2ページに分割: P11（①②③）+ P12（④⑤+メモ）
+- totalPages +1 で整合（7→8）
+- AIコメントコンテナにoverflow:hidden + wordBreak:break-word追加（文字はみ出し修正）
+- レポート対象月機能: URLの?month=パラメータでデータ切り詰め
+  - monthlyLabels/chartsを対象月まで切り詰め
+  - KPIを対象月の値で再計算（前月比・前年比含む）
+  - 期間表示・rankingHistory・searchQueriesも対象月以前のみ
+- monthToNum()ヘルパー追加: 月比較を文字列→数値に変更
+- gridRecentHistoryのフィルタ比較も数値比較に変更
+
+■ src/app/report/report-list-client.tsx
+- フィルターバーに「対象月」ドロップダウン追加（直近18ヶ月選択可能）
+- 選択した月をlocalStorageに保存（セッション跨ぎで維持）
+- 全レポートリンク・一括PDF・ShopCardに?month=パラメータ付与
+- ShopCardコンポーネントにmonthParam props追加
+
+■ src/lib/report-api.ts
+- monthToNum() / sortByMonth()ヘルパー追加
+- 全月ソートを文字列localeCompare→数値比較に修正
+  → "2025/10"が"2025/4"より前にソートされるバグ修正（10-12月消失の原因）
+- overridesの月フォーマット: ハイフン→スラッシュ変換追加（"2026-06"→"2026/6"）
+- supplementGridFromRanking()追加: rankingHistoryから不足月のグリッドデータを自動補完
+  - grid_ranking_overrides/logsにない月でもP7にデータがあれば7×7推定生成
+  - 月ごとのキーワード順位からcenterRankを取得→generateSimpleGrid
+
+■ src/app/grid-ranking/page.tsx
+- 3×3→7×7推定生成時の月フォーマット: ISO("2026-06")→スラッシュ("2026/6")に修正
+
+■ src/lib/ranking-fetch.ts
+- SHEETSにSheet3（1em-V1c4rJnoG-rqpdLGaFrqz8kQKepvHABt8NLOvvtE）追加
+- Sheet3専用パーサー群追加:
+  - trySheet3ByGid / trySheet3HistoryByGid / trySheet3HistoryByName
+  - parseRanksSheet3 / parseRanksHistorySheet3
+  - filterSheet3Rows: [平均]行 or 地域指定なし行のみ使用
+  - dedupeByMonth: 月ごとに最新データで重複排除
+  - 「圏外」→0/null処理
+- fetchRankingFromSheets / fetchRankingHistoryFromSheets にSheet3フォールバック追加
+  - タブ名直接アクセス優先 → gidマッピング検索
+
+■ src/app/api/report/ranking-keywords/route.ts
+- SHEETSにSheet3追加
+- fetchFromSheet3ByName / fetchFromSheet3ByGid / parseSheet3Data追加
+  - F列(5)以降をKW認識
+  - [平均]行 or 地域指定なし行のみ使用
+  - 「圏外」対応
+  - C=local, D=lat, E=lng の座標取得
+- tabMapCacheをシートIDごとに分離（Sheet2/3の衝突防止）
+- GET APIにSheet3タブ名直接アクセス+gidフォールバック追加
+
+### 数値・設定値
+- AIコメント分割: ①②③=ページ1、④⑤+メモ=ページ2
+- 対象月ドロップダウン: 直近18ヶ月
+- monthToNum: "2025/10" → 202510（数値ソート用）
+- Sheet3 KW列開始: F列（index=5）
+- Sheet3 地域行フィルタ: [平均] or A列空+B列日付あり
+
+### バグ修正
+1. 多地点順位「2026-06月」表示 → ハイフン→スラッシュ変換で修正
+2. 月ソートで10-12月が消える → localeCompare→数値比較で修正
+3. AI総評がKPIデータを使わない → kpiText空の原因調査+プロンプト強化
+4. AIコメント文字はみ出し → overflow:hidden + wordBreak:break-word
+5. tabMapCacheがSheet2/3で衝突 → シートIDごとに分離
+
+### 未解決・次回やること
+1. レポートへの実測データ連携（grid_ranking_logs → grid_ranking_overrides）
+2. 口コミ再分析の残り約200店舗（レート制限待ち）
+3. GBP投稿削除ボタンの404エラー改善
+4. GBPアクセストークン401エラー解消
+5. 検索語句API取得タイミング検証
+6. 写真不足ボタンの文言最終確定（ヒアリング後）
+7. 「しゃぶしゃぶ れたす 中目黒本店」が店舗セレクターで「該当なし」になる問題
+8. reviews?reply_comment=is.null → 500エラー（口コミ管理の未返信フィルタ）
+9. Google Maps Marker → AdvancedMarkerElement移行（deprecation警告対応）
+
+### 注意点・ハマったこと
+- 月の文字列ソート: "2025/10" < "2025/4" in localeCompare（"1" < "4"）→ .slice(-6)で10-12月が切り捨てられる。monthToNum()で数値化して比較する必要あり
+- grid_ranking_overridesのmonth値: grid-ranking/page.tsxで new Date().toISOString().slice(0,7) を使っていたため "2026-06" 形式で保存。report-api.tsでスラッシュ変換＋元のコードも修正
+- AI総評のKPIデータ: report_data_cacheにkpisがあっても、プロンプト内での位置（口コミテキストの後）とClaude Haiku 4.5の傾向で無視されやすい → KPIを口コミの前に配置＋「★最重要★」指示で改善
+- Sheet3のtabMapCache: Sheet2用のキャッシュと衝突してSheet3のタブマップが返されない → sheetIdごとにキャッシュを分離

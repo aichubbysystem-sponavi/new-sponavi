@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useShop } from "@/components/shop-provider";
 import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
 import KpiCard from "@/components/kpi-card";
+import DateRangePicker, { useDateRange } from "@/components/date-range-picker";
 
 interface PerformanceLog {
   id: string;
@@ -42,6 +43,7 @@ export default function Dashboard() {
   const [churnData, setChurnData] = useState<{ summary?: { high: number; warning: number; stable: number }; scores?: any[] } | null>(null);
   const [googleUpdates, setGoogleUpdates] = useState<{ title: string; link: string; published: string }[]>([]);
   const [lineAlerts, setLineAlerts] = useState<any[]>([]);
+  const { startMonth, endMonth, setRange, isInRange } = useDateRange(6);
 
   const fetchPerformance = useCallback(async () => {
     if (!selectedShopId) return;
@@ -169,8 +171,14 @@ export default function Dashboard() {
   }, [selectedShopId]);
 
   const v = (n: number | null | undefined) => n ?? 0;
-  const latest = perf.length > 0 ? perf[perf.length - 1] : null;
-  const prev = perf.length > 1 ? perf[perf.length - 2] : null;
+
+  // 期間フィルタ適用: perfを期間内に絞り込み
+  const filteredPerf = useMemo(() =>
+    perf.filter(p => p.from && isInRange(p.from)),
+  [perf, isInRange]);
+
+  const latest = filteredPerf.length > 0 ? filteredPerf[filteredPerf.length - 1] : null;
+  const prev = filteredPerf.length > 1 ? filteredPerf[filteredPerf.length - 2] : null;
 
   const searchTotal = latest ? v(latest.mobile_search_impressions) + v(latest.pc_search_impressions) : 0;
   const searchPrev = prev ? v(prev.mobile_search_impressions) + v(prev.pc_search_impressions) : 0;
@@ -187,11 +195,12 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">ダッシュボード</h1>
           <p className="text-sm text-slate-500 mt-1">{storeName} — 管理店舗数: {shopCount}</p>
         </div>
+        <DateRangePicker startMonth={startMonth} endMonth={endMonth} onChange={setRange} />
       </div>
 
       {/* KPI Cards */}
@@ -229,7 +238,7 @@ export default function Dashboard() {
           </div>
           {loading ? (
             <div className="flex items-center justify-center h-[200px] text-slate-400 text-sm">読み込み中...</div>
-          ) : perf.length === 0 ? (
+          ) : filteredPerf.length === 0 ? (
             <div className="flex items-center justify-center h-[200px] text-slate-300 text-sm">
               {apiConnected ? "パフォーマンスデータがありません。「店舗パフォーマンス」から計測を開始してください。" : "店舗を登録するとデータが表示されます"}
             </div>
@@ -247,11 +256,11 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {[...perf].sort((a, b) => {
+                  {[...filteredPerf].sort((a, b) => {
                     const ta = new Date(a.from).getTime();
                     const tb = new Date(b.from).getTime();
                     return perfDateSort === "asc" ? ta - tb : tb - ta;
-                  }).slice(0, 6).map((p, i) => {
+                  }).map((p, i) => {
                     const d = new Date(p.from);
                     return (
                       <tr key={i} className="border-b border-slate-50 hover:bg-slate-50">
@@ -518,12 +527,12 @@ export default function Dashboard() {
       )}
 
       {/* 売上予測 */}
-      {perf.length >= 3 && (
+      {filteredPerf.length >= 3 && (
         <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mt-6">
           <h3 className="text-sm font-semibold text-slate-500 mb-4">売上予測（3ヶ月）</h3>
           {(() => {
             // 線形回帰で予測
-            const data = perf.slice(-6).map((p, i) => ({
+            const data = filteredPerf.slice(-6).map((p, i) => ({
               x: i,
               search: v(p.mobile_search_impressions) + v(p.pc_search_impressions),
               calls: v(p.call_clicks),

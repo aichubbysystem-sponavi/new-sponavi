@@ -1,0 +1,115 @@
+## 2026-06-06 セッション: パフォーマンスAPI統合 + レポート全面修正
+
+### 実施内容
+
+#### 1. 検索語句管理v2 修正（前セッション続き）
+- report_data_cache の shop_id フォールバック追加
+- fetchタイムアウト90秒追加（AbortSignal互換性修正）
+- sync失敗を500→200(success:false)に変更
+- getCachedPerformance に shop_name フォールバック追加（重複店舗対応）
+- syncOneタイムアウトをgetAuthToken前に設定（ハング防止）
+
+#### 2. パフォーマンスメトリクスのGBP API直接取得（新機能）
+- src/lib/gbp-performance.ts: 共有lib新規作成
+  - fetchMultiDailyMetricsTimeSeries で11メトリクスの日次データ取得→月別集計
+  - performance_metrics_cache テーブルにキャッシュ
+  - syncShopPerformance() 統一同期関数
+  - getCachedPerformance() shop_name フォールバック対応
+- src/app/api/report/sync-performance/route.ts: 手動sync API（認証付き）
+- src/app/api/cron/sync-performance/route.ts: 月次cron（毎月5日 6:00 JST）
+- vercel.json: sync-performance cron追加
+- sql/create_performance_metrics_cache.sql: テーブル作成SQL
+- Supabaseでテーブル作成済み
+- パフォーマンス一括同期ボタン追加（紫色、検索語句管理ページ）
+- **507店舗の一括同期成功（0件失敗/23件データなし）**
+
+#### 3. レポートページへのAPIデータ反映
+- report-api.ts: performance_metrics_cache からリアルタイム読み込み
+  - キャッシュパス + スプレッドシートパス両方に適用
+  - charts, kpis, shop.period を最新APIデータで上書き
+  - searchQueries も search_query_cache から上書き
+  - shop_name フォールバック（重複店舗対応）
+- fetchGridRankingLive と supplementGridFromRanking のtry-catch分離
+  - ERR_REQUIRE_ESM エラーでもグリッド補完は実行
+
+#### 4. キーワード順位パース修正
+- ranking-fetch.ts: parseRanks を日付ソートに変更（行順依存排除）
+- ranking-fetch.ts: parseRanksHistory も日付ソート+重複排除に修正
+- 圏外の判定追加、日なしフォーマット対応
+
+#### 5. キーワード順位を多地点中心点から取得
+- client.tsx: gridRankingの中心点(row=3,col=3)順位をキーワード順位変動セクションに使用
+- スプレッドシートのオーガニック順位より店舗所在地の実順位を優先
+- gridRankingがない場合はスプレッドシートにフォールバック
+
+#### 6. AI分析APIの精度修正
+- analyze/route.ts: アクション合計にフードメニュー+予約を追加（3項目→5項目）
+- analyze/route.ts: 同グループ/同業種平均も同様に修正
+- analyze/route.ts: キーワード順位をシートからリアルタイム取得（fetchRankingFromSheets使用）
+- analyze/route.ts: curMonthスコープ修正
+
+#### 7. AI総評の月別保存対応
+- report_analysis テーブルに target_month カラム追加
+- onConflict を "shop_name" → "shop_name,target_month" に変更（月別保存）
+- getStoredAnalysis に month 引数追加（指定月の分析を取得可能）
+- クライアント: 表示月とtarget_monthが不一致の場合「この月のAI総評はまだ生成されていません」表示
+- Supabase: ALTER TABLE実行済み、UNIQUE制約変更済み
+
+#### 8. 口コミ増減ラベル修正
+- client.tsx trimmedData: 口コミ増減ラベルを表示月に動的変更
+- TDZ (Temporal Dead Zone) エラー修正（変数定義順序）
+
+#### 9. テンプレートコメントのバグ修正
+- spreadsheet.ts: アクション合計が kpis[7](口コミ) を参照 → kpis.slice(2,7) に修正
+
+#### 10. デバッグログ削除
+- report-api.ts の全デバッグ用console.logを削除（エラーログのみ残存）
+
+#### 11. レート制限緩和
+- middleware.ts: RATE_LIMIT を 60 → 500/分に変更
+- 多地点順位チェックページの429エラー解消
+
+### 動作確認済み
+- みそラーメンのよし乃 札幌アピア店:
+  - 5月レポート: 期間2026/05/01-05/31、KPI正常（検索7,655/マップ147,422等）、アクション率1.22%
+  - 4月レポート: 期間2026/04/01-04/30、KPI正常（検索7,028/マップ139,874等）
+  - 口コミラベル: 4月→「口コミ増減【2026/4】」、5月→「口コミ増減【2026/5】」
+  - AI総評: 5月は表示、4月は「まだ生成されていません」メッセージ
+  - 検索語句: 2026/5 反映確認
+- パフォーマンス一括同期: 507件成功/0件失敗/23件データなし
+- 多地点順位チェック: 429エラー解消
+
+### Supabase SQL実行済み
+1. CREATE TABLE performance_metrics_cache（テーブル+インデックス+RLS）
+2. ALTER TABLE report_analysis ADD COLUMN target_month text
+3. ALTER TABLE report_analysis UNIQUE制約変更（shop_name → shop_name,target_month）
+
+### コミット履歴
+1. 308a4e2 - 検索語句管理v2: IDベース化・JST固定・共有lib統一
+2. 08e5341 - fix: report_data_cache shop_idフォールバック
+3. 18e9ab0 - fix: sync失敗を200で返す + AbortSignal互換性修正
+4. c34c6aa - fix: レポートの検索語句をリアルタイム取得
+5. 0843c13 - feat: パフォーマンスメトリクスをGBP APIから直接取得
+6. 4c7a864 - fix: パフォーマンス上書きをスプレッドシートパスにも適用
+7. 7e2ab3f - fix: getCachedPerformance 重複店舗対応
+8. 6b2a946 - fix: キーワード順位パースを日付ソートに変更
+9. fc25a3c - fix: parseRanksHistoryも日付ソート+重複排除
+10. 2f0ce25 - fix: fetchGridRankingLive失敗時もsupplementを実行
+11. c3f072e - fix: テンプレートコメントのアクション合計バグ
+12. 7379c9c - feat: パフォーマンス一括同期ボタン追加
+13. 6ff4342 - fix: AI分析APIのデータ精度を完全修正
+14. 8713f89 - feat: AI総評月別対応 + 口コミラベル修正 + デバッグログ削除
+15. 6e4d11a - fix: syncOneタイムアウトをgetAuthToken前に設定
+16. 2352fe4 - fix: 口コミラベルの変数参照順序修正（TDZエラー解消）
+17. 79325a1 - feat: AI総評を月別に保存
+18. 4797021 - feat: キーワード順位を多地点中心点から取得
+19. e75b42b - chore: APIレート制限60→500/分に緩和
+
+### 次回やること
+1. 多地点順位チェック: 今月未計測店舗の一覧表示+未計測のみ一括計測+中断再開
+2. 検索語句の残り352件同期（青ボタン押すだけ）
+3. AI総評の4月分生成（口コミ分析ページで再分析）
+4. 全店舗のAI総評再生成（正しいアクション合計+順位データで）
+5. ERR_REQUIRE_ESM エラー（fetchGridRankingLive）の根本解決
+6. React hydration エラー #419
+7. 重複店舗のデータクレンジング

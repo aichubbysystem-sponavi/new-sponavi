@@ -1,0 +1,44 @@
+## 2026-06-06
+
+### 決定事項
+- 多地点順位チェックに「今月未計測店舗の管理＋スキップ機能」を追加
+- スキップ判定は「店舗単位」（KW単位ではない）で運用する
+- 全店舗表示（shopFilterMode=all）時は計測設定・順位マップ・グリッド・履歴を非表示にする
+
+### 変更内容（具体的に）
+- `src/app/grid-ranking/page.tsx`:
+  - `isMeasuredThisMonth()` ヘルパー関数追加（年+月で今月計測済み判定）
+  - `useShop()` から `shopFilterMode` を追加取得
+  - いつもの店舗リスト: 各店舗行に「6月済」(緑バッジ) / 「未計測」(オレンジバッジ) 追加、未計測行はオレンジ枠ハイライト
+  - ステータスサマリー: 「今月: X/Y件 計測済み（残りZ件）」表示追加
+  - いつもの店舗バッチ: Phase 3で `last_measurement` から今月計測済み店舗をフィルタしスキップ
+  - 全店舗バッチ: Phase 3で `grid_ranking_logs` をDB問合せ（`gte(measured_at, 月初)`, `limit(10000)`）して今月計測済みshop_idを取得、スキップ
+  - 一括計測ボタンラベルを「未計測のみ一括計測（Z/Y店舗）」に変更
+  - 全店舗計測済み時: ボタンdisabled + グレーアウト + 「全店舗 今月計測済み ✓」表示
+  - 完了メッセージ: スキップ内訳表示（計測済みX件・座標/KWなしY件）
+  - 進捗表示の分母を `latestPresets.length` → `targetPresets.length` / `allTargetShops.length` に修正
+  - `shopFilterMode === "single"` 条件で計測設定・マップ・グリッド・履歴セクションをラップ、else で「店舗を選択すると表示されます」メッセージ
+
+### 数値・設定値
+- `grid_ranking_logs` クエリの limit: デフォルト(1000) → 10000 に変更（580店舗×複数KWで1000行超え防止）
+- その他パラメータ変更なし
+
+### 未解決・次回やること
+- 検索語句の残り352件同期
+- AI総評の4月分生成 + 全店舗再生成（正しいアクション合計+順位データで）
+- ERR_REQUIRE_ESM エラー（fetchGridRankingLive）の根本解決
+- React hydration エラー #419
+- 重複店舗のデータクレンジング
+
+### 注意点・ハマったこと
+- `selectedShopId` は「全店舗表示」を選んでも前の店舗IDが残ったまま → `shopFilterMode` で判定しないとUI非表示が効かない
+- Supabaseのデフォルトlimitは1000行 → 明示的にlimit指定しないと計測済み店舗が漏れてスキップされない
+- スキップ判定が「店舗単位」のため、メインKW計測後に中断→次回その店舗のサブKWが未計測のまま全スキップされる制約あり（メインKWが最重要なので実用上は許容）
+- 「完璧ですか？」と聞かれた際に shopFilterMode の確認を怠り見落とした → 修正前に実際のUIの状態管理（Context/Provider）まで確認すべき
+
+### コミット履歴
+1. 60b2d4d - feat: 多地点順位チェック — 今月未計測管理＋スキップ機能
+2. d65c770 - fix: 全店舗計測済み時にボタンをdisabled化+グレーアウト
+3. 92848e5 - fix: 全店舗表示時に計測設定・マップ・グリッド・履歴を非表示
+4. 5a163b4 - fix: shopFilterMode=allで計測UI非表示（selectedShopId残存対応）
+5. 4f512ac - fix: grid_ranking_logsクエリにlimit(10000)追加

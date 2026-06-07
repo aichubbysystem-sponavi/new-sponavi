@@ -1,0 +1,42 @@
+## 2026-06-07
+
+### 決定事項
+- レポートページの?month=パラメータでKPI・期間がサーバー側から正しい月のデータを返すように修正
+- chartsは全月分を返し、クライアント側でトリムする既存設計は維持
+
+### 変更内容（具体的に）
+- `src/app/report/[shopId]/page.tsx`:
+  - `searchParams: { month?: string }` を受け取るように変更
+  - `searchParams.month` を `getReportData(shopId, targetMonth)` に渡す
+- `src/lib/report-api.ts`:
+  - `getReportData(shopId, targetMonth?)` にオプショナル引数追加
+  - `normalizedMonth` でゼロパディング正規化（"2026/04"→"2026/4"）
+  - キャッシュパス（L329）: `perfData.findIndex(p => p.month === normalizedMonth)` で該当月をcurに使用
+  - スプレッドシートパス（L437）: 同様のロジック適用
+  - 両パスとも: cur/prev/yoy/shop.periodが指定月に基づいて計算される
+  - targetMonth未指定時: 最新月にフォールバック（後方互換性維持）
+
+### 数値・設定値
+- 変更したパラメータなし（ロジック変更のみ）
+
+### 未解決・次回やること
+- 検索語句の残り352件同期
+- AI総評の4月分生成 + 全店舗再生成
+- ERR_REQUIRE_ESM エラー（fetchGridRankingLive）の根本解決
+- React hydration エラー #419
+- 重複店舗のデータクレンジング
+
+### 注意点・ハマったこと
+- サーバー側(report-api.ts)が常にperfData[perfData.length-1]（最新月）をcurとしてKPIを構築していたため、?monthが何であってもKPIは最新月の値が返されていた
+- クライアント側(client.tsx)はchartsデータからKPIを再計算するtrimmedDataロジックがあり、hydration後は正しい月を表示していたが、SSR出力は常に最新月だった
+- WebFetchツールはSSR出力を見るため、ブラウザでは問題なく見えていてもWebFetchでは同一データに見えることがある
+- perfDataの月フォーマットは "2026/5"（ゼロパディングなし）、URLの?monthも同形式だが念のため正規化を入れた
+
+### コミット履歴
+1. f1531b1 - fix: レポートの月別KPI/periodがサーバー側で正しい月を返すように修正
+
+### 動作確認済み
+- 七宝麻辣湯 すすきの南6条店:
+  - ?month=2026/4: 期間2026/04/01-04/30、検索11,444/マップ124,771/ウェブ230/ルート514/通話68
+  - ?month=2026/5: 期間2026/05/01-05/31、検索19,902/マップ130,341/ウェブ254/ルート709/通話72
+  - 全て異なる値で正常動作確認

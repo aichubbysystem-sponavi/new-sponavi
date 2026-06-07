@@ -1,0 +1,100 @@
+## 2026-06-05 セッション2: 検索語句管理v2 全面修正
+
+### 背景
+前セッションで作成した検索語句管理ページの全店舗同期で136件成功/61件失敗。
+根本原因を徹底分析し、17項目の問題を特定・修正。
+
+### 特定した問題（17項目）
+
+#### 基盤問題
+1. getExpectedMonth() がサーバー(UTC)とクライアント(JST)で不一致 → 毎月1-9日の0:00-9:00 JSTでステータス判定がずれる
+2. sync APIが名前ベース → .maybeSingle()で同名店舗がnull（Cheese Cheese Worker等3重複）
+3. 同期ロジックが4箇所に散在（sync API/cron/report actions/共有lib）
+4. report_data_cache更新が全て .eq("shop_name") → 同名店舗で誤更新
+5. 月フォーマット "YYYY/M" のlocaleCompareソートが10月以降で壊れる（"2025/10" < "2025/7"）
+
+#### ロジック問題
+6. 全店舗同期が「済」373件を含む949件全て再同期 → 最初の136件「成功」は既に済の再同期
+7. 同一gbp_location_nameの重複排除なし → 同じGBP APIを3回叩く
+8. 「API returned 0 months of data」が失敗扱い → データなし店舗が不必要にエラー表示
+
+#### UI問題
+9. SyncResultにshopIdなし → 同名店舗の失敗表示・再実行が名前ベースで誤動作
+10. 連続エラー10件自動停止が同名重複で即発動（3×3=9で残り1で停止）
+
+#### パフォーマンス問題
+11. ステータスAPIが全キャッシュデータ（keywords含む）をフルロード → 11,400行
+
+#### cron問題
+12. maxDuration=300だが949店舗×12ヶ月は300秒で終わらない
+13. cronスケジュールが毎月1日 → GBPデータ未確定の可能性
+
+#### セキュリティ・その他
+14. sync APIのGETに認証なし
+15. search_keyword_logsテーブルがランキングページで使用中（死コードではない）
+16. report_data_cacheの.maybeSingle()が同名で失敗するリスク
+17. 同時実行の排他制御なし
+
+### 変更内容
+
+#### src/lib/gbp-search-keywords.ts（共有lib強化）
+- `getExpectedMonthJST()` 追加: JST固定で前月を返す（UTC+9オフセット）
+- `compareMonths()` 追加: "YYYY/M" を数値分解して比較（localeCompare廃止）
+- `syncShopSearchKeywords()` 追加: GBP取得→cache保存→report_data_cache更新の統一関数
+  - report_data_cacheは shop_id + id ベースで更新（shop_name廃止）
+- `fetchSearchKeywordsFromGBP()`: ソートを compareMonths に変更
+- `getCachedSearchKeywords()`: DB文字列ソート依存をやめてJS数値ソートに
+- `MonthlyKeywords` interfaceをexportに変更
+
+#### src/app/api/report/sync-search-keywords/route.ts（手動sync API）
+- 全面書き換え: shopId受付 / 共有lib使用 / POST認証必須
+- GET: 後方互換でnameパラメータも受付（limit(1).maybeSingle()で安全化）
+- GET/POST両方に verifyAuth 認証追加
+- 独自のgetDbToken/fetchMonth関数を廃止
+
+#### src/app/api/cron/sync-search-keywords/route.ts（cron）
+- 共有libのsyncShopSearchKeywords使用
+- 未同期+古いのみ対象（当月済はスキップ）
+- 同一gbp_location_nameの重複排除（1回同期→他にもコピー）
+- タイムアウト対策: 270秒で自動停止（maxDuration=300のマージン）
+- ログ強化: synced/skipped/failed/targets/alreadySynced
+
+#### vercel.json
+- cronスケジュール: `0 20 1 * *` → `0 20 5 * *`（毎月6日 5:00 JST）
+
+#### src/app/api/search-keywords/status/route.ts（ステータスAPI）
+- getExpectedMonthJST() 使用（JST固定）
+- cacheMapの最新月検出をcompareMonths数値比較に変更
+- （全データロード問題は構造上fetchAllのままだが、最新月の正確な判定は修正済み）
+
+#### src/app/search-keywords/client.tsx（UI全面改修）
+- getExpectedMonthJST(): クライアント側もJST固定
+- SyncResult: shopId追加、全ての突合・フィルタ・再実行をIDベース
+- syncOne(): POST + Authorization Bearer token（認証対応）
+- buildSyncTargets(): gbp_location_nameで重複排除
+- 全店舗同期: 「未同期+古い」のみ対象（ボタン表示も件数変更）
+- 連続エラー: "API returned 0 months of data" はカウント対象外
+- KPIカード: 「データなし」を独立表示（7カード化）
+- フィルタ: 「データなし」フィルタ追加
+- 結果パネル: 失敗/データなしを色分け表示
+- 失敗再実行: IDベース、認証切れ/中断は再実行対象外
+
+#### src/app/report/actions.ts（レポート同期）
+- fetchSearchKeywordsFromGBP/cacheSearchKeywords → syncShopSearchKeywords に変更
+- .eq("name", shopName).maybeSingle() → .eq("name", shopName).limit(1).single() に変更
+- report_data_cache手動更新を廃止（syncShopSearchKeywords内で処理）
+
+### ビルド確認
+- `next build` 成功（エラーなし）
+
+### 未対応（今回スコープ外）
+- search_keyword_logsテーブルの統合（ランキングページが使用中のため影響範囲大）
+- ステータスAPIの全データフルロード最適化（Supabase RPC/Viewが必要）
+- 同時実行の排他制御（DB or Redisが必要）
+- DB上の重複店舗データのクレンジング
+
+### 次回やること
+1. デプロイして全店舗同期の実運用テスト
+2. KPIカードが正しく更新されることを確認（未同期→済に変わるか）
+3. 重複店舗のデータクレンジング検討
+4. React hydrationエラー #419（既存問題）

@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
 import { logAudit } from "@/lib/audit-log";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
+import DateRangePicker, { useDateRange } from "@/components/date-range-picker";
 
 interface ReviewRow {
   id: string;
@@ -40,8 +41,15 @@ export default function ReviewsPage() {
   const [replyFilter, setReplyFilter] = useState<ReplyFilter>("all");
   const [unrepliedCount, setUnrepliedCount] = useState(0);
   const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
-  const [selectedMonth, setSelectedMonth] = useState<string>("all"); // "all" or "2026-04"
   const [availableMonths, setAvailableMonths] = useState<string[]>([]);
+  const { startMonth: drStart, endMonth: drEnd, setRange: drSetRange } = useDateRange(6);
+  // DateRangePickerの値をSupabaseクエリ用の期間に変換
+  const dateRangeStart = `${drStart.replace("/", "-").replace(/^(\d{4})-(\d)$/, "$1-0$2")}-01T00:00:00`;
+  const dateRangeEnd = (() => {
+    const [y, m] = drEnd.split("/").map(Number);
+    const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
+    return `${next}-01T00:00:00`;
+  })();
   const [topWords, setTopWords] = useState<{ word: string; count: number; type: "good" | "bad" }[]>([]);
   const [keywordModal, setKeywordModal] = useState<{ word: string; type: "good" | "bad"; reviews: { reviewer_name: string; comment: string; star_rating: string; create_time: string }[] } | null>(null);
   const [monthlyStats, setMonthlyStats] = useState<{ month: string; count: number; avgRating: number; cumulative: number }[]>([]);
@@ -104,14 +112,8 @@ export default function ReviewsPage() {
         query = query.not("reply_comment", "is", null);
       }
 
-      // 月別フィルタ
-      if (selectedMonth !== "all") {
-        const startDate = `${selectedMonth}-01T00:00:00`;
-        const [y, m] = selectedMonth.split("-").map(Number);
-        const nextMonth = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
-        const endDate = `${nextMonth}-01T00:00:00`;
-        query = query.gte("create_time", startDate).lt("create_time", endDate);
-      }
+      // 期間範囲フィルタ
+      query = query.gte("create_time", dateRangeStart).lt("create_time", dateRangeEnd);
 
       const { data, count, error } = await query;
       if (error) {
@@ -131,7 +133,7 @@ export default function ReviewsPage() {
       setTotalCount(0);
     }
     setLoading(false);
-  }, [selectedShopId, page, isAllMode, replyFilter, dateSort, selectedMonth]);
+  }, [selectedShopId, page, isAllMode, replyFilter, dateSort, dateRangeStart, dateRangeEnd]);
 
   // 未返信件数を取得
   const fetchUnrepliedCount = useCallback(async () => {
@@ -303,12 +305,7 @@ export default function ReviewsPage() {
       // AI分析がない場合はフォールバック: 従来の単語頻度集計
       let query = supabase.from("reviews").select("comment, star_rating").not("comment", "is", null);
       query = query.eq("shop_id", selectedShopId);
-      if (selectedMonth !== "all") {
-        const startDate = `${selectedMonth}-01T00:00:00`;
-        const [y, m] = selectedMonth.split("-").map(Number);
-        const nextMonth = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
-        query = query.gte("create_time", startDate).lt("create_time", `${nextMonth}-01T00:00:00`);
-      }
+      query = query.gte("create_time", dateRangeStart).lt("create_time", dateRangeEnd);
       const { data: allComments } = await query.limit(500);
       if (!allComments || allComments.length === 0) { setTopWords([]); return; }
 
@@ -354,7 +351,7 @@ export default function ReviewsPage() {
       setTopWords(result.slice(0, 30));
     };
     extractKeywords();
-  }, [selectedShopId, isAllMode, selectedMonth]);
+  }, [selectedShopId, isAllMode, dateRangeStart, dateRangeEnd]);
 
   // キーワードクリック → search-reviews APIで該当口コミ取得（レポートと同じロジック）
   const handleKeywordClick = async (word: string, type: "good" | "bad") => {
@@ -378,7 +375,7 @@ export default function ReviewsPage() {
   // フィルタ変更時にページをリセット（pageが1以外の場合のみ）
   useEffect(() => {
     setPage((prev) => prev !== 1 ? 1 : prev);
-  }, [selectedShopId, replyFilter, shopFilterMode, dateSort, selectedMonth]);
+  }, [selectedShopId, replyFilter, shopFilterMode, dateSort, dateRangeStart, dateRangeEnd]);
 
   const fetchNoReviewShops = async () => {
     setLoadingNoReview(true);
@@ -674,7 +671,7 @@ export default function ReviewsPage() {
 
   const totalPages = Math.ceil(totalCount / PER_PAGE);
 
-  const monthLabel = selectedMonth !== "all" ? ` [${selectedMonth.replace("-", "年") + "月"}]` : "";
+  const monthLabel = drStart === drEnd ? ` [${drStart.replace("/", "年")}月]` : ` [${drStart.replace("/", "年")}月〜${drEnd.replace("/", "年")}月]`;
   const displayLabel = isAllMode
     ? `全店舗${monthLabel} — ${totalCount}件`
     : `${selectedShop?.name || "店舗未選択"}${monthLabel} — ${totalCount}件`;
@@ -895,17 +892,8 @@ export default function ReviewsPage() {
             {lastSynced && <span>最終同期: {new Date(lastSynced).toLocaleString("ja-JP")}</span>}
           </div>
           <div className="flex items-center gap-2">
-            {/* 月別フィルタ */}
-            <select
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(e.target.value)}
-              className="px-3 py-1.5 text-xs font-semibold border border-slate-200 rounded-lg bg-white text-slate-700 cursor-pointer"
-            >
-              <option value="all">全期間</option>
-              {availableMonths.map((m) => (
-                <option key={m} value={m}>{m.replace("-", "年") + "月"}</option>
-              ))}
-            </select>
+            {/* 期間フィルタ */}
+            <DateRangePicker startMonth={drStart} endMonth={drEnd} onChange={drSetRange} compact />
             {/* 日付ソート */}
             <div className="flex border border-slate-200 rounded-lg overflow-hidden">
               <button onClick={() => setDateSort("desc")}
@@ -1095,7 +1083,7 @@ export default function ReviewsPage() {
       {!isAllMode && topWords.length > 0 && (
         <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100 mb-4">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-slate-500">口コミキーワード分析{selectedMonth !== "all" ? `（${selectedMonth.replace("-", "年") + "月"}）` : ""}</h3>
+            <h3 className="text-sm font-semibold text-slate-500">口コミキーワード分析（{drStart === drEnd ? `${drStart.replace("/", "年")}月` : `${drStart.replace("/", "年")}月〜${drEnd.replace("/", "年")}月`}）</h3>
             <div className="flex items-center gap-3 text-[10px]">
               <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400"></span> ポジティブ({topWords.filter(w => w.type === "good").length})</span>
               <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-full bg-red-400"></span> ネガティブ({topWords.filter(w => w.type === "bad").length})</span>
