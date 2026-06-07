@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import DateRangePicker, { useDateRange } from "@/components/date-range-picker";
 
 interface ShopKeywordStatus {
   id: string;
@@ -62,6 +63,7 @@ export default function SearchKeywordsClient() {
   const [showResults, setShowResults] = useState(false);
 
   const expectedMonth = useMemo(() => getExpectedMonthJST(), []);
+  const { startMonth: skStart, endMonth: skEnd, setRange: skSetRange, isMonthInRange: skIsMonthInRange } = useDateRange(6);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -100,8 +102,10 @@ export default function SearchKeywordsClient() {
     } else if (statusFilter !== "all") {
       list = list.filter((s) => s.status === statusFilter);
     }
+    // 期間フィルタ: latestMonthが範囲内 or 未同期の店舗を表示
+    list = list.filter((s) => !s.latestMonth || s.status === "never" || s.status === "no_gbp" || skIsMonthInRange(s.latestMonth));
     return list;
-  }, [shops, search, statusFilter, syncResults]);
+  }, [shops, search, statusFilter, syncResults, skIsMonthInRange]);
 
   // Pagination
   const totalPages = Math.ceil(filtered.length / PER_PAGE);
@@ -271,6 +275,9 @@ export default function SearchKeywordsClient() {
         <div>
           <h1 className="text-xl font-bold text-slate-800">検索語句管理</h1>
           <p className="text-xs text-slate-400 mt-1">GBP Performance APIから検索語句を一括取得・管理 | 対象月: {expectedMonth}</p>
+          <div className="mt-2">
+            <DateRangePicker startMonth={skStart} endMonth={skEnd} onChange={skSetRange} compact />
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button
