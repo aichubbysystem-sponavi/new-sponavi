@@ -208,13 +208,18 @@ export async function getCachedPerformance(shopId: string, shopName?: string): P
 
   let rows = (!error && data && data.length > 0) ? data : null;
 
-  // shop_id でヒットしない場合、shop_name でフォールバック（重複店舗対応）
+  // shop_id でヒットしない場合、shop_name でフォールバック（最新shop_idのデータのみ使用）
   if (!rows && shopName) {
     const { data: byName } = await supabase
       .from("performance_metrics_cache")
-      .select("month, metrics")
-      .eq("shop_name", shopName);
-    if (byName && byName.length > 0) rows = byName;
+      .select("shop_id, month, metrics")
+      .eq("shop_name", shopName)
+      .order("updated_at", { ascending: false });
+    if (byName && byName.length > 0) {
+      // 最新のshop_idのデータだけをフィルタ（重複shop_id混在防止）
+      const primaryShopId = byName[0].shop_id;
+      rows = byName.filter((r: any) => r.shop_id === primaryShopId);
+    }
   }
 
   if (!rows) return [];

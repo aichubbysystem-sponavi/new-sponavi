@@ -1,7 +1,6 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
 import Sidebar from "@/components/sidebar";
 import Header from "@/components/header";
 import AuthGuard from "@/components/auth-guard";
@@ -12,14 +11,10 @@ import FloatingTasks from "@/components/floating-tasks";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const [isReportSubdomain, setIsReportSubdomain] = useState(false);
-
-  useEffect(() => {
-    setIsReportSubdomain(window.location.hostname.startsWith("report."));
-  }, []);
 
   const isLoginPage = pathname === "/login";
-  const isReportPage = pathname === "/report" || pathname.startsWith("/report/") || isReportSubdomain;
+  // ミドルウェアがreportサブドメインを/report/*にリライトするため、pathnameだけで判定可能
+  const isReportPage = pathname === "/report" || pathname.startsWith("/report/");
 
   return (
     <AuthGuard skipAuth={isReportPage}>

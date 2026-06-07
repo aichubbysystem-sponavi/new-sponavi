@@ -5,6 +5,15 @@ const nextConfig = {
   reactStrictMode: true,
   // 本番ではソースマップを無効化（セキュリティ）
   productionBrowserSourceMaps: false,
+  // ESM onlyパッケージをCJS互換にトランスパイル（ERR_REQUIRE_ESM対策）
+  transpilePackages: [
+    "@supabase/supabase-js",
+    "@supabase/auth-js",
+    "@supabase/postgrest-js",
+    "@supabase/realtime-js",
+    "@supabase/storage-js",
+    "@supabase/functions-js",
+  ],
   // API プロキシ（環境変数で切り替え）
   async rewrites() {
     return [

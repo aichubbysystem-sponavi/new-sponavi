@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 
 interface DateRangePickerProps {
   startMonth: string;  // "2026/1" format
@@ -158,19 +158,33 @@ export default function DateRangePicker({
   );
 }
 
+/** SSR安全な現在月を取得（初期値は固定、useEffect後に更新） */
+function getMonthStr(d: Date): string {
+  return `${d.getFullYear()}/${d.getMonth() + 1}`;
+}
+
 /** 期間フィルタの状態管理hook */
 export function useDateRange(defaultMonths: number = 1) {
-  const now = new Date();
-  const thisMonth = `${now.getFullYear()}/${now.getMonth() + 1}`;
-  const startDefault = defaultMonths === 1
-    ? thisMonth
-    : (() => {
-        const d = new Date(now.getFullYear(), now.getMonth() - defaultMonths + 1, 1);
-        return `${d.getFullYear()}/${d.getMonth() + 1}`;
-      })();
+  // SSR/CSR両方で同じ初期値を使う（hydration不一致防止）
+  const [startMonth, setStartMonth] = useState("");
+  const [endMonth, setEndMonth] = useState("");
+  const [initialized, setInitialized] = useState(false);
 
-  const [startMonth, setStartMonth] = useState(startDefault);
-  const [endMonth, setEndMonth] = useState(thisMonth);
+  // クライアント側でのみ日付を設定（SSR時は空文字列のまま）
+  useEffect(() => {
+    if (initialized) return;
+    const now = new Date();
+    const thisMonth = getMonthStr(now);
+    const startDefault = defaultMonths === 1
+      ? thisMonth
+      : (() => {
+          const d = new Date(now.getFullYear(), now.getMonth() - defaultMonths + 1, 1);
+          return getMonthStr(d);
+        })();
+    setStartMonth(startDefault);
+    setEndMonth(thisMonth);
+    setInitialized(true);
+  }, [defaultMonths, initialized]);
 
   const setRange = useCallback((start: string, end: string) => {
     setStartMonth(start);
@@ -180,6 +194,7 @@ export function useDateRange(defaultMonths: number = 1) {
   /** 日付文字列が期間内かチェック（ISO形式 "2026-05-15" や "2026/5" に対応） */
   const isInRange = useCallback((dateStr: string): boolean => {
     if (!dateStr) return false;
+    if (!startMonth || !endMonth) return true; // 初期化前は全データ表示
     // "2026-05-15" or "2026-05-15T..." → "2026/5"
     const d = new Date(dateStr.replace(/\//g, "-"));
     if (isNaN(d.getTime())) return false;
@@ -189,6 +204,7 @@ export function useDateRange(defaultMonths: number = 1) {
 
   /** 月文字列が期間内かチェック（"2026/5" 形式） */
   const isMonthInRange = useCallback((month: string): boolean => {
+    if (!startMonth || !endMonth) return true; // 初期化前は全データ表示
     return monthToNum(month) >= monthToNum(startMonth) && monthToNum(month) <= monthToNum(endMonth);
   }, [startMonth, endMonth]);
 
