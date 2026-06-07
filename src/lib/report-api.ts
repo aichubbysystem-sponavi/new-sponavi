@@ -65,12 +65,11 @@ async function getShopDbIds(shopName: string): Promise<string[]> {
       process.env.NEXT_PUBLIC_SUPABASE_URL || "",
       process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
     );
-    // 完全一致で取得（最新のupdated_atを優先、重複時は1件に絞る）
+    // 完全一致で取得（重複時は1件に絞る）
     const { data } = await sb
       .from("shops")
       .select("id")
       .eq("name", shopName)
-      .order("updated_at", { ascending: false })
       .limit(1);
     if (data && data.length > 0) return [data[0].id];
     // 部分一致フォールバック
@@ -79,7 +78,6 @@ async function getShopDbIds(shopName: string): Promise<string[]> {
       .from("shops")
       .select("id, name")
       .ilike("name", `%${simpleName.split(" ")[0]}%`)
-      .order("updated_at", { ascending: false })
       .limit(10);
     if (fuzzy && fuzzy.length > 0) {
       const normalize = (s: string) => s.replace(/[【】\[\]（）()_\s]/g, "").toLowerCase();
