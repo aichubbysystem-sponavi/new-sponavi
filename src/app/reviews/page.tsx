@@ -179,8 +179,6 @@ export default function ReviewsPage() {
         m.totalRating += rating;
       });
 
-      // 利用可能な月一覧（新しい順）
-      const months = Array.from(byMonth.keys()).sort((a, b) => b.localeCompare(a));
       let cumulative = 0;
       const stats = Array.from(byMonth.entries())
         .sort(([a], [b]) => a.localeCompare(b))
