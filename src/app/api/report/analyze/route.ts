@@ -302,6 +302,7 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const shopIds: { id: string; name: string }[] = body.shops || [];
   const forceReanalyze: boolean = body.force || false;
+  const overrideTargetMonth: string = body.targetMonth || ""; // フロントから対象月を指定可能
 
   if (shopIds.length === 0) {
     return NextResponse.json({ error: "店舗が指定されていません" }, { status: 400 });
@@ -369,7 +370,7 @@ export async function POST(request: NextRequest) {
       // KPIデータとグループ平均を取得
       let kpiText = "";
       let hasKpiData = false;
-      let curMonth = "";
+      let curMonth = overrideTargetMonth; // フロント指定があればそれを使う
       try {
         // キャッシュからKPIデータ取得
         const { data: cache } = await supabase.from("report_data_cache").select("report_json").eq("shop_name", shop.name).limit(1).maybeSingle();
@@ -377,9 +378,28 @@ export async function POST(request: NextRequest) {
           const report = cache.report_json as any;
           const kpis = report.kpis || [];
           const labels = report.monthlyLabels || [];
-          curMonth = labels[labels.length - 1] || "";
+          if (!curMonth) curMonth = labels[labels.length - 1] || "";
 
-          if (kpis.length > 0) {
+          // overrideTargetMonth時はchartsから対象月のKPIを再構成
+          const targetIdx0 = curMonth ? labels.indexOf(curMonth) : -1;
+          const useChartsKpi = targetIdx0 >= 0 && targetIdx0 < labels.length - 1 && report.charts;
+          const effectiveKpis = (() => {
+            if (!useChartsKpi) return kpis;
+            const c = report.charts;
+            const ci = targetIdx0;
+            const pi = ci >= 1 ? ci - 1 : -1;
+            const v = (arr: number[], idx: number) => arr?.[idx] ?? 0;
+            return [
+              { label: "Google検索 合計", value: v(c.searchMobile, ci) + v(c.searchPC, ci), momValue: pi >= 0 ? v(c.searchMobile, pi) + v(c.searchPC, pi) : null, unit: "回" },
+              { label: "Googleマップ 合計", value: v(c.mapMobile, ci) + v(c.mapPC, ci), momValue: pi >= 0 ? v(c.mapMobile, pi) + v(c.mapPC, pi) : null, unit: "回" },
+              { label: "ウェブサイトクリック", value: v(c.websites, ci), momValue: pi >= 0 ? v(c.websites, pi) : null, unit: "件" },
+              { label: "ルート検索", value: v(c.routes, ci), momValue: pi >= 0 ? v(c.routes, pi) : null, unit: "件" },
+              { label: "通話", value: v(c.calls, ci), momValue: pi >= 0 ? v(c.calls, pi) : null, unit: "件" },
+              { label: "フードメニュークリック", value: v(c.foodMenus, ci), momValue: pi >= 0 ? v(c.foodMenus, pi) : null, unit: "件" },
+            ];
+          })();
+
+          if (effectiveKpis.length > 0) {
             hasKpiData = true;
             // 前月比の増減率を計算
             const pctChange = (cur: number, prev: number) => {
@@ -387,7 +407,7 @@ export async function POST(request: NextRequest) {
               const pct = Math.round(((cur - prev) / prev) * 100);
               return pct > 0 ? `+${pct}%` : `${pct}%`;
             };
-            const kpiLines = kpis
+            const kpiLines = effectiveKpis
               .filter((k: any) => {
                 if (k.label?.includes("口コミ増減")) return false; // 口コミ増減は別で提供済み
                 if (k.label?.includes("予約") && k.value === 0 && (k.momValue === 0 || k.momValue == null)) return false; // 予約0件は業種的に不要
@@ -413,8 +433,12 @@ export async function POST(request: NextRequest) {
           // chartsデータから月次推移も追加（増減傾向の分析用）
           const charts = report.charts;
           if (charts && labels.length >= 2) {
-            const recentLabels = labels.slice(-3);
-            const getRecent = (arr: number[]) => arr ? arr.slice(-3) : [];
+            // curMonthのインデックスを特定（override時は末尾とは限らない）
+            const targetIdx = curMonth ? labels.indexOf(curMonth) : -1;
+            const effectiveLastIdx = targetIdx >= 0 ? targetIdx : labels.length - 1;
+            const startIdx = Math.max(0, effectiveLastIdx - 2);
+            const recentLabels = labels.slice(startIdx, effectiveLastIdx + 1);
+            const getRecent = (arr: number[]) => arr ? arr.slice(startIdx, effectiveLastIdx + 1) : [];
             const searchTrend = getRecent(charts.searchTotal || []);
             const mapTrend = getRecent(charts.mapTotal || []);
             if (searchTrend.length >= 2) {
@@ -424,7 +448,7 @@ export async function POST(request: NextRequest) {
             }
 
             // アクション率（アクション合計 ÷ マップ表示数）
-            const lastIdx = labels.length - 1;
+            const lastIdx = effectiveLastIdx;
             const curMap = (charts.mapMobile?.[lastIdx] || 0) + (charts.mapPC?.[lastIdx] || 0);
             const curActions = (charts.websites?.[lastIdx] || 0) + (charts.routes?.[lastIdx] || 0) + (charts.calls?.[lastIdx] || 0) + (charts.foodMenus?.[lastIdx] || 0) + (charts.bookings?.[lastIdx] || 0);
             if (curMap > 0) {

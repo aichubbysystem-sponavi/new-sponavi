@@ -391,9 +391,11 @@ export async function getReportData(shopId: string, targetMonth?: string): Promi
         } catch {}
       }
       // reviewAnalysisもDBからリアルタイム取得（再分析反映のため）
+      // 表示月が指定されていればその月の分析を優先取得、なければ最新
       try {
         const { getStoredAnalysis } = await import("./review-analyzer");
-        const stored = await getStoredAnalysis(shopName);
+        const displayMonth = normalizedMonth || (cached.monthlyLabels?.length ? cached.monthlyLabels[cached.monthlyLabels.length - 1] : undefined);
+        const stored = await getStoredAnalysis(shopName, displayMonth) || await getStoredAnalysis(shopName);
         if (stored) {
           cached.reviewAnalysis = stored.analysis;
           cached.comments = stored.comments;

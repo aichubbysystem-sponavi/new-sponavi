@@ -37,6 +37,19 @@ export default function ReviewAnalysisPage() {
   const [persistedFailures, setPersistedFailures] = useState<PersistedFailure[]>(loadPersistedFailures);
   const cancelRef = useRef(false);
 
+  // 対象月セレクタ: 直近6ヶ月の選択肢を生成
+  const monthOptions = (() => {
+    const opts: { value: string; label: string }[] = [];
+    const now = new Date();
+    for (let i = 0; i < 6; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const val = `${d.getFullYear()}/${d.getMonth() + 1}`;
+      opts.push({ value: val, label: val });
+    }
+    return opts;
+  })();
+  const [targetMonth, setTargetMonth] = useState(monthOptions[0]?.value || "");
+
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -77,7 +90,7 @@ export default function ReviewAnalysisPage() {
       try {
         // 60秒の強制タイムアウト（サーバーハング防止）
         const res = await Promise.race([
-          api.post("/api/report/analyze", { shops: [shop], force: forceReanalyze }, { timeout: 60000 }),
+          api.post("/api/report/analyze", { shops: [shop], force: forceReanalyze, targetMonth }, { timeout: 60000 }),
           new Promise<never>((_, reject) => setTimeout(() => reject(new Error("タイムアウト（60秒）")), 65000)),
         ]);
         const data = res.data;
@@ -120,7 +133,7 @@ export default function ReviewAnalysisPage() {
 
     setRunning(false);
     setProgress(null);
-  }, [selected, shops, forceReanalyze, persistedFailures]);
+  }, [selected, shops, forceReanalyze, persistedFailures, targetMonth]);
 
   const successCount = results.filter((r) => r.status === "success").length;
   const failedResults = results.filter((r) => r.status === "error" || r.status === "analysis_failed" || r.status === "db_error");
@@ -159,6 +172,20 @@ export default function ReviewAnalysisPage() {
                 `${shops.length}店舗`
               )}
             </span>
+            <span className="text-slate-300">|</span>
+            <label className="flex items-center gap-1.5 text-sm text-slate-600">
+              <span className="font-medium">対象月:</span>
+              <select
+                value={targetMonth}
+                onChange={(e) => setTargetMonth(e.target.value)}
+                disabled={running}
+                className="border border-slate-200 rounded-md px-2 py-1 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-[#003D6B]"
+              >
+                {monthOptions.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </label>
           </div>
           <button
             data-run-analysis
