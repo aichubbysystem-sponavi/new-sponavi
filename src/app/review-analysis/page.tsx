@@ -27,7 +27,7 @@ function savePersistedFailures(failures: PersistedFailure[]) {
 }
 
 export default function ReviewAnalysisPage() {
-  const { shops, apiConnected } = useShop();
+  const { shops, apiConnected, favoriteShopIds, setFavoriteShopIds } = useShop();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
@@ -164,6 +164,21 @@ export default function ReviewAnalysisPage() {
               className="text-sm text-[#003D6B] hover:underline font-medium"
             >
               {selected.size === shops.length ? "全解除" : "全選択"}
+            </button>
+            {favoriteShopIds.size > 0 && (
+              <button
+                onClick={() => setSelected(new Set(Array.from(favoriteShopIds).filter(id => shops.some(s => s.id === id))))}
+                className="text-sm text-amber-600 hover:underline font-medium"
+              >
+                ★ お気に入り ({favoriteShopIds.size})
+              </button>
+            )}
+            <button
+              onClick={() => setFavoriteShopIds(selected)}
+              disabled={selected.size === 0}
+              className={`text-sm font-medium ${selected.size > 0 ? "text-slate-500 hover:underline" : "text-slate-300 cursor-not-allowed"}`}
+            >
+              {selected.size > 0 ? "★ 保存" : "★ 保存"}
             </button>
             <span className="text-sm text-slate-500">
               {selected.size > 0 ? (

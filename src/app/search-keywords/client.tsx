@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import DateRangePicker, { useDateRange } from "@/components/date-range-picker";
+import { useShop } from "@/components/shop-provider";
 
 interface ShopKeywordStatus {
   id: string;
@@ -48,6 +49,7 @@ async function getAuthToken(): Promise<string> {
 }
 
 export default function SearchKeywordsClient() {
+  const { favoriteShopIds, setFavoriteShopIds } = useShop();
   const [shops, setShops] = useState<ShopKeywordStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -286,6 +288,21 @@ export default function SearchKeywordsClient() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {favoriteShopIds.size > 0 && (
+            <button
+              onClick={() => setSelected(new Set(Array.from(favoriteShopIds).filter(id => shops.some(s => s.id === id))))}
+              className="px-3 py-2 rounded-lg text-sm font-semibold text-amber-600 border border-amber-300 hover:bg-amber-50 transition"
+            >
+              ★ お気に入り ({favoriteShopIds.size})
+            </button>
+          )}
+          <button
+            onClick={() => setFavoriteShopIds(selected)}
+            disabled={selected.size === 0}
+            className={`px-3 py-2 rounded-lg text-sm font-semibold border transition ${selected.size > 0 ? "text-slate-600 border-slate-300 hover:bg-slate-50" : "text-slate-300 border-slate-200 cursor-not-allowed"}`}
+          >
+            ★ 保存
+          </button>
           <button
             onClick={() => {
               // 未同期 + 古い のみ対象（済は除外）、GBP未設定も除外

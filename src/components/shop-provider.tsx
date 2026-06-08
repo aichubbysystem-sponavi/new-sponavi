@@ -17,6 +17,8 @@ interface ShopContextType {
   setShopFilterMode: (mode: "all" | "single") => void;
   unrepliedCount: number;
   refreshUnreplied: () => Promise<void>;
+  favoriteShopIds: Set<string>;
+  setFavoriteShopIds: (ids: Set<string>) => void;
 }
 
 const ShopContext = createContext<ShopContextType>({
@@ -31,6 +33,8 @@ const ShopContext = createContext<ShopContextType>({
   setShopFilterMode: () => {},
   unrepliedCount: 0,
   refreshUnreplied: async () => {},
+  favoriteShopIds: new Set(),
+  setFavoriteShopIds: () => {},
 });
 
 export function useShop() {
@@ -44,6 +48,14 @@ export default function ShopProvider({ children }: { children: React.ReactNode }
   const [apiConnected, setApiConnected] = useState(false);
   const [shopFilterMode, setShopFilterMode] = useState<"all" | "single">("all");
   const [unrepliedCount, setUnrepliedCount] = useState(0);
+  const [favoriteShopIds, setFavoriteShopIdsRaw] = useState<Set<string>>(() => {
+    if (typeof window === "undefined") return new Set();
+    try { return new Set(JSON.parse(localStorage.getItem("favorite-shop-ids") || "[]")); } catch { return new Set(); }
+  });
+  const setFavoriteShopIds = useCallback((ids: Set<string>) => {
+    setFavoriteShopIdsRaw(ids);
+    localStorage.setItem("favorite-shop-ids", JSON.stringify(Array.from(ids)));
+  }, []);
 
   const fetchUnreplied = useCallback(async () => {
     try {
@@ -88,6 +100,8 @@ export default function ShopProvider({ children }: { children: React.ReactNode }
       setShopFilterMode,
       unrepliedCount,
       refreshUnreplied: fetchUnreplied,
+      favoriteShopIds,
+      setFavoriteShopIds,
     }}>
       {children}
     </ShopContext.Provider>
