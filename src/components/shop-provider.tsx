@@ -19,6 +19,9 @@ interface ShopContextType {
   refreshUnreplied: () => Promise<void>;
   favoriteShopIds: Set<string>;
   setFavoriteShopIds: (ids: Set<string>) => void;
+  addToFavorites: (shopIds: string[]) => Promise<void>;
+  removeFromFavorites: (shopIds: string[]) => Promise<void>;
+  refreshFavorites: () => Promise<void>;
 }
 
 const ShopContext = createContext<ShopContextType>({
@@ -35,6 +38,9 @@ const ShopContext = createContext<ShopContextType>({
   refreshUnreplied: async () => {},
   favoriteShopIds: new Set(),
   setFavoriteShopIds: () => {},
+  addToFavorites: async () => {},
+  removeFromFavorites: async () => {},
+  refreshFavorites: async () => {},
 });
 
 export function useShop() {
@@ -54,17 +60,42 @@ export default function ShopProvider({ children }: { children: React.ReactNode }
   }, []);
 
   // 「いつもの店舗」をgrid_ranking_presetsから取得
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await api.get("/api/report/grid-ranking-presets");
-        const presets = res.data?.presets || [];
-        if (presets.length > 0) {
-          setFavoriteShopIdsRaw(new Set(presets.map((p: any) => p.shop_id)));
-        }
-      } catch {}
-    })();
+  const refreshFavorites = useCallback(async () => {
+    try {
+      const res = await api.get("/api/report/grid-ranking-presets");
+      const presets = res.data?.presets || [];
+      setFavoriteShopIdsRaw(new Set(presets.map((p: any) => p.shop_id)));
+    } catch {}
   }, []);
+
+  useEffect(() => { refreshFavorites(); }, [refreshFavorites]);
+
+  // いつもの店舗に追加
+  const addToFavorites = useCallback(async (shopIds: string[]) => {
+    const newIds = shopIds.filter(id => !favoriteShopIds.has(id));
+    if (newIds.length === 0) return;
+    const shopsToAdd = newIds.map(id => {
+      const shop = shops.find(s => s.id === id);
+      return { shopId: id, shopName: shop?.name || "", keyword: null, gridSize: 7 };
+    });
+    await fetch("/api/report/grid-ranking-presets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shops: shopsToAdd }),
+    });
+    await refreshFavorites();
+  }, [favoriteShopIds, shops, refreshFavorites]);
+
+  // いつもの店舗から削除
+  const removeFromFavorites = useCallback(async (shopIds: string[]) => {
+    if (shopIds.length === 0) return;
+    await fetch("/api/report/grid-ranking-presets", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shopIds }),
+    });
+    await refreshFavorites();
+  }, [refreshFavorites]);
 
   const fetchUnreplied = useCallback(async () => {
     try {
@@ -111,6 +142,9 @@ export default function ShopProvider({ children }: { children: React.ReactNode }
       refreshUnreplied: fetchUnreplied,
       favoriteShopIds,
       setFavoriteShopIds,
+      addToFavorites,
+      removeFromFavorites,
+      refreshFavorites,
     }}>
       {children}
     </ShopContext.Provider>

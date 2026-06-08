@@ -49,7 +49,7 @@ async function getAuthToken(): Promise<string> {
 }
 
 export default function SearchKeywordsClient() {
-  const { favoriteShopIds } = useShop();
+  const { favoriteShopIds, addToFavorites, removeFromFavorites } = useShop();
   const [shops, setShops] = useState<ShopKeywordStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -305,6 +305,31 @@ export default function SearchKeywordsClient() {
               いつもの店舗 ({favoriteShopIds.size})
             </button>
           )}
+          {selected.size > 0 && (() => {
+            const selectedArr = Array.from(selected);
+            const notInFav = selectedArr.filter(id => !favoriteShopIds.has(id));
+            const inFav = selectedArr.filter(id => favoriteShopIds.has(id));
+            return (
+              <>
+                {notInFav.length > 0 && (
+                  <button
+                    onClick={() => addToFavorites(notInFav)}
+                    className="px-3 py-2 rounded-lg text-xs font-semibold border text-blue-700 bg-blue-50 border-blue-300 hover:bg-blue-100 cursor-pointer transition"
+                  >
+                    + いつもの店舗に追加 ({notInFav.length})
+                  </button>
+                )}
+                {inFav.length > 0 && inFav.length === selectedArr.length && (
+                  <button
+                    onClick={() => removeFromFavorites(inFav)}
+                    className="px-3 py-2 rounded-lg text-xs font-semibold border text-red-600 bg-red-50 border-red-200 hover:bg-red-100 cursor-pointer transition"
+                  >
+                    - いつもの店舗から削除 ({inFav.length})
+                  </button>
+                )}
+              </>
+            );
+          })()}
           <button
             onClick={() => {
               // 未同期 + 古い のみ対象（済は除外）、GBP未設定も除外
