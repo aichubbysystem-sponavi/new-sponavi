@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useShop } from "@/components/shop-provider";
 import api from "@/lib/api";
 
@@ -35,6 +35,7 @@ export default function ReviewAnalysisPage() {
   const [forceReanalyze, setForceReanalyze] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [persistedFailures, setPersistedFailures] = useState<PersistedFailure[]>(loadPersistedFailures);
+  const cancelRef = useRef(false);
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
@@ -52,6 +53,7 @@ export default function ReviewAnalysisPage() {
 
   const runAnalysis = useCallback(async () => {
     if (selected.size === 0) return;
+    cancelRef.current = false;
     setRunning(true);
     setError(null);
     setResults([]);
@@ -66,10 +68,18 @@ export default function ReviewAnalysisPage() {
     const allResults: AnalysisResult[] = [];
 
     for (let i = 0; i < selectedShops.length; i++) {
+      if (cancelRef.current) {
+        setError(`中断しました (${i}/${selectedShops.length})`);
+        break;
+      }
       const shop = selectedShops[i];
       setProgress({ current: i, total: selectedShops.length });
       try {
-        const res = await api.post("/api/report/analyze", { shops: [shop], force: forceReanalyze }, { timeout: 180000 });
+        // 60秒の強制タイムアウト（サーバーハング防止）
+        const res = await Promise.race([
+          api.post("/api/report/analyze", { shops: [shop], force: forceReanalyze }, { timeout: 60000 }),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("タイムアウト（60秒）")), 65000)),
+        ]);
         const data = res.data;
         allResults.push(...(data.results || []));
         setResults([...allResults]);
@@ -166,9 +176,17 @@ export default function ReviewAnalysisPage() {
                 分析中... ({progress?.current || 0}/{progress?.total || 0})
               </>
             ) : (
-              <>🔍 口コミ分析を実行</>
+              <>口コミ分析を実行</>
             )}
           </button>
+          {running && (
+            <button
+              onClick={() => { cancelRef.current = true; }}
+              className="px-4 py-2.5 rounded-lg text-sm font-semibold bg-red-500 text-white hover:bg-red-600 transition"
+            >
+              中断
+            </button>
+          )}
         </div>
         <label className="flex items-center gap-2 mt-2 ml-auto cursor-pointer">
           <input type="checkbox" checked={forceReanalyze} onChange={(e) => setForceReanalyze(e.target.checked)} className="w-3.5 h-3.5 rounded" />
