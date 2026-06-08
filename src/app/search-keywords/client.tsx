@@ -132,7 +132,7 @@ export default function SearchKeywordsClient() {
   async function syncOne(shopId: string, shopName: string, parentSignal?: AbortSignal, apiPath = "/api/report/sync-search-keywords"): Promise<SyncResult> {
     // タイムアウトを最初に設定（getAuthToken含む全体をカバー）
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 90000);
+    const timeout = setTimeout(() => controller.abort(), 30000);
     const onParentAbort = () => controller.abort();
     parentSignal?.addEventListener("abort", onParentAbort);
     try {
@@ -207,7 +207,13 @@ export default function SearchKeywordsClient() {
       }
       const t = targets[i];
       setSyncProgress({ current: i + 1, total: targets.length, shopName: t.shopName });
-      const result = await syncOne(t.shopId, t.shopName, controller.signal, apiPath);
+      // 35秒の強制タイムアウト（syncOne内の30秒+猶予5秒）でハング防止
+      const result = await Promise.race([
+        syncOne(t.shopId, t.shopName, controller.signal, apiPath),
+        new Promise<SyncResult>((resolve) =>
+          setTimeout(() => resolve({ shopId: t.shopId, shopName: t.shopName, success: false, error: "タイムアウト（強制）" }), 35000)
+        ),
+      ]);
       results.push(result);
       setSyncResults([...results]);
 
