@@ -42,13 +42,14 @@ export default function ReviewsPage() {
   const [unrepliedCount, setUnrepliedCount] = useState(0);
   const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
   const { startMonth: drStart, endMonth: drEnd, setRange: drSetRange } = useDateRange(18);
-  // DateRangePickerの値をSupabaseクエリ用の期間に変換
-  const dateRangeStart = `${drStart.replace("/", "-").replace(/^(\d{4})-(\d)$/, "$1-0$2")}-01T00:00:00`;
-  const dateRangeEnd = (() => {
+  // DateRangePickerの値をSupabaseクエリ用の期間に変換（初期化前は空→フィルタなし）
+  const dateRangeReady = !!(drStart && drEnd);
+  const dateRangeStart = drStart ? `${drStart.replace("/", "-").replace(/^(\d{4})-(\d)$/, "$1-0$2")}-01T00:00:00` : "";
+  const dateRangeEnd = drEnd ? (() => {
     const [y, m] = drEnd.split("/").map(Number);
     const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
     return `${next}-01T00:00:00`;
-  })();
+  })() : "";
   const [topWords, setTopWords] = useState<{ word: string; count: number; type: "good" | "bad" }[]>([]);
   const [keywordModal, setKeywordModal] = useState<{ word: string; type: "good" | "bad"; reviews: { reviewer_name: string; comment: string; star_rating: string; create_time: string }[] } | null>(null);
   const [monthlyStats, setMonthlyStats] = useState<{ month: string; count: number; avgRating: number; cumulative: number }[]>([]);
@@ -111,8 +112,10 @@ export default function ReviewsPage() {
         query = query.not("reply_comment", "is", null);
       }
 
-      // 期間範囲フィルタ
-      query = query.gte("create_time", dateRangeStart).lt("create_time", dateRangeEnd);
+      // 期間範囲フィルタ（初期化前はスキップ）
+      if (dateRangeReady) {
+        query = query.gte("create_time", dateRangeStart).lt("create_time", dateRangeEnd);
+      }
 
       const { data, count, error } = await query;
       if (error) {
@@ -300,7 +303,9 @@ export default function ReviewsPage() {
       // AI分析がない場合はフォールバック: 従来の単語頻度集計
       let query = supabase.from("reviews").select("comment, star_rating").not("comment", "is", null);
       query = query.eq("shop_id", selectedShopId);
-      query = query.gte("create_time", dateRangeStart).lt("create_time", dateRangeEnd);
+      if (dateRangeReady) {
+        query = query.gte("create_time", dateRangeStart).lt("create_time", dateRangeEnd);
+      }
       const { data: allComments } = await query.limit(500);
       if (!allComments || allComments.length === 0) { setTopWords([]); return; }
 
