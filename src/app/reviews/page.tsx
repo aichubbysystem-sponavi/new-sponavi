@@ -26,7 +26,7 @@ type ReplyFilter = "all" | "unreplied" | "replied";
 const PER_PAGE = 20;
 
 export default function ReviewsPage() {
-  const { selectedShopId, selectedShop, apiConnected, shops, shopFilterMode } = useShop();
+  const { selectedShopId, selectedShop, apiConnected, shops, shopFilterMode, favoriteShopIds } = useShop();
   const [reviews, setReviews] = useState<ReviewRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(1);
@@ -488,7 +488,7 @@ export default function ReviewsPage() {
     }
   };
 
-  const handleSyncAll = async () => {
+  const handleSyncAll = async (targetShopIds?: string[]) => {
     setSyncing(true);
     setSyncFailedShops([]);
     setShowSyncFailed(false);
@@ -496,7 +496,7 @@ export default function ReviewsPage() {
     let totalErrors = 0;
     let consecutiveErrors = 0;
     const allFailed: { shopName: string; status: string }[] = [];
-    const allShopIds = shops.map((s) => s.id);
+    const allShopIds = targetShopIds || shops.map((s) => s.id);
     const shopNameMap = new Map(shops.map(s => [s.id, s.name]));
 
     // 同期済み店舗を確認中
@@ -695,7 +695,14 @@ export default function ReviewsPage() {
               style={{ color: syncing ? undefined : "#fff" }}>
               {syncing ? "同期中..." : "範囲同期"}
             </button>
-            <button onClick={handleSyncAll} disabled={syncing}
+            {favoriteShopIds.size > 0 && (
+              <button onClick={() => handleSyncAll(Array.from(favoriteShopIds))} disabled={syncing}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing ? "bg-slate-200 text-slate-400" : "bg-emerald-600 hover:bg-emerald-700"}`}
+                style={{ color: syncing ? undefined : "#fff" }}>
+                {syncing ? "同期中..." : `いつもの店舗同期 (${favoriteShopIds.size})`}
+              </button>
+            )}
+            <button onClick={() => handleSyncAll()} disabled={syncing}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing ? "bg-slate-200 text-slate-400" : "bg-slate-600 hover:bg-slate-700"}`}
               style={{ color: syncing ? undefined : "#fff" }}>
               {syncing ? "同期中..." : "全店舗同期"}

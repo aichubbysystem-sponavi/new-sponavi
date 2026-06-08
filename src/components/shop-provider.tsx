@@ -48,13 +48,22 @@ export default function ShopProvider({ children }: { children: React.ReactNode }
   const [apiConnected, setApiConnected] = useState(false);
   const [shopFilterMode, setShopFilterMode] = useState<"all" | "single">("all");
   const [unrepliedCount, setUnrepliedCount] = useState(0);
-  const [favoriteShopIds, setFavoriteShopIdsRaw] = useState<Set<string>>(() => {
-    if (typeof window === "undefined") return new Set();
-    try { return new Set(JSON.parse(localStorage.getItem("favorite-shop-ids") || "[]")); } catch { return new Set(); }
-  });
+  const [favoriteShopIds, setFavoriteShopIdsRaw] = useState<Set<string>>(new Set());
   const setFavoriteShopIds = useCallback((ids: Set<string>) => {
     setFavoriteShopIdsRaw(ids);
-    localStorage.setItem("favorite-shop-ids", JSON.stringify(Array.from(ids)));
+  }, []);
+
+  // 「いつもの店舗」をgrid_ranking_presetsから取得
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await api.get("/api/report/grid-ranking-presets");
+        const presets = res.data?.presets || [];
+        if (presets.length > 0) {
+          setFavoriteShopIdsRaw(new Set(presets.map((p: any) => p.shop_id)));
+        }
+      } catch {}
+    })();
   }, []);
 
   const fetchUnreplied = useCallback(async () => {

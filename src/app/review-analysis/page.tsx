@@ -27,7 +27,7 @@ function savePersistedFailures(failures: PersistedFailure[]) {
 }
 
 export default function ReviewAnalysisPage() {
-  const { shops, apiConnected, favoriteShopIds, setFavoriteShopIds } = useShop();
+  const { shops, apiConnected, favoriteShopIds } = useShop();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
@@ -36,8 +36,6 @@ export default function ReviewAnalysisPage() {
   const [error, setError] = useState<string | null>(null);
   const [persistedFailures, setPersistedFailures] = useState<PersistedFailure[]>(loadPersistedFailures);
   const cancelRef = useRef(false);
-  const [toast, setToast] = useState<string | null>(null);
-  useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t); } }, [toast]);
 
   // お気に入り店舗があればページ表示時に自動選択
   const initRef = useRef(false);
@@ -176,32 +174,14 @@ export default function ReviewAnalysisPage() {
             >
               {selected.size === shops.length ? "全解除" : "全選択"}
             </button>
-            <button
-              onClick={() => {
-                if (favoriteShopIds.size > 0) {
-                  setSelected(new Set(Array.from(favoriteShopIds).filter(id => shops.some(s => s.id === id))));
-                }
-              }}
-              disabled={favoriteShopIds.size === 0}
-              className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition ${
-                favoriteShopIds.size > 0
-                  ? "text-amber-700 bg-amber-50 border-amber-300 hover:bg-amber-100 cursor-pointer"
-                  : "text-slate-400 bg-slate-50 border-slate-200 cursor-not-allowed"
-              }`}
-            >
-              {favoriteShopIds.size > 0 ? `★ お気に入り (${favoriteShopIds.size})` : "★ お気に入り 未設定"}
-            </button>
-            <button
-              onClick={() => { setFavoriteShopIds(selected); setToast(`${selected.size}店舗をお気に入りに保存しました`); }}
-              disabled={selected.size === 0}
-              className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition ${
-                selected.size > 0
-                  ? "text-slate-700 bg-white border-slate-300 hover:bg-slate-50 cursor-pointer"
-                  : "text-slate-400 bg-slate-50 border-slate-200 cursor-not-allowed"
-              }`}
-            >
-              ★ 現在の選択を保存
-            </button>
+            {favoriteShopIds.size > 0 && (
+              <button
+                onClick={() => setSelected(new Set(Array.from(favoriteShopIds).filter(id => shops.some(s => s.id === id))))}
+                className="px-3 py-1.5 rounded-lg text-sm font-semibold border text-emerald-700 bg-emerald-50 border-emerald-300 hover:bg-emerald-100 cursor-pointer transition"
+              >
+                いつもの店舗 ({favoriteShopIds.size})
+              </button>
+            )}
             <span className="text-sm text-slate-500">
               {selected.size > 0 ? (
                 <span className="text-emerald-600 font-semibold">{selected.size}店舗選択中</span>
@@ -390,12 +370,6 @@ export default function ReviewAnalysisPage() {
         )}
       </div>
 
-      {/* トースト通知 */}
-      {toast && (
-        <div className="fixed bottom-6 right-6 z-50 bg-slate-800 text-white px-5 py-3 rounded-xl shadow-lg text-sm font-medium animate-fade-in">
-          {toast}
-        </div>
-      )}
     </div>
   );
 }
