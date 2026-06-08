@@ -17,7 +17,6 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
     "/posts",
     "/aio",
     "/shop-management",
-    "/ranking",
     "/search-keywords",
     "/grid-ranking",
     "/reports",
@@ -47,7 +46,6 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
     "/posts",
     "/aio",
     "/shop-management",
-    "/ranking",
     "/search-keywords",
     "/grid-ranking",
     "/reports",
@@ -70,7 +68,6 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
     "/diagnosis",
     "/reviews",
     "/posts",
-    "/ranking",
   ],
 };
 
