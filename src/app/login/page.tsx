@@ -105,7 +105,9 @@ export default function LoginPage() {
 
     if (data.session) {
       resetLoginAttempts();
-      router.push("/");
+      // レポートサブドメインからのログインはレポート一覧へ遷移
+      const isReport = window.location.hostname.startsWith("report.");
+      router.push(isReport ? "/report" : "/");
     }
     setLoading(false);
   };
