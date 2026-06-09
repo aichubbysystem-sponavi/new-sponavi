@@ -189,10 +189,12 @@ export default function ReportListClient({
       try {
         const ids = Array.from(selected);
         let added = 0;
-        for (const shopName of ids) {
+        for (const id of ids) {
           // 店舗のperiodから月を取得（"2026年4月" → "2026/4"）
-          const shop = shops.find(s => s.name === shopName || s.id === shopName);
-          const period = shop?.period || "";
+          const shop = shops.find(s => s.id === id);
+          if (!shop) continue;
+          const shopName = shop.name;
+          const period = shop.period || "";
           const m = period.match(/(\d{4})\D+(\d{1,2})/);
           const month = m ? `${m[1]}/${parseInt(m[2])}` : new Date().getFullYear() + "/" + (new Date().getMonth() + 1);
 
