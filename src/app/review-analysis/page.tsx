@@ -15,6 +15,7 @@ interface PersistedFailure {
   shopId: string;
   shopName: string;
   status: string;
+  reason?: string;
   failedAt: string;
 }
 
@@ -98,7 +99,8 @@ export default function ReviewAnalysisPage() {
         allResults.push(...(data.results || []));
         setResults([...allResults]);
       } catch (err: any) {
-        allResults.push({ shopId: shop.id, shopName: shop.name, status: "error" });
+        const reason = err?.response?.data?.error || err?.message || "通信エラー";
+        allResults.push({ shopId: shop.id, shopName: shop.name, status: "error", reason });
         setResults([...allResults]);
         // 429の場合は10秒待機してから続行
         if (err?.response?.status === 429) {
@@ -115,7 +117,7 @@ export default function ReviewAnalysisPage() {
     const failed = allResults.filter(r => r.status === "error" || r.status === "analysis_failed" || r.status === "db_error");
     if (failed.length > 0) {
       const now = new Date().toLocaleString("ja-JP");
-      const newFailures = failed.map(f => ({ shopId: f.shopId, shopName: f.shopName, status: f.status, failedAt: now }));
+      const newFailures = failed.map(f => ({ shopId: f.shopId, shopName: f.shopName, status: f.status, reason: f.reason, failedAt: now }));
       // 既存の失敗リストから今回成功した店舗を除去し、新しい失敗を追加
       const successIds = new Set(allResults.filter(r => r.status === "success").map(r => r.shopId));
       const updated = [
@@ -284,9 +286,10 @@ export default function ReviewAnalysisPage() {
           </div>
           <div className="space-y-1 max-h-40 overflow-y-auto">
             {persistedFailures.map((p, i) => (
-              <div key={i} className="flex items-center justify-between py-1 px-2 text-sm bg-white rounded">
-                <span className="text-slate-700">{p.shopName}</span>
-                <span className="text-[10px] text-orange-500">{p.failedAt}</span>
+              <div key={i} className="flex items-center justify-between py-1 px-2 text-sm bg-white rounded gap-2">
+                <span className="text-slate-700 truncate flex-1">{p.shopName}</span>
+                {p.reason && <span className="text-[10px] text-red-400 truncate max-w-[250px]">{p.reason}</span>}
+                <span className="text-[10px] text-orange-500 flex-shrink-0">{p.failedAt}</span>
               </div>
             ))}
           </div>
