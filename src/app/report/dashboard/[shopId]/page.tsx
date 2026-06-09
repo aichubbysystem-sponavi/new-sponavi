@@ -29,20 +29,21 @@ export default async function CustomerDashboardPage({ params }: { params: { shop
     );
   }
 
-  // 口コミ統計
+  // 口コミ統計（shop_nameで検索 — reviews.shop_idはGo API IDでSupabase shops.idとは異なる）
+  const shopName = shop.name;
   const { count: totalReviews } = await supabase
-    .from("reviews").select("id", { count: "exact", head: true }).eq("shop_id", shop.id);
+    .from("reviews").select("id", { count: "exact", head: true }).eq("shop_name", shopName);
   const { count: unrepliedCount } = await supabase
-    .from("reviews").select("id", { count: "exact", head: true }).eq("shop_id", shop.id).is("reply_comment", null);
+    .from("reviews").select("id", { count: "exact", head: true }).eq("shop_name", shopName).is("reply_comment", null);
 
   // 最新口コミ5件
   const { data: recentReviews } = await supabase
     .from("reviews").select("reviewer_name, star_rating, comment, reply_comment, create_time")
-    .eq("shop_id", shop.id).order("create_time", { ascending: false }).limit(5);
+    .eq("shop_name", shopName).order("create_time", { ascending: false }).limit(5);
 
   // 月別口コミ統計
   const { data: allReviews } = await supabase
-    .from("reviews").select("create_time, star_rating").eq("shop_id", shop.id).order("create_time", { ascending: true }).limit(3000);
+    .from("reviews").select("create_time, star_rating").eq("shop_name", shopName).order("create_time", { ascending: true }).limit(3000);
 
   const ratingMap: Record<string, number> = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5, ONE_STAR: 1, TWO_STARS: 2, THREE_STARS: 3, FOUR_STARS: 4, FIVE_STARS: 5 };
   const monthlyStats: { month: string; count: number; avgRating: number }[] = [];
@@ -60,7 +61,7 @@ export default async function CustomerDashboardPage({ params }: { params: { shop
     monthlyStats.sort((a, b) => a.month.localeCompare(b.month));
   }
 
-  // 順位データ
+  // 順位データ（ranking_search_logsはshop_idカラムのみ — shop.idで検索）
   const { data: rankingData } = await supabase
     .from("ranking_search_logs").select("search_words, rank, searched_at")
     .eq("shop_id", shop.id).eq("is_display", true)
@@ -69,7 +70,7 @@ export default async function CustomerDashboardPage({ params }: { params: { shop
   // AI分析結果
   const { data: analysis } = await supabase
     .from("report_analysis").select("positive_words, negative_words, summary")
-    .eq("shop_id", shop.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    .eq("shop_name", shopName).order("created_at", { ascending: false }).limit(1).maybeSingle();
 
   const avgRating = allReviews && allReviews.length > 0
     ? Math.round((allReviews.reduce((s, r) => s + (ratingMap[(r.star_rating || "").toUpperCase().replace(/_STARS?/, "")] || 0), 0) / allReviews.length) * 100) / 100

@@ -64,11 +64,11 @@ export async function GET(request: NextRequest) {
   // Vercel Pro maxDuration=300秒: 1店舗約5秒 → 最大50店舗/実行
   for (const shop of toAnalyze.slice(0, 50)) {
     if (Date.now() - startTime > TIME_LIMIT) break;
-    // 口コミ取得
+    // 口コミ取得（shop_nameで検索 — reviews.shop_idはGo API IDでSupabase shops.idとは異なる）
     const { data: reviews } = await supabase
       .from("reviews")
       .select("comment, star_rating")
-      .eq("shop_id", shop.id)
+      .eq("shop_name", shop.name)
       .not("comment", "is", null)
       .order("create_time", { ascending: false })
       .limit(20);
