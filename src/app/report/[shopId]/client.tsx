@@ -946,8 +946,8 @@ export default function ReportClient({
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "flex-start" }}>
                     {isLastKpi ? (<>
-                      <span style={badgeStyle(kpi.value >= 0)}>
-                        {kpi.value >= 0 ? "▲" : "▼"} {(displayTotalReviews - kpi.value).toLocaleString()}→{displayTotalReviews.toLocaleString()}件 前月比
+                      <span style={badgeStyle(kpi.value > 0, kpi.value === 0)}>
+                        {kpi.value > 0 ? "▲" : kpi.value === 0 ? "→" : "▼"} {(displayTotalReviews - kpi.value).toLocaleString()}→{displayTotalReviews.toLocaleString()}件 前月比
                       </span>
                       {kpi.yoyValue != null ? (() => {
                         const yoyDelta = displayTotalReviews - kpi.yoyValue!;
