@@ -380,22 +380,46 @@ export async function POST(request: NextRequest) {
           const labels = report.monthlyLabels || [];
           if (!curMonth) curMonth = labels[labels.length - 1] || "";
 
-          // overrideTargetMonth時はchartsから対象月のKPIを再構成
-          const targetIdx0 = curMonth ? labels.indexOf(curMonth) : -1;
-          const useChartsKpi = targetIdx0 >= 0 && targetIdx0 < labels.length - 1 && report.charts;
+          // performance_metrics_cacheで上書き（フロントと同じデータソースを使用）
+          let perfCharts = report.charts;
+          let perfLabels = labels;
+          try {
+            const { getCachedPerformance } = await import("@/lib/gbp-performance");
+            const { data: shopRow } = await supabase.from("shops").select("id").eq("name", shop.name).limit(1).maybeSingle();
+            if (shopRow?.id) {
+              const perfData = await getCachedPerformance(shopRow.id, shop.name);
+              if (perfData.length > 0) {
+                perfLabels = perfData.map((p: any) => p.month);
+                perfCharts = {
+                  searchMobile: perfData.map((p: any) => p.searchMobile),
+                  searchPC: perfData.map((p: any) => p.searchPC),
+                  mapMobile: perfData.map((p: any) => p.mapMobile),
+                  mapPC: perfData.map((p: any) => p.mapPC),
+                  calls: perfData.map((p: any) => p.calls),
+                  routes: perfData.map((p: any) => p.routes),
+                  websites: perfData.map((p: any) => p.websites),
+                  foodMenus: perfData.map((p: any) => p.foodMenus),
+                  bookings: perfData.map((p: any) => p.bookings),
+                };
+              }
+            }
+          } catch {}
+
+          // chartsから対象月のKPIを再構成
+          const targetIdx0 = curMonth ? perfLabels.indexOf(curMonth) : perfLabels.length - 1;
           const effectiveKpis = (() => {
-            if (!useChartsKpi) return kpis;
-            const c = report.charts;
+            if (targetIdx0 < 0) return kpis;
+            const c = perfCharts;
             const ci = targetIdx0;
             const pi = ci >= 1 ? ci - 1 : -1;
             const v = (arr: number[], idx: number) => arr?.[idx] ?? 0;
             return [
-              { label: "Google検索 合計", value: v(c.searchMobile, ci) + v(c.searchPC, ci), momValue: pi >= 0 ? v(c.searchMobile, pi) + v(c.searchPC, pi) : null, unit: "回" },
-              { label: "Googleマップ 合計", value: v(c.mapMobile, ci) + v(c.mapPC, ci), momValue: pi >= 0 ? v(c.mapMobile, pi) + v(c.mapPC, pi) : null, unit: "回" },
-              { label: "ウェブサイトクリック", value: v(c.websites, ci), momValue: pi >= 0 ? v(c.websites, pi) : null, unit: "件" },
-              { label: "ルート検索", value: v(c.routes, ci), momValue: pi >= 0 ? v(c.routes, pi) : null, unit: "件" },
-              { label: "通話", value: v(c.calls, ci), momValue: pi >= 0 ? v(c.calls, pi) : null, unit: "件" },
-              { label: "フードメニュークリック", value: v(c.foodMenus, ci), momValue: pi >= 0 ? v(c.foodMenus, pi) : null, unit: "件" },
+              { label: "Google検索 合計", value: v(c.searchMobile, ci) + v(c.searchPC, ci), momValue: pi >= 0 ? v(c.searchMobile, pi) + v(c.searchPC, pi) : null, yoyValue: ci >= 12 ? v(c.searchMobile, ci - 12) + v(c.searchPC, ci - 12) : null, unit: "回" },
+              { label: "Googleマップ 合計", value: v(c.mapMobile, ci) + v(c.mapPC, ci), momValue: pi >= 0 ? v(c.mapMobile, pi) + v(c.mapPC, pi) : null, yoyValue: ci >= 12 ? v(c.mapMobile, ci - 12) + v(c.mapPC, ci - 12) : null, unit: "回" },
+              { label: "ウェブサイトクリック", value: v(c.websites, ci), momValue: pi >= 0 ? v(c.websites, pi) : null, yoyValue: ci >= 12 ? v(c.websites, ci - 12) : null, unit: "件" },
+              { label: "ルート検索", value: v(c.routes, ci), momValue: pi >= 0 ? v(c.routes, pi) : null, yoyValue: ci >= 12 ? v(c.routes, ci - 12) : null, unit: "件" },
+              { label: "通話", value: v(c.calls, ci), momValue: pi >= 0 ? v(c.calls, pi) : null, yoyValue: ci >= 12 ? v(c.calls, ci - 12) : null, unit: "件" },
+              { label: "フードメニュークリック", value: v(c.foodMenus, ci), momValue: pi >= 0 ? v(c.foodMenus, pi) : null, yoyValue: ci >= 12 ? v(c.foodMenus, ci - 12) : null, unit: "件" },
             ];
           })();
 
@@ -431,16 +455,15 @@ export async function POST(request: NextRequest) {
           }
 
           // chartsデータから月次推移も追加（増減傾向の分析用）
-          const charts = report.charts;
-          if (charts && labels.length >= 2) {
+          if (perfCharts && perfLabels.length >= 2) {
             // curMonthのインデックスを特定（override時は末尾とは限らない）
-            const targetIdx = curMonth ? labels.indexOf(curMonth) : -1;
-            const effectiveLastIdx = targetIdx >= 0 ? targetIdx : labels.length - 1;
+            const targetIdx = curMonth ? perfLabels.indexOf(curMonth) : -1;
+            const effectiveLastIdx = targetIdx >= 0 ? targetIdx : perfLabels.length - 1;
             const startIdx = Math.max(0, effectiveLastIdx - 2);
-            const recentLabels = labels.slice(startIdx, effectiveLastIdx + 1);
+            const recentLabels = perfLabels.slice(startIdx, effectiveLastIdx + 1);
             const getRecent = (arr: number[]) => arr ? arr.slice(startIdx, effectiveLastIdx + 1) : [];
-            const searchTrend = getRecent(charts.searchTotal || []);
-            const mapTrend = getRecent(charts.mapTotal || []);
+            const searchTrend = getRecent(perfCharts.searchMobile?.map((v: number, i: number) => v + (perfCharts.searchPC?.[i] || 0)) || []);
+            const mapTrend = getRecent(perfCharts.mapMobile?.map((v: number, i: number) => v + (perfCharts.mapPC?.[i] || 0)) || []);
             if (searchTrend.length >= 2) {
               kpiText += `\n\n【直近3ヶ月の推移】`;
               kpiText += `\nGoogle検索: ${recentLabels.map((l: string, i: number) => `${l}=${searchTrend[i]?.toLocaleString() || 0}`).join(" → ")}`;
@@ -449,14 +472,14 @@ export async function POST(request: NextRequest) {
 
             // アクション率（アクション合計 ÷ マップ表示数）
             const lastIdx = effectiveLastIdx;
-            const curMap = (charts.mapMobile?.[lastIdx] || 0) + (charts.mapPC?.[lastIdx] || 0);
-            const curActions = (charts.websites?.[lastIdx] || 0) + (charts.routes?.[lastIdx] || 0) + (charts.calls?.[lastIdx] || 0) + (charts.foodMenus?.[lastIdx] || 0) + (charts.bookings?.[lastIdx] || 0);
+            const curMap = (perfCharts.mapMobile?.[lastIdx] || 0) + (perfCharts.mapPC?.[lastIdx] || 0);
+            const curActions = (perfCharts.websites?.[lastIdx] || 0) + (perfCharts.routes?.[lastIdx] || 0) + (perfCharts.calls?.[lastIdx] || 0) + (perfCharts.foodMenus?.[lastIdx] || 0) + (perfCharts.bookings?.[lastIdx] || 0);
             if (curMap > 0) {
               const actionRate = (curActions / curMap * 100).toFixed(2);
               kpiText += `\n\n【アクション率】\nアクション合計(Web+ルート+通話+メニュー+予約): ${curActions.toLocaleString()}件 ÷ マップ表示: ${curMap.toLocaleString()}回 = ${actionRate}%`;
               if (lastIdx >= 1) {
-                const prevMap = (charts.mapMobile?.[lastIdx - 1] || 0) + (charts.mapPC?.[lastIdx - 1] || 0);
-                const prevActions = (charts.websites?.[lastIdx - 1] || 0) + (charts.routes?.[lastIdx - 1] || 0) + (charts.calls?.[lastIdx - 1] || 0) + (charts.foodMenus?.[lastIdx - 1] || 0) + (charts.bookings?.[lastIdx - 1] || 0);
+                const prevMap = (perfCharts.mapMobile?.[lastIdx - 1] || 0) + (perfCharts.mapPC?.[lastIdx - 1] || 0);
+                const prevActions = (perfCharts.websites?.[lastIdx - 1] || 0) + (perfCharts.routes?.[lastIdx - 1] || 0) + (perfCharts.calls?.[lastIdx - 1] || 0) + (perfCharts.foodMenus?.[lastIdx - 1] || 0) + (perfCharts.bookings?.[lastIdx - 1] || 0);
                 if (prevMap > 0) {
                   const prevRate = (prevActions / prevMap * 100).toFixed(2);
                   kpiText += `（前月: ${prevRate}%）`;
@@ -503,13 +526,45 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          // キーワード順位データ（シートからリアルタイム取得 — report_data_cacheは古い可能性）
+          // キーワード順位データ（gridRankingから対象月の中心点順位を取得）
           try {
-            const { fetchRankingFromSheets } = await import("@/lib/ranking-fetch");
-            const freshRanks = await fetchRankingFromSheets(shop.name);
-            const kwData = freshRanks.length > 0 ? freshRanks : report.keywords;
-            if (kwData && kwData.length > 0) {
-              kpiText += `\n\n【キーワード順位（当月）】`;
+            const gridRanking = report.gridRanking;
+            const targetNorm = (curMonth || "").replace(/\/0+(\d)/, "/$1");
+            let kwData: { word: string; rank: number; prevRank: number }[] = [];
+
+            if (gridRanking?.history?.length > 0) {
+              // 対象月以前のデータのみ使用
+              const monthToNum = (m: string) => { const p = m.split("/"); return (parseInt(p[0]) || 0) * 100 + (parseInt(p[1]) || 0); };
+              const targetNum = monthToNum(targetNorm);
+              const filtered = gridRanking.history.filter((h: any) => monthToNum(h.month) <= targetNum);
+              if (filtered.length > 0) {
+                const latest = filtered[filtered.length - 1];
+                const prev = filtered.length >= 2 ? filtered[filtered.length - 2] : null;
+                for (const snap of (latest.snapshots || [])) {
+                  const center = snap.results?.find((r: any) => r.row === Math.floor(snap.gridSize / 2) && r.col === Math.floor(snap.gridSize / 2));
+                  const rank = center?.rank || 0;
+                  let prevRank = rank;
+                  if (prev?.snapshots) {
+                    const prevSnap = prev.snapshots.find((s: any) => s.keyword === snap.keyword);
+                    if (prevSnap) {
+                      const prevCenter = prevSnap.results?.find((r: any) => r.row === Math.floor(prevSnap.gridSize / 2) && r.col === Math.floor(prevSnap.gridSize / 2));
+                      prevRank = prevCenter?.rank || 0;
+                    }
+                  }
+                  if (rank > 0) kwData.push({ word: snap.keyword, rank, prevRank: prevRank || rank });
+                }
+              }
+            }
+
+            // gridRankingにデータがなければシート/キャッシュからフォールバック
+            if (kwData.length === 0) {
+              const { fetchRankingFromSheets } = await import("@/lib/ranking-fetch");
+              const freshRanks = await fetchRankingFromSheets(shop.name);
+              kwData = freshRanks.length > 0 ? freshRanks : (report.keywords || []);
+            }
+
+            if (kwData.length > 0) {
+              kpiText += `\n\n【キーワード順位（${curMonth}）】`;
               for (const kw of kwData) {
                 const diff = kw.prevRank > 0 && kw.rank > 0 ? kw.prevRank - kw.rank : 0;
                 const arrow = diff > 0 ? `↑${diff}` : diff < 0 ? `↓${Math.abs(diff)}` : "→";
@@ -520,7 +575,7 @@ export async function POST(request: NextRequest) {
             // フォールバック: キャッシュのデータを使用
             const kwData = report.keywords;
             if (kwData && kwData.length > 0) {
-              kpiText += `\n\n【キーワード順位（当月）】`;
+              kpiText += `\n\n【キーワード順位（${curMonth}）】`;
               for (const kw of kwData) {
                 const diff = kw.prevRank > 0 && kw.rank > 0 ? kw.prevRank - kw.rank : 0;
                 const arrow = diff > 0 ? `↑${diff}` : diff < 0 ? `↓${Math.abs(diff)}` : "→";
