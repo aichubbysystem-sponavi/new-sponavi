@@ -74,15 +74,6 @@ export default function SearchKeywordsClient() {
 
   useEffect(() => { loadShops(); }, []);
 
-  // お気に入り店舗があればページ表示時に自動選択
-  const initRef = useRef(false);
-  useEffect(() => {
-    if (initRef.current || shops.length === 0 || favoriteShopIds.size === 0) return;
-    initRef.current = true;
-    const valid = new Set(Array.from(favoriteShopIds).filter(id => shops.some(s => s.id === id)));
-    if (valid.size > 0) setSelected(valid);
-  }, [shops, favoriteShopIds]);
-
   async function loadShops() {
     setLoading(true);
     try {

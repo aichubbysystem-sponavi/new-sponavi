@@ -37,15 +37,6 @@ export default function ReviewAnalysisPage() {
   const [persistedFailures, setPersistedFailures] = useState<PersistedFailure[]>(loadPersistedFailures);
   const cancelRef = useRef(false);
 
-  // お気に入り店舗があればページ表示時に自動選択
-  const initRef = useRef(false);
-  useEffect(() => {
-    if (initRef.current || shops.length === 0 || favoriteShopIds.size === 0) return;
-    initRef.current = true;
-    const valid = new Set(Array.from(favoriteShopIds).filter(id => shops.some(s => s.id === id)));
-    if (valid.size > 0) setSelected(valid);
-  }, [shops, favoriteShopIds]);
-
   // 対象月セレクタ: 直近6ヶ月の選択肢を生成
   const monthOptions = (() => {
     const opts: { value: string; label: string }[] = [];
