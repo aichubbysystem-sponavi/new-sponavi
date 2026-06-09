@@ -412,12 +412,12 @@ export async function POST(request: NextRequest) {
           ).then(({ error }) => { if (error) console.error("[sync-reviews] Alert error:", error.message); });
         }
 
-        // Google公式評価をshopsテーブルに保存
+        // Google公式評価をshopsテーブルに保存（店舗名で検索 — Go API IDとSupabase IDは異なる）
         if (googleAvgRating > 0 || googleTotalCount > 0) {
           const updateData: any = {};
           if (googleAvgRating > 0) updateData.rating = googleAvgRating;
           if (googleTotalCount > 0) updateData.review_count = googleTotalCount;
-          await supabase.from("shops").update(updateData).eq("id", shop.id);
+          await supabase.from("shops").update(updateData).eq("name", shop.name);
         }
 
         totalSynced += reviews.length;
