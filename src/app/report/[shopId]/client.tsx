@@ -566,7 +566,7 @@ export default function ReportClient({
       if (existing) { existing.addEventListener("load", renderGridMap); return; }
       const script = document.createElement("script");
       script.id = "google-maps-script";
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=marker&loading=async`;
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=marker`;
       script.async = true; script.defer = true;
       script.onload = renderGridMap;
       document.head.appendChild(script);
