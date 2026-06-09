@@ -83,7 +83,7 @@ export function middleware(request: NextRequest) {
       url.pathname = "/report";
       return addHeaders(NextResponse.rewrite(url), request, true);
     }
-    if (!pathname.startsWith("/report") && !pathname.startsWith("/_next") && !pathname.startsWith("/api") && pathname !== "/favicon.ico") {
+    if (!pathname.startsWith("/report") && !pathname.startsWith("/_next") && !pathname.startsWith("/api") && pathname !== "/favicon.ico" && pathname !== "/login") {
       // report.xxx.com/shopId → /report/shopId へリライト
       const url = request.nextUrl.clone();
       url.pathname = `/report${pathname}`;
