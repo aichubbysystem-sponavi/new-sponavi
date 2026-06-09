@@ -263,6 +263,9 @@ export default function ReportClient({
   const hasBookingsData = charts.bookings?.some(v => v > 0) ?? false;
   const hasFoodMenusData = charts.foodMenus?.some(v => v > 0) ?? false;
 
+  // 表示月の口コミ累計（reviewCountsのトリム済み末尾 = 対象月の値）
+  const displayTotalReviews = reviewCounts.length > 0 ? reviewCounts[reviewCounts.length - 1] : shop.totalReviews;
+
   const hasKeywords = keywords.length > 0 || !!(gridRanking && gridRanking.history.length > 0);
   const hasRankingHistory = rankingHistory && rankingHistory.labels.length > 0;
   const hasReviews = reviewCounts.length > 0;
@@ -869,7 +872,7 @@ export default function ReportClient({
           <div style={{ position: "absolute", top: 28, right: 36, background: "rgba(255,255,255,.12)", padding: "7px 18px", borderRadius: 8, fontSize: 13, fontWeight: 600 }}>{shop.period.start} - {shop.period.end}</div>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", padding: "10px 36px", background: "#e8eaf0", flexShrink: 0 }}>
-          {[{ lb: "対策開始日", vl: shop.startDate }, { lb: "レポート対象", vl: curLabel }, ...(shop.category ? [{ lb: "業種", vl: shop.category }] : []), { lb: "口コミ合計", vl: `${shop.totalReviews.toLocaleString()}件` }, { lb: "評価", vl: String(shop.rating) }].map((b, i) => (
+          {[{ lb: "対策開始日", vl: shop.startDate }, { lb: "レポート対象", vl: curLabel }, ...(shop.category ? [{ lb: "業種", vl: shop.category }] : []), { lb: "口コミ合計", vl: `${displayTotalReviews.toLocaleString()}件` }, { lb: "評価", vl: String(shop.rating) }].map((b, i) => (
             <div key={i} style={{ background: "#fff", borderRadius: 10, padding: "7px 14px", fontSize: 12, display: "flex", alignItems: "center", gap: 5, boxShadow: "0 1px 3px rgba(0,0,0,.05)" }}>
               <span style={{ color: "#888" }}>{b.lb}</span><span style={{ fontWeight: 700 }}>{b.vl}</span>
             </div>
@@ -892,7 +895,7 @@ export default function ReportClient({
                   </div>
                   <div style={{ fontSize: 11, color: "#aaa", marginBottom: 4 }}>
                     {isLastKpi ? (
-                      <span>累計: {shop.totalReviews.toLocaleString()}件（評価 {shop.rating}）</span>
+                      <span>累計: {displayTotalReviews.toLocaleString()}件（評価 {shop.rating}）</span>
                     ) : kpi.label === "Google検索 合計" || kpi.label === "Googleマップ 合計" ? (
                       <><span style={{ marginRight: 6 }}>モバイル: {i === 0 ? charts.searchMobile[charts.searchMobile.length-1]?.toLocaleString() : charts.mapMobile[charts.mapMobile.length-1]?.toLocaleString()}</span><span>PC: {i === 0 ? charts.searchPC[charts.searchPC.length-1]?.toLocaleString() : charts.mapPC[charts.mapPC.length-1]?.toLocaleString()}</span></>
                     ) : (
@@ -902,12 +905,12 @@ export default function ReportClient({
                   <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "flex-start" }}>
                     {isLastKpi ? (<>
                       <span style={badgeStyle(kpi.value >= 0)}>
-                        {kpi.value >= 0 ? "▲" : "▼"} {(shop.totalReviews - kpi.value).toLocaleString()}→{shop.totalReviews.toLocaleString()}件 前月比
+                        {kpi.value >= 0 ? "▲" : "▼"} {(displayTotalReviews - kpi.value).toLocaleString()}→{displayTotalReviews.toLocaleString()}件 前月比
                       </span>
                       {kpi.yoyValue != null ? (() => {
-                        const yoyDelta = shop.totalReviews - kpi.yoyValue!;
+                        const yoyDelta = displayTotalReviews - kpi.yoyValue!;
                         return <span style={badgeStyle(yoyDelta >= 0)}>
-                          {yoyDelta >= 0 ? "▲" : "▼"} {kpi.yoyValue!.toLocaleString()}→{shop.totalReviews.toLocaleString()}件 前年比
+                          {yoyDelta >= 0 ? "▲" : "▼"} {kpi.yoyValue!.toLocaleString()}→{displayTotalReviews.toLocaleString()}件 前年比
                         </span>;
                       })() : <span style={{ fontSize: 10, color: "#bbb" }}>前年比 なし</span>}
                     </>) : (<>
@@ -1620,7 +1623,7 @@ export default function ReportClient({
                 <div>
                   <div style={{ fontSize: 32, color: "#fbc02d" }}>{"★".repeat(Math.round(shop.rating))}{"☆".repeat(5 - Math.round(shop.rating))}</div>
                   <span style={{ fontSize: 56, fontWeight: 900, color: "#0f3460" }}>{shop.rating}</span>
-                  <span style={{ fontSize: 16, color: "#888", marginLeft: 8 }}>/ 5.0（{shop.totalReviews.toLocaleString()}件）</span>
+                  <span style={{ fontSize: 16, color: "#888", marginLeft: 8 }}>/ 5.0（{displayTotalReviews.toLocaleString()}件）</span>
                 </div>
               </div>
               <p style={{ fontSize: 15, lineHeight: 1.9, color: "#444", margin: 0 }} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(reviewAnalysis.summary, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
