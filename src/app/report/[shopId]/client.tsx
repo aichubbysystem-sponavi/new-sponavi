@@ -68,11 +68,12 @@ const kpiTopColors = [
 
 // ── Helpers ──
 
-function pctChange(cur: number, prev: number): { pct: number; text: string; isUp: boolean } {
-  if (prev === 0 && cur === 0) return { pct: 0, text: "±0.0%", isUp: true };
-  if (prev === 0) return { pct: 999, text: "+∞", isUp: true };
+function pctChange(cur: number, prev: number): { pct: number; text: string; isUp: boolean; isFlat: boolean } {
+  if (prev === 0 && cur === 0) return { pct: 0, text: "±0.0%", isUp: true, isFlat: true };
+  if (prev === 0) return { pct: 999, text: "+∞", isUp: true, isFlat: false };
   const pct = ((cur - prev) / prev) * 100;
-  return { pct, text: `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`, isUp: pct >= 0 };
+  const isFlat = Math.abs(pct) < 0.05;
+  return { pct, text: isFlat ? "+0.0%" : `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`, isUp: pct >= 0, isFlat };
 }
 
 function buildStackedOptions() {
@@ -276,6 +277,12 @@ export default function ReportClient({
       latestMonth: targetMonth,
     } : data.searchQueries;
 
+    // gridRankingもフィルタ（対象月以降のデータを除外）
+    const newGridRanking = data.gridRanking ? {
+      ...data.gridRanking,
+      history: data.gridRanking.history.filter((h: { month: string }) => monthToNum(h.month) <= monthToNum(normalized || targetMonth)),
+    } : data.gridRanking;
+
     return {
       ...data,
       monthlyLabels: data.monthlyLabels.slice(0, endIdx),
@@ -284,6 +291,7 @@ export default function ReportClient({
       shop: { ...data.shop, period: newPeriod },
       rankingHistory: newRankingHistory,
       searchQueries: newSearchQueries,
+      gridRanking: newGridRanking,
       reviewLabels: data.reviewLabels.slice(0, reviewTrimIdx),
       reviewCounts: data.reviewCounts.slice(0, reviewTrimIdx),
       reviewDelta: data.reviewDelta.slice(0, reviewTrimIdx),
@@ -918,7 +926,8 @@ export default function ReportClient({
               const isLastKpi = i === kpis.length - 1;
               const mom = kpi.momValue != null ? pctChange(kpi.value, kpi.momValue) : null;
               const yoyC = kpi.yoyValue != null ? pctChange(kpi.value, kpi.yoyValue) : null;
-              const badgeStyle = (isUp: boolean): React.CSSProperties => ({ display: "inline-block", padding: "2px 7px", borderRadius: 16, fontSize: 10, fontWeight: 600, background: isUp ? "#e6f9ee" : "#fde8e8", color: isUp ? "#0a8f3c" : "#c0392b" });
+              const badgeStyle = (isUp: boolean, isFlat?: boolean): React.CSSProperties => ({ display: "inline-block", padding: "2px 7px", borderRadius: 16, fontSize: 10, fontWeight: 600, background: isFlat ? "#f0f0f0" : isUp ? "#e6f9ee" : "#fde8e8", color: isFlat ? "#888" : isUp ? "#0a8f3c" : "#c0392b" });
+              const arrow = (c: { isUp: boolean; isFlat: boolean }) => c.isFlat ? "→" : c.isUp ? "▲" : "▼";
               return (
                 <div key={i} style={{ background: "#fff", borderRadius: 12, padding: "14px 16px", position: "relative", overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", justifyContent: "center" }}>
                   <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: 3, background: kpiTopColors[i] }} />
@@ -947,8 +956,8 @@ export default function ReportClient({
                         </span>;
                       })() : <span style={{ fontSize: 10, color: "#bbb" }}>前年比 なし</span>}
                     </>) : (<>
-                      {mom && <span style={badgeStyle(mom.isUp)}>{mom.isUp ? "▲" : "▼"} {mom.text}（{kpi.momValue!.toLocaleString()}→{kpi.value.toLocaleString()}）前月比</span>}
-                      {yoyC ? <span style={badgeStyle(yoyC.isUp)}>{yoyC.isUp ? "▲" : "▼"} {yoyC.text}（{kpi.yoyValue!.toLocaleString()}→{kpi.value.toLocaleString()}）前年比</span>
+                      {mom && <span style={badgeStyle(mom.isUp, mom.isFlat)}>{arrow(mom)} {mom.text}（{kpi.momValue!.toLocaleString()}→{kpi.value.toLocaleString()}）前月比</span>}
+                      {yoyC ? <span style={badgeStyle(yoyC.isUp, yoyC.isFlat)}>{arrow(yoyC)} {yoyC.text}（{kpi.yoyValue!.toLocaleString()}→{kpi.value.toLocaleString()}）前年比</span>
                         : <span style={{ fontSize: 10, color: "#bbb" }}>前年比 なし</span>}
                     </>)}
                   </div>
