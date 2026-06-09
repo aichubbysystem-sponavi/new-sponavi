@@ -194,9 +194,13 @@ export default function ReportListClient({
           const shop = shops.find(s => s.id === id);
           if (!shop) continue;
           const shopName = shop.name;
-          const period = shop.period || "";
-          const m = period.match(/(\d{4})\D+(\d{1,2})/);
-          const month = m ? `${m[1]}/${parseInt(m[2])}` : new Date().getFullYear() + "/" + (new Date().getMonth() + 1);
+          // 対象月セレクタの値を優先、未選択なら店舗のperiodから取得
+          let month = reportMonth;
+          if (!month) {
+            const period = shop.period || "";
+            const m = period.match(/(\d{4})\D+(\d{1,2})/);
+            month = m ? `${m[1]}/${parseInt(m[2])}` : new Date().getFullYear() + "/" + (new Date().getMonth() + 1);
+          }
 
           // 既存メモを取得して追記
           let existingMemo = "";
