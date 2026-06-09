@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
@@ -177,6 +177,78 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  console.log(`[cron/sync-shops] added: ${added}, skipped: ${skipped}, accounts: ${accounts.length}, errors: ${errors.length}`);
-  return NextResponse.json({ success: true, added, skipped, accounts: accounts.length, errors: errors.slice(0, 5) });
+  // ── Step 2: Go API → Supabase shops 同期 ──
+  // Go APIの全店舗をSupabaseにもupsertして、ID/住所/カテゴリ等を統一
+  let synced = 0;
+  let syncErrors = 0;
+  try {
+    const goRes = await fetch(`${GO_API_URL}/api/shop`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (goRes.ok) {
+      const goData = await goRes.json();
+      const goShops: any[] = Array.isArray(goData) ? goData : [];
+      // Supabaseの既存店舗を名前で取得（重複チェック用）
+      const { data: sbShops } = await supabase.from("shops").select("id, name, gbp_location_name");
+      const sbByName = new Map((sbShops || []).map((s: any) => [s.name, s]));
+
+      for (const gs of goShops) {
+        const name = gs.name || gs.Name;
+        if (!name) continue;
+        const existing = sbByName.get(name);
+
+        try {
+          if (existing) {
+            // 既存 → Go APIに値がある場合のみ更新（空文字での上書き防止）
+            const updateRow: Record<string, any> = {
+              updated_at: new Date().toISOString(),
+            };
+            const goState = gs.state || gs.State || "";
+            const goCity = gs.city || gs.City || "";
+            const goAddress = gs.address || gs.Address || "";
+            const goPhone = gs.phone || gs.Phone || "";
+            const goPostal = gs.postal_code || gs.PostalCode || "";
+            if (goState) updateRow.state = goState;
+            if (goCity) updateRow.city = goCity;
+            if (goAddress) updateRow.address = goAddress;
+            if (goPhone) updateRow.phone = goPhone;
+            if (goPostal) updateRow.postal_code = goPostal;
+            // gbp_location_name はSupabase側が空のときだけGo APIから補完
+            const goLocName = gs.gbp_location_name || gs.GbpLocationName || null;
+            if (goLocName && !existing.gbp_location_name) {
+              updateRow.gbp_location_name = goLocName;
+              updateRow.gbp_shop_name = gs.gbp_shop_name || gs.GbpShopName || null;
+            }
+            await supabase.from("shops").update(updateRow).eq("id", existing.id);
+          } else {
+            // 新規 → 挿入
+            const insertRow: Record<string, any> = {
+              id: gs.id || gs.ID || crypto.randomUUID(),
+              name,
+              owner_id: gs.owner_id || gs.OwnerID || ownerId,
+              gbp_location_name: gs.gbp_location_name || gs.GbpLocationName || null,
+              gbp_shop_name: gs.gbp_shop_name || gs.GbpShopName || null,
+              state: gs.state || gs.State || "",
+              city: gs.city || gs.City || "",
+              address: gs.address || gs.Address || "",
+              phone: gs.phone || gs.Phone || "",
+              postal_code: gs.postal_code || gs.PostalCode || "",
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            };
+            await supabase.from("shops").insert(insertRow);
+          }
+          synced++;
+        } catch {
+          syncErrors++;
+        }
+      }
+    }
+  } catch (e: any) {
+    console.error("[cron/sync-shops] Go→Supabase sync error:", e?.message);
+  }
+
+  console.log(`[cron/sync-shops] added: ${added}, skipped: ${skipped}, synced: ${synced}, syncErrors: ${syncErrors}, accounts: ${accounts.length}`);
+  return NextResponse.json({ success: true, added, skipped, synced, syncErrors, accounts: accounts.length, errors: errors.slice(0, 5) });
 }
