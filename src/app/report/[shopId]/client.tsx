@@ -184,9 +184,37 @@ export default function ReportClient({
       if (kpi.label.includes("通話")) return { ...kpi, value: getVal(charts.calls, idx), prevValue: getVal(charts.calls, prevIdx), momValue: prevIdx >= 0 ? getVal(charts.calls, prevIdx) : null, yoyValue: yoyIdx >= 0 ? getVal(charts.calls, yoyIdx) : null };
       if (kpi.label.includes("メニュー")) return { ...kpi, value: getVal(charts.foodMenus, idx), prevValue: getVal(charts.foodMenus, prevIdx), momValue: prevIdx >= 0 ? getVal(charts.foodMenus, prevIdx) : null, yoyValue: yoyIdx >= 0 ? getVal(charts.foodMenus, yoyIdx) : null };
       if (kpi.label.includes("予約")) return { ...kpi, value: getVal(charts.bookings, idx), prevValue: getVal(charts.bookings, prevIdx), momValue: prevIdx >= 0 ? getVal(charts.bookings, prevIdx) : null, yoyValue: yoyIdx >= 0 ? getVal(charts.bookings, yoyIdx) : null };
-      // 口コミ増減ラベルを表示月に合わせる
+      // 口コミ増減を表示月のreviewDeltaから再計算
       if (kpi.label.includes("口コミ") && m) {
-        return { ...kpi, label: `口コミ増減【${m[1]}/${m[2]}】` };
+        // reviewDeltaのトリム後末尾 = 対象月の増減数
+        const trimmedDelta = data.reviewDelta.slice(0, (() => {
+          const targetYM2 = parseInt(m[1]) * 100 + parseInt(m[2]);
+          const isSlash = data.reviewLabels[0]?.includes("/");
+          if (isSlash) {
+            for (let ri = 0; ri < data.reviewLabels.length; ri++) {
+              const p = data.reviewLabels[ri].split("/");
+              if ((parseInt(p[0]) || 0) * 100 + (parseInt(p[1]) || 0) > targetYM2) return ri;
+            }
+          } else {
+            const baseYear = parseInt((data.monthlyLabels[0] || "2026").split("/")[0]) || 2026;
+            let ry = baseYear;
+            for (let ri = 0; ri < data.reviewLabels.length; ri++) {
+              const rm = (data.reviewLabels[ri] || "").match(/(\d{1,2})/);
+              if (rm) {
+                const mn = parseInt(rm[1]);
+                if (ri > 0) { const prev = (data.reviewLabels[ri-1]||"").match(/(\d{1,2})/); if (prev && parseInt(prev[1]) > mn) ry++; }
+                if (ry * 100 + mn > targetYM2) return ri;
+              }
+            }
+          }
+          return data.reviewLabels.length;
+        })());
+        const deltaValue = trimmedDelta.length > 0 ? trimmedDelta[trimmedDelta.length - 1] ?? 0 : kpi.value;
+        // 前年同月の口コミ累計
+        const trimmedCounts = data.reviewCounts.slice(0, trimmedDelta.length);
+        const curCount = trimmedCounts.length > 0 ? trimmedCounts[trimmedCounts.length - 1] : null;
+        const yoyCount = trimmedCounts.length >= 13 ? trimmedCounts[trimmedCounts.length - 13] : (trimmedCounts.length > 0 ? trimmedCounts[0] : null);
+        return { ...kpi, label: `口コミ増減【${m[1]}/${m[2]}】`, value: deltaValue, yoyValue: yoyCount };
       }
       return kpi;
     });
