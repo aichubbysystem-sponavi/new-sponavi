@@ -132,7 +132,7 @@ export async function POST(request: NextRequest) {
   // Places APIフォールバックがあるのでgbp_location_nameの有無を問わない
   let query = supabase
     .from("shops")
-    .select("id, name, gbp_location_name, gbp_latitude, gbp_longitude, gbp_shop_name");
+    .select("id, name, gbp_location_name, gbp_latitude, gbp_longitude, gbp_shop_name, state, city, address, full_address");
 
   if (targetShopId) {
     query = query.eq("id", targetShopId);
@@ -197,10 +197,18 @@ export async function POST(request: NextRequest) {
     }
 
     // 方法2: Google Places APIで店舗名+住所から座標取得（最終手段）
-    // ※ 店舗名だけでは同名の別店舗にマッチする恐れがあるため、住所情報も含めて検索
     if (!lat && GCP_API_KEY) {
       try {
-        // locationMapから住所のヒントを探す（マッチしたロケーションの近辺情報）
+        // DB上の住所情報を組み立て（同名店舗の絞り込みに使用）
+        const shopState = (shop as any).state || "";
+        const shopCity = (shop as any).city || "";
+        const shopAddress = (shop as any).address || "";
+        const shopFullAddress = (shop as any).full_address || "";
+        const addressHint = shopFullAddress || [shopState, shopCity, shopAddress].filter(Boolean).join("");
+
+        // 住所情報があれば検索クエリに含めて精度向上
+        const textQuery = addressHint ? `${shopTitle} ${addressHint}` : shopTitle;
+
         const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
           method: "POST",
           headers: {
@@ -209,7 +217,7 @@ export async function POST(request: NextRequest) {
             "X-Goog-FieldMask": "places.displayName,places.location,places.formattedAddress",
           },
           body: JSON.stringify({
-            textQuery: shopTitle,
+            textQuery,
             languageCode: "ja",
             pageSize: 5,
           }),
@@ -218,27 +226,48 @@ export async function POST(request: NextRequest) {
         if (res.ok) {
           const data = await res.json();
           const places = data.places || [];
-          // 完全一致のみ使用（同名別店舗の誤マッチ防止）
-          const exactMatch = places.find((p: any) => {
-            const name = p.displayName?.text || "";
-            return name === shopTitle;
-          });
-          if (exactMatch?.location && places.length === 1) {
-            // 検索結果が1件のみの場合は信頼できる
-            lat = exactMatch.location.latitude;
-            lng = exactMatch.location.longitude;
+
+          // 名前が完全一致する候補を抽出
+          const exactMatches = places.filter((p: any) => (p.displayName?.text || "") === shopTitle);
+          const candidates = exactMatches.length > 0 ? exactMatches : places;
+
+          if (candidates.length === 1 && candidates[0]?.location) {
+            // 1件のみ → 信頼できる
+            lat = candidates[0].location.latitude;
+            lng = candidates[0].location.longitude;
             method = "Places API (唯一)";
-          } else if (exactMatch?.location && places.length > 1) {
-            // 複数件ある場合はスキップ（間違った店舗の可能性）
-            details.push({ shop: shop.name, error: `Places API: 同名${places.length}件ヒット（特定不可）` });
+          } else if (candidates.length > 1 && addressHint) {
+            // 複数件 → 住所マッチングで絞り込み
+            const matched = candidates.find((p: any) => {
+              const fa = (p.formattedAddress || "") as string;
+              if (!fa) return false;
+              // 都道府県+市区町村が両方含まれるか
+              if (shopState && shopCity && fa.includes(shopState) && fa.includes(shopCity)) return true;
+              // 市区町村+番地が両方含まれるか
+              if (shopCity && shopAddress && fa.includes(shopCity) && fa.includes(shopAddress)) return true;
+              // full_addressしかない場合: 郵便番号を除いた住所部分で比較
+              if (shopFullAddress && !shopState && !shopCity) {
+                const stripped = shopFullAddress.replace(/^〒?\d{3}-?\d{4}\s*/, "");
+                if (stripped.length >= 4 && fa.includes(stripped)) return true;
+              }
+              return false;
+            });
+            if (matched?.location) {
+              lat = matched.location.latitude;
+              lng = matched.location.longitude;
+              method = `Places API (住所一致: ${candidates.length}件中)`;
+            } else {
+              details.push({ shop: shop.name, error: `Places API: 同名${candidates.length}件ヒット（住所で絞り込み不可）` });
+              errors++;
+              continue;
+            }
+          } else if (candidates.length > 1) {
+            // 複数件 & 住所情報なし → スキップ
+            details.push({ shop: shop.name, error: `Places API: 同名${candidates.length}件ヒット（住所情報なし）` });
             errors++;
             continue;
-          } else if (places.length === 1 && places[0]?.location) {
-            lat = places[0].location.latitude;
-            lng = places[0].location.longitude;
-            method = "Places API (唯一)";
           } else {
-            details.push({ shop: shop.name, error: places.length > 0 ? `Places API: ${places.length}件ヒット（特定不可）` : "Places API: 0件" });
+            details.push({ shop: shop.name, error: "Places API: 0件" });
             errors++;
             continue;
           }
