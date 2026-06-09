@@ -277,12 +277,6 @@ export default function ReportClient({
       latestMonth: targetMonth,
     } : data.searchQueries;
 
-    // gridRankingもフィルタ（対象月以降のデータを除外）
-    const newGridRanking = data.gridRanking ? {
-      ...data.gridRanking,
-      history: data.gridRanking.history.filter((h: { month: string }) => monthToNum(h.month) <= monthToNum(normalized || targetMonth)),
-    } : data.gridRanking;
-
     return {
       ...data,
       monthlyLabels: data.monthlyLabels.slice(0, endIdx),
@@ -291,7 +285,6 @@ export default function ReportClient({
       shop: { ...data.shop, period: newPeriod },
       rankingHistory: newRankingHistory,
       searchQueries: newSearchQueries,
-      gridRanking: newGridRanking,
       reviewLabels: data.reviewLabels.slice(0, reviewTrimIdx),
       reviewCounts: data.reviewCounts.slice(0, reviewTrimIdx),
       reviewDelta: data.reviewDelta.slice(0, reviewTrimIdx),
@@ -402,9 +395,13 @@ export default function ReportClient({
   // gridRankingの中心点順位をキーワード順位として使用（あればスプレッドシートより優先）
   const gridKeywords = useMemo(() => {
     if (!gridRanking || gridRanking.history.length === 0) return null;
-    const history = gridRanking.history;
-    const latest = history[history.length - 1];
-    const prev = history.length >= 2 ? history[history.length - 2] : null;
+    // 対象月（curLabel）以前のデータのみ使用
+    const filtered = curLabel
+      ? gridRanking.history.filter(h => monthToNum(h.month) <= monthToNum(curLabel))
+      : gridRanking.history;
+    if (filtered.length === 0) return null;
+    const latest = filtered[filtered.length - 1];
+    const prev = filtered.length >= 2 ? filtered[filtered.length - 2] : null;
     if (!latest?.snapshots) return null;
 
     const result: { word: string; rank: number; prevRank: number }[] = [];
@@ -422,7 +419,7 @@ export default function ReportClient({
       if (rank > 0) result.push({ word: snap.keyword, rank, prevRank: prevRank || rank });
     }
     return result.length > 0 ? result : null;
-  }, [gridRanking]);
+  }, [gridRanking, curLabel]);
 
   // gridRankingの中心点があればそちらを使用、なければスプレッドシートのkeywords
   const effectiveKeywords = gridKeywords || keywords;
