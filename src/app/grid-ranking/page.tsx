@@ -227,13 +227,18 @@ export default function GridRankingPage() {
       setShopLng(goLng);
       return;
     }
-    // Go APIに座標がない場合、Supabaseから取得
+    // Go APIに座標がない場合、Supabaseから店舗名で取得（Go API⇔SupabaseのID不一致対策）
+    const shopName = (selectedShop as any)?.name;
+    if (!shopName) return;
     import("@/lib/supabase").then(({ supabase }) => {
       supabase
         .from("shops")
         .select("gbp_latitude, gbp_longitude")
-        .eq("id", selectedShopId)
-        .single()
+        .eq("name", shopName)
+        .not("gbp_latitude", "is", null)
+        .gt("gbp_latitude", 0)
+        .limit(1)
+        .maybeSingle()
         .then(({ data }) => {
           if (data?.gbp_latitude) {
             setShopLat(data.gbp_latitude);
@@ -862,7 +867,7 @@ export default function GridRankingPage() {
                       try {
                         const { createClient } = await import("@supabase/supabase-js");
                         const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL || "", process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "");
-                        const { data: coordRow } = await sb.from("shops").select("gbp_latitude, gbp_longitude").eq("id", p.shop_id).not("gbp_latitude", "is", null).gt("gbp_latitude", 0).limit(1).maybeSingle();
+                        const { data: coordRow } = await sb.from("shops").select("gbp_latitude, gbp_longitude").eq("name", p.shop_name).not("gbp_latitude", "is", null).gt("gbp_latitude", 0).limit(1).maybeSingle();
                         if (coordRow) { lat = coordRow.gbp_latitude || 0; lng = coordRow.gbp_longitude || 0; }
                       } catch {}
                       if (!lat || !lng) { skipped++; continue; }
@@ -1138,7 +1143,7 @@ export default function GridRankingPage() {
                     const shopName = s.name || s.id;
                     try {
                       // 座標取得
-                      const { data: coordRow } = await sb.from("shops").select("gbp_latitude, gbp_longitude").eq("id", s.id).not("gbp_latitude", "is", null).gt("gbp_latitude", 0).limit(1).maybeSingle();
+                      const { data: coordRow } = await sb.from("shops").select("gbp_latitude, gbp_longitude").eq("name", s.name || s.id).not("gbp_latitude", "is", null).gt("gbp_latitude", 0).limit(1).maybeSingle();
                       if (!coordRow?.gbp_latitude) { skipped++; continue; }
                       const lat = coordRow.gbp_latitude;
                       const lng = coordRow.gbp_longitude;
