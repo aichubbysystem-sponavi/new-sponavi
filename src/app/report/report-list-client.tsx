@@ -4,6 +4,13 @@ import Link from "next/link";
 import { useState, useMemo, useTransition, useEffect, useCallback } from "react";
 import type { ShopListItem } from "@/lib/report-data";
 import { syncAllData, syncShopData } from "./actions";
+import { supabase } from "@/lib/supabase";
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 type SortKey = "name" | "rating" | "totalReviews" | "period";
 type SortDir = "asc" | "desc";
@@ -205,6 +212,7 @@ export default function ReportListClient({
 
           // 既存メモを取得して追記
           let existingMemo = "";
+          const authH = await getAuthHeaders();
           try {
             const getRes = await fetch(`/api/report/memo?shopName=${encodeURIComponent(shopName)}&month=${encodeURIComponent(month)}`);
             if (getRes.ok) {
@@ -216,7 +224,7 @@ export default function ReportListClient({
           const newMemo = existingMemo ? `${existingMemo}\n\n${templateText}` : templateText;
           const res = await fetch("/api/report/memo", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", ...authH },
             body: JSON.stringify({ shopName, month, memo: newMemo }),
           });
           if (res.ok) added++;

@@ -51,6 +51,10 @@ export async function GET(request: NextRequest) {
  * { shopName, month, memo }
  */
 export async function POST(request: NextRequest) {
+  const { verifyAuth } = await import("@/lib/auth-verify");
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+
   const body = await request.json();
   const { shopName, month, memo } = body as { shopName: string; month: string; memo: string };
 

@@ -26,6 +26,10 @@ function formatReview(r: any) {
 }
 
 export async function GET(request: NextRequest) {
+  const { verifyAuth } = await import("@/lib/auth-verify");
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+
   const shopName = request.nextUrl.searchParams.get("shop") || "";
   const keyword = request.nextUrl.searchParams.get("keyword") || "";
   const type = request.nextUrl.searchParams.get("type") || ""; // "positive" or "negative"

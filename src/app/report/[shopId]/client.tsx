@@ -3,6 +3,13 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import DOMPurify from "isomorphic-dompurify";
 import Link from "next/link";
+import { supabase } from "@/lib/supabase";
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -352,10 +359,11 @@ export default function ReportClient({
   const saveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const saveToDb = useCallback((field: "sectionVisibility" | "kwVisibility" | "rwVisibility", value: Record<string, boolean>) => {
     if (saveTimersRef.current[field]) clearTimeout(saveTimersRef.current[field]);
-    saveTimersRef.current[field] = setTimeout(() => {
+    saveTimersRef.current[field] = setTimeout(async () => {
+      const authH = await getAuthHeaders();
       fetch(`/api/report/display-settings`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authH },
         body: JSON.stringify({ shopId, [field]: value }),
       }).catch(() => {});
     }, 500);
@@ -580,7 +588,8 @@ export default function ReportClient({
   // ワードクリック: 直近1年の口コミからAPI検索（全件表示）
   const handleWordClick = async (word: string, _source: any, type: "positive" | "negative") => {
     try {
-      const res = await fetch(`/api/report/search-reviews?shop=${encodeURIComponent(shop.name)}&keyword=${encodeURIComponent(word)}&type=${type}`);
+      const authH = await getAuthHeaders();
+      const res = await fetch(`/api/report/search-reviews?shop=${encodeURIComponent(shop.name)}&keyword=${encodeURIComponent(word)}&type=${type}`, { headers: authH });
       const data = await res.json();
       setNegativeModal({ word, reviews: data.reviews || [], type, matched: data.matched });
     } catch {
@@ -604,9 +613,10 @@ export default function ReportClient({
   const saveMemo = async () => {
     setMemoLoading(true);
     try {
+      const authH = await getAuthHeaders();
       const res = await fetch("/api/report/memo", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authH },
         body: JSON.stringify({ shopName: shop.name, month: curLabel, memo }),
       });
       if (res.ok) {

@@ -46,14 +46,8 @@ export default function AuthGuard({ children, skipAuth }: { children: React.Reac
     };
   }, [authenticated, pathname, resetTimeout]);
 
-  // レポートサブドメイン検出（useEffect内でのみ判定 — hydration安全）
-  const [isReportDomain, setIsReportDomain] = useState(false);
   useEffect(() => {
-    setIsReportDomain(window.location.hostname.startsWith("report."));
-  }, []);
-
-  useEffect(() => {
-    if (skipAuth || isReportDomain) return; // レポートサブドメインでは認証スキップ
+    if (skipAuth) return;
 
     const checkAuth = async () => {
       const { data } = await supabase.auth.getSession();
@@ -81,9 +75,9 @@ export default function AuthGuard({ children, skipAuth }: { children: React.Reac
     return () => {
       listener.subscription.unsubscribe();
     };
-  }, [pathname, router, skipAuth, isReportDomain]);
+  }, [pathname, router, skipAuth]);
 
-  if (pathname === "/login" || skipAuth || isReportDomain) {
+  if (pathname === "/login" || skipAuth) {
     return <>{children}</>;
   }
 

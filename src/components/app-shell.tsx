@@ -17,7 +17,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const isReportPage = pathname === "/report" || pathname.startsWith("/report/");
 
   return (
-    <AuthGuard skipAuth={isReportPage}>
+    <AuthGuard>
       {isLoginPage || isReportPage ? (
         children
       ) : (

@@ -33,6 +33,10 @@ export async function GET(request: NextRequest) {
  * { shopId, sectionVisibility?, kwVisibility?, rwVisibility? }
  */
 export async function PUT(request: NextRequest) {
+  const { verifyAuth } = await import("@/lib/auth-verify");
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+
   const body = await request.json();
   const { shopId, sectionVisibility, kwVisibility, rwVisibility } = body;
   if (!shopId) return NextResponse.json({ error: "shopId必須" }, { status: 400 });
