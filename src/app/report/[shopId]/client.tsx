@@ -325,7 +325,7 @@ export default function ReportClient({
   const [gridEditMonth, setGridEditMonth] = useState("");
   const [gridEditKw, setGridEditKw] = useState("");
 
-  // セクション表示ON/OFF（店舗ごとにlocalStorage保存）
+  // セクション表示ON/OFF（店舗ごとにDB保存、localStorageはフォールバック）
   const visKey = `report-visibility-${shopId}`;
   const [sectionVisibility, setSectionVisibility] = useState<Record<string, boolean>>({
     keywords: true,
@@ -336,33 +336,70 @@ export default function ReportClient({
     metricFoodMenus: true,
   });
 
-  // 個別キーワード表示ON/OFF（店舗ごとにlocalStorage保存）
+  // 個別キーワード表示ON/OFF
   const kwVisKey = `report-kw-visibility-${shopId}`;
   const [kwVisibility, setKwVisibility] = useState<Record<string, boolean>>({});
 
-  // 口コミ分析ワード個別ON/OFF（店舗ごとにlocalStorage保存）
+  // 口コミ分析ワード個別ON/OFF
   const rwVisKey = `report-rw-visibility-${shopId}`;
   const [rwVisibility, setRwVisibility] = useState<Record<string, boolean>>({});
 
-  // ハイドレーション完了フラグ（localStorage依存の表示分岐をクライアントのみに限定）
+  // ハイドレーション完了フラグ
   const [mounted, setMounted] = useState(false);
+
+  // DB保存（種類ごとに独立したデバウンスタイマー）
+  const saveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const saveToDb = useCallback((field: "sectionVisibility" | "kwVisibility" | "rwVisibility", value: Record<string, boolean>) => {
+    if (saveTimersRef.current[field]) clearTimeout(saveTimersRef.current[field]);
+    saveTimersRef.current[field] = setTimeout(() => {
+      fetch(`/api/report/display-settings`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shopId, [field]: value }),
+      }).catch(() => {});
+    }, 500);
+  }, [shopId]);
 
   useEffect(() => {
     setMounted(true);
-    try {
-      const saved = localStorage.getItem(visKey);
-      if (saved) setSectionVisibility(JSON.parse(saved));
-      const kwSaved = localStorage.getItem(kwVisKey);
-      if (kwSaved) setKwVisibility(JSON.parse(kwSaved));
-      const rwSaved = localStorage.getItem(rwVisKey);
-      if (rwSaved) setRwVisibility(JSON.parse(rwSaved));
-    } catch {}
-  }, [visKey, kwVisKey, rwVisKey]);
+    // DBから読み込み → localStorageフォールバック
+    fetch(`/api/report/display-settings?shopId=${encodeURIComponent(shopId)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.section_visibility && Object.keys(data.section_visibility).length > 0) {
+          setSectionVisibility(prev => ({ ...prev, ...data.section_visibility }));
+        } else {
+          try { const s = localStorage.getItem(visKey); if (s) setSectionVisibility(prev => ({ ...prev, ...JSON.parse(s) })); } catch {}
+        }
+        if (data.kw_visibility && Object.keys(data.kw_visibility).length > 0) {
+          setKwVisibility(data.kw_visibility);
+        } else {
+          try { const s = localStorage.getItem(kwVisKey); if (s) setKwVisibility(JSON.parse(s)); } catch {}
+        }
+        if (data.rw_visibility && Object.keys(data.rw_visibility).length > 0) {
+          setRwVisibility(data.rw_visibility);
+        } else {
+          try { const s = localStorage.getItem(rwVisKey); if (s) setRwVisibility(JSON.parse(s)); } catch {}
+        }
+      })
+      .catch(() => {
+        // DB読み込み失敗 → localStorageから復元
+        try {
+          const saved = localStorage.getItem(visKey);
+          if (saved) setSectionVisibility(prev => ({ ...prev, ...JSON.parse(saved) }));
+          const kwSaved = localStorage.getItem(kwVisKey);
+          if (kwSaved) setKwVisibility(JSON.parse(kwSaved));
+          const rwSaved = localStorage.getItem(rwVisKey);
+          if (rwSaved) setRwVisibility(JSON.parse(rwSaved));
+        } catch {}
+      });
+  }, [shopId, visKey, kwVisKey, rwVisKey]);
 
   const toggleSection = (key: string) => {
     setSectionVisibility(prev => {
       const next = { ...prev, [key]: !prev[key] };
       localStorage.setItem(visKey, JSON.stringify(next));
+      saveToDb("sectionVisibility", next);
       return next;
     });
   };
@@ -371,6 +408,7 @@ export default function ReportClient({
     setKwVisibility(prev => {
       const next = { ...prev, [word]: prev[word] === false ? true : false };
       localStorage.setItem(kwVisKey, JSON.stringify(next));
+      saveToDb("kwVisibility", next);
       return next;
     });
   };
@@ -379,6 +417,7 @@ export default function ReportClient({
     setRwVisibility(prev => {
       const next = { ...prev, [word]: prev[word] === false ? true : false };
       localStorage.setItem(rwVisKey, JSON.stringify(next));
+      saveToDb("rwVisibility", next);
       return next;
     });
   };
