@@ -1336,7 +1336,7 @@ export default function GridRankingPage() {
               <button
                 onClick={async () => {
                   try {
-                    const res = await api.post("/api/report/sync-coordinates", { shopId: selectedShopId }, { timeout: 60000 });
+                    const res = await api.post("/api/report/sync-coordinates", { shopId: selectedShopId, shopName: (selectedShop as any)?.name || "" }, { timeout: 60000 });
                     if (res.data?.error) {
                       alert(`座標取得失敗: ${res.data.error}`);
                     } else if (res.data?.updated > 0 && res.data?.details?.[0]) {

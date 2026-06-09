@@ -79,6 +79,7 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json().catch(() => ({}));
   const targetShopId = body?.shopId;
+  const targetShopName = body?.shopName;
 
   const supabase = getSupabase();
 
@@ -103,9 +104,22 @@ export async function POST(request: NextRequest) {
 
     if (targetShopId) {
       unmappedQuery = unmappedQuery.eq("id", targetShopId);
+    } else if (targetShopName) {
+      unmappedQuery = unmappedQuery.eq("name", targetShopName);
     }
 
-    const { data: unmappedShops } = await unmappedQuery.limit(500);
+    let { data: unmappedShops } = await unmappedQuery.limit(500);
+
+    // shopIdで見つからない場合、shopNameでフォールバック（Go API⇔Supabase ID不一致対策）
+    if ((!unmappedShops || unmappedShops.length === 0) && targetShopId && targetShopName) {
+      const { data: fallback } = await supabase
+        .from("shops")
+        .select("id, name, gbp_location_name")
+        .is("gbp_location_name", null)
+        .eq("name", targetShopName)
+        .limit(1);
+      if (fallback && fallback.length > 0) unmappedShops = fallback;
+    }
 
     if (unmappedShops && unmappedShops.length > 0 && locationMap.size > 0) {
       for (const shop of unmappedShops) {
@@ -136,15 +150,31 @@ export async function POST(request: NextRequest) {
 
   if (targetShopId) {
     query = query.eq("id", targetShopId);
+  } else if (targetShopName) {
+    // Go APIのshopIdがSupabaseに存在しない場合、名前で検索
+    query = query.eq("name", targetShopName);
   } else {
     // gbp_latitude が null または 0 の店舗のみ
     query = query.or("gbp_latitude.is.null,gbp_latitude.eq.0");
   }
 
-  const { data: shops } = await query.limit(500);
+  let { data: shops } = await query.limit(500);
+
+  // shopIdで見つからない場合、shopNameでフォールバック検索
+  if ((!shops || shops.length === 0) && targetShopId && targetShopName) {
+    const { data: fallback } = await supabase
+      .from("shops")
+      .select("id, name, gbp_location_name, gbp_latitude, gbp_longitude, gbp_shop_name, state, city, address, full_address")
+      .eq("name", targetShopName)
+      .limit(1);
+    if (fallback && fallback.length > 0) shops = fallback;
+  }
+
   if (!shops || shops.length === 0) {
     return NextResponse.json({
-      message: "座標未設定の店舗なし",
+      message: targetShopName
+        ? `店舗「${targetShopName}」がSupabase上に見つかりません。顧客マスタで店舗をインポートしてください。`
+        : "座標未設定の店舗なし",
       updated: 0,
       autoLinked,
       autoLinkDetails: autoLinkDetails.slice(0, 20),
