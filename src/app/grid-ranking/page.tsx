@@ -1337,16 +1337,20 @@ export default function GridRankingPage() {
                 onClick={async () => {
                   try {
                     const res = await api.post("/api/report/sync-coordinates", { shopId: selectedShopId }, { timeout: 60000 });
-                    if (res.data?.updated > 0 && res.data?.details?.[0]) {
+                    if (res.data?.error) {
+                      alert(`座標取得失敗: ${res.data.error}`);
+                    } else if (res.data?.updated > 0 && res.data?.details?.[0]) {
                       const d = res.data.details[0];
                       setShopLat(d.lat);
                       setShopLng(d.lng);
                       alert(`座標を取得しました: ${d.lat.toFixed(6)}, ${d.lng.toFixed(6)}`);
                     } else {
-                      alert(res.data?.details?.[0]?.error || "座標を取得できませんでした");
+                      const errMsg = res.data?.details?.[0]?.error || res.data?.message || "座標を取得できませんでした";
+                      alert(errMsg);
                     }
                   } catch (e: any) {
-                    alert("座標取得エラー: " + (e?.message || "不明"));
+                    const msg = e?.response?.data?.error || e?.userMessage || e?.message || "不明";
+                    alert("座標取得エラー: " + msg);
                   }
                 }}
                 className="text-xs bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 transition"
