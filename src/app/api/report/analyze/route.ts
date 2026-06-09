@@ -309,7 +309,7 @@ export async function POST(request: NextRequest) {
   }
 
   const supabase = getSupabaseAdmin();
-  const results: { shopId: string; shopName: string; status: string }[] = [];
+  const results: { shopId: string; shopName: string; status: string; reason?: string }[] = [];
 
   // 今月分析済み店舗を取得（スキップ用）
   const thisMonthStart = new Date();
@@ -332,7 +332,7 @@ export async function POST(request: NextRequest) {
     try {
       const reviewData = await fetchReviews(shop.id);
       if (!reviewData || !reviewData.reviews || reviewData.reviews.length === 0) {
-        results.push({ shopId: shop.id, shopName: shop.name, status: "no_reviews" });
+        results.push({ shopId: shop.id, shopName: shop.name, status: "no_reviews", reason: "口コミデータなし（先に口コミ同期が必要）" });
         continue;
       }
 
@@ -622,7 +622,7 @@ export async function POST(request: NextRequest) {
       );
 
       if (!analysis) {
-        results.push({ shopId: shop.id, shopName: shop.name, status: "analysis_failed" });
+        results.push({ shopId: shop.id, shopName: shop.name, status: "analysis_failed", reason: "AI分析が応答なし（タイムアウトまたはAPI制限）" });
         continue;
       }
 
@@ -668,13 +668,13 @@ export async function POST(request: NextRequest) {
 
       if (error) {
         console.error("[analyze] Supabase error:", error);
-        results.push({ shopId: shop.id, shopName: shop.name, status: "db_error" });
+        results.push({ shopId: shop.id, shopName: shop.name, status: "db_error", reason: `DB保存エラー: ${error.message}` });
       } else {
         results.push({ shopId: shop.id, shopName: shop.name, status: "success" });
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("[analyze] Error for shop:", shop.name, err);
-      results.push({ shopId: shop.id, shopName: shop.name, status: "error" });
+      results.push({ shopId: shop.id, shopName: shop.name, status: "error", reason: err?.message?.slice(0, 100) || "不明なエラー" });
     }
   }
 

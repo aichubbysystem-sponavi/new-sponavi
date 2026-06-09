@@ -8,6 +8,7 @@ interface AnalysisResult {
   shopId: string;
   shopName: string;
   status: string;
+  reason?: string;
 }
 
 interface PersistedFailure {
@@ -351,6 +352,7 @@ export default function ReviewAnalysisPage() {
                 >
                   {r.status === "success" ? "完了" : r.status === "already_done" ? "分析済み" : r.status === "no_reviews" ? "口コミなし" : "失敗"}
                 </span>
+                {r.reason && <span className="text-[10px] text-red-400 truncate max-w-[300px]">{r.reason}</span>}
               </div>
             ))}
           </div>
