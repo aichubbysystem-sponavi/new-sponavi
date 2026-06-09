@@ -37,10 +37,10 @@ export async function GET(request: NextRequest) {
       if (error.code === "42P01" || error.message?.includes("does not exist")) {
         return NextResponse.json({ memo: "" });
       }
-      return NextResponse.json({ memo: "" });
+      return NextResponse.json({ memo: "", _error: error.message, _code: error.code });
     }
 
-    return NextResponse.json({ memo: data?.memo || "" });
+    return NextResponse.json({ memo: data?.memo || "", month: data?.month || null, shop_name: data?.shop_name || null });
   } catch {
     return NextResponse.json({ memo: "" });
   }
