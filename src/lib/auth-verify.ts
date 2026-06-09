@@ -1,36 +1,36 @@
-import { jwtVerify } from "jose";
+import { createClient } from "@supabase/supabase-js";
 
-const JWT_SECRET = process.env.SUPABASE_JWT_SECRET || "";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
 /**
- * Supabase JWTトークンを検証（署名検証必須）
+ * Supabase JWTトークンを検証（Supabase Auth APIで署名検証）
+ * HS256/ECC両方のJWTに対応。トークン偽造は不可能。
  */
 export async function verifyAuth(authHeader: string | null): Promise<{ valid: boolean; sub?: string }> {
   if (!authHeader?.startsWith("Bearer ")) return { valid: false };
 
-  const jwt = authHeader.replace("Bearer ", "");
+  const token = authHeader.replace("Bearer ", "");
 
-  // JWTシークレットが未設定の場合は認証拒否（本番で必ず設定すること）
-  if (!JWT_SECRET) {
-    console.error("[auth] SUPABASE_JWT_SECRET is not set — all requests will be rejected");
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    console.error("[auth] Supabase URL or Anon Key is not set");
     return { valid: false };
   }
 
   try {
-    // HS256署名を検証（署名が正しくなければ例外がスローされる）
-    const secret = new TextEncoder().encode(JWT_SECRET);
-    const { payload } = await jwtVerify(jwt, secret, {
-      algorithms: ["HS256"],
+    // Supabase Auth APIでトークンを検証（署名・有効期限を自動チェック）
+    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+      auth: { autoRefreshToken: false, persistSession: false },
     });
+    const { data, error } = await supabase.auth.getUser(token);
 
-    // jwtVerifyは有効期限も自動チェックするが、念のため明示チェック
-    if (payload.exp && payload.exp < Date.now() / 1000) {
+    if (error || !data.user) {
       return { valid: false };
     }
 
-    return { valid: true, sub: payload.sub as string };
+    return { valid: true, sub: data.user.id };
   } catch {
-    // 署名検証失敗 = 不正なトークン → 拒否
     return { valid: false };
   }
 }
