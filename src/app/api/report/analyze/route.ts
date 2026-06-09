@@ -526,9 +526,18 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          // キーワード順位データ（gridRankingから対象月の中心点順位を取得）
+          // キーワード順位データ（DBからリアルタイム取得 — フロントと同じデータソース）
           try {
-            const gridRanking = report.gridRanking;
+            // report_data_cacheのgridRankingは古い可能性があるのでDBから直接取得
+            let gridRanking = report.gridRanking;
+            try {
+              const { data: shopRow } = await supabase.from("shops").select("id").eq("name", shop.name).limit(1).maybeSingle();
+              if (shopRow?.id) {
+                const { fetchGridRankingLive } = await import("@/lib/report-api");
+                const liveGrid = await fetchGridRankingLive([shopRow.id], shop.name);
+                if (liveGrid && liveGrid.history.length > 0) gridRanking = liveGrid;
+              }
+            } catch {}
             const targetNorm = (curMonth || "").replace(/\/0+(\d)/, "/$1");
             let kwData: { word: string; rank: number; prevRank: number }[] = [];
 

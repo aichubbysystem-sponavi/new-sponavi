@@ -97,7 +97,7 @@ async function getShopDbIds(shopName: string): Promise<string[]> {
  * グリッド順位データをリアルタイム取得
  * shopIdsを複数受け取り、いずれかにマッチするログを取得（同名の重複店舗対策）
  */
-async function fetchGridRankingLive(shopIds: string[], shopName?: string): Promise<GridRankingReport | undefined> {
+export async function fetchGridRankingLive(shopIds: string[], shopName?: string): Promise<GridRankingReport | undefined> {
   try {
     const sb = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || "",
