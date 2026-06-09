@@ -34,8 +34,12 @@ function generateMonthOptions(min: string, max: string): string[] {
   return opts;
 }
 
-/** デフォルトの最小月（36ヶ月前） */
+/** デフォルトの最小月（36ヶ月前）— SSR安全: 固定値を返し、クライアントでのみ更新 */
+const SSR_SAFE_MIN = "2023/1";
+const SSR_SAFE_MAX = "2026/6";
+
 function defaultMinMonth(): string {
+  if (typeof window === "undefined") return SSR_SAFE_MIN;
   const d = new Date();
   d.setMonth(d.getMonth() - 35);
   return `${d.getFullYear()}/${d.getMonth() + 1}`;
@@ -43,6 +47,7 @@ function defaultMinMonth(): string {
 
 /** デフォルトの最大月（今月） */
 function defaultMaxMonth(): string {
+  if (typeof window === "undefined") return SSR_SAFE_MAX;
   const d = new Date();
   return `${d.getFullYear()}/${d.getMonth() + 1}`;
 }
@@ -55,8 +60,15 @@ export default function DateRangePicker({
   maxMonth,
   compact = false,
 }: DateRangePickerProps) {
-  const min = minMonth || defaultMinMonth();
-  const max = maxMonth || defaultMaxMonth();
+  const [clientMin, setClientMin] = useState("");
+  const [clientMax, setClientMax] = useState("");
+  useEffect(() => {
+    if (!minMonth) setClientMin(defaultMinMonth());
+    if (!maxMonth) setClientMax(defaultMaxMonth());
+  }, [minMonth, maxMonth]);
+
+  const min = minMonth || clientMin || SSR_SAFE_MIN;
+  const max = maxMonth || clientMax || SSR_SAFE_MAX;
   const options = useMemo(() => generateMonthOptions(min, max), [min, max]);
 
   const handleStartChange = useCallback((val: string) => {
@@ -77,12 +89,12 @@ export default function DateRangePicker({
     }
   }, [startMonth, onChange]);
 
-  // プリセットボタン
+  // プリセットボタン（maxを基準にすることでSSR/クライアント間の不一致を防止）
   const presets = useMemo(() => {
-    const now = new Date();
-    const thisMonth = `${now.getFullYear()}/${now.getMonth() + 1}`;
+    const thisMonth = max;
+    const [maxY, maxM] = max.split("/").map(Number);
     const prev = (m: number) => {
-      const d = new Date(now.getFullYear(), now.getMonth() - m + 1, 1);
+      const d = new Date(maxY, maxM - 1 - m + 1, 1);
       return `${d.getFullYear()}/${d.getMonth() + 1}`;
     };
     return [
@@ -93,7 +105,7 @@ export default function DateRangePicker({
       { label: "1年", start: prev(12), end: thisMonth },
       { label: "全期間", start: min, end: thisMonth },
     ].filter(p => monthToNum(p.start) >= monthToNum(min));
-  }, [min]);
+  }, [min, max]);
 
   const isPresetActive = (p: { start: string; end: string }) =>
     p.start === startMonth && p.end === endMonth;

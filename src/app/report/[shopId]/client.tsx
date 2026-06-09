@@ -219,9 +219,10 @@ export default function ReportClient({
       }
       return kpi;
     });
+    const lastDay = m ? new Date(parseInt(m[1]), parseInt(m[2]), 0).getDate() : 0;
     const newPeriod = m ? {
       start: `${m[1]}/${String(m[2]).padStart(2, "0")}/01`,
-      end: `${m[1]}/${String(m[2]).padStart(2, "0")}/${new Date(parseInt(m[1]), parseInt(m[2]), 0).getDate()}`,
+      end: `${m[1]}/${String(m[2]).padStart(2, "0")}/${lastDay}`,
     } : data.shop.period;
 
     // rankingHistoryもフィルタ
@@ -565,7 +566,7 @@ export default function ReportClient({
       if (existing) { existing.addEventListener("load", renderGridMap); return; }
       const script = document.createElement("script");
       script.id = "google-maps-script";
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=marker`;
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=marker&loading=async`;
       script.async = true; script.defer = true;
       script.onload = renderGridMap;
       document.head.appendChild(script);

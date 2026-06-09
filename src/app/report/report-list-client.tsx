@@ -199,8 +199,9 @@ export default function ReportListClient({
           if (!month) {
             const period = shop.period || "";
             const m = period.match(/(\d{4})\D+(\d{1,2})/);
-            month = m ? `${m[1]}/${parseInt(m[2])}` : new Date().getFullYear() + "/" + (new Date().getMonth() + 1);
+            month = m ? `${m[1]}/${parseInt(m[2])}` : "";
           }
+          if (!month) continue;
 
           // 既存メモを取得して追記
           let existingMemo = "";
@@ -299,14 +300,15 @@ export default function ReportListClient({
   const sortArrow = (key: SortKey) => sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
 
   // 対象月の選択肢（直近18ヶ月）
-  const monthOptions = useMemo(() => {
+  const [monthOptions, setMonthOptions] = useState<string[]>([]);
+  useEffect(() => {
     const opts: string[] = [];
     const now = new Date();
     for (let i = 0; i < 18; i++) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       opts.push(`${d.getFullYear()}/${d.getMonth() + 1}`);
     }
-    return opts;
+    setMonthOptions(opts);
   }, []);
 
   // 対象月のリンク用パラメータ
@@ -621,7 +623,7 @@ export default function ReportListClient({
           </div>
         )}
 
-        <footer className="text-center py-6 text-[11px] text-slate-300" suppressHydrationWarning>© {new Date().getFullYear()} SPOTLIGHT NAVIGATOR by 株式会社Chubby</footer>
+        <footer className="text-center py-6 text-[11px] text-slate-300">© 2026 SPOTLIGHT NAVIGATOR by 株式会社Chubby</footer>
 
         {/* メモ一括追加モーダル */}
         {showMemoModal && (
