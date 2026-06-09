@@ -110,15 +110,17 @@ function monthToNum(m: string): number {
 // ── Component ──
 
 export default function ReportClient({
-  data, shopId, dataSource = "mock", googleReviewUrl = null,
+  data, shopId, dataSource = "mock", googleReviewUrl = null, targetMonth: targetMonthProp,
 }: {
-  data: ReportData; shopId: string; dataSource?: "cache" | "spreadsheet" | "mock"; googleReviewUrl?: string | null;
+  data: ReportData; shopId: string; dataSource?: "cache" | "spreadsheet" | "mock"; googleReviewUrl?: string | null; targetMonth?: string;
 }) {
-  const [targetMonth, setTargetMonth] = useState("");
+  // サーバーから渡されたtargetMonthを優先、フォールバックでURLから取得
+  const [targetMonth, setTargetMonth] = useState(targetMonthProp || "");
   useEffect(() => {
+    if (targetMonthProp) return;
     const params = new URLSearchParams(window.location.search);
     setTargetMonth(params.get("month") || "");
-  }, []);
+  }, [targetMonthProp]);
 
   // 指定月がデータに存在するか
   const monthNotFound = targetMonth && !data.monthlyLabels.includes(targetMonth);
@@ -127,7 +129,10 @@ export default function ReportClient({
   // 対象月でデータを切り詰め
   const trimmedData = useMemo(() => {
     if (!targetMonth) return data;
-    const idx = data.monthlyLabels.indexOf(targetMonth);
+    // フォーマット正規化: "2026/04" → "2026/4"（ゼロパディング除去）
+    const normalized = targetMonth.replace(/\/0+(\d)/, "/$1");
+    let idx = data.monthlyLabels.indexOf(targetMonth);
+    if (idx < 0) idx = data.monthlyLabels.indexOf(normalized);
     if (idx < 0) return data; // 指定月が見つからなければ最新月を表示
 
     const endIdx = idx + 1;

@@ -51,5 +51,5 @@ export default async function ReportPage({
     );
   }
 
-  return <ReportClient data={data} shopId={params.shopId} dataSource={source} googleReviewUrl={reviewUrl} />;
+  return <ReportClient data={data} shopId={params.shopId} dataSource={source} googleReviewUrl={reviewUrl} targetMonth={targetMonth} />;
 }
