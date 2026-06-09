@@ -34,8 +34,10 @@ export async function GET(request: NextRequest) {
   }
 
   const supabase = getSupabase();
+  // ?month=2026-05 で対象月を指定可能（未指定なら今月）
+  const monthParam = request.nextUrl.searchParams.get("month");
   const now = new Date();
-  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const currentMonth = monthParam || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 
   // 全店舗取得
   const { data: shops } = await supabase
