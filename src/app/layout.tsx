@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import "./globals.css";
 import AppShell from "@/components/app-shell";
 
@@ -16,10 +17,14 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const headersList = headers();
+  const host = headersList.get("host") || "";
+  const isReportDomain = host.startsWith("report.");
+
   return (
     <html lang="ja">
       <body className="antialiased bg-white text-[#324567]">
-        <AppShell>{children}</AppShell>
+        <AppShell isReportDomain={isReportDomain}>{children}</AppShell>
       </body>
     </html>
   );

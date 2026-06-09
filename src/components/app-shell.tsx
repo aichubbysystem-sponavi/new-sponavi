@@ -1,7 +1,6 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { useState, useEffect } from "react";
 import Sidebar from "@/components/sidebar";
 import Header from "@/components/header";
 import AuthGuard from "@/components/auth-guard";
@@ -10,17 +9,11 @@ import RoleGuard from "@/components/role-guard";
 import ShopProvider from "@/components/shop-provider";
 import FloatingTasks from "@/components/floating-tasks";
 
-export default function AppShell({ children }: { children: React.ReactNode }) {
+export default function AppShell({ children, isReportDomain = false }: { children: React.ReactNode; isReportDomain?: boolean }) {
   const pathname = usePathname();
 
   const isLoginPage = pathname === "/login";
-  // パス or ホスト名でレポートページ判定
-  const isReportPath = pathname === "/report" || pathname.startsWith("/report/");
-  const [isReportDomain, setIsReportDomain] = useState(false);
-  useEffect(() => {
-    setIsReportDomain(window.location.hostname.startsWith("report."));
-  }, []);
-  const isReportPage = isReportPath || isReportDomain;
+  const isReportPage = isReportDomain || pathname === "/report" || pathname.startsWith("/report/");
 
   return (
     <AuthGuard>
