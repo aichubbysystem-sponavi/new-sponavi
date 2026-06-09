@@ -92,8 +92,8 @@ export default function ReviewAnalysisPage() {
       try {
         // 60秒の強制タイムアウト（サーバーハング防止）
         const res = await Promise.race([
-          api.post("/api/report/analyze", { shops: [shop], force: forceReanalyze, targetMonth }, { timeout: 60000 }),
-          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("タイムアウト（60秒）")), 65000)),
+          api.post("/api/report/analyze", { shops: [shop], force: forceReanalyze, targetMonth }, { timeout: 180000 }),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("タイムアウト（180秒）")), 185000)),
         ]);
         const data = res.data;
         allResults.push(...(data.results || []));
