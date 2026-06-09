@@ -101,7 +101,7 @@ export default function ShopProvider({ children }: { children: React.ReactNode }
     try {
       const { count } = await supabase
         .from("reviews")
-        .select("id", { count: "exact", head: true })
+        .select("id", { count: "estimated", head: true })
         .is("reply_comment", null);
       setUnrepliedCount(count || 0);
     } catch {}

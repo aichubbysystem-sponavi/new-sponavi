@@ -130,7 +130,7 @@ export async function POST(request: NextRequest) {
       if (text.includes("ステータス") || text.includes("状況")) {
         // 店舗状況サマリーを返信
         const { count: totalShops } = await supabase.from("shops").select("id", { count: "exact", head: true });
-        const { count: unreplied } = await supabase.from("reviews").select("id", { count: "exact", head: true }).is("reply_comment", null);
+        const { count: unreplied } = await supabase.from("reviews").select("id", { count: "estimated", head: true }).is("reply_comment", null);
 
         await replyMessage(event.replyToken, [{
           type: "text",

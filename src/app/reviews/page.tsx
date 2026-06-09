@@ -96,9 +96,11 @@ export default function ReviewsPage() {
       const from = (page - 1) * PER_PAGE;
       const to = from + PER_PAGE - 1;
 
+      const columns = "id,shop_id,shop_name,review_id,reviewer_name,star_rating,comment,reply_comment,create_time,synced_at";
+
       let query = supabase
         .from("reviews")
-        .select("*", { count: isAllMode ? "estimated" : "exact" })
+        .select(columns, { count: "estimated" })
         .order("create_time", { ascending: dateSort === "asc" })
         .range(from, to);
 
@@ -141,7 +143,7 @@ export default function ReviewsPage() {
   const fetchUnrepliedCount = useCallback(async () => {
     let query = supabase
       .from("reviews")
-      .select("id", { count: isAllMode ? "estimated" : "exact", head: true })
+      .select("id", { count: "estimated", head: true })
       .is("reply_comment", null);
 
     if (!isAllMode && selectedShopId) {
