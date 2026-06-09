@@ -58,10 +58,12 @@ export async function GET(request: NextRequest) {
 
   let analyzed = 0;
   let errors = 0;
+  const startTime = Date.now();
+  const TIME_LIMIT = 270_000; // 270秒（maxDuration=300の安全マージン）
 
-  // Vercel Hobby 60秒制限: 1店舗約5秒 → 最大10店舗/実行
-  // Cronが毎月1日に実行 → 30日分割で全店舗カバー
-  for (const shop of toAnalyze.slice(0, 10)) {
+  // Vercel Pro maxDuration=300秒: 1店舗約5秒 → 最大50店舗/実行
+  for (const shop of toAnalyze.slice(0, 50)) {
+    if (Date.now() - startTime > TIME_LIMIT) break;
     // 口コミ取得
     const { data: reviews } = await supabase
       .from("reviews")
@@ -143,11 +145,13 @@ ${comments}
     }
   }
 
-  console.log(`[cron/monthly-analysis] analyzed: ${analyzed}, errors: ${errors}, total: ${toAnalyze.length}`);
+  const remaining = toAnalyze.length - analyzed - errors;
+  console.log(`[cron/monthly-analysis] analyzed: ${analyzed}, errors: ${errors}, remaining: ${remaining}, total: ${toAnalyze.length}`);
   return NextResponse.json({
     success: true,
     analyzed,
     errors,
+    remaining,
     total: toAnalyze.length,
     skipped: analyzedSet.size,
   });

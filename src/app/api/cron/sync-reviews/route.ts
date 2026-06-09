@@ -327,12 +327,12 @@ export async function GET(request: NextRequest) {
         await supabase.from("reviews").upsert(rows.slice(j, j + 50), { onConflict: "review_id" });
       }
 
-      // Google公式評価をshopsテーブルに保存
+      // Google公式評価をshopsテーブルに保存（店舗名で検索 — Go API IDとSupabase IDは異なる）
       if (result.avgRating > 0 || result.totalCount > 0) {
         const updateData: Record<string, any> = {};
         if (result.avgRating > 0) updateData.rating = result.avgRating;
         if (result.totalCount > 0) updateData.review_count = result.totalCount;
-        await supabase.from("shops").update(updateData).eq("id", shop.id);
+        await supabase.from("shops").update(updateData).eq("name", shop.name);
       }
 
       synced += reviews.length;
