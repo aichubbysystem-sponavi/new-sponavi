@@ -182,7 +182,7 @@ export async function fetchGridRankingLive(shopIds: string[], shopName?: string)
  * rankingHistoryから不足月のグリッドデータを推定生成
  * grid_ranking_overrides/logsにない月をP7のキーワード順位から補完
  */
-function supplementGridFromRanking(
+export function supplementGridFromRanking(
   gridRanking: GridRankingReport | undefined,
   rankingHistory: { labels: string[]; datasets: { word: string; ranks: (number | null)[] }[] }
 ): GridRankingReport | undefined {

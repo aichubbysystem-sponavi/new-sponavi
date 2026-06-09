@@ -528,14 +528,18 @@ export async function POST(request: NextRequest) {
 
           // キーワード順位データ（DBからリアルタイム取得 — フロントと同じデータソース）
           try {
-            // report_data_cacheのgridRankingは古い可能性があるのでDBから直接取得
+            // フロントと同じ2段階でgridRankingを構築: DB取得 → rankingHistoryで補完
             let gridRanking = report.gridRanking;
             try {
               const { data: shopRow } = await supabase.from("shops").select("id").eq("name", shop.name).limit(1).maybeSingle();
               if (shopRow?.id) {
-                const { fetchGridRankingLive } = await import("@/lib/report-api");
+                const { fetchGridRankingLive, supplementGridFromRanking } = await import("@/lib/report-api");
                 const liveGrid = await fetchGridRankingLive([shopRow.id], shop.name);
                 if (liveGrid && liveGrid.history.length > 0) gridRanking = liveGrid;
+                // rankingHistoryから補完（5月データはここで追加される）
+                if (report.rankingHistory) {
+                  gridRanking = supplementGridFromRanking(gridRanking, report.rankingHistory);
+                }
               }
             } catch {}
             const targetNorm = (curMonth || "").replace(/\/0+(\d)/, "/$1");
