@@ -150,8 +150,8 @@ export default function GridRankingPage() {
   // プリセット読み込み（空データで上書きしないよう保護）
   const refreshPresets = useCallback(async () => {
     try {
-      const res = await fetch("/api/report/grid-ranking-presets");
-      const data = await res.json();
+      const res = await api.get("/api/report/grid-ranking-presets");
+      const data = res.data;
       if (data.presets && data.presets.length > 0) {
         setPresets(data.presets);
         setEstimate(data.estimate || null);
@@ -187,11 +187,7 @@ export default function GridRankingPage() {
         }
       } catch {}
       // プリセット登録
-      await fetch("/api/report/grid-ranking-presets", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ shops: [{ shopId, shopName, keyword: bestKw, gridSize: size || 7 }] }),
-      });
+      await api.post("/api/report/grid-ranking-presets", { shops: [{ shopId, shopName, keyword: bestKw, gridSize: size || 7 }] });
       await refreshPresets();
       setShowPresetPanel(true);
     } finally {
@@ -201,11 +197,7 @@ export default function GridRankingPage() {
 
   // プリセットから削除
   const removeFromPreset = async (shopId: string) => {
-    await fetch("/api/report/grid-ranking-presets", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ shopIds: [shopId] }),
-    });
+    await api.delete("/api/report/grid-ranking-presets", { data: { shopIds: [shopId] } });
     await refreshPresets();
   };
   const [selectedHistory, setSelectedHistory] = useState<GridLog | null>(null);
@@ -653,11 +645,7 @@ export default function GridRankingPage() {
                             value={p.keyword || ""}
                             onChange={async (e) => {
                               const newKw = e.target.value;
-                              await fetch("/api/report/grid-ranking-presets", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ shops: [{ shopId: p.shop_id, shopName: p.shop_name, keyword: newKw, gridSize: p.grid_size }] }),
-                              });
+                              await api.post("/api/report/grid-ranking-presets", { shops: [{ shopId: p.shop_id, shopName: p.shop_name, keyword: newKw, gridSize: p.grid_size }] });
                               await refreshPresets();
                             }}
                             className="w-full text-xs border rounded px-1.5 py-1 text-indigo-600"
@@ -760,11 +748,7 @@ export default function GridRankingPage() {
                           const bestKw = res.data.ranks?.length > 0
                             ? [...res.data.ranks].sort((a: any, b: any) => (a.rank || 999) - (b.rank || 999))[0]?.word || res.data.keywords[0]
                             : res.data.keywords[0];
-                          await fetch("/api/report/grid-ranking-presets", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ shops: [{ shopId: p.shop_id, shopName: p.shop_name, keyword: bestKw, gridSize: p.grid_size }] }),
-                          });
+                          await api.post("/api/report/grid-ranking-presets", { shops: [{ shopId: p.shop_id, shopName: p.shop_name, keyword: bestKw, gridSize: p.grid_size }] });
                           await api.put("/api/report/shop-keywords", { shopId: p.shop_id, keywords: res.data.keywords, source: "sheet" });
                           updated++;
                         } else { failed++; }
@@ -831,11 +815,7 @@ export default function GridRankingPage() {
                           const bestKw = res.data.ranks?.length > 0
                             ? [...res.data.ranks].sort((a: any, b: any) => (a.rank || 999) - (b.rank || 999))[0]?.word || res.data.keywords[0]
                             : res.data.keywords[0];
-                          await fetch("/api/report/grid-ranking-presets", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ shops: [{ shopId: p.shop_id, shopName: p.shop_name, keyword: bestKw, gridSize: p.grid_size }] }),
-                          });
+                          await api.post("/api/report/grid-ranking-presets", { shops: [{ shopId: p.shop_id, shopName: p.shop_name, keyword: bestKw, gridSize: p.grid_size }] });
                           await api.put("/api/report/shop-keywords", { shopId: p.shop_id, keywords: res.data.keywords, source: "sheet" });
                           kwUpdated++;
                         } else { kwFailed++; }
@@ -850,8 +830,8 @@ export default function GridRankingPage() {
                   // プリセット再取得（座標・KW更新反映）
                   let latestPresets = presets;
                   try {
-                    const refreshRes = await fetch("/api/report/grid-ranking-presets");
-                    const refreshData = await refreshRes.json();
+                    const refreshRes = await api.get("/api/report/grid-ranking-presets");
+                    const refreshData = refreshRes.data;
                     if (refreshData.presets && refreshData.presets.length > 0) {
                       latestPresets = refreshData.presets;
                       setPresets(latestPresets);

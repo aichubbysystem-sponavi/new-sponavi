@@ -15,7 +15,11 @@ function getSupabase(): any {
  * GET /api/report/grid-ranking-presets
  * いつも計測する店舗一覧を取得
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const { verifyAuth } = await import("@/lib/auth-verify");
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("grid_ranking_presets")
@@ -101,6 +105,10 @@ export async function GET() {
  * いつも計測する店舗を追加
  */
 export async function POST(request: NextRequest) {
+  const { verifyAuth } = await import("@/lib/auth-verify");
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+
   const body = await request.json();
   const { shops } = body as { shops: { shopId: string; shopName: string; keyword?: string; gridSize?: number }[] };
 
@@ -129,6 +137,10 @@ export async function POST(request: NextRequest) {
  * いつも計測する店舗を削除
  */
 export async function DELETE(request: NextRequest) {
+  const { verifyAuth } = await import("@/lib/auth-verify");
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+
   const body = await request.json();
   const { shopIds } = body as { shopIds: string[] };
 

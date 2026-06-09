@@ -67,7 +67,7 @@ export default function CustomerMasterPage() {
       const [shopRes, ownerRes, custRes] = await Promise.all([
         api.get("/api/shop"),
         api.get("/api/owner"),
-        fetch("/api/report/customer-sheet").then(r => r.ok ? r.json() : { customers: [] }).catch(() => ({ customers: [] })),
+        api.get("/api/report/customer-sheet").then(r => r.data || { customers: [] }).catch(() => ({ customers: [] })),
       ]);
       const shopData: Shop[] = Array.isArray(shopRes.data) ? shopRes.data : [];
       const ownerData: Owner[] = Array.isArray(ownerRes.data) ? ownerRes.data : [];

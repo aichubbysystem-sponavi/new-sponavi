@@ -13,7 +13,11 @@ function getAdminSupabase() {
 /**
  * GET /api/report/users — ユーザー一覧取得
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const { verifyAuth } = await import("@/lib/auth-verify");
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+
   const supabase = getAdminSupabase();
   const { data } = await supabase.from("user_profiles").select("*").order("created_at", { ascending: true });
   return NextResponse.json(data || []);

@@ -78,22 +78,14 @@ export default function ShopProvider({ children }: { children: React.ReactNode }
       const shop = shops.find(s => s.id === id);
       return { shopId: id, shopName: shop?.name || "", keyword: null, gridSize: 7 };
     });
-    await fetch("/api/report/grid-ranking-presets", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ shops: shopsToAdd }),
-    });
+    await api.post("/api/report/grid-ranking-presets", { shops: shopsToAdd });
     await refreshFavorites();
   }, [favoriteShopIds, shops, refreshFavorites]);
 
   // いつもの店舗から削除
   const removeFromFavorites = useCallback(async (shopIds: string[]) => {
     if (shopIds.length === 0) return;
-    await fetch("/api/report/grid-ranking-presets", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ shopIds }),
-    });
+    await api.delete("/api/report/grid-ranking-presets", { data: { shopIds } });
     await refreshFavorites();
   }, [refreshFavorites]);
 
