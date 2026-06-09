@@ -261,7 +261,8 @@ export default function ReportListClient({
     startSync(async () => {
       try {
         const ids = Array.from(selected);
-        const result = await syncShopData(ids);
+        const names = ids.map(id => shops.find(s => s.id === id)?.name).filter(Boolean) as string[];
+        const result = await syncShopData(names);
         setLastSync(result?.timestamp || new Date().toISOString());
         setSelected(new Set());
         showToast(`${result?.count || ids.length}店舗のデータを反映しました`);
