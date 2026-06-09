@@ -533,10 +533,13 @@ export async function POST(request: NextRequest) {
           const sq = report.searchQueries;
           if (sq?.latest && sq.latest.length > 0) {
             const top10 = sq.latest.slice(0, 10);
-            const totalCount = sq.latest.reduce((s: number, q: any) => s + (q.count || 0), 0);
+            // 全キーワード合計を使用（sq.latestは上位30件のみ、historyの対象月エントリが全件）
+            const targetMonthEntry = sq.history?.find((h: any) => h.month === (curMonth || sq.latestMonth));
+            const allKeywords = targetMonthEntry?.keywords || sq.latest;
+            const totalCount = allKeywords.reduce((s: number, q: any) => s + (q.count || 0), 0);
             // 指名検索の判定（店舗名の一部を含む）
             const shopWords = shop.name.toLowerCase().split(/[\s　]+/).filter((w: string) => w.length >= 2);
-            const brandQueries = sq.latest.filter((q: any) => shopWords.some((w: string) => q.word?.toLowerCase().includes(w)));
+            const brandQueries = allKeywords.filter((q: any) => shopWords.some((w: string) => q.word?.toLowerCase().includes(w)));
             const brandCount = brandQueries.reduce((s: number, q: any) => s + (q.count || 0), 0);
             const brandPct = totalCount > 0 ? Math.round(brandCount / totalCount * 100) : 0;
 
