@@ -133,18 +133,20 @@ ${comments}
       const posWords = (parsed.positive_words || []).filter((w: string) => allCommentText.includes(w));
       const negWords = (parsed.negative_words || []).filter((w: string) => allCommentText.includes(w));
 
-      await supabase.from("report_analysis").upsert({
+      const { error: upsertErr } = await supabase.from("report_analysis").upsert({
         shop_name: shop.name,
         target_month: currentMonth,
-        rating: Math.round(avgRating * 10) / 10,
+        average_rating: Math.round(avgRating * 10) / 10,
         review_count: reviews.length,
         positive_words: posWords,
         negative_words: negWords,
         summary: parsed.summary || "",
         comments: parsed.comments || [],
-        created_at: new Date().toISOString(),
+        analyzed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       }, { onConflict: "shop_name,target_month" });
 
+      if (upsertErr) { console.error(`[cron/monthly-analysis] upsert error for ${shop.name}:`, upsertErr.message); errors++; continue; }
       analyzed++;
     } catch {
       errors++;
