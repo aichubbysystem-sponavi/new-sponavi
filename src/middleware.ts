@@ -71,6 +71,20 @@ export function middleware(request: NextRequest) {
       return NextResponse.json({ error: "ログイン試行回数が上限に達しました。5分後にお試しください。" }, { status: 429 });
     }
   }
+
+  // === 壁13: CSRF対策（状態変更リクエストのOriginチェック） ===
+  const method = request.method;
+  if (pathname.startsWith("/api/") && ["POST", "PUT", "DELETE", "PATCH"].includes(method)) {
+    // Cron/Webhook は Origin なしで呼ばれるため除外
+    const isCron = pathname.startsWith("/api/cron/");
+    const isWebhook = pathname.startsWith("/api/webhook/");
+    if (!isCron && !isWebhook) {
+      const origin = request.headers.get("origin");
+      if (origin && !ALLOWED_ORIGINS.includes(origin)) {
+        return NextResponse.json({ error: "不正なリクエスト元です" }, { status: 403 });
+      }
+    }
+  }
   const isReportSubdomain = hostname === REPORT_HOSTNAME || hostname.startsWith("report.localhost");
 
   // === サブドメインルーティング ===
