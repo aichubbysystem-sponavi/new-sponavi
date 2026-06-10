@@ -6,7 +6,13 @@ export const dynamic = "force-dynamic";
  * GET /api/report/google-updates
  * Google検索セントラルブログの最新記事を取得
  */
-export async function GET() {
+export async function GET(request: Request) {
+  // 認証チェック
+  const { verifyAuth } = await import("@/lib/auth-verify");
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) {
+    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  }
   try {
     // Google Search Central Blog RSS
     const rssUrl = "https://developers.google.com/search/blog/rss.xml";

@@ -34,11 +34,11 @@ export default function RoleProvider({ children }: { children: React.ReactNode }
         if (userRole && userRole in ROLE_LABELS) {
           setRole(userRole);
         } else {
-          // ロール未設定の場合、デフォルトで社長（初期ユーザー向け）
-          setRole("president");
+          // ロール未設定の場合、最小権限（part_time）をデフォルトに
+          setRole(DEFAULT_ROLE);
         }
       } catch {
-        setRole("president");
+        setRole(DEFAULT_ROLE);
       }
       setLoading(false);
     };

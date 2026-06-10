@@ -103,8 +103,14 @@ export default function Dashboard() {
 
   // Googleアップデート通知取得
   useEffect(() => {
-    fetch("/api/report/google-updates").then(r => r.ok ? r.json() : { updates: [] })
-      .then(d => setGoogleUpdates(d.updates || [])).catch(() => {});
+    (async () => {
+      try {
+        const token = (await supabase.auth.getSession()).data.session?.access_token;
+        const res = await fetch("/api/report/google-updates", { headers: { Authorization: `Bearer ${token}` } });
+        const d = res.ok ? await res.json() : { updates: [] };
+        setGoogleUpdates(d.updates || []);
+      } catch {}
+    })();
   }, []);
 
   // 解約予兆スコア取得

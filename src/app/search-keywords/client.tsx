@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import DateRangePicker, { useDateRange } from "@/components/date-range-picker";
 import { useShop } from "@/components/shop-provider";
+import { supabase } from "@/lib/supabase";
 
 interface ShopKeywordStatus {
   id: string;
@@ -77,7 +78,8 @@ export default function SearchKeywordsClient() {
   async function loadShops() {
     setLoading(true);
     try {
-      const res = await fetch("/api/search-keywords/status");
+      const token = (await supabase.auth.getSession()).data.session?.access_token;
+      const res = await fetch("/api/search-keywords/status", { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) throw new Error("Failed to load");
       const data = await res.json();
       setShops(data.shops || []);

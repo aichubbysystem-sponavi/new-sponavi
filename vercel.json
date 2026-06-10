@@ -17,7 +17,7 @@
     },
     {
       "path": "/api/cron/monthly-analysis",
-      "schedule": "0 1 1-5 * *"
+      "schedule": "0 1 1-10 * *"
     },
     {
       "path": "/api/cron/sync-shops",

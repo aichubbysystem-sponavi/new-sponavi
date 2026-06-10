@@ -140,12 +140,12 @@ export default function Sidebar() {
   const filteredSections = navSections
     .map((section) => {
       if (section.children) {
-        const filtered = section.children.filter((item) => canShowInSidebar(role, item.href));
+        const filtered = section.children.filter((item) => item.href.startsWith("http") || canShowInSidebar(role, item.href));
         if (filtered.length === 0) return null;
         return { ...section, children: filtered };
       }
       if (section.items) {
-        const filtered = section.items.filter((item) => canShowInSidebar(role, item.href))
+        const filtered = section.items.filter((item) => item.href.startsWith("http") || canShowInSidebar(role, item.href))
           .map((item) => {
             if (item.href === "/reviews" && unrepliedCount > 0) {
               return { ...item, badge: unrepliedCount };

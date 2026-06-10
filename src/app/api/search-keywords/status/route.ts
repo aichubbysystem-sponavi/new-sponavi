@@ -37,7 +37,14 @@ async function fetchAll<T>(
   return all;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  // 認証チェック
+  const { verifyAuth } = await import("@/lib/auth-verify");
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) {
+    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  }
+
   const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
   const expectedMonth = getExpectedMonthJST();
 
