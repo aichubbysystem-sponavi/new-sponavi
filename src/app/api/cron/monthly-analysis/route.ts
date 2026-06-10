@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 900;
+export const maxDuration = 800;
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
@@ -61,9 +61,9 @@ export async function GET(request: NextRequest) {
   let analyzed = 0;
   let errors = 0;
   const startTime = Date.now();
-  const TIME_LIMIT = 850_000; // 850秒（maxDuration=900の安全マージン）
+  const TIME_LIMIT = 750_000; // 750秒（maxDuration=800の安全マージン）
 
-  // Vercel Pro maxDuration=900秒: 1店舗約5秒 → 最大150店舗/実行
+  // Vercel Pro maxDuration=800秒: 1店舗約5秒 → 最大130店舗/実行
   for (const shop of toAnalyze.slice(0, 150)) {
     if (Date.now() - startTime > TIME_LIMIT) break;
     // 口コミ取得（shop_nameで検索 — reviews.shop_idはGo API IDでSupabase shops.idとは異なる）
