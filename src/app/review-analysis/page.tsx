@@ -90,10 +90,10 @@ export default function ReviewAnalysisPage() {
       const shop = selectedShops[i];
       setProgress({ current: i, total: selectedShops.length });
       try {
-        // 60秒の強制タイムアウト（サーバーハング防止）
+        // 280秒タイムアウト（大量口コミ店舗対応）
         const res = await Promise.race([
-          api.post("/api/report/analyze", { shops: [shop], force: forceReanalyze, targetMonth }, { timeout: 180000 }),
-          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("タイムアウト（180秒）")), 185000)),
+          api.post("/api/report/analyze", { shops: [shop], force: forceReanalyze, targetMonth }, { timeout: 280000 }),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("タイムアウト（280秒）")), 285000)),
         ]);
         const data = res.data;
         allResults.push(...(data.results || []));
