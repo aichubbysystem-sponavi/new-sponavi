@@ -34,10 +34,14 @@ export async function GET(request: NextRequest) {
   }
 
   const supabase = getSupabase();
-  // ?month=2026-05 で対象月を指定可能（未指定なら今月）
+  // ?month=2026/5 または ?month=2026-05 で対象月を指定可能（未指定なら今月）
   const monthParam = request.nextUrl.searchParams.get("month");
   const now = new Date();
-  const currentMonth = monthParam || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  // target_monthカラムは "2026/5" 形式で統一
+  const rawMonth = monthParam || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const currentMonth = rawMonth.includes("-")
+    ? `${rawMonth.split("-")[0]}/${parseInt(rawMonth.split("-")[1])}`
+    : rawMonth;
 
   // 全店舗取得
   const { data: shops } = await supabase
@@ -49,11 +53,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: true, message: "店舗なし", analyzed: 0 });
   }
 
-  // 今月分析済みの店舗を除外
+  // 今月分析済みの店舗を除外（target_monthで正確にチェック）
   const { data: existingAnalysis } = await supabase
     .from("report_analysis")
     .select("shop_name")
-    .gte("created_at", `${currentMonth}-01T00:00:00`);
+    .eq("target_month", currentMonth);
 
   const analyzedSet = new Set((existingAnalysis || []).map(a => a.shop_name));
   const toAnalyze = shops.filter(s => !analyzedSet.has(s.name));
@@ -131,7 +135,7 @@ ${comments}
 
       await supabase.from("report_analysis").upsert({
         shop_name: shop.name,
-        month: currentMonth,
+        target_month: currentMonth,
         rating: Math.round(avgRating * 10) / 10,
         review_count: reviews.length,
         positive_words: posWords,
@@ -139,7 +143,7 @@ ${comments}
         summary: parsed.summary || "",
         comments: parsed.comments || [],
         created_at: new Date().toISOString(),
-      }, { onConflict: "shop_name,month" });
+      }, { onConflict: "shop_name,target_month" });
 
       analyzed++;
     } catch {
