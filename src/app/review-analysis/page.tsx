@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useShop } from "@/components/shop-provider";
+import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
 
 interface AnalysisResult {
@@ -52,6 +53,21 @@ export default function ReviewAnalysisPage() {
   })();
   const [targetMonth, setTargetMonth] = useState(monthOptions[0]?.value || "");
 
+  // 対象月の分析済み店舗名を取得
+  const [analyzedShopNames, setAnalyzedShopNames] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (!targetMonth) return;
+    (async () => {
+      const { data } = await supabase
+        .from("report_analysis")
+        .select("shop_name")
+        .eq("target_month", targetMonth);
+      setAnalyzedShopNames(new Set((data || []).map((r: any) => r.shop_name)));
+    })();
+  }, [targetMonth, results]);
+
+  const BATCH_SIZE = 15;
+
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -79,7 +95,7 @@ export default function ReviewAnalysisPage() {
 
     setProgress({ current: 0, total: selectedShops.length });
 
-    // 1店舗ずつ処理（確実に進行）
+    // バッチ処理（BATCH_SIZE店舗ごとに冷却期間）
     const allResults: AnalysisResult[] = [];
 
     for (let i = 0; i < selectedShops.length; i++) {
@@ -102,14 +118,23 @@ export default function ReviewAnalysisPage() {
         const reason = err?.response?.data?.error || err?.message || "通信エラー";
         allResults.push({ shopId: shop.id, shopName: shop.name, status: "error", reason });
         setResults([...allResults]);
-        // 429の場合は10秒待機してから続行
+        // 429の場合は30秒待機してから続行
         if (err?.response?.status === 429) {
-          await new Promise(r => setTimeout(r, 10000));
+          setError(`レート制限中...30秒後に再開 (${i + 1}/${selectedShops.length})`);
+          await new Promise(r => setTimeout(r, 30000));
+          setError(null);
         }
       }
-      // レート制限回避: 3秒間隔
+      // レート制限回避: 店舗間3秒 + バッチ区切りで60秒冷却
       if (i < selectedShops.length - 1) {
-        await new Promise(r => setTimeout(r, 3000));
+        const isEndOfBatch = (i + 1) % BATCH_SIZE === 0;
+        if (isEndOfBatch) {
+          setError(`バッチ${Math.floor((i + 1) / BATCH_SIZE)}完了（${i + 1}/${selectedShops.length}）— 60秒冷却中...`);
+          await new Promise(r => setTimeout(r, 60000));
+          setError(null);
+        } else {
+          await new Promise(r => setTimeout(r, 3000));
+        }
       }
     }
 
@@ -176,6 +201,17 @@ export default function ReviewAnalysisPage() {
                 いつもの店舗 ({favoriteShopIds.size})
               </button>
             )}
+            {(() => {
+              const unanalyzed = shops.filter(s => !analyzedShopNames.has(s.name));
+              return unanalyzed.length > 0 ? (
+                <button
+                  onClick={() => setSelected(new Set(unanalyzed.map(s => s.id)))}
+                  className="px-3 py-1.5 rounded-lg text-sm font-semibold border text-orange-700 bg-orange-50 border-orange-300 hover:bg-orange-100 cursor-pointer transition"
+                >
+                  未分析のみ ({unanalyzed.length})
+                </button>
+              ) : null;
+            })()}
             {selected.size > 0 && (() => {
               const selectedArr = Array.from(selected);
               const notInFav = selectedArr.filter(id => !favoriteShopIds.has(id));
@@ -378,8 +414,13 @@ export default function ReviewAnalysisPage() {
                 onChange={() => toggleSelect(shop.id)}
                 className="w-4 h-4 rounded border-slate-300 text-[#003D6B]"
               />
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 flex-1 flex items-center gap-2">
                 <p className="text-sm font-medium text-slate-800 truncate">{shop.name}</p>
+                {analyzedShopNames.has(shop.name) ? (
+                  <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-600 font-medium">済</span>
+                ) : (
+                  <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-400 font-medium">未</span>
+                )}
               </div>
             </label>
           ))}
