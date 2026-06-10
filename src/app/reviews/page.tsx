@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useShop } from "@/components/shop-provider";
 import { supabase } from "@/lib/supabase";
@@ -81,6 +81,15 @@ export default function ReviewsPage() {
     if (typeof window === "undefined") return false;
     try { return JSON.parse(localStorage.getItem("sync-failed-shops") || "[]").length > 0; } catch { return false; }
   });
+  // 同期中断・再開
+  const syncAbortRef = useRef<AbortController | null>(null);
+  const [syncResumeState, setSyncResumeState] = useState<{ shopIds: string[]; startIndex: number; totalSynced: number; skippedCount: number } | null>(null);
+  const [syncElapsed, setSyncElapsed] = useState(0);
+  const syncTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 今月未同期店舗
+  const [showUnsyncedPanel, setShowUnsyncedPanel] = useState(false);
+  const [unsyncedShops, setUnsyncedShops] = useState<{ id: string; name: string; lastSynced: string | null }[]>([]);
+  const [loadingUnsynced, setLoadingUnsynced] = useState(false);
 
   const isAllMode = shopFilterMode === "all";
 
@@ -153,6 +162,13 @@ export default function ReviewsPage() {
     const { count } = await query;
     setUnrepliedCount(count || 0);
   }, [selectedShopId, isAllMode]);
+
+  // タイマークリーンアップ
+  useEffect(() => {
+    return () => {
+      if (syncTimerRef.current) clearInterval(syncTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     fetchReviews();
@@ -379,6 +395,67 @@ export default function ReviewsPage() {
     setPage((prev) => prev !== 1 ? 1 : prev);
   }, [selectedShopId, replyFilter, shopFilterMode, dateSort, dateRangeStart, dateRangeEnd]);
 
+  const fetchUnsyncedShops = async () => {
+    setLoadingUnsynced(true);
+    try {
+      // 今月1日の日時
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+      const shopIds = shops.map(s => s.id);
+      const shopNameMap = new Map(shops.map(s => [s.id, s.name]));
+
+      // 今月同期済みの店舗IDを収集（バッチで確認）
+      const syncedSet = new Set<string>();
+      const lastSyncMap = new Map<string, string>();
+      for (let i = 0; i < shopIds.length; i += 30) {
+        const batch = shopIds.slice(i, i + 30);
+        // 各店舗の最新synced_atを取得
+        const { data } = await supabase
+          .from("reviews")
+          .select("shop_id, synced_at")
+          .in("shop_id", batch)
+          .gte("synced_at", monthStart)
+          .limit(1000);
+        if (data) {
+          data.forEach(r => {
+            syncedSet.add(r.shop_id);
+            const prev = lastSyncMap.get(r.shop_id);
+            if (!prev || r.synced_at > prev) lastSyncMap.set(r.shop_id, r.synced_at);
+          });
+        }
+      }
+
+      // 今月同期済みでない店舗を抽出
+      // 過去の最終synced_atも取得（未同期店舗のみ）
+      const unsyncedIds = shopIds.filter(id => !syncedSet.has(id));
+      const result: { id: string; name: string; lastSynced: string | null }[] = [];
+      for (let i = 0; i < unsyncedIds.length; i += 30) {
+        const batch = unsyncedIds.slice(i, i + 30);
+        const { data } = await supabase
+          .from("reviews")
+          .select("shop_id, synced_at")
+          .in("shop_id", batch)
+          .order("synced_at", { ascending: false })
+          .limit(1000);
+        const latestMap = new Map<string, string>();
+        if (data) {
+          data.forEach(r => {
+            if (!latestMap.has(r.shop_id)) latestMap.set(r.shop_id, r.synced_at);
+          });
+        }
+        batch.forEach(id => {
+          result.push({ id, name: shopNameMap.get(id) || id, lastSynced: latestMap.get(id) || null });
+        });
+      }
+
+      setUnsyncedShops(result);
+      setShowUnsyncedPanel(true);
+    } catch {
+      setSyncMsg("未同期店舗の取得に失敗しました");
+    }
+    setLoadingUnsynced(false);
+  };
+
   const fetchNoReviewShops = async () => {
     setLoadingNoReview(true);
     try {
@@ -490,29 +567,57 @@ export default function ReviewsPage() {
     }
   };
 
-  const handleSyncAll = async (targetShopIds?: string[]) => {
+  const handleCancelSync = () => {
+    if (syncAbortRef.current) {
+      syncAbortRef.current.abort();
+      syncAbortRef.current = null;
+    }
+  };
+
+  const handleSyncAll = async (targetShopIds?: string[], resumeFrom?: number, resumeTotalSynced?: number, resumeSkipped?: number) => {
+    const abortController = new AbortController();
+    syncAbortRef.current = abortController;
     setSyncing(true);
-    setSyncFailedShops([]);
-    setShowSyncFailed(false);
-    let totalSynced = 0;
+    setSyncResumeState(null);
+    if (!resumeFrom) {
+      setSyncFailedShops([]);
+      setShowSyncFailed(false);
+    }
+    let totalSynced = resumeTotalSynced || 0;
     let totalErrors = 0;
     let consecutiveErrors = 0;
-    const allFailed: { shopName: string; status: string }[] = [];
+    const allFailed: { shopName: string; status: string }[] = resumeFrom ? [...syncFailedShops] : [];
     const allShopIds = targetShopIds || shops.map((s) => s.id);
     const shopNameMap = new Map(shops.map(s => [s.id, s.name]));
+    const startIdx = resumeFrom || 0;
 
-    // 同期済み店舗を確認中
     setSyncMsg("同期開始...");
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    let skippedCount = 0;
+    let skippedCount = resumeSkipped || 0;
 
-    // 1店舗ずつ処理（同期済みチェックも各店舗ごとに実行）
-    for (let i = 0; i < allShopIds.length; i++) {
+    // 経過時間タイマー開始
+    setSyncElapsed(0);
+    if (syncTimerRef.current) clearInterval(syncTimerRef.current);
+    const startTime = Date.now();
+    syncTimerRef.current = setInterval(() => setSyncElapsed(Math.floor((Date.now() - startTime) / 1000)), 1000);
+
+    for (let i = startIdx; i < allShopIds.length; i++) {
+      // 中断チェック
+      if (abortController.signal.aborted) {
+        if (syncTimerRef.current) { clearInterval(syncTimerRef.current); syncTimerRef.current = null; }
+        setSyncResumeState({ shopIds: allShopIds, startIndex: i, totalSynced, skippedCount });
+        setSyncFailedShops(allFailed);
+        localStorage.setItem("sync-failed-shops", JSON.stringify(allFailed));
+        if (allFailed.length > 0) setShowSyncFailed(true);
+        setSyncMsg(`⏸ ${i}/${allShopIds.length}店舗で中断しました（${totalSynced}件取得済み、スキップ${skippedCount}）。「続きから再開」で残り${allShopIds.length - i}店舗を処理できます。`);
+        await fetchReviews();
+        setSyncing(false);
+        return;
+      }
+
       const shopId = allShopIds[i];
       const shopName = shopNameMap.get(shopId) || `店舗${i + 1}`;
-      const done = i;
-      const remaining = allShopIds.length - i;
-      setSyncMsg(`全店舗同期中... ${done}/${allShopIds.length}店舗完了（スキップ${skippedCount}、${totalSynced}件取得）\n処理中: ${shopName}`);
+      setSyncMsg(`全店舗同期中... ${i}/${allShopIds.length}店舗完了（スキップ${skippedCount}、${totalSynced}件取得）\n処理中: ${shopName}`);
 
       // 個別店舗の同期済みチェック（7日以内に同期済みならスキップ）
       try {
@@ -532,7 +637,6 @@ export default function ReviewsPage() {
         const res = await api.post("/api/report/sync-reviews", { shopIds: [shopId] }, { timeout: 60000 });
         totalSynced += res.data.totalSynced || 0;
         if (res.data.totalErrors > 0) totalErrors++;
-        // 失敗店舗を収集
         const shopResults = res.data.results || [];
         for (const r of shopResults) {
           if (r.status !== "success" && r.status !== "no_reviews") {
@@ -544,23 +648,26 @@ export default function ReviewsPage() {
         consecutiveErrors++;
         totalErrors++;
         allFailed.push({ shopName, status: `error: ${e?.message || "タイムアウト"}` });
-        // 連続10回失敗で中断（それ以外はスキップして続行）
         if (consecutiveErrors >= 10) {
-          const detail = e?.response?.data?.error || e?.message || "タイムアウト";
+          if (syncTimerRef.current) { clearInterval(syncTimerRef.current); syncTimerRef.current = null; }
+          setSyncResumeState({ shopIds: allShopIds, startIndex: i + 1, totalSynced, skippedCount });
           setSyncFailedShops(allFailed);
+          localStorage.setItem("sync-failed-shops", JSON.stringify(allFailed));
           if (allFailed.length > 0) setShowSyncFailed(true);
-          setSyncMsg(`⚠ ${done}/${allShopIds.length}店舗で中断（${totalSynced}件取得済み）。原因: ${detail}。再読み込みで残りから再開できます。`);
+          setSyncMsg(`⚠ ${i}/${allShopIds.length}店舗で中断（連続エラー10回）。${totalSynced}件取得済み。「続きから再開」で残り${allShopIds.length - i - 1}店舗を処理できます。`);
           await fetchReviews();
           setSyncing(false);
           return;
         }
       }
 
-      // 次の店舗まで1秒待機（レート制限対策）
       if (i < allShopIds.length - 1) {
         await new Promise(r => setTimeout(r, 1000));
       }
     }
+
+    if (syncTimerRef.current) { clearInterval(syncTimerRef.current); syncTimerRef.current = null; }
+    setSyncResumeState(null);
     setSyncFailedShops(allFailed);
     localStorage.setItem("sync-failed-shops", JSON.stringify(allFailed));
     if (allFailed.length > 0) setShowSyncFailed(true);
@@ -704,10 +811,26 @@ export default function ReviewsPage() {
                 {syncing ? "同期中..." : `いつもの店舗同期 (${favoriteShopIds.size})`}
               </button>
             )}
+            {syncing && syncAbortRef.current ? (
+              <button onClick={handleCancelSync}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all bg-red-500 hover:bg-red-600 text-white">
+                中断
+              </button>
+            ) : syncResumeState ? (
+              <button onClick={() => handleSyncAll(syncResumeState.shopIds, syncResumeState.startIndex, syncResumeState.totalSynced, syncResumeState.skippedCount)}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all bg-orange-500 hover:bg-orange-600 text-white animate-pulse">
+                続きから再開（残り{syncResumeState.shopIds.length - syncResumeState.startIndex}店舗）
+              </button>
+            ) : null}
             <button onClick={() => handleSyncAll()} disabled={syncing}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing ? "bg-slate-200 text-slate-400" : "bg-slate-600 hover:bg-slate-700"}`}
               style={{ color: syncing ? undefined : "#fff" }}>
               {syncing ? "同期中..." : "全店舗同期"}
+            </button>
+            <button onClick={fetchUnsyncedShops} disabled={syncing || loadingUnsynced}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing || loadingUnsynced ? "bg-slate-200 text-slate-400" : "bg-blue-600 hover:bg-blue-700"}`}
+              style={{ color: syncing || loadingUnsynced ? undefined : "#fff" }}>
+              {loadingUnsynced ? "確認中..." : "今月未同期"}
             </button>
             <button onClick={handleSyncMedia} disabled={syncing}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing ? "bg-slate-200 text-slate-400" : "bg-purple-600 hover:bg-purple-700"}`}
@@ -812,6 +935,44 @@ export default function ReviewsPage() {
         </div>
       )}
 
+      {/* 今月未同期店舗パネル */}
+      {showUnsyncedPanel && (
+        <div className="bg-white rounded-xl p-4 shadow-sm border border-blue-200 mb-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-blue-700">今月未同期 — {unsyncedShops.length}店舗</span>
+              <span className="text-[10px] text-slate-400">（全{shops.length}店舗中）</span>
+            </div>
+            <div className="flex items-center gap-2">
+              {unsyncedShops.length > 0 && (
+                <button onClick={() => handleSyncAll(unsyncedShops.map(s => s.id))} disabled={syncing}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${syncing ? "bg-slate-200 text-slate-400" : "bg-blue-600 hover:bg-blue-700 text-white"}`}>
+                  {syncing ? "同期中..." : `未同期${unsyncedShops.length}店舗を同期`}
+                </button>
+              )}
+              <button onClick={() => setShowUnsyncedPanel(false)} className="text-xs text-slate-400 hover:text-slate-600">閉じる</button>
+            </div>
+          </div>
+          {unsyncedShops.length === 0 ? (
+            <p className="text-sm text-emerald-600 font-medium py-2">今月は全店舗の口コミが同期済みです</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-0 max-h-60 overflow-y-auto">
+              {unsyncedShops.map((shop, i) => (
+                <div key={shop.id} className="flex items-center justify-between py-1.5 px-2 text-xs bg-blue-50 rounded">
+                  <span className="text-slate-600 truncate flex-1">
+                    <span className="text-blue-400 mr-1">{i + 1}.</span>{shop.name}
+                  </span>
+                  <span className="text-[9px] text-slate-400 whitespace-nowrap ml-2">
+                    {shop.lastSynced ? `最終: ${new Date(shop.lastSynced).toLocaleDateString("ja-JP")}` : "同期歴なし"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="text-[10px] text-slate-400 mt-2">今月1日以降にsynced_atが更新されていない店舗です。7日以内の同期済み店舗は全店舗同期時にスキップされます。</p>
+        </div>
+      )}
+
       {/* 口コミなし店舗パネル */}
       {showNoReviewShops && (
         <div className="bg-white rounded-xl p-4 shadow-sm border border-amber-200 mb-4">
@@ -888,8 +1049,13 @@ export default function ReviewsPage() {
       )}
 
       {syncMsg && (
-        <div className={`p-3 rounded-lg mb-4 text-sm whitespace-pre-line ${syncMsg.includes("失敗") || syncMsg.includes("⚠") ? "bg-red-50 text-red-700 border border-red-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}>
-          {syncMsg}
+        <div className={`p-3 rounded-lg mb-4 text-sm whitespace-pre-line ${syncMsg.includes("失敗") || syncMsg.includes("⚠") || syncMsg.includes("⏸") ? "bg-red-50 text-red-700 border border-red-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}>
+          <div className="flex items-center justify-between">
+            <span>{syncMsg}</span>
+            {syncing && syncElapsed > 0 && (
+              <span className="text-xs text-slate-400 ml-2 whitespace-nowrap">{Math.floor(syncElapsed / 60)}:{String(syncElapsed % 60).padStart(2, "0")}</span>
+            )}
+          </div>
         </div>
       )}
 

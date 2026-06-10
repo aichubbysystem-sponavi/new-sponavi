@@ -29,6 +29,13 @@ function savePersistedFailures(failures: PersistedFailure[]) {
   localStorage.setItem("analysis-failed-shops", JSON.stringify(failures));
 }
 
+function safeStr(val: unknown): string {
+  if (val == null) return "";
+  if (typeof val === "string") return val;
+  if (typeof val === "object" && val !== null && "message" in val) return String((val as any).message);
+  return JSON.stringify(val);
+}
+
 export default function ReviewAnalysisPage() {
   const { shops, apiConnected, favoriteShopIds, addToFavorites, removeFromFavorites } = useShop();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -115,7 +122,8 @@ export default function ReviewAnalysisPage() {
         allResults.push(...(data.results || []));
         setResults([...allResults]);
       } catch (err: any) {
-        const reason = err?.response?.data?.error || err?.message || "通信エラー";
+        const rawReason = err?.response?.data?.error || err?.message || "通信エラー";
+        const reason = typeof rawReason === "object" ? (rawReason?.message || JSON.stringify(rawReason)) : String(rawReason);
         allResults.push({ shopId: shop.id, shopName: shop.name, status: "error", reason });
         setResults([...allResults]);
         // 429の場合は30秒待機してから続行
@@ -324,7 +332,7 @@ export default function ReviewAnalysisPage() {
             {persistedFailures.map((p, i) => (
               <div key={i} className="flex items-center justify-between py-1 px-2 text-sm bg-white rounded gap-2">
                 <span className="text-slate-700 truncate flex-1">{p.shopName}</span>
-                {p.reason && <span className="text-[10px] text-red-400 truncate max-w-[250px]">{p.reason}</span>}
+                {p.reason && <span className="text-[10px] text-red-400 truncate max-w-[250px]">{safeStr(p.reason)}</span>}
                 <span className="text-[10px] text-orange-500 flex-shrink-0">{p.failedAt}</span>
               </div>
             ))}
@@ -391,7 +399,7 @@ export default function ReviewAnalysisPage() {
                 >
                   {r.status === "success" ? "完了" : r.status === "already_done" ? "分析済み" : r.status === "no_reviews" ? "口コミなし" : "失敗"}
                 </span>
-                {r.reason && <span className="text-[10px] text-red-400 truncate max-w-[300px]">{r.reason}</span>}
+                {r.reason && <span className="text-[10px] text-red-400 truncate max-w-[300px]">{safeStr(r.reason)}</span>}
               </div>
             ))}
           </div>
