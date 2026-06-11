@@ -614,6 +614,9 @@ export default function ReviewsPage() {
     syncTimerRef.current = setInterval(() => setSyncElapsed(Math.floor((Date.now() - startTime) / 1000)), 1000);
 
     for (let i = startIdx; i < allShopIds.length; i++) {
+      const shopStart = Date.now();
+      // タイマー更新（バックグラウンドタブでsetIntervalが止まっても各ループで更新）
+      setSyncElapsed(Math.floor((Date.now() - startTime) / 1000));
       // 中断チェック
       if (abortController.signal.aborted) {
         if (syncTimerRef.current) { clearInterval(syncTimerRef.current); syncTimerRef.current = null; }
@@ -633,24 +636,22 @@ export default function ReviewsPage() {
 
       // 個別店舗の同期済みチェック（7日以内に同期済みならスキップ）
       try {
-        const { data: syncCheck } = await supabase
-          .from("reviews")
-          .select("id")
-          .eq("shop_id", shopId)
-          .gte("synced_at", since)
-          .limit(1);
-        if (syncCheck && syncCheck.length > 0) {
+        const syncCheckResult = await Promise.race([
+          supabase.from("reviews").select("id").eq("shop_id", shopId).gte("synced_at", since).limit(1),
+          new Promise<{ data: null }>((resolve) => setTimeout(() => resolve({ data: null }), 10000)),
+        ]);
+        if (syncCheckResult.data && (syncCheckResult.data as any[]).length > 0) {
           skippedCount++;
           continue;
         }
       } catch {}
 
       try {
-        // AbortControllerで確実に65秒でタイムアウト（axiosのtimeoutだけでは接続ハングを検知できない場合がある）
-        const reqAbort = new AbortController();
-        const reqTimer = setTimeout(() => reqAbort.abort(), 65000);
-        const res = await api.post("/api/report/sync-reviews", { shopIds: [shopId] }, { timeout: 60000, signal: reqAbort.signal });
-        clearTimeout(reqTimer);
+        // Promise.raceで確実に70秒でタイムアウト（Chromeバックグラウンドタブ対策）
+        const res = await Promise.race([
+          api.post("/api/report/sync-reviews", { shopIds: [shopId] }, { timeout: 60000, signal: AbortSignal.timeout(65000) }),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("タイムアウト（70秒）")), 70000)),
+        ]);
         totalSynced += res.data.totalSynced || 0;
         if (res.data.totalErrors > 0) totalErrors++;
         const shopResults = res.data.results || [];
@@ -715,10 +716,10 @@ export default function ReviewsPage() {
       setSyncMsg(`範囲同期中... ${no}番目 / ${start}〜${end} （${totalSynced}件取得）\n処理中: ${shopName}`);
 
       try {
-        const rAbort = new AbortController();
-        const rTimer = setTimeout(() => rAbort.abort(), 65000);
-        const res = await api.post("/api/report/sync-reviews", { shopIds: [shopId] }, { timeout: 60000, signal: rAbort.signal });
-        clearTimeout(rTimer);
+        const res = await Promise.race([
+          api.post("/api/report/sync-reviews", { shopIds: [shopId] }, { timeout: 60000, signal: AbortSignal.timeout(65000) }),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("タイムアウト（70秒）")), 70000)),
+        ]);
         totalSynced += res.data.totalSynced || 0;
         if (res.data.totalErrors > 0) totalErrors++;
       } catch {
