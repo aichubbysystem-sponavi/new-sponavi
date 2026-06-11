@@ -656,7 +656,7 @@ export default function ReviewsPage() {
         if (res.data.totalErrors > 0) totalErrors++;
         const shopResults = res.data.results || [];
         for (const r of shopResults) {
-          if (r.status !== "success" && r.status !== "no_reviews") {
+          if (r.status !== "success" && r.status !== "no_reviews" && r.status !== "no_gbp_location") {
             allFailed.push({ shopName: r.shopName, status: r.status });
           }
         }
@@ -665,13 +665,13 @@ export default function ReviewsPage() {
         consecutiveErrors++;
         totalErrors++;
         allFailed.push({ shopName, status: `error: ${e?.message || "タイムアウト"}` });
-        if (consecutiveErrors >= 10) {
+        if (consecutiveErrors >= 20) {
           if (syncTimerRef.current) { clearInterval(syncTimerRef.current); syncTimerRef.current = null; }
           persistResumeState({ shopIds: allShopIds, startIndex: i + 1, totalSynced, skippedCount });
           setSyncFailedShops(allFailed);
           localStorage.setItem("sync-failed-shops", JSON.stringify(allFailed));
           if (allFailed.length > 0) setShowSyncFailed(true);
-          setSyncMsg(`⚠ ${i}/${allShopIds.length}店舗で中断（連続エラー10回）。${totalSynced}件取得済み。「続きから再開」で残り${allShopIds.length - i - 1}店舗を処理できます。`);
+          setSyncMsg(`⚠ ${i}/${allShopIds.length}店舗で中断（連続エラー20回）。${totalSynced}件取得済み。「続きから再開」で残り${allShopIds.length - i - 1}店舗を処理できます。`);
           await fetchReviews();
           setSyncing(false);
           return;
