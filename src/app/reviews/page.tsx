@@ -81,9 +81,12 @@ export default function ReviewsPage() {
     if (typeof window === "undefined") return false;
     try { return JSON.parse(localStorage.getItem("sync-failed-shops") || "[]").length > 0; } catch { return false; }
   });
-  // 同期中断・再開
+  // 同期中断・再開（localStorageに永続化）
   const syncAbortRef = useRef<AbortController | null>(null);
-  const [syncResumeState, setSyncResumeState] = useState<{ shopIds: string[]; startIndex: number; totalSynced: number; skippedCount: number } | null>(null);
+  const [syncResumeState, setSyncResumeState] = useState<{ shopIds: string[]; startIndex: number; totalSynced: number; skippedCount: number } | null>(() => {
+    if (typeof window === "undefined") return null;
+    try { return JSON.parse(localStorage.getItem("sync-resume-state") || "null"); } catch { return null; }
+  });
   const [syncElapsed, setSyncElapsed] = useState(0);
   const syncTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // 今月未同期店舗
@@ -567,6 +570,15 @@ export default function ReviewsPage() {
     }
   };
 
+  const persistResumeState = (state: { shopIds: string[]; startIndex: number; totalSynced: number; skippedCount: number } | null) => {
+    setSyncResumeState(state);
+    if (state) {
+      localStorage.setItem("sync-resume-state", JSON.stringify(state));
+    } else {
+      localStorage.removeItem("sync-resume-state");
+    }
+  };
+
   const handleCancelSync = () => {
     if (syncAbortRef.current) {
       syncAbortRef.current.abort();
@@ -578,7 +590,7 @@ export default function ReviewsPage() {
     const abortController = new AbortController();
     syncAbortRef.current = abortController;
     setSyncing(true);
-    setSyncResumeState(null);
+    persistResumeState(null);
     if (!resumeFrom) {
       setSyncFailedShops([]);
       setShowSyncFailed(false);
@@ -605,7 +617,7 @@ export default function ReviewsPage() {
       // 中断チェック
       if (abortController.signal.aborted) {
         if (syncTimerRef.current) { clearInterval(syncTimerRef.current); syncTimerRef.current = null; }
-        setSyncResumeState({ shopIds: allShopIds, startIndex: i, totalSynced, skippedCount });
+        persistResumeState({ shopIds: allShopIds, startIndex: i, totalSynced, skippedCount });
         setSyncFailedShops(allFailed);
         localStorage.setItem("sync-failed-shops", JSON.stringify(allFailed));
         if (allFailed.length > 0) setShowSyncFailed(true);
@@ -634,7 +646,11 @@ export default function ReviewsPage() {
       } catch {}
 
       try {
-        const res = await api.post("/api/report/sync-reviews", { shopIds: [shopId] }, { timeout: 60000 });
+        // AbortControllerで確実に65秒でタイムアウト（axiosのtimeoutだけでは接続ハングを検知できない場合がある）
+        const reqAbort = new AbortController();
+        const reqTimer = setTimeout(() => reqAbort.abort(), 65000);
+        const res = await api.post("/api/report/sync-reviews", { shopIds: [shopId] }, { timeout: 60000, signal: reqAbort.signal });
+        clearTimeout(reqTimer);
         totalSynced += res.data.totalSynced || 0;
         if (res.data.totalErrors > 0) totalErrors++;
         const shopResults = res.data.results || [];
@@ -650,7 +666,7 @@ export default function ReviewsPage() {
         allFailed.push({ shopName, status: `error: ${e?.message || "タイムアウト"}` });
         if (consecutiveErrors >= 10) {
           if (syncTimerRef.current) { clearInterval(syncTimerRef.current); syncTimerRef.current = null; }
-          setSyncResumeState({ shopIds: allShopIds, startIndex: i + 1, totalSynced, skippedCount });
+          persistResumeState({ shopIds: allShopIds, startIndex: i + 1, totalSynced, skippedCount });
           setSyncFailedShops(allFailed);
           localStorage.setItem("sync-failed-shops", JSON.stringify(allFailed));
           if (allFailed.length > 0) setShowSyncFailed(true);
@@ -667,7 +683,7 @@ export default function ReviewsPage() {
     }
 
     if (syncTimerRef.current) { clearInterval(syncTimerRef.current); syncTimerRef.current = null; }
-    setSyncResumeState(null);
+    persistResumeState(null);
     setSyncFailedShops(allFailed);
     localStorage.setItem("sync-failed-shops", JSON.stringify(allFailed));
     if (allFailed.length > 0) setShowSyncFailed(true);
@@ -699,7 +715,10 @@ export default function ReviewsPage() {
       setSyncMsg(`範囲同期中... ${no}番目 / ${start}〜${end} （${totalSynced}件取得）\n処理中: ${shopName}`);
 
       try {
-        const res = await api.post("/api/report/sync-reviews", { shopIds: [shopId] }, { timeout: 60000 });
+        const rAbort = new AbortController();
+        const rTimer = setTimeout(() => rAbort.abort(), 65000);
+        const res = await api.post("/api/report/sync-reviews", { shopIds: [shopId] }, { timeout: 60000, signal: rAbort.signal });
+        clearTimeout(rTimer);
         totalSynced += res.data.totalSynced || 0;
         if (res.data.totalErrors > 0) totalErrors++;
       } catch {
@@ -1053,7 +1072,7 @@ export default function ReviewsPage() {
           <div className="flex items-center justify-between">
             <span>{syncMsg}</span>
             {syncing && syncElapsed > 0 && (
-              <span className="text-xs text-slate-400 ml-2 whitespace-nowrap">{Math.floor(syncElapsed / 60)}:{String(syncElapsed % 60).padStart(2, "0")}</span>
+              <span className="text-xs text-slate-400 ml-2 whitespace-nowrap">{syncElapsed >= 3600 ? `${Math.floor(syncElapsed / 3600)}:${String(Math.floor((syncElapsed % 3600) / 60)).padStart(2, "0")}:${String(syncElapsed % 60).padStart(2, "0")}` : `${Math.floor(syncElapsed / 60)}:${String(syncElapsed % 60).padStart(2, "0")}`}</span>
             )}
           </div>
         </div>
