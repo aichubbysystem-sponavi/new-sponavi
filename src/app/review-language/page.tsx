@@ -46,23 +46,38 @@ export default function ReviewLanguagePage() {
   const [shopCount, setShopCount] = useState(0);
   const [showDetails, setShowDetails] = useState(false);
   const [detailLangFilter, setDetailLangFilter] = useState<string>("all");
+  const [error, setError] = useState<string | null>(null);
 
-  // GBPアカウント一覧を取得
+  // GBPアカウント一覧を取得 → Go APIの店舗名にマッチング
   useEffect(() => {
+    if (shops.length === 0) return;
     (async () => {
       try {
         const res = await api.get("/api/gbp/account", { timeout: 15000 });
         const data = Array.isArray(res.data) ? res.data : [];
-        const accs: GbpAccount[] = data.map((acc: any) => ({
-          name: acc.name || "",
-          label: acc.email || acc.accountName || acc.name || "",
-          shopNames: (acc.locations || []).map((loc: any) => loc.title || "").filter(Boolean),
-        }));
+        // Go API店舗名のセット（reviewsテーブルのshop_nameと一致する名前）
+        const goShopNamesList = shops.map(s => s.name);
+        const goShopNamesSet = new Set(goShopNamesList);
+        // GBP店舗名→Go API店舗名のマッチング（完全一致 or 大文字小文字無視）
+        const matchGoName = (gbpTitle: string): string | null => {
+          if (goShopNamesSet.has(gbpTitle)) return gbpTitle;
+          const lower = gbpTitle.toLowerCase();
+          return goShopNamesList.find(n => n.toLowerCase() === lower) || null;
+        };
+        const accs: GbpAccount[] = data.map((acc: any) => {
+          const gbpTitles: string[] = (acc.locations || []).map((loc: any) => loc.title || "").filter(Boolean);
+          const matched = gbpTitles.map(matchGoName).filter(Boolean) as string[];
+          return {
+            name: acc.name || "",
+            label: acc.email || acc.accountName || acc.name || "",
+            shopNames: matched,
+          };
+        });
         setAccounts(accs);
       } catch {}
       setLoadingAccounts(false);
     })();
-  }, []);
+  }, [shops]);
 
   const fetchStats = useCallback(async () => {
     // 対象店舗名を決定
@@ -74,18 +89,18 @@ export default function ReviewLanguagePage() {
       if (acc) targetShopNames = acc.shopNames;
     }
 
-    if (targetShopNames.length === 0) return;
+    if (targetShopNames.length === 0) {
+      setError("対象店舗が見つかりません。口コミ同期が必要です。");
+      return;
+    }
 
     setLoading(true);
+    setError(null);
+    setStats([]);
+    setDetails([]);
     try {
       const headers = await getAuthHeaders();
-      const allStats: LangStat[] = [];
-      let allDetails: ReviewDetail[] = [];
-      let total = 0;
-      let totalLow = 0;
-      let sCount = 0;
 
-      // 全店舗名を一括POSTで送信
       const res = await fetch("/api/report/review-language-stats", {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
@@ -94,23 +109,22 @@ export default function ReviewLanguagePage() {
       });
       if (res.ok) {
         const data = await res.json();
-        total = data.totalReviews || 0;
-        totalLow = data.totalLowRating || 0;
-        sCount = data.shopCount || 0;
-        allStats.push(...(data.stats || []));
-        allDetails = data.details || [];
+        const allStats = (data.stats || []).sort((a: LangStat, b: LangStat) => b.total - a.total);
+        setStats(allStats);
+        setDetails((data.details || []).sort((a: ReviewDetail, b: ReviewDetail) => a.star_rating - b.star_rating));
+        setTotalReviews(data.totalReviews || 0);
+        setTotalLowRating(data.totalLowRating || 0);
+        setShopCount(data.shopCount || 0);
+        if ((data.totalReviews || 0) === 0) {
+          setError(`${targetShopNames.length}店舗を検索しましたが、口コミが0件でした。口コミ管理ページで同期してください。`);
+        }
       } else {
         const err = await res.json().catch(() => ({ error: "不明なエラー" }));
-        console.error("API error:", err);
+        setError(`APIエラー: ${err?.error || res.status}`);
       }
-
-      allStats.sort((a, b) => b.total - a.total);
-      setStats(allStats);
-      setDetails(allDetails.sort((a, b) => a.star_rating - b.star_rating));
-      setTotalReviews(total);
-      setTotalLowRating(totalLow);
-      setShopCount(sCount);
-    } catch {}
+    } catch (e: any) {
+      setError(`通信エラー: ${e?.message || "タイムアウト"}`);
+    }
     setLoading(false);
   }, [selectedAccount, shops, accounts]);
 
@@ -202,6 +216,13 @@ export default function ReviewLanguagePage() {
           )}
         </div>
       </div>
+
+      {/* エラー表示 */}
+      {error && (
+        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 mb-6">
+          {error}
+        </div>
+      )}
 
       {/* サマリーカード */}
       {stats.length > 0 && (
