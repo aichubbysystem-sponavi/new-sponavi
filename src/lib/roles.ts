@@ -36,6 +36,7 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
     "/ai-integration",
     "/feature",
     "/review-analysis",
+    "/review-language",
     "/group-management",
     "/gbp-accounts",
   ],
