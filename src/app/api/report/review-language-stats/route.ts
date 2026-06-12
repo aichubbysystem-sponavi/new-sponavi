@@ -57,17 +57,36 @@ export async function POST(request: NextRequest) {
 
   const supabase = getSupabase();
 
-  // 口コミを取得
+  // shopNames → shop_idに変換（大文字小文字不一致対策）
+  let resolvedIds: string[] = [...shopIds];
+  if (shopNames.length > 0 && shopIds.length === 0) {
+    for (let i = 0; i < shopNames.length; i += 30) {
+      const batch = shopNames.slice(i, i + 30);
+      // まず完全一致で検索
+      const { data } = await supabase.from("reviews").select("shop_id, shop_name").in("shop_name", batch).limit(1000);
+      if (data && data.length > 0) {
+        const ids = Array.from(new Set(data.map((r: any) => r.shop_id)));
+        resolvedIds.push(...ids);
+      }
+      // 完全一致で見つからなかった名前をilike検索
+      const foundNames = new Set((data || []).map((r: any) => r.shop_name));
+      const notFound = batch.filter(n => !foundNames.has(n));
+      for (const name of notFound) {
+        const { data: iData } = await supabase.from("reviews").select("shop_id").ilike("shop_name", name).limit(1);
+        if (iData && iData.length > 0) resolvedIds.push(iData[0].shop_id);
+      }
+    }
+    resolvedIds = Array.from(new Set(resolvedIds));
+  }
+
+  // 口コミを取得（常にshop_idで検索）
   let allReviews: any[] = [];
-  const targetNames = shopNames.length > 0 ? shopNames : [];
-  const targetIds = shopIds.length > 0 ? shopIds : [];
-  const useNames = targetNames.length > 0;
-  const targets = useNames ? targetNames : targetIds;
-  const col = useNames ? "shop_name" : "shop_id";
+  const targets = resolvedIds;
+  const col = "shop_id";
   const batchSize = 10;
   const debug: string[] = [];
 
-  debug.push(`targets=${targets.length}, col=${col}, first3=${JSON.stringify(targets.slice(0, 3))}`);
+  debug.push(`inputNames=${shopNames.length}, inputIds=${shopIds.length}, resolvedIds=${resolvedIds.length}, first3=${JSON.stringify(resolvedIds.slice(0, 3))}`);
 
   for (let i = 0; i < targets.length; i += batchSize) {
     const batch = targets.slice(i, i + batchSize);
