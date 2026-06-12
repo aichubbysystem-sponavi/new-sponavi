@@ -440,17 +440,22 @@ export default function ReportClient({
       setLangLoading(true);
       try {
         const authH = await getAuthHeaders();
-        // shopId = 店舗名（URLエンコード済み）。shop_nameで検索
+        const shopName = decodeURIComponent(shopId);
         const res = await fetch("/api/report/review-language-stats", {
           method: "POST",
           headers: { "Content-Type": "application/json", ...authH },
-          body: JSON.stringify({ shopNames: [decodeURIComponent(shopId)] }),
+          body: JSON.stringify({ shopNames: [shopName] }),
         });
         if (res.ok) {
           const d = await res.json();
+          console.log("[lang-stats]", shopName, d.stats?.length, "langs,", d.totalReviews, "reviews");
           setLangStats(d.stats || []);
+        } else {
+          console.warn("[lang-stats] error:", res.status, await res.text().catch(() => ""));
         }
-      } catch {}
+      } catch (e) {
+        console.warn("[lang-stats] fetch error:", e);
+      }
       setLangLoading(false);
     })();
   }, [shopId]);
