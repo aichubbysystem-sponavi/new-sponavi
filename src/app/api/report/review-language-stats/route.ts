@@ -57,23 +57,26 @@ export async function POST(request: NextRequest) {
 
   const supabase = getSupabase();
 
-  // 口コミを取得（1店舗ずつページネーション付きで取得 — Supabaseデフォルト1000行制限対策）
+  // 口コミを取得
   let allReviews: any[] = [];
   const targetNames = shopNames.length > 0 ? shopNames : [];
   const targetIds = shopIds.length > 0 ? shopIds : [];
   const useNames = targetNames.length > 0;
   const targets = useNames ? targetNames : targetIds;
-  const batchSize = 10; // inクエリは10店舗ずつ（1店舗あたり数百件想定）
+  const col = useNames ? "shop_name" : "shop_id";
+  const batchSize = 10;
+  const debug: string[] = [];
+
+  debug.push(`targets=${targets.length}, col=${col}, first3=${JSON.stringify(targets.slice(0, 3))}`);
 
   for (let i = 0; i < targets.length; i += batchSize) {
     const batch = targets.slice(i, i + batchSize);
-    const col = useNames ? "shop_name" : "shop_id";
 
     // ページネーション: 1バッチ最大5000件まで取得
     let from = 0;
     const pageSize = 1000;
     while (from < 5000) {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("reviews")
         .select("shop_name, reviewer_name, star_rating, comment, create_time")
         .in(col, batch)
@@ -81,6 +84,7 @@ export async function POST(request: NextRequest) {
         .neq("comment", "")
         .order("create_time", { ascending: false })
         .range(from, from + pageSize - 1);
+      if (error) { debug.push(`error: ${error.message}`); break; }
       if (!data || data.length === 0) break;
       allReviews.push(...data);
       if (data.length < pageSize) break; // 最終ページ
@@ -127,11 +131,14 @@ export async function POST(request: NextRequest) {
   const totalReviews = allReviews.length;
   const totalLowRating = stats.reduce((s, st) => s + st.lowRatingCount, 0);
 
+  debug.push(`totalReviews=${allReviews.length}`);
+
   return NextResponse.json({
     totalReviews,
     totalLowRating,
     shopCount: new Set(allReviews.map(r => r.shop_name)).size,
     stats,
     details: details.sort((a, b) => a.star_rating - b.star_rating || a.create_time.localeCompare(b.create_time)),
+    _debug: debug,
   });
 }
