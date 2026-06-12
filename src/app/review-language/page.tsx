@@ -47,6 +47,8 @@ export default function ReviewLanguagePage() {
   const [showDetails, setShowDetails] = useState(false);
   const [detailLangFilter, setDetailLangFilter] = useState<string>("all");
   const [error, setError] = useState<string | null>(null);
+  const [selectedShops, setSelectedShops] = useState<Set<string>>(new Set());
+  const [shopSearch, setShopSearch] = useState("");
 
   // GBPアカウント一覧を取得 → Go APIの店舗名にマッチング
   useEffect(() => {
@@ -79,15 +81,27 @@ export default function ReviewLanguagePage() {
     })();
   }, [shops]);
 
+  // アカウント変更時: 全店舗を選択状態に
+  const currentAccountShops = selectedAccount === "all"
+    ? shops.map(s => s.name)
+    : accounts.find(a => a.name === selectedAccount)?.shopNames || [];
+
+  useEffect(() => {
+    setSelectedShops(new Set(currentAccountShops));
+    setShopSearch("");
+  }, [selectedAccount, accounts.length]);
+
+  const toggleShop = (name: string) => {
+    setSelectedShops(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      return next;
+    });
+  };
+
   const fetchStats = useCallback(async () => {
-    // 対象店舗名を決定
-    let targetShopNames: string[] = [];
-    if (selectedAccount === "all") {
-      targetShopNames = shops.map(s => s.name);
-    } else {
-      const acc = accounts.find(a => a.name === selectedAccount);
-      if (acc) targetShopNames = acc.shopNames;
-    }
+    // 選択された店舗のみ対象
+    const targetShopNames = Array.from(selectedShops);
 
     if (targetShopNames.length === 0) {
       setError("対象店舗が見つかりません。口コミ同期が必要です。");
@@ -126,7 +140,7 @@ export default function ReviewLanguagePage() {
       setError(`通信エラー: ${e?.message || "タイムアウト"}`);
     }
     setLoading(false);
-  }, [selectedAccount, shops, accounts]);
+  }, [selectedShops, shops]);
 
   async function getAuthHeaders(): Promise<Record<string, string>> {
     const { data } = await supabase.auth.getSession();
@@ -216,6 +230,38 @@ export default function ReviewLanguagePage() {
           )}
         </div>
       </div>
+
+      {/* 店舗選択パネル */}
+      {currentAccountShops.length > 0 && (
+        <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100 mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-semibold text-slate-700">対象店舗（{selectedShops.size}/{currentAccountShops.length}）</span>
+              <button onClick={() => setSelectedShops(new Set(currentAccountShops))}
+                className="text-xs text-blue-600 hover:underline">全選択</button>
+              <button onClick={() => setSelectedShops(new Set())}
+                className="text-xs text-slate-400 hover:underline">全解除</button>
+            </div>
+            <input
+              type="text"
+              placeholder="店舗名で検索..."
+              value={shopSearch}
+              onChange={(e) => setShopSearch(e.target.value)}
+              className="px-3 py-1.5 border border-slate-200 rounded-lg text-xs w-64 focus:outline-none focus:ring-1 focus:ring-[#003D6B]"
+            />
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-0 max-h-48 overflow-y-auto border border-slate-100 rounded-lg">
+            {currentAccountShops
+              .filter(name => !shopSearch || name.toLowerCase().includes(shopSearch.toLowerCase()))
+              .map((name) => (
+              <label key={name} className={`flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer hover:bg-blue-50 border-b border-r border-slate-50 ${selectedShops.has(name) ? "bg-blue-50/50" : ""}`}>
+                <input type="checkbox" checked={selectedShops.has(name)} onChange={() => toggleShop(name)} className="w-3.5 h-3.5 rounded" />
+                <span className="truncate text-slate-700">{name}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* エラー表示 */}
       {error && (
