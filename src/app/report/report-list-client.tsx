@@ -86,6 +86,34 @@ export default function ReportListClient({
   const [accountFilter, setAccountFilter] = useState<string>("all");
   const [reportMonth, setReportMonth] = useState("");
 
+  // GBPアカウント情報（サーバーから渡されなかった場合、クライアントでフォールバック取得）
+  const [clientAccountNames, setClientAccountNames] = useState<string[]>([]);
+  const [clientLocToAccount, setClientLocToAccount] = useState<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    if (gbpAccountNames.length > 0) return; // サーバーで取得済みならスキップ
+    (async () => {
+      try {
+        const res = await fetch("/api/gbp/account", { signal: AbortSignal.timeout(15000) });
+        if (!res.ok) return;
+        const accounts = await res.json();
+        const names: string[] = [];
+        const locMap = new Map<string, string>();
+        for (const acc of (Array.isArray(accounts) ? accounts : [])) {
+          const label = acc.email || acc.accountName || acc.name || "";
+          if (label) names.push(label);
+          for (const loc of (acc.locations || [])) {
+            if (loc.title) locMap.set(loc.title, label);
+          }
+        }
+        setClientAccountNames(names);
+        setClientLocToAccount(locMap);
+      } catch {}
+    })();
+  }, [gbpAccountNames.length]);
+
+  const effectiveAccountNames = gbpAccountNames.length > 0 ? gbpAccountNames : clientAccountNames;
+
   // お気に入り・対象月をlocalStorageから読み込み
   useEffect(() => {
     const saved = localStorage.getItem("report-favorites");
@@ -123,7 +151,20 @@ export default function ReportListClient({
 
   // フィルタ＆ソート
   const filtered = useMemo(() => {
-    let result = shops;
+    // 重複除去: 同名店舗（大文字小文字違い）はデータが多い方を残す
+    const seen = new Map<string, ShopListItem>();
+    for (const s of shops) {
+      const key = s.name.toLowerCase();
+      const existing = seen.get(key);
+      if (!existing) {
+        seen.set(key, s);
+      } else {
+        // rating/totalReviews/searchTotalがある方を優先
+        const score = (s2: ShopListItem) => (s2.rating > 0 ? 1 : 0) + (s2.totalReviews > 0 ? 1 : 0) + (s2.searchTotal ? 1 : 0) + (s2.dataSource === "both" ? 2 : 0);
+        if (score(s) > score(existing)) seen.set(key, s);
+      }
+    }
+    let result = Array.from(seen.values());
 
     // お気に入りフィルタ
     if (showOnlyFavorites) result = result.filter((s) => favorites.has(s.id));
@@ -157,7 +198,10 @@ export default function ReportListClient({
 
     // GBPアカウントフィルタ
     if (accountFilter !== "all") {
-      result = result.filter((s) => s.gbpAccountLabel === accountFilter);
+      result = result.filter((s) => {
+        const label = s.gbpAccountLabel || clientLocToAccount.get(s.name) || "";
+        return label === accountFilter;
+      });
     }
 
     // ソート（お気に入りを上部固定）
@@ -176,7 +220,7 @@ export default function ReportListClient({
       return sortDir === "asc" ? cmp : -cmp;
     });
     return result;
-  }, [shops, search, sortKey, sortDir, ratingFilter, areaFilter, favorites, showOnlyFavorites, showOnlyAlert, sourceFilter, accountFilter]);
+  }, [shops, search, sortKey, sortDir, ratingFilter, areaFilter, favorites, showOnlyFavorites, showOnlyAlert, sourceFilter, accountFilter, clientLocToAccount]);
 
   const totalPages = Math.ceil(filtered.length / perPage);
   const paged = filtered.slice((page - 1) * perPage, page * perPage);
@@ -490,11 +534,11 @@ export default function ReportListClient({
             )}
 
             {/* GBPアカウントフィルタ */}
-            {gbpAccountNames.length > 0 && (
+            {effectiveAccountNames.length > 0 && (
               <select value={accountFilter} onChange={(e) => { setAccountFilter(e.target.value); setPage(1); }}
                 className="px-3 py-2 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none font-semibold text-[#003D6B]">
                 <option value="all">全アカウント</option>
-                {gbpAccountNames.map((name) => <option key={name} value={name}>{name.replace(/\(.*?\)/, "").trim()}</option>)}
+                {effectiveAccountNames.map((name) => <option key={name} value={name}>{name.replace(/\(.*?\)/, "").trim()}</option>)}
               </select>
             )}
 
