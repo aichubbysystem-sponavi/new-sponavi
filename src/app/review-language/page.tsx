@@ -31,6 +31,12 @@ interface GbpAccount {
   name: string;
   label: string;
   shopNames: string[];
+  shopIds: string[];
+}
+
+interface ShopOption {
+  id: string;
+  name: string;
 }
 
 export default function ReviewLanguagePage() {
@@ -61,18 +67,19 @@ export default function ReviewLanguagePage() {
         const goShopNamesList = shops.map(s => s.name);
         const goShopNamesSet = new Set(goShopNamesList);
         // GBP店舗名→Go API店舗名のマッチング（完全一致 or 大文字小文字無視）
-        const matchGoName = (gbpTitle: string): string | null => {
-          if (goShopNamesSet.has(gbpTitle)) return gbpTitle;
-          const lower = gbpTitle.toLowerCase();
-          return goShopNamesList.find(n => n.toLowerCase() === lower) || null;
+        // GBP店舗名→Go APIの{id, name}をマッチング
+        const goShopMap = new Map(shops.map(s => [s.name.toLowerCase(), { id: s.id, name: s.name }]));
+        const matchGoShop = (gbpTitle: string): ShopOption | null => {
+          return goShopMap.get(gbpTitle.toLowerCase()) || null;
         };
         const accs: GbpAccount[] = data.map((acc: any) => {
           const gbpTitles: string[] = (acc.locations || []).map((loc: any) => loc.title || "").filter(Boolean);
-          const matched = gbpTitles.map(matchGoName).filter(Boolean) as string[];
+          const matched = gbpTitles.map(matchGoShop).filter(Boolean) as ShopOption[];
           return {
             name: acc.name || "",
             label: acc.email || acc.accountName || acc.name || "",
-            shopNames: matched,
+            shopNames: matched.map(m => m.name),
+            shopIds: matched.map(m => m.id),
           };
         });
         setAccounts(accs);
@@ -82,26 +89,31 @@ export default function ReviewLanguagePage() {
   }, [shops]);
 
   // アカウント変更時: 全店舗を選択状態に
-  const currentAccountShops = selectedAccount === "all"
-    ? shops.map(s => s.name)
-    : accounts.find(a => a.name === selectedAccount)?.shopNames || [];
+  const currentAccountShopOptions: ShopOption[] = selectedAccount === "all"
+    ? shops.map(s => ({ id: s.id, name: s.name }))
+    : (() => {
+        const acc = accounts.find(a => a.name === selectedAccount);
+        if (!acc) return [];
+        return acc.shopIds.map((id, i) => ({ id, name: acc.shopNames[i] || id }));
+      })();
 
   useEffect(() => {
-    setSelectedShops(new Set(currentAccountShops));
+    setSelectedShops(new Set(currentAccountShopOptions.map(s => s.id)));
     setShopSearch("");
   }, [selectedAccount, accounts.length]);
 
-  const toggleShop = (name: string) => {
+  const toggleShop = (id: string) => {
     setSelectedShops(prev => {
       const next = new Set(prev);
-      if (next.has(name)) next.delete(name); else next.add(name);
+      if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
   };
 
   const fetchStats = useCallback(async () => {
-    // 選択された店舗のみ対象
-    const targetShopNames = Array.from(selectedShops);
+    // 選択された店舗IDで検索
+    const targetShopIds = Array.from(selectedShops);
+    const targetShopNames = targetShopIds; // エラーメッセージ用
 
     if (targetShopNames.length === 0) {
       setError("対象店舗が見つかりません。口コミ同期が必要です。");
@@ -118,7 +130,7 @@ export default function ReviewLanguagePage() {
       const res = await fetch("/api/report/review-language-stats", {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ shopNames: targetShopNames }),
+        body: JSON.stringify({ shopIds: targetShopIds }),
         signal: AbortSignal.timeout(120000),
       });
       if (res.ok) {
@@ -232,12 +244,12 @@ export default function ReviewLanguagePage() {
       </div>
 
       {/* 店舗選択パネル */}
-      {currentAccountShops.length > 0 && (
+      {currentAccountShopOptions.length > 0 && (
         <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100 mb-6">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-3">
-              <span className="text-sm font-semibold text-slate-700">対象店舗（{selectedShops.size}/{currentAccountShops.length}）</span>
-              <button onClick={() => setSelectedShops(new Set(currentAccountShops))}
+              <span className="text-sm font-semibold text-slate-700">対象店舗（{selectedShops.size}/{currentAccountShopOptions.length}）</span>
+              <button onClick={() => setSelectedShops(new Set(currentAccountShopOptions.map(s => s.id)))}
                 className="text-xs text-blue-600 hover:underline">全選択</button>
               <button onClick={() => setSelectedShops(new Set())}
                 className="text-xs text-slate-400 hover:underline">全解除</button>
@@ -251,12 +263,12 @@ export default function ReviewLanguagePage() {
             />
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-0 max-h-48 overflow-y-auto border border-slate-100 rounded-lg">
-            {currentAccountShops
-              .filter(name => !shopSearch || name.toLowerCase().includes(shopSearch.toLowerCase()))
-              .map((name) => (
-              <label key={name} className={`flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer hover:bg-blue-50 border-b border-r border-slate-50 ${selectedShops.has(name) ? "bg-blue-50/50" : ""}`}>
-                <input type="checkbox" checked={selectedShops.has(name)} onChange={() => toggleShop(name)} className="w-3.5 h-3.5 rounded" />
-                <span className="truncate text-slate-700">{name}</span>
+            {currentAccountShopOptions
+              .filter(s => !shopSearch || s.name.toLowerCase().includes(shopSearch.toLowerCase()))
+              .map((s) => (
+              <label key={s.id} className={`flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer hover:bg-blue-50 border-b border-r border-slate-50 ${selectedShops.has(s.id) ? "bg-blue-50/50" : ""}`}>
+                <input type="checkbox" checked={selectedShops.has(s.id)} onChange={() => toggleShop(s.id)} className="w-3.5 h-3.5 rounded" />
+                <span className="truncate text-slate-700">{s.name}</span>
               </label>
             ))}
           </div>
