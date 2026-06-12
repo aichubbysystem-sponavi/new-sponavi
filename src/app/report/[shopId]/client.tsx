@@ -1849,7 +1849,7 @@ export default function ReportClient({
         <div style={slideStyle} className="slide">
           <div style={slideBarStyle}><span>{shop.name} — 口コミ言語別分析</span></div>
           <div style={slideBodyStyle}>
-            <div style={stitleStyle}>口コミ言語別集計</div>
+            <div style={stitleStyle}>口コミ言語別集計 <span style={{ fontSize: 11, fontWeight: 400, color: "#999" }}>※コメント付き口コミのみ対象（{shop.totalReviews}件中{langStats.reduce((s, st) => s + st.total, 0)}件）</span></div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 20 }}>
               <div style={{ background: "#fff", borderRadius: 10, padding: "16px 20px", boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
                 <div style={{ fontSize: 11, color: "#888" }}>口コミ総数</div>

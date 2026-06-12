@@ -291,7 +291,7 @@ export default function ReviewLanguagePage() {
             <p className="text-2xl font-bold text-slate-800">{shopCount}</p>
           </div>
           <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
-            <p className="text-xs text-slate-500">口コミ総数</p>
+            <p className="text-xs text-slate-500">口コミ総数（コメント付きのみ）</p>
             <p className="text-2xl font-bold text-slate-800">{totalReviews.toLocaleString()}</p>
           </div>
           <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
