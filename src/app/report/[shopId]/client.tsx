@@ -1845,67 +1845,62 @@ export default function ReportClient({
       })()}
 
       {/* ════ 口コミ言語別分析 ════ */}
-      {langStats.length > 1 && (() => {
-        pageNum++;
-        const totalLang = langStats.reduce((s, st) => s + st.total, 0);
-        const totalLow = langStats.reduce((s, st) => s + st.lowRatingCount, 0);
-        return (
-          <div style={slideStyle} className="slide">
-            <div style={slideBarStyle}><span>{shop.name} — 口コミ言語別分析</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
-            <div style={slideBodyStyle}>
-              <div style={stitleStyle}>口コミ言語別集計</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 20 }}>
-                <div style={{ background: "#fff", borderRadius: 10, padding: "16px 20px", boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
-                  <div style={{ fontSize: 11, color: "#888" }}>口コミ総数</div>
-                  <div style={{ fontSize: 28, fontWeight: 700, color: "#1a2a44" }}>{totalLang.toLocaleString()}</div>
-                </div>
-                <div style={{ background: "#fff", borderRadius: 10, padding: "16px 20px", boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
-                  <div style={{ fontSize: 11, color: "#888" }}>低評価（★1-3）</div>
-                  <div style={{ fontSize: 28, fontWeight: 700, color: "#c0392b" }}>{totalLow.toLocaleString()}</div>
-                </div>
-                <div style={{ background: "#fff", borderRadius: 10, padding: "16px 20px", boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
-                  <div style={{ fontSize: 11, color: "#888" }}>検出言語数</div>
-                  <div style={{ fontSize: 28, fontWeight: 700, color: "#2980b9" }}>{langStats.length}</div>
-                </div>
+      {langStats.length > 1 && (
+        <div style={slideStyle} className="slide">
+          <div style={slideBarStyle}><span>{shop.name} — 口コミ言語別分析</span></div>
+          <div style={slideBodyStyle}>
+            <div style={stitleStyle}>口コミ言語別集計</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 20 }}>
+              <div style={{ background: "#fff", borderRadius: 10, padding: "16px 20px", boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
+                <div style={{ fontSize: 11, color: "#888" }}>口コミ総数</div>
+                <div style={{ fontSize: 28, fontWeight: 700, color: "#1a2a44" }}>{langStats.reduce((s, st) => s + st.total, 0).toLocaleString()}</div>
               </div>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                <thead>
-                  <tr style={{ borderBottom: "2px solid #e0e0e0" }}>
-                    <th style={{ textAlign: "left", padding: "8px 10px", color: "#666", fontWeight: 600 }}>言語</th>
-                    <th style={{ textAlign: "left", padding: "8px 6px", color: "#666", fontWeight: 600 }}>推定国</th>
-                    <th style={{ textAlign: "right", padding: "8px 6px", color: "#666", fontWeight: 600 }}>合計</th>
-                    <th style={{ textAlign: "right", padding: "8px 6px", color: "#666", fontWeight: 600 }}>★1</th>
-                    <th style={{ textAlign: "right", padding: "8px 6px", color: "#666", fontWeight: 600 }}>★2</th>
-                    <th style={{ textAlign: "right", padding: "8px 6px", color: "#666", fontWeight: 600 }}>★3</th>
-                    <th style={{ textAlign: "right", padding: "8px 6px", color: "#666", fontWeight: 600 }}>★4</th>
-                    <th style={{ textAlign: "right", padding: "8px 6px", color: "#666", fontWeight: 600 }}>★5</th>
-                    <th style={{ textAlign: "right", padding: "8px 6px", color: "#c0392b", fontWeight: 600 }}>低評価</th>
-                    <th style={{ textAlign: "right", padding: "8px 6px", color: "#c0392b", fontWeight: 600 }}>低評価率</th>
-                    <th style={{ textAlign: "right", padding: "8px 10px", color: "#666", fontWeight: 600 }}>構成比</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {langStats.map((s, i) => (
-                    <tr key={s.lang} style={{ borderBottom: "1px solid #f0f0f0", background: i % 2 === 0 ? "#fafbfc" : "#fff" }}>
-                      <td style={{ padding: "7px 10px", fontWeight: 600, color: "#333" }}>{s.lang}</td>
-                      <td style={{ padding: "7px 6px", color: "#666" }}>{s.country}</td>
-                      <td style={{ padding: "7px 6px", textAlign: "right", fontWeight: 600 }}>{s.total.toLocaleString()}</td>
-                      <td style={{ padding: "7px 6px", textAlign: "right", color: "#c0392b" }}>{s.star1 || "-"}</td>
-                      <td style={{ padding: "7px 6px", textAlign: "right", color: "#e67e22" }}>{s.star2 || "-"}</td>
-                      <td style={{ padding: "7px 6px", textAlign: "right", color: "#f39c12" }}>{s.star3 || "-"}</td>
-                      <td style={{ padding: "7px 6px", textAlign: "right", color: "#888" }}>{s.star4 || "-"}</td>
-                      <td style={{ padding: "7px 6px", textAlign: "right", color: "#27ae60" }}>{s.star5 || "-"}</td>
-                      <td style={{ padding: "7px 6px", textAlign: "right", fontWeight: 600, color: "#c0392b" }}>{s.lowRatingCount || "-"}</td>
-                      <td style={{ padding: "7px 6px", textAlign: "right", color: "#c0392b" }}>{s.total > 0 ? (s.lowRatingCount / s.total * 100).toFixed(1) + "%" : "-"}</td>
-                      <td style={{ padding: "7px 10px", textAlign: "right", color: "#999" }}>{totalLang > 0 ? (s.total / totalLang * 100).toFixed(1) + "%" : "-"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div style={{ background: "#fff", borderRadius: 10, padding: "16px 20px", boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
+                <div style={{ fontSize: 11, color: "#888" }}>低評価（★1-3）</div>
+                <div style={{ fontSize: 28, fontWeight: 700, color: "#c0392b" }}>{langStats.reduce((s, st) => s + st.lowRatingCount, 0).toLocaleString()}</div>
+              </div>
+              <div style={{ background: "#fff", borderRadius: 10, padding: "16px 20px", boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
+                <div style={{ fontSize: 11, color: "#888" }}>検出言語数</div>
+                <div style={{ fontSize: 28, fontWeight: 700, color: "#2980b9" }}>{langStats.length}</div>
+              </div>
             </div>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: "2px solid #e0e0e0" }}>
+                  <th style={{ textAlign: "left", padding: "8px 10px", color: "#666", fontWeight: 600 }}>言語</th>
+                  <th style={{ textAlign: "left", padding: "8px 6px", color: "#666", fontWeight: 600 }}>推定国</th>
+                  <th style={{ textAlign: "right", padding: "8px 6px", color: "#666", fontWeight: 600 }}>合計</th>
+                  <th style={{ textAlign: "right", padding: "8px 6px", color: "#666", fontWeight: 600 }}>★1</th>
+                  <th style={{ textAlign: "right", padding: "8px 6px", color: "#666", fontWeight: 600 }}>★2</th>
+                  <th style={{ textAlign: "right", padding: "8px 6px", color: "#666", fontWeight: 600 }}>★3</th>
+                  <th style={{ textAlign: "right", padding: "8px 6px", color: "#666", fontWeight: 600 }}>★4</th>
+                  <th style={{ textAlign: "right", padding: "8px 6px", color: "#666", fontWeight: 600 }}>★5</th>
+                  <th style={{ textAlign: "right", padding: "8px 6px", color: "#c0392b", fontWeight: 600 }}>低評価</th>
+                  <th style={{ textAlign: "right", padding: "8px 6px", color: "#c0392b", fontWeight: 600 }}>低評価率</th>
+                  <th style={{ textAlign: "right", padding: "8px 10px", color: "#666", fontWeight: 600 }}>構成比</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(() => { const totalLang = langStats.reduce((s, st) => s + st.total, 0); return langStats.map((s, i) => (
+                  <tr key={s.lang} style={{ borderBottom: "1px solid #f0f0f0", background: i % 2 === 0 ? "#fafbfc" : "#fff" }}>
+                    <td style={{ padding: "7px 10px", fontWeight: 600, color: "#333" }}>{s.lang}</td>
+                    <td style={{ padding: "7px 6px", color: "#666" }}>{s.country}</td>
+                    <td style={{ padding: "7px 6px", textAlign: "right", fontWeight: 600 }}>{s.total.toLocaleString()}</td>
+                    <td style={{ padding: "7px 6px", textAlign: "right", color: "#c0392b" }}>{s.star1 || "-"}</td>
+                    <td style={{ padding: "7px 6px", textAlign: "right", color: "#e67e22" }}>{s.star2 || "-"}</td>
+                    <td style={{ padding: "7px 6px", textAlign: "right", color: "#f39c12" }}>{s.star3 || "-"}</td>
+                    <td style={{ padding: "7px 6px", textAlign: "right", color: "#888" }}>{s.star4 || "-"}</td>
+                    <td style={{ padding: "7px 6px", textAlign: "right", color: "#27ae60" }}>{s.star5 || "-"}</td>
+                    <td style={{ padding: "7px 6px", textAlign: "right", fontWeight: 600, color: "#c0392b" }}>{s.lowRatingCount || "-"}</td>
+                    <td style={{ padding: "7px 6px", textAlign: "right", color: "#c0392b" }}>{s.total > 0 ? (s.lowRatingCount / s.total * 100).toFixed(1) + "%" : "-"}</td>
+                    <td style={{ padding: "7px 10px", textAlign: "right", color: "#999" }}>{totalLang > 0 ? (s.total / totalLang * 100).toFixed(1) + "%" : "-"}</td>
+                  </tr>
+                )); })()}
+              </tbody>
+            </table>
           </div>
-        );
-      })()}
+        </div>
+      )}
 
       {/* ワード詳細モーダル（ポジティブ/ネガティブ共用） */}
       {negativeModal && (
