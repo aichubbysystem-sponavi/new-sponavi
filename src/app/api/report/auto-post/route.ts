@@ -266,14 +266,15 @@ async function searchDropboxPhotoWithDebug(folderUrl: string, dateCompact: strin
 // おおもとDropboxフォルダ（全店舗の写真フォルダが入っている親フォルダ）
 const DROPBOX_ROOT_FOLDER_URL = "https://www.dropbox.com/scl/fo/3wfz63eiz5t4kw5ag2100/AJ5pTKC43xbeIaxVOgCQL9I?rlkey=ngob0xb0csan3fldwvt2ach1u&dl=0";
 
-// おおもとフォルダのサブフォルダ一覧キャッシュ（リクエスト内で共有）
-let cachedRootSubfolders: { name: string; url: string }[] | null = null;
+// おおもとフォルダのサブフォルダ一覧キャッシュ（TTL 10分、失敗時はキャッシュしない）
+let cachedRootSubfolders: { data: { name: string; url: string }[]; ts: number } | null = null;
+const ROOT_CACHE_TTL = 10 * 60 * 1000; // 10分
 
 /**
  * おおもとDropboxフォルダのサブフォルダ一覧を取得（キャッシュあり）
  */
 async function getRootSubfolders(dbxToken: string): Promise<{ name: string; url: string }[]> {
-  if (cachedRootSubfolders) return cachedRootSubfolders;
+  if (cachedRootSubfolders && Date.now() - cachedRootSubfolders.ts < ROOT_CACHE_TTL) return cachedRootSubfolders.data;
 
   const shareUrl = DROPBOX_ROOT_FOLDER_URL.replace(/[&?]dl=\d/g, "").replace(/[&?]st=[^&]*/g, "").replace(/[?&]$/, "");
 
@@ -287,8 +288,7 @@ async function getRootSubfolders(dbxToken: string): Promise<{ name: string; url:
     });
     if (!res.ok) {
       console.error(`[Dropbox] Root folder list failed: ${res.status}`);
-      cachedRootSubfolders = [];
-      return [];
+      return []; // 失敗時はキャッシュしない
     }
     const data = await res.json();
     allEntries = data.entries || [];
@@ -317,12 +317,11 @@ async function getRootSubfolders(dbxToken: string): Promise<{ name: string; url:
       .map((e: any) => ({ name: e.name || "", url: "" }));
 
     console.log(`[Dropbox] Root subfolders: ${folders.length}件 (例: ${folders.slice(0, 5).map(f => f.name).join(", ")})`);
-    cachedRootSubfolders = folders;
+    cachedRootSubfolders = { data: folders, ts: Date.now() };
     return folders;
   } catch (e: any) {
     console.error(`[Dropbox] Root folder error: ${e?.message}`);
-    cachedRootSubfolders = [];
-    return [];
+    return []; // 失敗時はキャッシュしない
   }
 }
 

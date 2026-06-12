@@ -254,6 +254,14 @@ export async function GET(request: NextRequest) {
   const supabase = getSupabase();
   const now = new Date().toISOString();
 
+  // 10分以上processingのまま残っているレコードをpendingに戻す（クラッシュリカバリ）
+  const staleThreshold = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  await supabase
+    .from("scheduled_posts")
+    .update({ status: "pending" })
+    .eq("status", "processing")
+    .lt("scheduled_at", staleThreshold);
+
   const { data: posts } = await supabase
     .from("scheduled_posts")
     .select("*")
@@ -274,6 +282,15 @@ export async function GET(request: NextRequest) {
 
   async function processPost(post: any): Promise<void> {
     try {
+      // 二重実行防止: pending→processingにクレーム。他のcron実行と競合した場合は何もしない
+      const { data: claimed } = await supabase
+        .from("scheduled_posts")
+        .update({ status: "processing" })
+        .eq("id", post.id)
+        .eq("status", "pending")
+        .select("id");
+      if (!claimed || claimed.length === 0) return; // 他の実行が先にクレーム済み
+
       if (!post.shop_id) {
         await supabase.from("scheduled_posts").update({
           status: "error", error_detail: "shop_idなし",
