@@ -57,31 +57,34 @@ export async function POST(request: NextRequest) {
 
   const supabase = getSupabase();
 
-  // 口コミを取得（shopIdsまたはshopNamesで検索）
+  // 口コミを取得（1店舗ずつページネーション付きで取得 — Supabaseデフォルト1000行制限対策）
   let allReviews: any[] = [];
-  const batchSize = 30;
+  const targetNames = shopNames.length > 0 ? shopNames : [];
+  const targetIds = shopIds.length > 0 ? shopIds : [];
+  const useNames = targetNames.length > 0;
+  const targets = useNames ? targetNames : targetIds;
+  const batchSize = 10; // inクエリは10店舗ずつ（1店舗あたり数百件想定）
 
-  if (shopIds.length > 0) {
-    for (let i = 0; i < shopIds.length; i += batchSize) {
-      const batch = shopIds.slice(i, i + batchSize);
+  for (let i = 0; i < targets.length; i += batchSize) {
+    const batch = targets.slice(i, i + batchSize);
+    const col = useNames ? "shop_name" : "shop_id";
+
+    // ページネーション: 1バッチ最大5000件まで取得
+    let from = 0;
+    const pageSize = 1000;
+    while (from < 5000) {
       const { data } = await supabase
         .from("reviews")
         .select("shop_name, reviewer_name, star_rating, comment, create_time")
-        .in("shop_id", batch)
+        .in(col, batch)
         .not("comment", "is", null)
-        .order("create_time", { ascending: false });
-      if (data) allReviews.push(...data);
-    }
-  } else {
-    for (let i = 0; i < shopNames.length; i += batchSize) {
-      const batch = shopNames.slice(i, i + batchSize);
-      const { data } = await supabase
-        .from("reviews")
-        .select("shop_name, reviewer_name, star_rating, comment, create_time")
-        .in("shop_name", batch)
-        .not("comment", "is", null)
-        .order("create_time", { ascending: false });
-      if (data) allReviews.push(...data);
+        .neq("comment", "")
+        .order("create_time", { ascending: false })
+        .range(from, from + pageSize - 1);
+      if (!data || data.length === 0) break;
+      allReviews.push(...data);
+      if (data.length < pageSize) break; // 最終ページ
+      from += pageSize;
     }
   }
 
