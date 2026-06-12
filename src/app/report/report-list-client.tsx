@@ -60,9 +60,11 @@ function MomBadge({ cur, prev, label, showLabel = false }: { cur: number; prev: 
 export default function ReportListClient({
   shops,
   source,
+  gbpAccountNames = [],
 }: {
   shops: ShopListItem[];
   source: "cache" | "spreadsheet" | "mock";
+  gbpAccountNames?: string[];
 }) {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("name");
@@ -81,6 +83,7 @@ export default function ReportListClient({
   const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
   const [showOnlyAlert, setShowOnlyAlert] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<"all" | "both" | "sheet_only">("all");
+  const [accountFilter, setAccountFilter] = useState<string>("all");
   const [reportMonth, setReportMonth] = useState("");
 
   // お気に入り・対象月をlocalStorageから読み込み
@@ -152,6 +155,11 @@ export default function ReportListClient({
       result = result.filter((s) => (s.dataSource || "both") === sourceFilter);
     }
 
+    // GBPアカウントフィルタ
+    if (accountFilter !== "all") {
+      result = result.filter((s) => s.gbpAccountLabel === accountFilter);
+    }
+
     // ソート（お気に入りを上部固定）
     result = [...result].sort((a, b) => {
       const aFav = favorites.has(a.id) ? 0 : 1;
@@ -168,7 +176,7 @@ export default function ReportListClient({
       return sortDir === "asc" ? cmp : -cmp;
     });
     return result;
-  }, [shops, search, sortKey, sortDir, ratingFilter, areaFilter, favorites, showOnlyFavorites, showOnlyAlert, sourceFilter]);
+  }, [shops, search, sortKey, sortDir, ratingFilter, areaFilter, favorites, showOnlyFavorites, showOnlyAlert, sourceFilter, accountFilter]);
 
   const totalPages = Math.ceil(filtered.length / perPage);
   const paged = filtered.slice((page - 1) * perPage, page * perPage);
@@ -479,6 +487,15 @@ export default function ReportListClient({
                   </button>
                 ))}
               </div>
+            )}
+
+            {/* GBPアカウントフィルタ */}
+            {gbpAccountNames.length > 0 && (
+              <select value={accountFilter} onChange={(e) => { setAccountFilter(e.target.value); setPage(1); }}
+                className="px-3 py-2 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none font-semibold text-[#003D6B]">
+                <option value="all">全アカウント</option>
+                {gbpAccountNames.map((name) => <option key={name} value={name}>{name.replace(/\(.*?\)/, "").trim()}</option>)}
+              </select>
             )}
 
             {/* 対象月 */}

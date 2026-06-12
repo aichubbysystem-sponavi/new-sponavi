@@ -130,4 +130,6 @@ export interface ShopListItem {
   dataSource?: "both" | "sheet_only";
   /** GBPメインカテゴリ（例：ラーメン屋、美容院） */
   category?: string;
+  /** GBPアカウント表示名（例：JAPAN SELECT, Spotlight Navigator） */
+  gbpAccountLabel?: string;
 }
