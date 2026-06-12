@@ -20,6 +20,7 @@ function Modal({ children, onClose }: { children: React.ReactNode; onClose: () =
 interface MasterRow {
   shopId: string; shopName: string; ownerName: string; agentName: string;
   city: string; state: string; phone: string; gbpConnected: boolean;
+  gbpAccountLabel: string;
   service: "meo" | "pmax" | "both" | "none";
   reviewCount: number;
   status: "active" | "paused" | "churned";
@@ -64,14 +65,27 @@ export default function CustomerMasterPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [shopRes, ownerRes, custRes] = await Promise.all([
+      const [shopRes, ownerRes, custRes, gbpAccRes] = await Promise.all([
         api.get("/api/shop"),
         api.get("/api/owner"),
         api.get("/api/report/customer-sheet").then(r => r.data || { customers: [] }).catch(() => ({ customers: [] })),
+        api.get("/api/gbp/account", { timeout: 15000 }).then(r => r.data || []).catch(() => []),
       ]);
       const shopData: Shop[] = Array.isArray(shopRes.data) ? shopRes.data : [];
       const ownerData: Owner[] = Array.isArray(ownerRes.data) ? ownerRes.data : [];
       setOwners(ownerData);
+
+      // GBPアカウント→ロケーションのマッピング構築（locationName → アカウント表示名）
+      const locToAccount = new Map<string, string>();
+      for (const acc of (Array.isArray(gbpAccRes) ? gbpAccRes : [])) {
+        const accLabel = acc.email || acc.accountName || acc.name || "";
+        for (const loc of (acc.locations || [])) {
+          const locName = loc.name || "";
+          if (locName) locToAccount.set(locName, accLabel);
+          const fullPath = `${acc.name || ""}/${locName}`;
+          if (fullPath) locToAccount.set(fullPath, accLabel);
+        }
+      }
 
       // 顧客シートデータをマップに変換
       const custMap = new Map<string, { name: string; service: "meo" | "pmax" | "both" | "none" }>();
@@ -96,6 +110,10 @@ export default function CustomerMasterPage() {
             }
           }
         }
+        // GBPアカウント名を逆引き
+        const gbpLoc = s.gbp_location_name || "";
+        const gbpAccountLabel = locToAccount.get(gbpLoc) || (gbpLoc.includes("/") ? locToAccount.get(gbpLoc.split("/").slice(-2).join("/")) : "") || "";
+
         return {
           shopId: s.id,
           shopName,
@@ -105,6 +123,7 @@ export default function CustomerMasterPage() {
           state: s.state || "",
           phone: s.phone || "",
           gbpConnected: !!s.gbp_location_name,
+          gbpAccountLabel,
           service,
           reviewCount: 0,
           status: "active" as const,
@@ -499,12 +518,13 @@ export default function CustomerMasterPage() {
               <th className="text-left py-3 px-2 text-xs font-semibold text-slate-500 cursor-pointer hover:text-slate-800" onClick={() => hs("city")}>エリア {si("city")}</th>
               <th className="text-left py-3 px-2 text-xs font-semibold text-slate-500">電話番号</th>
               <th className="text-center py-3 px-2 text-xs font-semibold text-slate-500 w-20">GBP</th>
+              <th className="text-left py-3 px-2 text-xs font-semibold text-slate-500 cursor-pointer hover:text-slate-800" onClick={() => hs("gbpAccountLabel")}>GBPアカウント {si("gbpAccountLabel")}</th>
               <th className="text-center py-3 px-2 text-xs font-semibold text-slate-500 w-40">操作</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={7} className="py-12 text-center text-slate-400">{shops.length === 0 ? "店舗が登録されていません" : "該当なし"}</td></tr>
+              <tr><td colSpan={8} className="py-12 text-center text-slate-400">{shops.length === 0 ? "店舗が登録されていません" : "該当なし"}</td></tr>
             ) : filtered.map((row) => (
               <tr key={row.shopId} className="border-b border-slate-50 hover:bg-blue-50/30 transition">
                 <td className="py-2.5 px-3">
@@ -523,6 +543,7 @@ export default function CustomerMasterPage() {
                     ? <span className="text-green-600 text-xs font-semibold">● 接続</span>
                     : <span className="text-slate-300 text-xs">○ 未接続</span>}
                 </td>
+                <td className="py-2.5 px-2 text-xs text-slate-500 max-w-[160px] truncate" title={row.gbpAccountLabel}>{row.gbpAccountLabel || "—"}</td>
                 <td className="py-2.5 px-2 text-center">
                   <div className="flex items-center justify-center gap-1">
                     <button onClick={() => setEditShop(row)} className="text-[10px] px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition">編集</button>
