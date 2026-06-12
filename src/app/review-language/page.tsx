@@ -79,43 +79,29 @@ export default function ReviewLanguagePage() {
     setLoading(true);
     try {
       const headers = await getAuthHeaders();
-      // 店舗名をバッチでAPI送信（URLが長くなるためPOSTも検討だが、GETで分割）
-      const batchSize = 50;
-      let allStats: LangStat[] = [];
+      const allStats: LangStat[] = [];
       let allDetails: ReviewDetail[] = [];
       let total = 0;
       let totalLow = 0;
       let sCount = 0;
 
-      for (let i = 0; i < targetShopNames.length; i += batchSize) {
-        const batch = targetShopNames.slice(i, i + batchSize);
-        const params = new URLSearchParams({ shopNames: batch.join(",") });
-        const res = await fetch(`/api/report/review-language-stats?${params}`, {
-          headers,
-          signal: AbortSignal.timeout(120000),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          // マージ
-          for (const s of (data.stats || [])) {
-            const existing = allStats.find(st => st.lang === s.lang);
-            if (existing) {
-              existing.total += s.total;
-              existing.star1 += s.star1;
-              existing.star2 += s.star2;
-              existing.star3 += s.star3;
-              existing.star4 += s.star4;
-              existing.star5 += s.star5;
-              existing.lowRatingCount += s.lowRatingCount;
-            } else {
-              allStats.push({ ...s });
-            }
-          }
-          allDetails.push(...(data.details || []));
-          total += data.totalReviews || 0;
-          totalLow += data.totalLowRating || 0;
-          sCount += data.shopCount || 0;
-        }
+      // 全店舗名を一括POSTで送信
+      const res = await fetch("/api/report/review-language-stats", {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ shopNames: targetShopNames }),
+        signal: AbortSignal.timeout(120000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        total = data.totalReviews || 0;
+        totalLow = data.totalLowRating || 0;
+        sCount = data.shopCount || 0;
+        allStats.push(...(data.stats || []));
+        allDetails = data.details || [];
+      } else {
+        const err = await res.json().catch(() => ({ error: "不明なエラー" }));
+        console.error("API error:", err);
       }
 
       allStats.sort((a, b) => b.total - a.total);

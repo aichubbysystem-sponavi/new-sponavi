@@ -36,18 +36,20 @@ interface ReviewDetail {
 }
 
 /**
- * GET /api/report/review-language-stats?shopIds=id1,id2,...
+ * POST /api/report/review-language-stats
+ * body: { shopIds?: string[], shopNames?: string[] }
  * 指定店舗の口コミを言語別に集計
  */
-export async function GET(request: NextRequest) {
+export async function POST(request: NextRequest) {
   const { verifyAuth } = await import("@/lib/auth-verify");
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid) {
     return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   }
 
-  const shopIds = request.nextUrl.searchParams.get("shopIds")?.split(",").filter(Boolean) || [];
-  const shopNames = request.nextUrl.searchParams.get("shopNames")?.split(",").filter(Boolean) || [];
+  const body = await request.json().catch(() => ({}));
+  const shopIds: string[] = body.shopIds || [];
+  const shopNames: string[] = body.shopNames || [];
 
   if (shopIds.length === 0 && shopNames.length === 0) {
     return NextResponse.json({ error: "shopIds または shopNames が必要です" }, { status: 400 });
