@@ -990,9 +990,9 @@ export default function ReportClient({
             </div>
           ))}
         </div>
-        <div style={{ flex: 1, padding: "16px 36px 20px", display: "flex", flexDirection: "column", justifyContent: "stretch", overflow: "hidden" }}>
+        <div style={{ flex: 1, padding: "16px 9px 20px", display: "flex", flexDirection: "column", justifyContent: "stretch", overflow: "hidden" }}>
           <div style={{ ...stitleStyle, marginBottom: 14 }}>主要指標サマリー（{curLabel}）</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, flex: 1 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, flex: 1 }}>
             {kpis.map((kpi, i) => {
               const isLastKpi = i === kpis.length - 1;
               const mom = kpi.momValue != null ? pctChange(kpi.value, kpi.momValue) : null;
