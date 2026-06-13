@@ -57,56 +57,45 @@ export async function POST(request: NextRequest) {
 
   const supabase = getSupabase();
 
-  // shopNamesがあればshop_nameで検索、shopIdsがあればshop_idで検索
+  // shopNames → shop_idを解決してからshop_idで全件検索（名前バリエーション対策）
+  let resolvedIds: string[] = [...shopIds];
+
+  if (shopNames.length > 0) {
+    for (const name of shopNames) {
+      // 完全一致でshop_idを取得
+      const { data } = await supabase.from("reviews").select("shop_id").eq("shop_name", name).limit(1);
+      if (data && data.length > 0) {
+        resolvedIds.push(data[0].shop_id);
+      } else {
+        // フォールバック: ilike検索
+        const { data: iData } = await supabase.from("reviews").select("shop_id").ilike("shop_name", name).limit(1);
+        if (iData && iData.length > 0) resolvedIds.push(iData[0].shop_id);
+      }
+    }
+    resolvedIds = Array.from(new Set(resolvedIds));
+  }
+
+  // shop_idで口コミ全件取得
   let allReviews: any[] = [];
   const pageSize = 1000;
 
-  const fetchByCol = async (col: string, values: string[]) => {
-    for (let i = 0; i < values.length; i += 10) {
-      const batch = values.slice(i, i + 10);
-      let from = 0;
-      while (from < 5000) {
-        const { data, error } = await supabase
-          .from("reviews")
-          .select("shop_name, reviewer_name, star_rating, comment, create_time")
-          .in(col, batch)
-          .not("comment", "is", null)
-          .neq("comment", "")
-          .order("create_time", { ascending: false })
-          .range(from, from + pageSize - 1);
-        if (error) { console.error("[review-language-stats]", error.message); break; }
-        if (!data || data.length === 0) break;
-        allReviews.push(...data);
-        if (data.length < pageSize) break;
-        from += pageSize;
-      }
-    }
-  };
-
-  if (shopIds.length > 0) {
-    await fetchByCol("shop_id", shopIds);
-  }
-  if (shopNames.length > 0) {
-    await fetchByCol("shop_name", shopNames);
-    // 完全一致で見つからなかった店舗はilike検索でフォールバック
-    if (allReviews.length === 0) {
-      for (const name of shopNames) {
-        let from = 0;
-        while (from < 5000) {
-          const { data } = await supabase
-            .from("reviews")
-            .select("shop_name, reviewer_name, star_rating, comment, create_time")
-            .ilike("shop_name", name)
-            .not("comment", "is", null)
-            .neq("comment", "")
-            .order("create_time", { ascending: false })
-            .range(from, from + pageSize - 1);
-          if (!data || data.length === 0) break;
-          allReviews.push(...data);
-          if (data.length < pageSize) break;
-          from += pageSize;
-        }
-      }
+  for (let i = 0; i < resolvedIds.length; i += 10) {
+    const batch = resolvedIds.slice(i, i + 10);
+    let from = 0;
+    while (from < 5000) {
+      const { data, error } = await supabase
+        .from("reviews")
+        .select("shop_name, reviewer_name, star_rating, comment, create_time")
+        .in("shop_id", batch)
+        .not("comment", "is", null)
+        .neq("comment", "")
+        .order("create_time", { ascending: false })
+        .range(from, from + pageSize - 1);
+      if (error) { console.error("[review-language-stats]", error.message); break; }
+      if (!data || data.length === 0) break;
+      allReviews.push(...data);
+      if (data.length < pageSize) break;
+      from += pageSize;
     }
   }
 
