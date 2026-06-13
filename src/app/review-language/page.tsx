@@ -203,45 +203,66 @@ export default function ReviewLanguagePage() {
     return token ? { Authorization: `Bearer ${token}` } : {};
   }
 
-  // CSV統合ダウンロード（3セクション: 口コミ一覧 + 国別サマリー + クレーム詳細）
+  // CSV統合ダウンロード（3セクション横並び: 口コミ一覧 | 国別サマリー | クレーム詳細）
   const downloadCSV = () => {
     const esc = (s: string) => `"${(s || "").replace(/"/g, '""').replace(/\n/g, " ")}"`;
     const totalLang = stats.reduce((s, st) => s + st.total, 0);
-    let csv = "\uFEFF" + "sep=,\n"; // BOM + Excel区切り文字指定
+    const sorted = [...details].sort((a, b) => (b.create_time || "").localeCompare(a.create_time || ""));
+    const complaints = sorted.filter(d => d.star_rating >= 1 && d.star_rating <= 2);
+
+    // 各セクションのデータを行配列として構築
+    const COL1 = 7; // 口コミ一覧の列数
+    const COL2 = 11; // 国別サマリーの列数
+    const COL3 = 6; // クレーム詳細の列数
+    const empty1 = Array(COL1).fill("").join(",");
+    const empty2 = Array(COL2).fill("").join(",");
+    const empty3 = Array(COL3).fill("").join(",");
 
     // セクション1: 口コミ一覧
-    csv += "【口コミ一覧】\n";
-    csv += "投稿日,投稿者,評価,口コミ,返信,言語,推定国\n";
-    const sorted = [...details].sort((a, b) => (b.create_time || "").localeCompare(a.create_time || ""));
+    const sec1: string[] = [];
+    sec1.push("口コミ一覧" + "," .repeat(COL1 - 1));
+    sec1.push("投稿日,投稿者,評価,口コミ,返信,言語,推定国");
     for (const d of sorted) {
-      csv += `${d.create_time?.slice(0, 10) || ""},${esc(d.reviewer_name)},${d.star_rating},${esc(d.comment)},,${esc(d.lang)},${esc(d.country)}\n`;
+      sec1.push(`${d.create_time?.slice(0, 10) || ""},${esc(d.reviewer_name)},${d.star_rating},${esc(d.comment)},,${esc(d.lang)},${esc(d.country)}`);
     }
-
-    csv += "\n";
 
     // セクション2: 国別サマリー
-    csv += "【国別サマリー】\n";
-    csv += "言語,推定国,合計,★1,★2,★3,★4,★5,低評価(★1-3),低評価率,構成比\n";
+    const sec2: string[] = [];
+    sec2.push("国別サマリー" + ",".repeat(COL2 - 1));
+    sec2.push("推定国,合計件数,合計比率,★5,★4,★3,★2,★1,低評価(★1-3),低評価比率,低評価内シェア");
+    const totalLow = stats.reduce((s, st) => s + st.lowRatingCount, 0);
     for (const s of stats) {
-      const pct = s.total > 0 ? (s.lowRatingCount / s.total * 100).toFixed(1) + "%" : "0%";
-      const ratio = totalLang > 0 ? (s.total / totalLang * 100).toFixed(1) + "%" : "0%";
-      csv += `${s.lang},${s.country},${s.total},${s.star1 || "-"},${s.star2 || "-"},${s.star3 || "-"},${s.star4 || "-"},${s.star5 || "-"},${s.lowRatingCount},${pct},${ratio}\n`;
+      const pct = totalLang > 0 ? (s.total / totalLang * 100).toFixed(0) + "%" : "0%";
+      const lowPct = s.total > 0 ? (s.lowRatingCount / s.total * 100).toFixed(0) + "%" : "0%";
+      const lowShare = totalLow > 0 ? (s.lowRatingCount / totalLow * 100).toFixed(0) + "%" : "0%";
+      sec2.push(`${s.country},${s.total},${pct},${s.star5 || "-"},${s.star4 || "-"},${s.star3 || "-"},${s.star2 || "-"},${s.star1 || "-"},${s.lowRatingCount},${lowPct},${lowShare}`);
     }
-
-    csv += "\n";
+    // 合計行
+    const t = stats.reduce((a, s) => ({ s5: a.s5 + s.star5, s4: a.s4 + s.star4, s3: a.s3 + s.star3, s2: a.s2 + s.star2, s1: a.s1 + s.star1, low: a.low + s.lowRatingCount }), { s5: 0, s4: 0, s3: 0, s2: 0, s1: 0, low: 0 });
+    const totalLowPct = totalLang > 0 ? (t.low / totalLang * 100).toFixed(0) + "%" : "0%";
+    sec2.push(`合計,${totalLang},100%,${t.s5},${t.s4},${t.s3},${t.s2},${t.s1},${t.low},${totalLowPct},100%`);
 
     // セクション3: クレーム詳細（★1-2）
-    csv += "【クレーム詳細（★1-2）】\n";
-    csv += "推定国,投稿日,投稿者,評価,口コミ(原文),口コミ(日本語訳)\n";
-    const complaints = sorted.filter(d => d.star_rating >= 1 && d.star_rating <= 2);
+    const sec3: string[] = [];
+    sec3.push("クレーム詳細(★1-2)" + ",".repeat(COL3 - 1));
+    sec3.push("推定国,投稿日,投稿者,評価,口コミ内容,日本語訳");
     for (const d of complaints) {
-      // 原文と翻訳を分離
       const comment = d.comment || "";
       const origMatch = comment.match(/\(Original\)\s*([\s\S]+)/i);
       const transMatch = comment.match(/\(Translated by Google\)\s*([\s\S]*?)(?:\(Original\)|$)/i);
       const original = origMatch ? origMatch[1].trim() : comment.replace(/\(Translated by Google\)/i, "").trim();
       const translation = transMatch ? transMatch[1].trim() : "";
-      csv += `${esc(d.country)},${d.create_time?.slice(0, 10) || ""},${esc(d.reviewer_name)},${d.star_rating},${esc(original)},${esc(translation)}\n`;
+      sec3.push(`${esc(d.country)},${d.create_time?.slice(0, 10) || ""},${esc(d.reviewer_name)},${d.star_rating},${esc(original)},${esc(translation)}`);
+    }
+
+    // 3セクションを横並びで結合
+    const maxRows = Math.max(sec1.length, sec2.length, sec3.length);
+    let csv = "\uFEFF" + "sep=,\n";
+    for (let i = 0; i < maxRows; i++) {
+      const c1 = i < sec1.length ? sec1[i] : empty1;
+      const c2 = i < sec2.length ? sec2[i] : empty2;
+      const c3 = i < sec3.length ? sec3[i] : empty3;
+      csv += `${c1},,${c2},,${c3}\n`;
     }
 
     const monthLabel = targetMonth ? targetMonth.replace("/", "-") : "全期間";
