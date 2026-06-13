@@ -690,12 +690,33 @@ export default function ReportClient({
   };
 
   // ── Page count ──
-  const aiCommentPageCount = Math.max(1, Math.ceil((comments || []).length / 2));
+  // AIコメントのページ数を文字数ベースで計算（実際の分割ロジックと同期）
+  const aiCommentPageCount = (() => {
+    const ac = comments || [];
+    if (ac.length === 0) return 1;
+    let pages = 0;
+    let ci = 0;
+    while (ci < ac.length) {
+      const limit = pages === 0 ? 750 : 850;
+      let charCount = 0;
+      let end = ci;
+      while (end < ac.length) {
+        const len = (ac[end] || "").replace(/<[^>]*>/g, "").length;
+        if (end > ci && charCount + len > limit) break;
+        charCount += len;
+        end++;
+      }
+      pages++;
+      ci = end;
+    }
+    return pages;
+  })();
   let totalPages = 6 + aiCommentPageCount; // P1,P2(月次),P3-P5(グラフ),口コミ分析 + AIコメント(動的)
-  if (hasReviews) totalPages += 2; // P9(口コミ件数推移), P10(月間増加数)
+  if (hasReviews) totalPages += 2; // 口コミ件数推移, 月間増加数
   if (showKeywords) totalPages++;
   if (showRankingHistory) totalPages++;
   if (showGridRanking) totalPages++;
+  if (langStats.length > 1) totalPages++; // 口コミ言語別分析
   if (showSearchQueries) {
     totalPages++;
     // 16件以上なら2ページ目も表示
