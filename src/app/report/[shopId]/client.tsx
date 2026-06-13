@@ -1784,7 +1784,7 @@ export default function ReportClient({
         <div style={slideBarStyle}><span>{shop.name} — AIによるコメント{pageLabel}</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={stitleStyle}>{isFirst ? "AIによるコメント" : "AIによるコメント（続き）"}</div>
-          <div style={{ background: "linear-gradient(135deg,#f0f4ff,#fff)", border: "2px solid #0f3460", borderRadius: 14, padding: "28px 32px", flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", wordBreak: "break-word" }}>
+          <div style={{ background: "linear-gradient(135deg,#f0f4ff,#fff)", border: "2px solid #0f3460", borderRadius: 14, padding: "16px 20px", flex: 1, display: "flex", flexDirection: "column", overflowY: "auto", wordBreak: "break-word" }}>
             {isFirst && <h3 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", marginBottom: 16 }}>{curLabel} 総評</h3>}
             <div style={{ margin: 0 }}>
               {allComments.slice(page.start, page.end).map((c, i) => {
