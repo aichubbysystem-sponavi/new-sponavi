@@ -186,6 +186,17 @@ export default function ReviewLanguagePage() {
     }
   }, [autoRunShopId]);
 
+  // 対象月変更時に自動再実行（既に分析結果がある場合のみ）
+  const [prevMonth, setPrevMonth] = useState(targetMonth);
+  useEffect(() => {
+    if (targetMonth !== prevMonth) {
+      setPrevMonth(targetMonth);
+      if (stats.length > 0 && !loading) {
+        fetchStats();
+      }
+    }
+  }, [targetMonth]);
+
   async function getAuthHeaders(): Promise<Record<string, string>> {
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
@@ -196,7 +207,7 @@ export default function ReviewLanguagePage() {
   const downloadCSV = () => {
     const esc = (s: string) => `"${(s || "").replace(/"/g, '""').replace(/\n/g, " ")}"`;
     const totalLang = stats.reduce((s, st) => s + st.total, 0);
-    let csv = "\uFEFF"; // BOM for Excel
+    let csv = "\uFEFF" + "sep=,\n"; // BOM + Excel区切り文字指定
 
     // セクション1: 口コミ一覧
     csv += "【口コミ一覧】\n";
