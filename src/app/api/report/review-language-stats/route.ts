@@ -142,18 +142,16 @@ export async function POST(request: NextRequest) {
       else if (star === 5) stat.star5++;
       if (star >= 1 && star <= 3) stat.lowRatingCount++;
 
-      // 星3以下の詳細を保持
-      if (star >= 1 && star <= 3) {
-        details.push({
-          shop_name: r.shop_name,
-          reviewer_name: r.reviewer_name || "匿名",
-          star_rating: star,
-          comment: r.comment || "",
-          lang: detLang,
-          country: detCountry,
-          create_time: r.create_time,
-        });
-      }
+      // 全口コミの詳細を保持（CSV用）
+      details.push({
+        shop_name: r.shop_name,
+        reviewer_name: r.reviewer_name || "匿名",
+        star_rating: star,
+        comment: r.comment || "",
+        lang: detLang,
+        country: detCountry,
+        create_time: r.create_time,
+      });
     } catch (e) {
       console.error("[review-language-stats] detectLanguage error:", e, "comment:", (r.comment || "").slice(0, 50));
     }

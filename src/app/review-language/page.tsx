@@ -191,30 +191,53 @@ export default function ReviewLanguagePage() {
     return token ? { Authorization: `Bearer ${token}` } : {};
   }
 
-  // CSVダウンロード
-  const downloadCSV = (type: "summary" | "details") => {
+  // CSV統合ダウンロード（3セクション: 口コミ一覧 + 国別サマリー + クレーム詳細）
+  const downloadCSV = () => {
+    const esc = (s: string) => `"${(s || "").replace(/"/g, '""').replace(/\n/g, " ")}"`;
+    const totalLang = stats.reduce((s, st) => s + st.total, 0);
     let csv = "\uFEFF"; // BOM for Excel
 
-    if (type === "summary") {
-      csv += "言語,推定国,合計,★1,★2,★3,★4,★5,低評価(★1-3),低評価比率\n";
-      for (const s of stats) {
-        const pct = s.total > 0 ? (s.lowRatingCount / s.total * 100).toFixed(1) + "%" : "0%";
-        csv += `${s.lang},${s.country},${s.total},${s.star1},${s.star2},${s.star3},${s.star4},${s.star5},${s.lowRatingCount},${pct}\n`;
-      }
-    } else {
-      csv += "店舗名,投稿者,評価,言語,推定国,投稿日,コメント\n";
-      const filtered = detailLangFilter === "all" ? details : details.filter(d => d.lang === detailLangFilter);
-      for (const d of filtered) {
-        const comment = d.comment.replace(/"/g, '""').replace(/\n/g, " ");
-        csv += `"${d.shop_name}","${d.reviewer_name}",${d.star_rating},"${d.lang}","${d.country}","${d.create_time?.slice(0, 10) || ""}","${comment}"\n`;
-      }
+    // セクション1: 口コミ一覧
+    csv += "【口コミ一覧】\n";
+    csv += "投稿日,投稿者,評価,口コミ,返信,言語,推定国\n";
+    const sorted = [...details].sort((a, b) => (b.create_time || "").localeCompare(a.create_time || ""));
+    for (const d of sorted) {
+      csv += `${d.create_time?.slice(0, 10) || ""},${esc(d.reviewer_name)},${d.star_rating},${esc(d.comment)},,${esc(d.lang)},${esc(d.country)}\n`;
     }
 
+    csv += "\n";
+
+    // セクション2: 国別サマリー
+    csv += "【国別サマリー】\n";
+    csv += "言語,推定国,合計,★1,★2,★3,★4,★5,低評価(★1-3),低評価率,構成比\n";
+    for (const s of stats) {
+      const pct = s.total > 0 ? (s.lowRatingCount / s.total * 100).toFixed(1) + "%" : "0%";
+      const ratio = totalLang > 0 ? (s.total / totalLang * 100).toFixed(1) + "%" : "0%";
+      csv += `${s.lang},${s.country},${s.total},${s.star1 || "-"},${s.star2 || "-"},${s.star3 || "-"},${s.star4 || "-"},${s.star5 || "-"},${s.lowRatingCount},${pct},${ratio}\n`;
+    }
+
+    csv += "\n";
+
+    // セクション3: クレーム詳細（★1-2）
+    csv += "【クレーム詳細（★1-2）】\n";
+    csv += "推定国,投稿日,投稿者,評価,口コミ(原文),口コミ(日本語訳)\n";
+    const complaints = sorted.filter(d => d.star_rating >= 1 && d.star_rating <= 2);
+    for (const d of complaints) {
+      // 原文と翻訳を分離
+      const comment = d.comment || "";
+      const origMatch = comment.match(/\(Original\)\s*([\s\S]+)/i);
+      const transMatch = comment.match(/\(Translated by Google\)\s*([\s\S]*?)(?:\(Original\)|$)/i);
+      const original = origMatch ? origMatch[1].trim() : comment.replace(/\(Translated by Google\)/i, "").trim();
+      const translation = transMatch ? transMatch[1].trim() : "";
+      csv += `${esc(d.country)},${d.create_time?.slice(0, 10) || ""},${esc(d.reviewer_name)},${d.star_rating},${esc(original)},${esc(translation)}\n`;
+    }
+
+    const monthLabel = targetMonth ? targetMonth.replace("/", "-") : "全期間";
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = type === "summary" ? "口コミ言語別集計.csv" : "低評価口コミ詳細.csv";
+    a.download = `口コミ国別分析_${monthLabel}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -272,13 +295,9 @@ export default function ReviewLanguagePage() {
           </button>
           {stats.length > 0 && (
             <div className="flex gap-2 ml-auto">
-              <button onClick={() => downloadCSV("summary")}
+              <button onClick={downloadCSV}
                 className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700">
-                集計CSV
-              </button>
-              <button onClick={() => downloadCSV("details")}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-orange-600 text-white hover:bg-orange-700">
-                低評価CSV
+                CSVダウンロード
               </button>
             </div>
           )}
