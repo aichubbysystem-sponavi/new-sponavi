@@ -1796,7 +1796,7 @@ export default function ReportClient({
                 fixedComment = fixedComment.replace(/([^（(])([①②③④⑤⑥⑦⑧⑨⑩])/g, "$1<br>$2");
                 fixedComment = fixedComment.replace(/(.)\s*(\(\d+\))/g, "$1<br>$2");
                 return (
-                <p key={globalIdx} style={{ fontSize: 16, lineHeight: 2, color: "#444", margin: "0 0 16px 0" }}>
+                <p key={globalIdx} style={{ fontSize: 18, lineHeight: 2, color: "#444", margin: "0 0 16px 0" }}>
                   <span style={{ fontWeight: 700, color: "#0f3460", marginRight: 8 }}>{"①②③④⑤⑥⑦⑧⑨⑩"[globalIdx] || `${globalIdx + 1}.`}</span>
                   <span dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(fixedComment, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
                 </p>
