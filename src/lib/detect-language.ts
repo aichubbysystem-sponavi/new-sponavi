@@ -39,7 +39,7 @@ export interface LangDetectResult {
  * - どれにも該当しない場合はラテン文字ベースなら「英語」、それ以外は「不明」
  */
 export function detectLanguage(text: string | null | undefined): LangDetectResult {
-  if (!text || text.trim().length === 0) return { lang: "不明", country: "不明" };
+  if (!text || typeof text !== "string" || text.trim().length === 0) return { lang: "不明", country: "不明" };
 
   // GBP口コミフォーマット: "(Translated by Google) [翻訳] (Original) [原文]"
   // → 原文（Original以降）があればそちらを判定対象にする

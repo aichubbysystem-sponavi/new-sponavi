@@ -92,32 +92,38 @@ export async function POST(request: NextRequest) {
   const details: ReviewDetail[] = [];
 
   for (const r of allReviews) {
-    const { lang, country } = detectLanguage(r.comment);
-    const star = starToNum(r.star_rating);
+    try {
+      const detected = detectLanguage(r.comment);
+      const detLang = detected.lang;
+      const detCountry = detected.country;
+      const star = starToNum(r.star_rating);
 
-    if (!langMap.has(lang)) {
-      langMap.set(lang, { lang, country, total: 0, star1: 0, star2: 0, star3: 0, star4: 0, star5: 0, lowRatingCount: 0 });
-    }
-    const stat = langMap.get(lang)!;
-    stat.total++;
-    if (star === 1) stat.star1++;
-    else if (star === 2) stat.star2++;
-    else if (star === 3) stat.star3++;
-    else if (star === 4) stat.star4++;
-    else if (star === 5) stat.star5++;
-    if (star >= 1 && star <= 3) stat.lowRatingCount++;
+      if (!langMap.has(detLang)) {
+        langMap.set(detLang, { lang: detLang, country: detCountry, total: 0, star1: 0, star2: 0, star3: 0, star4: 0, star5: 0, lowRatingCount: 0 });
+      }
+      const stat = langMap.get(detLang)!;
+      stat.total++;
+      if (star === 1) stat.star1++;
+      else if (star === 2) stat.star2++;
+      else if (star === 3) stat.star3++;
+      else if (star === 4) stat.star4++;
+      else if (star === 5) stat.star5++;
+      if (star >= 1 && star <= 3) stat.lowRatingCount++;
 
-    // 星3以下の詳細を保持
-    if (star >= 1 && star <= 3) {
-      details.push({
-        shop_name: r.shop_name,
-        reviewer_name: r.reviewer_name || "匿名",
-        star_rating: star,
-        comment: r.comment || "",
-        lang,
-        country,
-        create_time: r.create_time,
-      });
+      // 星3以下の詳細を保持
+      if (star >= 1 && star <= 3) {
+        details.push({
+          shop_name: r.shop_name,
+          reviewer_name: r.reviewer_name || "匿名",
+          star_rating: star,
+          comment: r.comment || "",
+          lang: detLang,
+          country: detCountry,
+          create_time: r.create_time,
+        });
+      }
+    } catch (e) {
+      console.error("[review-language-stats] detectLanguage error:", e, "comment:", (r.comment || "").slice(0, 50));
     }
   }
 
