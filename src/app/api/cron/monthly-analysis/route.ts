@@ -91,10 +91,29 @@ export async function GET(request: NextRequest) {
       return s + (RATING_MAP[(r.star_rating || "").toUpperCase().replace(/_STARS?$/, "")] || 0);
     }, 0) / reviews.length;
 
+    // 口コミ言語別集計（detectLanguageに生コメントをそのまま渡す — review-language-stats APIと同じ挙動）
+    let langSection = "";
+    try {
+      const { detectLanguage } = await import("@/lib/detect-language");
+      const lc: Record<string, { country: string; count: number }> = {};
+      for (const r of reviews) {
+        if (!r.comment) continue;
+        const det = detectLanguage(r.comment);
+        if (det.lang === "不明") continue;
+        if (!lc[det.lang]) lc[det.lang] = { country: det.country, count: 0 };
+        lc[det.lang].count++;
+      }
+      const sorted = Object.entries(lc).map(([lang, v]) => ({ lang, ...v })).sort((a, b) => b.count - a.count);
+      if (sorted.length > 0) {
+        langSection = `\n\n【口コミ言語別集計】\n${sorted.map(l => `${l.lang}: ${l.count}件`).join(", ")}\n※上記に含まれない言語を推測で記述しないこと。`;
+      }
+    } catch {}
+
     try {
       const prompt = `「${shop.name}」の口コミを分析してください。
 
 ${comments}
+${langSection}
 
 【重要ルール】
 - positive_words・negative_wordsは、必ず口コミ原文に含まれる表現をそのまま抜き出してください。
