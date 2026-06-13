@@ -41,7 +41,7 @@ const slideStyle: React.CSSProperties = {
 
 const slideBarStyle: React.CSSProperties = {
   background: "linear-gradient(135deg,#1a1a2e,#0f3460)", color: "#fff",
-  padding: "12px 36px", fontSize: 14, fontWeight: 700,
+  padding: "12px 36px", fontSize: 16, fontWeight: 700,
   display: "flex", justifyContent: "space-between", alignItems: "center",
   flexShrink: 0, letterSpacing: 0.5,
 };
@@ -58,7 +58,7 @@ const stitleStyle: React.CSSProperties = {
 
 const footerStyle: React.CSSProperties = {
   background: "#1a1a2e", color: "rgba(255,255,255,0.3)", textAlign: "center",
-  padding: 8, fontSize: 10, flexShrink: 0,
+  padding: 8, fontSize: 16, flexShrink: 0,
 };
 
 // KPI top-bar colors
@@ -570,7 +570,7 @@ export default function ReportClient({
           fillColor: rankColor(pt.rank), fillOpacity: 0.9,
           strokeColor: "#fff", strokeWeight: 2, scale: 18,
         },
-        label: { text: pt.rank > 0 ? String(pt.rank) : "-", color: "#fff", fontWeight: "bold", fontSize: "11px" },
+        label: { text: pt.rank > 0 ? String(pt.rank) : "-", color: "#fff", fontWeight: "bold", fontSize: "16px" },
       });
       gridMarkersRef.current.push(marker);
       bounds.extend({ lat: pt.lat, lng: pt.lng });
@@ -723,13 +723,13 @@ export default function ReportClient({
     <div style={{ fontFamily: "'Noto Sans JP', sans-serif", background: "#1a1a2e" }}>
       {/* Top bar (no-print) */}
       <div className="no-print" style={{ background: "rgba(0,0,0,0.3)", padding: "12px 32px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100, backdropFilter: "blur(10px)" }}>
-        <Link href="/report" style={{ color: "rgba(255,255,255,0.8)", textDecoration: "none", fontSize: 14 }}>← レポート一覧に戻る</Link>
+        <Link href="/report" style={{ color: "rgba(255,255,255,0.8)", textDecoration: "none", fontSize: 16 }}>← レポート一覧に戻る</Link>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {dataSource === "mock" && <span style={{ fontSize: 11, color: "#ffd54f", background: "rgba(255,213,79,0.15)", padding: "4px 12px", borderRadius: 20, border: "1px solid rgba(255,213,79,0.3)" }}>デモデータ</span>}
-          <button onClick={() => setShowSettings(!showSettings)} style={{ background: "rgba(255,255,255,0.15)", color: "#fff", border: "1px solid rgba(255,255,255,0.3)", padding: "10px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+          {dataSource === "mock" && <span style={{ fontSize: 16, color: "#ffd54f", background: "rgba(255,213,79,0.15)", padding: "4px 12px", borderRadius: 20, border: "1px solid rgba(255,213,79,0.3)" }}>デモデータ</span>}
+          <button onClick={() => setShowSettings(!showSettings)} style={{ background: "rgba(255,255,255,0.15)", color: "#fff", border: "1px solid rgba(255,255,255,0.3)", padding: "10px 16px", borderRadius: 8, fontSize: 16, fontWeight: 600, cursor: "pointer" }}>
             表示設定
           </button>
-          <button onClick={handlePdfDownload} disabled={pdfGenerating} style={{ background: pdfGenerating ? "#999" : "linear-gradient(135deg,#e94560,#c73050)", color: "#fff", border: "none", padding: "10px 24px", borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: pdfGenerating ? "wait" : "pointer" }}>
+          <button onClick={handlePdfDownload} disabled={pdfGenerating} style={{ background: pdfGenerating ? "#999" : "linear-gradient(135deg,#e94560,#c73050)", color: "#fff", border: "none", padding: "10px 24px", borderRadius: 8, fontSize: 16, fontWeight: 600, cursor: pdfGenerating ? "wait" : "pointer" }}>
             {pdfGenerating ? "PDF生成中..." : "PDFダウンロード"}
           </button>
         </div>
@@ -746,7 +746,7 @@ export default function ReportClient({
               <button onClick={() => setShowSettings(false)} style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: "rgba(255,255,255,0.5)", padding: "0 4px" }}>×</button>
             </div>
             <div style={{ marginBottom: 20 }}>
-              <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: 600, display: "block", marginBottom: 10 }}>スライド表示ON/OFF</span>
+              <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 16, fontWeight: 600, display: "block", marginBottom: 10 }}>スライド表示ON/OFF</span>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {[
                   { key: "keywords", label: "キーワード順位", hasData: hasKeywords },
@@ -758,14 +758,14 @@ export default function ReportClient({
                     <input type="checkbox" checked={sectionVisibility[item.key] !== false && item.hasData} disabled={!item.hasData}
                       onChange={() => toggleSection(item.key)}
                       style={{ width: 16, height: 16, cursor: item.hasData ? "pointer" : "not-allowed" }} />
-                    <span style={{ color: "#fff", fontSize: 13 }}>{item.label}</span>
-                    {!item.hasData && <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 10 }}>（データなし）</span>}
+                    <span style={{ color: "#fff", fontSize: 16 }}>{item.label}</span>
+                    {!item.hasData && <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 16 }}>（データなし）</span>}
                   </label>
                 ))}
               </div>
             </div>
             <div style={{ marginBottom: 20 }}>
-              <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: 600, display: "block", marginBottom: 10 }}>指標の表示/非表示</span>
+              <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 16, fontWeight: 600, display: "block", marginBottom: 10 }}>指標の表示/非表示</span>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {[
                   { key: "metricFoodMenus", label: "フードメニュークリック", hasData: hasFoodMenusData },
@@ -775,22 +775,22 @@ export default function ReportClient({
                     <input type="checkbox" checked={sectionVisibility[item.key] !== false && item.hasData} disabled={!item.hasData}
                       onChange={() => toggleSection(item.key)}
                       style={{ width: 16, height: 16, cursor: item.hasData ? "pointer" : "not-allowed" }} />
-                    <span style={{ color: "#fff", fontSize: 13 }}>{item.label}</span>
-                    {!item.hasData && <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 10 }}>（データなし）</span>}
+                    <span style={{ color: "#fff", fontSize: 16 }}>{item.label}</span>
+                    {!item.hasData && <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 16 }}>（データなし）</span>}
                   </label>
                 ))}
               </div>
             </div>
             {hasKeywords && (
               <div style={{ marginBottom: 20 }}>
-                <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: 600, display: "block", marginBottom: 10 }}>個別キーワード</span>
+                <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 16, fontWeight: 600, display: "block", marginBottom: 10 }}>個別キーワード</span>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                   {keywords.map(kw => (
                     <label key={kw.word} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
                       <input type="checkbox" checked={kwVisibility[kw.word] !== false}
                         onChange={() => toggleKeyword(kw.word)}
                         style={{ width: 14, height: 14, cursor: "pointer" }} />
-                      <span style={{ color: "#fff", fontSize: 12 }}>{kw.word}</span>
+                      <span style={{ color: "#fff", fontSize: 16 }}>{kw.word}</span>
                     </label>
                   ))}
                 </div>
@@ -798,17 +798,17 @@ export default function ReportClient({
             )}
             {(reviewAnalysis.positiveWords.length > 0 || reviewAnalysis.negativeWords.length > 0) && (
               <div>
-                <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: 600, display: "block", marginBottom: 10 }}>口コミ分析ワード</span>
+                <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 16, fontWeight: 600, display: "block", marginBottom: 10 }}>口コミ分析ワード</span>
                 {reviewAnalysis.positiveWords.length > 0 && (
                   <div style={{ marginBottom: 10 }}>
-                    <span style={{ color: "#27ae60", fontSize: 11, fontWeight: 600, display: "block", marginBottom: 6 }}>ポジティブ</span>
+                    <span style={{ color: "#27ae60", fontSize: 16, fontWeight: 600, display: "block", marginBottom: 6 }}>ポジティブ</span>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                       {reviewAnalysis.positiveWords.map(w => (
                         <label key={`pos-${w}`} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
                           <input type="checkbox" checked={rwVisibility[`pos:${w}`] !== false}
                             onChange={() => toggleReviewWord(`pos:${w}`)}
                             style={{ width: 14, height: 14, cursor: "pointer" }} />
-                          <span style={{ color: "#a7f3d0", fontSize: 12 }}>{w}</span>
+                          <span style={{ color: "#a7f3d0", fontSize: 16 }}>{w}</span>
                         </label>
                       ))}
                     </div>
@@ -816,14 +816,14 @@ export default function ReportClient({
                 )}
                 {reviewAnalysis.negativeWords.length > 0 && (
                   <div>
-                    <span style={{ color: "#e74c3c", fontSize: 11, fontWeight: 600, display: "block", marginBottom: 6 }}>ネガティブ</span>
+                    <span style={{ color: "#e74c3c", fontSize: 16, fontWeight: 600, display: "block", marginBottom: 6 }}>ネガティブ</span>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                       {reviewAnalysis.negativeWords.map(w => (
                         <label key={`neg-${w}`} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
                           <input type="checkbox" checked={rwVisibility[`neg:${w}`] !== false}
                             onChange={() => toggleReviewWord(`neg:${w}`)}
                             style={{ width: 14, height: 14, cursor: "pointer" }} />
-                          <span style={{ color: "#fca5a5", fontSize: 12 }}>{w}</span>
+                          <span style={{ color: "#fca5a5", fontSize: 16 }}>{w}</span>
                         </label>
                       ))}
                     </div>
@@ -856,18 +856,18 @@ export default function ReportClient({
 
               return (
               <div style={{ marginTop: 16, borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 16 }}>
-                <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: 600, display: "block", marginBottom: 10 }}>多地点順位グリッド編集</span>
+                <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 16, fontWeight: 600, display: "block", marginBottom: 10 }}>多地点順位グリッド編集</span>
                 {/* 月・KW選択 */}
                 <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
                   <select value={selectedMonth} onChange={e => setGridEditMonth(e.target.value)}
-                    style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.2)", background: "#2a2a4e", color: "#fff", fontSize: 12 }}>
+                    style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.2)", background: "#2a2a4e", color: "#fff", fontSize: 16 }}>
                     {allMonths.map(m => <option key={m} value={m}>{m}</option>)}
                   </select>
                   <select value={selectedKw} onChange={e => setGridEditKw(e.target.value)}
-                    style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.2)", background: "#2a2a4e", color: "#fff", fontSize: 12 }}>
+                    style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.2)", background: "#2a2a4e", color: "#fff", fontSize: 16 }}>
                     {allKws.map(k => <option key={k} value={k}>{k}</option>)}
                   </select>
-                  <span style={{ color: "rgba(255,255,255,0.4)", fontSize: 11, alignSelf: "center" }}>
+                  <span style={{ color: "rgba(255,255,255,0.4)", fontSize: 16, alignSelf: "center" }}>
                     中心順位: {centerRank > 0 ? `${centerRank}位` : "データなし"}
                   </span>
                 </div>
@@ -884,7 +884,7 @@ export default function ReportClient({
                       window.location.reload();
                     } catch {} finally { setGridGenerating(false); }
                   }} disabled={gridGenerating}
-                  style={{ padding: "5px 12px", borderRadius: 6, border: "none", background: gridGenerating ? "#666" : "#0f3460", color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+                  style={{ padding: "5px 12px", borderRadius: 6, border: "none", background: gridGenerating ? "#666" : "#0f3460", color: "#fff", fontSize: 16, fontWeight: 600, cursor: "pointer" }}>
                     {gridGenerating ? "生成中..." : "この月を自動生成"}
                   </button>
                   <button onClick={async () => {
@@ -910,7 +910,7 @@ export default function ReportClient({
                       }
                     } catch {} finally { setGridGenerating(false); }
                   }} disabled={gridGenerating}
-                  style={{ padding: "5px 12px", borderRadius: 6, border: "none", background: gridGenerating ? "#666" : "#e94560", color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+                  style={{ padding: "5px 12px", borderRadius: 6, border: "none", background: gridGenerating ? "#666" : "#e94560", color: "#fff", fontSize: 16, fontWeight: 600, cursor: "pointer" }}>
                     全月一括生成
                   </button>
                 </div>
@@ -944,7 +944,7 @@ export default function ReportClient({
                                       });
                                     }}
                                     onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                                    style={{ width: 32, fontSize: 13, textAlign: "center", border: "1px solid #e94560", borderRadius: 3, padding: 1, outline: "none", background: "#1a1a2e", color: "#fff" }} />
+                                    style={{ width: 32, fontSize: 16, textAlign: "center", border: "1px solid #e94560", borderRadius: 3, padding: 1, outline: "none", background: "#1a1a2e", color: "#fff" }} />
                                 ) : rank > 0 ? rank : "-"}
                               </td>
                             );
@@ -954,7 +954,7 @@ export default function ReportClient({
                     </tbody>
                   </table>
                 ) : (
-                  <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 11, textAlign: "center", padding: 16 }}>
+                  <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 16, textAlign: "center", padding: 16 }}>
                     {centerRank > 0 ? "「この月を自動生成」でグリッドを作成してください" : "この月/KWのデータなし"}
                   </div>
                 )}
@@ -969,7 +969,7 @@ export default function ReportClient({
       {monthNotFound && (
         <div style={{ background: "#FEF3C7", border: "1px solid #F59E0B", borderRadius: 8, padding: "12px 20px", margin: "0 0 12px", display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 18 }}>⚠</span>
-          <span style={{ fontSize: 13, color: "#92400E" }}>
+          <span style={{ fontSize: 16, color: "#92400E" }}>
             <strong>{targetMonth.replace(/(\d{4})\/(\d{1,2})/, "$1年$2月")}</strong>のデータがありません。最新月（{latestMonth.replace(/(\d{4})\/(\d{1,2})/, "$1年$2月")}）のデータを表示しています。レポート管理画面で「全店舗反映」を実行してください。
           </span>
         </div>
@@ -979,13 +979,13 @@ export default function ReportClient({
       <div style={slideStyle} className="slide">
         <div style={{ background: "linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%)", color: "#fff", padding: "28px 36px 20px", flexShrink: 0, position: "relative" }}>
           <h1 style={{ margin: 0, fontSize: 26, fontWeight: 900, letterSpacing: 1 }}>{shop.name}</h1>
-          <div style={{ fontSize: 13, opacity: 0.7, marginTop: 2 }}>MEO対策 レポート報告</div>
-          <div style={{ fontSize: 12, opacity: 0.5, marginTop: 6 }}>{shop.address}</div>
-          <div style={{ position: "absolute", top: 28, right: 36, background: "rgba(255,255,255,.12)", padding: "7px 18px", borderRadius: 8, fontSize: 13, fontWeight: 600 }}>{shop.period.start} - {shop.period.end}</div>
+          <div style={{ fontSize: 16, opacity: 0.7, marginTop: 2 }}>MEO対策 レポート報告</div>
+          <div style={{ fontSize: 16, opacity: 0.5, marginTop: 6 }}>{shop.address}</div>
+          <div style={{ position: "absolute", top: 28, right: 36, background: "rgba(255,255,255,.12)", padding: "7px 18px", borderRadius: 8, fontSize: 16, fontWeight: 600 }}>{shop.period.start} - {shop.period.end}</div>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", padding: "10px 36px", background: "#e8eaf0", flexShrink: 0 }}>
           {[{ lb: "対策開始日", vl: shop.startDate }, { lb: "レポート対象", vl: curLabel }, ...(shop.category ? [{ lb: "業種", vl: shop.category }] : []), { lb: "口コミ合計", vl: `${displayTotalReviews.toLocaleString()}件` }, { lb: "評価", vl: String(shop.rating) }].map((b, i) => (
-            <div key={i} style={{ background: "#fff", borderRadius: 10, padding: "7px 14px", fontSize: 12, display: "flex", alignItems: "center", gap: 5, boxShadow: "0 1px 3px rgba(0,0,0,.05)" }}>
+            <div key={i} style={{ background: "#fff", borderRadius: 10, padding: "7px 14px", fontSize: 16, display: "flex", alignItems: "center", gap: 5, boxShadow: "0 1px 3px rgba(0,0,0,.05)" }}>
               <span style={{ color: "#888" }}>{b.lb}</span><span style={{ fontWeight: 700 }}>{b.vl}</span>
             </div>
           ))}
@@ -997,16 +997,16 @@ export default function ReportClient({
               const isLastKpi = i === kpis.length - 1;
               const mom = kpi.momValue != null ? pctChange(kpi.value, kpi.momValue) : null;
               const yoyC = kpi.yoyValue != null ? pctChange(kpi.value, kpi.yoyValue) : null;
-              const badgeStyle = (isUp: boolean, isFlat?: boolean): React.CSSProperties => ({ display: "inline-block", padding: "2px 7px", borderRadius: 16, fontSize: 10, fontWeight: 600, background: isFlat ? "#f0f0f0" : isUp ? "#e6f9ee" : "#fde8e8", color: isFlat ? "#888" : isUp ? "#0a8f3c" : "#c0392b" });
+              const badgeStyle = (isUp: boolean, isFlat?: boolean): React.CSSProperties => ({ display: "inline-block", padding: "2px 7px", borderRadius: 16, fontSize: 16, fontWeight: 600, background: isFlat ? "#f0f0f0" : isUp ? "#e6f9ee" : "#fde8e8", color: isFlat ? "#888" : isUp ? "#0a8f3c" : "#c0392b" });
               const arrow = (c: { isUp: boolean; isFlat: boolean }) => c.isFlat ? "→" : c.isUp ? "▲" : "▼";
               return (
                 <div key={i} style={{ background: "#fff", borderRadius: 12, padding: "14px 16px", position: "relative", overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", justifyContent: "center" }}>
                   <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: 3, background: kpiTopColors[i] }} />
-                  <div style={{ fontSize: 11, color: "#888", fontWeight: 500 }}>{kpi.label}</div>
+                  <div style={{ fontSize: 16, color: "#888", fontWeight: 500 }}>{kpi.label}</div>
                   <div style={{ fontSize: 26, fontWeight: 900, lineHeight: 1.1, margin: "4px 0" }}>
                     {isLastKpi ? `${kpi.value >= 0 ? "+" : ""}${kpi.value.toLocaleString()}件` : kpi.value.toLocaleString()}
                   </div>
-                  <div style={{ fontSize: 11, color: "#aaa", marginBottom: 4 }}>
+                  <div style={{ fontSize: 16, color: "#aaa", marginBottom: 4 }}>
                     {isLastKpi ? (
                       <span>累計: {displayTotalReviews.toLocaleString()}件（評価 {shop.rating}）</span>
                     ) : kpi.label === "Google検索 合計" || kpi.label === "Googleマップ 合計" ? (
@@ -1025,11 +1025,11 @@ export default function ReportClient({
                         return <span style={badgeStyle(yoyDelta >= 0)}>
                           {yoyDelta >= 0 ? "▲" : "▼"} {kpi.yoyValue!.toLocaleString()}→{displayTotalReviews.toLocaleString()}件 前年比
                         </span>;
-                      })() : <span style={{ fontSize: 10, color: "#bbb" }}>前年比 なし</span>}
+                      })() : <span style={{ fontSize: 16, color: "#bbb" }}>前年比 なし</span>}
                     </>) : (<>
                       {mom && <span style={badgeStyle(mom.isUp, mom.isFlat)}>{arrow(mom)} {mom.text}（{kpi.momValue!.toLocaleString()}→{kpi.value.toLocaleString()}）前月比</span>}
                       {yoyC ? <span style={badgeStyle(yoyC.isUp, yoyC.isFlat)}>{arrow(yoyC)} {yoyC.text}（{kpi.yoyValue!.toLocaleString()}→{kpi.value.toLocaleString()}）前年比</span>
-                        : <span style={{ fontSize: 10, color: "#bbb" }}>前年比 なし</span>}
+                        : <span style={{ fontSize: 16, color: "#bbb" }}>前年比 なし</span>}
                     </>)}
                   </div>
                 </div>
@@ -1042,11 +1042,11 @@ export default function ReportClient({
       {/* ════ P2: 月次テーブル ════ */}
       {(() => { pageNum = 2; return null; })()}
       <div style={slideStyle} className="slide">
-        <div style={slideBarStyle}><span>{shop.name} — 月次推移データ</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBarStyle}><span>{shop.name} — 月次推移データ</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={stitleStyle}>月次推移データ（直近12ヶ月）</div>
           <div style={{ overflow: "hidden", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", fontSize: 13, flex: 1 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", fontSize: 16, flex: 1 }}>
               <thead><tr>
                 {["月","検索モバイル","検索PC","検索合計","マップモバイル","マップPC","マップ合計","Web","ルート","通話",
                   ...(hasFoodMenus ? ["メニュー"] : []),
@@ -1085,7 +1085,7 @@ export default function ReportClient({
       {/* ════ P3: Google検索数推移 ════ */}
       {(() => { pageNum = 3; return null; })()}
       <div style={slideStyle} className="slide">
-        <div style={slideBarStyle}><span>{shop.name} — Google検索数推移</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBarStyle}><span>{shop.name} — Google検索数推移</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={{ width: "95%", margin: "0 auto" }}>
             <Bar data={{ labels: monthlyLabels, datasets: [
@@ -1093,7 +1093,7 @@ export default function ReportClient({
               { label: "PC", data: charts.searchPC, backgroundColor: "rgba(2,136,209,.75)" },
             ]}} options={buildStackedOptions()} />
           </div>
-          <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 9 }}>
+          <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 16 }}>
             <tbody>
               <tr style={{ background: "#f8f9fa" }}>
                 <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60 }}>月</td>
@@ -1113,7 +1113,7 @@ export default function ReportClient({
       {/* ════ P4: Googleマップ表示数推移 ════ */}
       {(() => { pageNum = 4; return null; })()}
       <div style={slideStyle} className="slide">
-        <div style={slideBarStyle}><span>{shop.name} — Googleマップ表示数推移</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBarStyle}><span>{shop.name} — Googleマップ表示数推移</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={{ width: "95%", margin: "0 auto" }}>
             <Bar data={{ labels: monthlyLabels, datasets: [
@@ -1121,7 +1121,7 @@ export default function ReportClient({
               { label: "PC", data: charts.mapPC, backgroundColor: "rgba(56,142,60,.75)" },
             ]}} options={buildStackedOptions()} />
           </div>
-          <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 9 }}>
+          <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 16 }}>
             <tbody>
               <tr style={{ background: "#f8f9fa" }}>
                 <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60 }}>月</td>
@@ -1135,14 +1135,14 @@ export default function ReportClient({
                 {charts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700 }}>{(v + charts.mapPC[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
-          <div style={{ fontSize: 9, color: "#999", textAlign: "right", margin: "4px 16px 0", fontStyle: "italic" }}>※ 2025年11月以降、Google Business Profile APIの計測仕様変更により数値が大幅に変動する場合があります</div>
+          <div style={{ fontSize: 16, color: "#999", textAlign: "right", margin: "4px 16px 0", fontStyle: "italic" }}>※ 2025年11月以降、Google Business Profile APIの計測仕様変更により数値が大幅に変動する場合があります</div>
         </div>
       </div>
 
       {/* ════ P5: ユーザー反応数推移 ════ */}
       {(() => { pageNum = 5; return null; })()}
       <div style={slideStyle} className="slide">
-        <div style={slideBarStyle}><span>{shop.name} — ユーザー反応数推移</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBarStyle}><span>{shop.name} — ユーザー反応数推移</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={{ width: "95%", margin: "0 auto" }}>
             <Bar data={{ labels: monthlyLabels, datasets: [
@@ -1153,7 +1153,7 @@ export default function ReportClient({
               { label: "予約", data: charts.bookings, backgroundColor: "rgba(121,134,203,.75)" },
             ]}} options={buildStackedOptions()} />
           </div>
-          <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 9 }}>
+          <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 16 }}>
             <tbody>
               <tr style={{ background: "#f8f9fa" }}>
                 <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60 }}>月</td>
@@ -1179,7 +1179,7 @@ export default function ReportClient({
       {/* ════ P7: キーワード順位 (データある場合のみ) ════ */}
       {showKeywords && (() => { pageNum = 6; return (
         <div style={slideStyle} className="slide">
-          <div style={slideBarStyle}><span>{shop.name} — キーワード順位変動</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+          <div style={slideBarStyle}><span>{shop.name} — キーワード順位変動</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={slideBodyStyle}>
             <div style={stitleStyle}>キーワード順位変動（{curLabel}）</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16, flex: 1 }}>
@@ -1191,10 +1191,10 @@ export default function ReportClient({
                   <div key={i} style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     <div style={{ fontSize: 16, fontWeight: 600 }}>{kw.word}</div>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <span style={{ fontSize: 13, color: "#999" }}>前月{kw.prevRank}位</span>
+                      <span style={{ fontSize: 16, color: "#999" }}>前月{kw.prevRank}位</span>
                       <span style={{ fontSize: 22, color: arrowColor }}>{arrow}</span>
                       <span style={{ fontSize: 36, fontWeight: 900, color: "#e94560" }}>{kw.rank}</span>
-                      <span style={{ fontSize: 14, color: "#666" }}>位</span>
+                      <span style={{ fontSize: 16, color: "#666" }}>位</span>
                     </div>
                   </div>
                 );
@@ -1207,20 +1207,20 @@ export default function ReportClient({
       {/* ════ P7.5: キーワード順位推移テーブル ════ */}
       {showRankingHistory && (() => { pageNum++; return (
         <div style={slideStyle} className="slide">
-          <div style={slideBarStyle}><span>{shop.name} — キーワード順位推移</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+          <div style={slideBarStyle}><span>{shop.name} — キーワード順位推移</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={{ ...slideBodyStyle, display: "flex", flexDirection: "column", justifyContent: "center" }}>
             <div style={stitleStyle}>キーワード順位推移（直近{rankingHistory.labels.length}ヶ月）</div>
             <div style={{ overflow: "hidden", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", flex: 1 }}>
                 <thead>
                   <tr>
-                    <th style={{ background: "#0f3460", color: "#fff", padding: "12px 12px", textAlign: "left", fontWeight: 600, whiteSpace: "nowrap", fontSize: 12, position: "sticky", left: 0 }}>キーワード</th>
+                    <th style={{ background: "#0f3460", color: "#fff", padding: "12px 12px", textAlign: "left", fontWeight: 600, whiteSpace: "nowrap", fontSize: 16, position: "sticky", left: 0 }}>キーワード</th>
                     {rankingHistory.labels.map((l, i) => (
-                      <th key={i} style={{ background: i === rankingHistory.labels.length - 1 ? "#e94560" : "#0f3460", color: "#fff", padding: "12px 8px", textAlign: "center", fontWeight: 600, whiteSpace: "nowrap", fontSize: 12 }}>
+                      <th key={i} style={{ background: i === rankingHistory.labels.length - 1 ? "#e94560" : "#0f3460", color: "#fff", padding: "12px 8px", textAlign: "center", fontWeight: 600, whiteSpace: "nowrap", fontSize: 16 }}>
                         {l}
                       </th>
                     ))}
-                    <th style={{ background: "#0f3460", color: "#fff", padding: "12px 8px", textAlign: "center", fontWeight: 600, fontSize: 11 }}>変動</th>
+                    <th style={{ background: "#0f3460", color: "#fff", padding: "12px 8px", textAlign: "center", fontWeight: 600, fontSize: 16 }}>変動</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1231,12 +1231,12 @@ export default function ReportClient({
                     const diff = latest !== null && prev !== null ? prev - latest : 0;
                     return (
                       <tr key={di} style={{ background: di % 2 === 0 ? "#fff" : "#f8f9fb" }}>
-                        <td style={{ padding: "10px 12px", fontWeight: 700, color: "#333", whiteSpace: "nowrap", borderBottom: "1px solid #eee", fontSize: 13 }}>{ds.word}</td>
+                        <td style={{ padding: "10px 12px", fontWeight: 700, color: "#333", whiteSpace: "nowrap", borderBottom: "1px solid #eee", fontSize: 16 }}>{ds.word}</td>
                         {ds.ranks.map((r, ri) => {
                           const isLatest = ri === rankingHistory.labels.length - 1;
                           return (
                             <td key={ri} style={{
-                              padding: "10px 8px", textAlign: "center", borderBottom: "1px solid #eee", fontSize: 15,
+                              padding: "10px 8px", textAlign: "center", borderBottom: "1px solid #eee", fontSize: 16,
                               fontWeight: r !== null && r <= 3 ? 900 : isLatest ? 700 : 400,
                               color: r === null ? "#ddd" : r <= 3 ? "#0a8f3c" : r <= 5 ? "#0f3460" : r <= 10 ? "#555" : "#999",
                               background: isLatest ? "#fff8f0" : undefined,
@@ -1246,7 +1246,7 @@ export default function ReportClient({
                           );
                         })}
                         <td style={{
-                          padding: "10px 8px", textAlign: "center", borderBottom: "1px solid #eee", fontSize: 13, fontWeight: 700,
+                          padding: "10px 8px", textAlign: "center", borderBottom: "1px solid #eee", fontSize: 16, fontWeight: 700,
                           color: diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888",
                         }}>
                           {diff > 0 ? `↑${diff}` : diff < 0 ? `↓${Math.abs(diff)}` : "→"}
@@ -1296,14 +1296,14 @@ export default function ReportClient({
         <div style={slideStyle} className="slide">
           <div style={slideBarStyle}>
             <span>{shop.name} — 多地点順位計測</span>
-            <span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
+            <span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
           </div>
           <div style={{ ...slideBodyStyle, padding: "20px 36px", gap: 12 }}>
             <div className="no-print" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: "#0f3460" }}>KW:</span>
+              <span style={{ fontSize: 16, fontWeight: 700, color: "#0f3460" }}>KW:</span>
               {gr.keywords.map((kw, i) => (
                 <button key={kw} onClick={() => setGridKwIdx(i)}
-                  style={{ padding: "5px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer",
+                  style={{ padding: "5px 14px", borderRadius: 20, fontSize: 16, fontWeight: 600, border: "none", cursor: "pointer",
                     background: i === (gridKwIdx < gr.keywords.length ? gridKwIdx : 0) ? "#0f3460" : "#e8edf3",
                     color: i === (gridKwIdx < gr.keywords.length ? gridKwIdx : 0) ? "#fff" : "#555" }}>
                   {kw}
@@ -1311,10 +1311,10 @@ export default function ReportClient({
               ))}
             </div>
             <div className="no-print" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: "#0f3460" }}>月:</span>
+              <span style={{ fontSize: 16, fontWeight: 700, color: "#0f3460" }}>月:</span>
               {recentHistory.map((h, i) => (
                 <button key={h.month} onClick={() => setGridMonthIdx(i)}
-                  style={{ padding: "4px 10px", borderRadius: 14, fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer",
+                  style={{ padding: "4px 10px", borderRadius: 14, fontSize: 16, fontWeight: 600, border: "none", cursor: "pointer",
                     background: i === activeMonthI ? "#e94560" : "#f0f2f5",
                     color: i === activeMonthI ? "#fff" : "#666" }}>
                   {h.month.replace(/^\d{4}\//, "")}月
@@ -1327,19 +1327,19 @@ export default function ReportClient({
                 {snapshot ? (
                   <>
                     <div ref={gridMapRef} style={{ width: 440, height: 400, borderRadius: 12, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,.15)", background: "#e8edf5" }} />
-                    <div style={{ display: "flex", gap: 10, fontSize: 10, color: "#555", marginTop: 2 }}>
+                    <div style={{ display: "flex", gap: 10, fontSize: 16, color: "#555", marginTop: 2 }}>
                       <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#16A34A", display: "inline-block" }} />1-3位</span>
                       <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#2563EB", display: "inline-block" }} />4-10位</span>
                       <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#F59E0B", display: "inline-block" }} />11-20位</span>
                       <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#EF4444", display: "inline-block" }} />21位~</span>
                       <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#6B7280", display: "inline-block" }} />圏外</span>
                     </div>
-                    <div style={{ fontSize: 12, color: "#555", textAlign: "center" }}>
+                    <div style={{ fontSize: 16, color: "#555", textAlign: "center" }}>
                       平均順位: <span style={{ fontSize: 22, fontWeight: 900, color: "#e94560" }}>{snapshot.avgRank}</span>位
                       {prevSnapshot && (() => {
                         const diff = prevSnapshot.avgRank - snapshot.avgRank;
                         return diff !== 0 ? (
-                          <span style={{ marginLeft: 8, fontSize: 13, fontWeight: 700, color: diff > 0 ? "#0a8f3c" : "#c0392b" }}>
+                          <span style={{ marginLeft: 8, fontSize: 16, fontWeight: 700, color: diff > 0 ? "#0a8f3c" : "#c0392b" }}>
                             {diff > 0 ? `↑${diff.toFixed(1)}` : `↓${Math.abs(diff).toFixed(1)}`}
                           </span>
                         ) : null;
@@ -1348,7 +1348,7 @@ export default function ReportClient({
                   </>
                 ) : (
                   <div style={{ padding: 40, textAlign: "center" }}>
-                    <div style={{ color: "#999", fontSize: 13, marginBottom: 12 }}>この月のデータなし</div>
+                    <div style={{ color: "#999", fontSize: 16, marginBottom: 12 }}>この月のデータなし</div>
                     {(() => {
                       const kwData = keywords.find(k => k.word === activeKw);
                       const centerRank = kwData?.rank || 0;
@@ -1363,31 +1363,31 @@ export default function ReportClient({
                             window.location.reload();
                           } catch {} finally { setGridGenerating(false); }
                         }} disabled={gridGenerating}
-                        style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: gridGenerating ? "#999" : "#0f3460", color: "#fff", fontSize: 12, fontWeight: 600, cursor: gridGenerating ? "wait" : "pointer" }}>
+                        style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: gridGenerating ? "#999" : "#0f3460", color: "#fff", fontSize: 16, fontWeight: 600, cursor: gridGenerating ? "wait" : "pointer" }}>
                           {gridGenerating ? "生成中..." : `「${activeKw}」${centerRank}位からグリッド自動生成`}
                         </button>
-                      ) : <div style={{ color: "#bbb", fontSize: 11 }}>キーワード順位データがありません</div>;
+                      ) : <div style={{ color: "#bbb", fontSize: 16 }}>キーワード順位データがありません</div>;
                     })()}
                   </div>
                 )}
               </div>
               <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8, minWidth: 0 }}>
-                <h4 style={{ fontSize: 13, fontWeight: 700, color: "#0f3460", margin: 0 }}>「{activeKw}」月別平均順位</h4>
+                <h4 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", margin: 0 }}>「{activeKw}」月別平均順位</h4>
                 <div style={{ overflow: "auto", borderRadius: 10, boxShadow: "0 1px 4px rgba(0,0,0,.04)", flex: 1 }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
                     <thead>
                       <tr>
                         {trendLabels.map((l, i) => (
-                          <th key={i} style={{ background: i === activeMonthI ? "#e94560" : "#0f3460", color: "#fff", padding: "10px 6px", textAlign: "center", fontWeight: 600, fontSize: 11, whiteSpace: "nowrap" }}>{l}</th>
+                          <th key={i} style={{ background: i === activeMonthI ? "#e94560" : "#0f3460", color: "#fff", padding: "10px 6px", textAlign: "center", fontWeight: 600, fontSize: 16, whiteSpace: "nowrap" }}>{l}</th>
                         ))}
-                        <th style={{ background: "#0f3460", color: "#fff", padding: "10px 6px", textAlign: "center", fontWeight: 600, fontSize: 11 }}>変動</th>
+                        <th style={{ background: "#0f3460", color: "#fff", padding: "10px 6px", textAlign: "center", fontWeight: 600, fontSize: 16 }}>変動</th>
                       </tr>
                     </thead>
                     <tbody>
                       <tr>
                         {trendData.map((v, i) => (
                           <td key={i} style={{
-                            padding: "12px 6px", textAlign: "center", fontSize: 15, fontWeight: v !== null && v <= 5 ? 900 : 600,
+                            padding: "12px 6px", textAlign: "center", fontSize: 16, fontWeight: v !== null && v <= 5 ? 900 : 600,
                             color: v === null ? "#ddd" : v <= 3 ? "#15803d" : v <= 10 ? "#1d4ed8" : v <= 20 ? "#b45309" : "#999",
                             background: i === activeMonthI ? "#fff8f0" : undefined, borderBottom: "1px solid #eee",
                           }}>
@@ -1399,7 +1399,7 @@ export default function ReportClient({
                           if (valid.length < 2) return <td style={{ padding: "12px 6px", textAlign: "center", color: "#888", borderBottom: "1px solid #eee" }}>→</td>;
                           const diff = valid[valid.length - 2] - valid[valid.length - 1];
                           return (
-                            <td style={{ padding: "12px 6px", textAlign: "center", fontSize: 13, fontWeight: 700, borderBottom: "1px solid #eee",
+                            <td style={{ padding: "12px 6px", textAlign: "center", fontSize: 16, fontWeight: 700, borderBottom: "1px solid #eee",
                               color: diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
                               {diff > 0 ? `↑${diff.toFixed(1)}` : diff < 0 ? `↓${Math.abs(diff).toFixed(1)}` : "→"}
                             </td>
@@ -1411,15 +1411,15 @@ export default function ReportClient({
                 </div>
                 {monthData && monthData.snapshots.length > 1 && (
                   <>
-                    <h4 style={{ fontSize: 13, fontWeight: 700, color: "#0f3460", margin: "8px 0 0" }}>全キーワード比較（{monthData.month}）</h4>
+                    <h4 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", margin: "8px 0 0" }}>全キーワード比較（{monthData.month}）</h4>
                     <div style={{ overflow: "auto", borderRadius: 10, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
                       <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
                         <thead>
                           <tr>
-                            <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "left", fontSize: 11 }}>キーワード</th>
-                            <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "center", fontSize: 11 }}>平均順位</th>
-                            <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "center", fontSize: 11 }}>前月比</th>
-                            <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "center", fontSize: 11 }}>計測地点</th>
+                            <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "left", fontSize: 16 }}>キーワード</th>
+                            <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "center", fontSize: 16 }}>平均順位</th>
+                            <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "center", fontSize: 16 }}>前月比</th>
+                            <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "center", fontSize: 16 }}>計測地点</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1428,16 +1428,16 @@ export default function ReportClient({
                             const diff = ps ? ps.avgRank - s.avgRank : 0;
                             return (
                               <tr key={si} style={{ background: s.keyword === activeKw ? "#fff8f0" : si % 2 === 0 ? "#fff" : "#f8f9fb" }}>
-                                <td style={{ padding: "8px 12px", fontWeight: s.keyword === activeKw ? 700 : 500, fontSize: 12, borderBottom: "1px solid #eee" }}>{s.keyword}</td>
+                                <td style={{ padding: "8px 12px", fontWeight: s.keyword === activeKw ? 700 : 500, fontSize: 16, borderBottom: "1px solid #eee" }}>{s.keyword}</td>
                                 <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 16, fontWeight: 800, borderBottom: "1px solid #eee",
                                   color: s.avgRank <= 3 ? "#15803d" : s.avgRank <= 10 ? "#1d4ed8" : s.avgRank <= 20 ? "#b45309" : "#999" }}>
                                   {s.avgRank}
                                 </td>
-                                <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 12, fontWeight: 700, borderBottom: "1px solid #eee",
+                                <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 16, fontWeight: 700, borderBottom: "1px solid #eee",
                                   color: diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
                                   {ps ? (diff > 0 ? `↑${diff.toFixed(1)}` : diff < 0 ? `↓${Math.abs(diff).toFixed(1)}` : "→") : "-"}
                                 </td>
-                                <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 11, color: "#888", borderBottom: "1px solid #eee" }}>
+                                <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 16, color: "#888", borderBottom: "1px solid #eee" }}>
                                   {s.gridSize}×{s.gridSize}
                                 </td>
                               </tr>
@@ -1489,7 +1489,7 @@ export default function ReportClient({
         const btnStyle = (disabled: boolean): React.CSSProperties => ({
           background: disabled ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.25)",
           color: disabled ? "rgba(255,255,255,0.3)" : "#fff",
-          border: "none", borderRadius: 6, padding: "4px 12px", fontSize: 12, fontWeight: 600,
+          border: "none", borderRadius: 6, padding: "4px 12px", fontSize: 16, fontWeight: 600,
           cursor: disabled ? "default" : "pointer",
         });
         const hasPrev = sqPrev !== null;
@@ -1497,7 +1497,7 @@ export default function ReportClient({
         const PER_PAGE = 15;
         const page1 = currentKeywords.slice(0, PER_PAGE);
         const page2 = currentKeywords.slice(PER_PAGE, PER_PAGE * 2);
-        const thStyle = (w?: number, groupStart?: boolean): React.CSSProperties => ({ background: "#0f3460", color: "#fff", padding: "10px 6px", textAlign: "center", fontWeight: 600, fontSize: 11, whiteSpace: "nowrap", ...(w ? { width: w } : {}), ...(groupStart ? { borderLeft: "2px solid rgba(255,255,255,0.3)" } : {}) });
+        const thStyle = (w?: number, groupStart?: boolean): React.CSSProperties => ({ background: "#0f3460", color: "#fff", padding: "10px 6px", textAlign: "center", fontWeight: 600, fontSize: 16, whiteSpace: "nowrap", ...(w ? { width: w } : {}), ...(groupStart ? { borderLeft: "2px solid rgba(255,255,255,0.3)" } : {}) });
         const renderSqTable = (rows: typeof currentKeywords, startIdx: number) => (
           <div style={{ overflow: "hidden", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", flex: 1 }}>
@@ -1523,18 +1523,18 @@ export default function ReportClient({
                   const prev2Diff = prev2 !== undefined ? kw.count - prev2 : null;
                   const yoyVal = yoyMap.get(kw.word);
                   const yoyDiff = yoyVal !== undefined ? kw.count - yoyVal : null;
-                  const diffStyle = (d: number | null): React.CSSProperties => ({ padding: "7px 4px", textAlign: "center", fontSize: 11, fontWeight: 600, color: d === null ? "#ccc" : d > 0 ? "#0a8f3c" : d < 0 ? "#c0392b" : "#888" });
+                  const diffStyle = (d: number | null): React.CSSProperties => ({ padding: "7px 4px", textAlign: "center", fontSize: 16, fontWeight: 600, color: d === null ? "#ccc" : d > 0 ? "#0a8f3c" : d < 0 ? "#c0392b" : "#888" });
                   const fmtDiff = (d: number | null) => d === null ? "-" : d > 0 ? `+${d.toLocaleString()}` : d === 0 ? "→" : d.toLocaleString();
                   return (
                     <tr key={`${sqCurrent?.month}-${rank}`} style={{ background: ri % 2 === 0 ? "#fff" : "#f8f9fb", borderBottom: "1px solid #eee" }}>
-                      <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 13, fontWeight: 700, color: rank < 3 ? "#e94560" : rank < 10 ? "#0f3460" : "#888" }}>{rank + 1}</td>
-                      <td style={{ padding: "7px 12px", fontSize: 13, color: "#333" }}>{kw.word}</td>
-                      <td style={{ padding: "7px 6px", textAlign: "center", fontSize: 14, fontWeight: 700, color: "#0f3460" }}>{kw.count.toLocaleString()}</td>
-                      {hasPrev && <td style={{ padding: "7px 6px", textAlign: "center", fontSize: 12, color: "#888", borderLeft: "2px solid #e8edf3" }}>{prev !== undefined ? prev.toLocaleString() : "-"}</td>}
+                      <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 16, fontWeight: 700, color: rank < 3 ? "#e94560" : rank < 10 ? "#0f3460" : "#888" }}>{rank + 1}</td>
+                      <td style={{ padding: "7px 12px", fontSize: 16, color: "#333" }}>{kw.word}</td>
+                      <td style={{ padding: "7px 6px", textAlign: "center", fontSize: 16, fontWeight: 700, color: "#0f3460" }}>{kw.count.toLocaleString()}</td>
+                      {hasPrev && <td style={{ padding: "7px 6px", textAlign: "center", fontSize: 16, color: "#888", borderLeft: "2px solid #e8edf3" }}>{prev !== undefined ? prev.toLocaleString() : "-"}</td>}
                       {hasPrev && <td style={{ ...diffStyle(prevDiff), padding: "7px 4px" }}>{fmtDiff(prevDiff)}</td>}
-                      {hasPrev2 && <td style={{ padding: "7px 6px", textAlign: "center", fontSize: 12, color: "#888", borderLeft: "2px solid #e8edf3" }}>{prev2 !== undefined ? prev2.toLocaleString() : "-"}</td>}
+                      {hasPrev2 && <td style={{ padding: "7px 6px", textAlign: "center", fontSize: 16, color: "#888", borderLeft: "2px solid #e8edf3" }}>{prev2 !== undefined ? prev2.toLocaleString() : "-"}</td>}
                       {hasPrev2 && <td style={{ ...diffStyle(prev2Diff), padding: "7px 4px" }}>{fmtDiff(prev2Diff)}</td>}
-                      {hasYoy && <td style={{ padding: "7px 6px", textAlign: "center", fontSize: 12, color: "#888", borderLeft: "2px solid #e8edf3" }}>{yoyVal !== undefined ? yoyVal.toLocaleString() : "-"}</td>}
+                      {hasYoy && <td style={{ padding: "7px 6px", textAlign: "center", fontSize: 16, color: "#888", borderLeft: "2px solid #e8edf3" }}>{yoyVal !== undefined ? yoyVal.toLocaleString() : "-"}</td>}
                       {hasYoy && <td style={{ ...diffStyle(yoyDiff), padding: "7px 4px" }}>{fmtDiff(yoyDiff)}</td>}
                     </tr>
                   );
@@ -1546,21 +1546,21 @@ export default function ReportClient({
         const sqNavBar = (
           <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <button onClick={() => { if (canPrev) setSqMonthIdx(activeIdx - 1); }} style={btnStyle(!canPrev)}>◀</button>
-            <span style={{ fontSize: 12, minWidth: 60, textAlign: "center" }}>{sqCurrent?.month || ""}</span>
+            <span style={{ fontSize: 16, minWidth: 60, textAlign: "center" }}>{sqCurrent?.month || ""}</span>
             <button onClick={() => { if (canNext) setSqMonthIdx(activeIdx + 1); }} style={btnStyle(!canNext)}>▶</button>
-            <span style={{ fontSize: 10, opacity: 0.4, marginLeft: 4 }}>{sqHistory.length}ヶ月分</span>
+            <span style={{ fontSize: 16, opacity: 0.4, marginLeft: 4 }}>{sqHistory.length}ヶ月分</span>
           </div>
         );
         const sqSummary = (
-          <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 12, padding: "6px 16px 2px", fontSize: 13 }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 12, padding: "6px 16px 2px", fontSize: 16 }}>
             <span style={{ color: "#555", fontWeight: 500 }}>総検索数: <strong style={{ color: "#0f3460", fontSize: 16 }}>{totalCount.toLocaleString()}</strong></span>
             {totalDiff !== null && (
-              <span style={{ fontSize: 12, fontWeight: 600, color: totalDiff > 0 ? "#0a8f3c" : totalDiff < 0 ? "#c0392b" : "#888" }}>
+              <span style={{ fontSize: 16, fontWeight: 600, color: totalDiff > 0 ? "#0a8f3c" : totalDiff < 0 ? "#c0392b" : "#888" }}>
                 前月比: {totalDiff > 0 ? `+${totalDiff.toLocaleString()}` : totalDiff === 0 ? "→" : totalDiff.toLocaleString()}
               </span>
             )}
             {yoyTotalDiff !== null && (
-              <span style={{ fontSize: 12, fontWeight: 600, color: yoyTotalDiff > 0 ? "#0a8f3c" : yoyTotalDiff < 0 ? "#c0392b" : "#888" }}>
+              <span style={{ fontSize: 16, fontWeight: 600, color: yoyTotalDiff > 0 ? "#0a8f3c" : yoyTotalDiff < 0 ? "#c0392b" : "#888" }}>
                 前年比: {yoyTotalDiff > 0 ? `+${yoyTotalDiff.toLocaleString()}` : yoyTotalDiff === 0 ? "→" : yoyTotalDiff.toLocaleString()}
               </span>
             )}
@@ -1572,7 +1572,7 @@ export default function ReportClient({
           <div style={slideBarStyle}>
             <span>{shop.name} — 検索語句</span>
             {sqNavBar}
-            <span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
+            <span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
           </div>
           <div style={{ ...slideBodyStyle, display: "flex", flexDirection: "column" }}>
             <div style={stitleStyle}>検索語句ランキング（{sqCurrent?.month || ""}）1〜{Math.min(PER_PAGE, currentKeywords.length)}位</div>
@@ -1586,7 +1586,7 @@ export default function ReportClient({
           <div style={slideBarStyle}>
             <span>{shop.name} — 検索語句</span>
             {sqNavBar}
-            <span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
+            <span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
           </div>
           <div style={{ ...slideBodyStyle, display: "flex", flexDirection: "column" }}>
             <div style={stitleStyle}>検索語句ランキング（{sqCurrent?.month || ""}）{PER_PAGE + 1}〜{Math.min(PER_PAGE * 2, currentKeywords.length)}位</div>
@@ -1601,7 +1601,7 @@ export default function ReportClient({
       {(() => { pageNum++; return null; })()}
       {hasReviews && (
         <div style={slideStyle} className="slide">
-          <div style={slideBarStyle}><span>{shop.name} — 口コミ件数推移</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+          <div style={slideBarStyle}><span>{shop.name} — 口コミ件数推移</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={{ ...slideBodyStyle, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <div style={{ width: "95%", maxHeight: 600 }}>
               <Line data={{ labels: reviewLabels, datasets: [{
@@ -1610,7 +1610,7 @@ export default function ReportClient({
                 fill: true, tension: 0.3, pointRadius: 4, pointBackgroundColor: "#fbc02d", borderWidth: 2,
               }]}} options={{ ...lineOptions, scales: { ...lineOptions.scales, y: { ...lineOptions.scales.y, ticks: { ...lineOptions.scales.y.ticks, stepSize: 1, callback: (v: any) => Number.isInteger(Number(v)) ? Number(v).toLocaleString() : "" } } } }} />
             </div>
-            <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 9 }}>
+            <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 16 }}>
               <tbody>
                 <tr style={{ background: "#f8f9fa" }}>
                   <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60 }}>月</td>
@@ -1630,7 +1630,7 @@ export default function ReportClient({
       {(() => { pageNum++; return null; })()}
       {hasReviews && (
         <div style={slideStyle} className="slide">
-          <div style={slideBarStyle}><span>{shop.name} — 月間口コミ増加数</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+          <div style={slideBarStyle}><span>{shop.name} — 月間口コミ増加数</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={{ ...slideBodyStyle, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <div style={{ width: "95%", maxHeight: 600 }}>
               {(() => {
@@ -1663,7 +1663,7 @@ export default function ReportClient({
                 );
               })()}
             </div>
-            <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 9 }}>
+            <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 16 }}>
               <tbody>
                 <tr style={{ background: "#f8f9fa" }}>
                   <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60 }}>月</td>
@@ -1682,7 +1682,7 @@ export default function ReportClient({
       {/* ════ P10: 口コミ分析 ════ */}
       {(() => { pageNum++; return null; })()}
       <div style={slideStyle} className="slide">
-        <div style={slideBarStyle}><span>{shop.name} — AIによる口コミ分析</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBarStyle}><span>{shop.name} — AIによる口コミ分析</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={stitleStyle}>口コミ分析（直近1年）</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "auto 1fr", gap: 16, flex: 1 }}>
@@ -1700,13 +1700,13 @@ export default function ReportClient({
                   return (
                     <span key={i}
                       onClick={() => handleWordClick(w, source, "positive")}
-                      style={{ display: "inline-block", padding: "6px 16px", borderRadius: 16, fontSize: 13, margin: 5, fontWeight: 500, background: "#e6f9ee", color: "#0a8f3c", cursor: "pointer", transition: "opacity 0.2s" }}
+                      style={{ display: "inline-block", padding: "6px 16px", borderRadius: 16, fontSize: 16, margin: 5, fontWeight: 500, background: "#e6f9ee", color: "#0a8f3c", cursor: "pointer", transition: "opacity 0.2s" }}
                       title="クリックで該当口コミを表示"
                     >{w}</span>
                   );
-                }) : <span style={{ color: "#bbb", fontSize: 14, fontStyle: "italic" }}>データ準備中</span>;
+                }) : <span style={{ color: "#bbb", fontSize: 16, fontStyle: "italic" }}>データ準備中</span>;
               })()}</div>
-              <p style={{ fontSize: 10, color: "#aaa", marginTop: 8, margin: "8px 0 0" }}>※ クリックで該当する口コミを表示します</p>
+              <p style={{ fontSize: 16, color: "#aaa", marginTop: 8, margin: "8px 0 0" }}>※ クリックで該当する口コミを表示します</p>
             </div>
             <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", justifyContent: "center" }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, color: "#c0392b", marginBottom: 14 }}>ネガティブワード（推定）</h3>
@@ -1722,13 +1722,13 @@ export default function ReportClient({
                   return (
                     <span key={i}
                       onClick={() => handleWordClick(w, source, "negative")}
-                      style={{ display: "inline-block", padding: "6px 16px", borderRadius: 16, fontSize: 13, margin: 5, fontWeight: 500, background: "#fde8e8", color: "#c0392b", cursor: "pointer", transition: "opacity 0.2s" }}
+                      style={{ display: "inline-block", padding: "6px 16px", borderRadius: 16, fontSize: 16, margin: 5, fontWeight: 500, background: "#fde8e8", color: "#c0392b", cursor: "pointer", transition: "opacity 0.2s" }}
                       title="クリックで該当口コミを表示"
                     >{w}</span>
                   );
-                }) : <span style={{ color: "#bbb", fontSize: 14, fontStyle: "italic" }}>データ準備中</span>;
+                }) : <span style={{ color: "#bbb", fontSize: 16, fontStyle: "italic" }}>データ準備中</span>;
               })()}</div>
-              <p style={{ fontSize: 10, color: "#aaa", marginTop: 8, margin: "8px 0 0" }}>※ クリックで該当する口コミを表示します</p>
+              <p style={{ fontSize: 16, color: "#aaa", marginTop: 8, margin: "8px 0 0" }}>※ クリックで該当する口コミを表示します</p>
             </div>
             <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", gridColumn: "1/-1", display: "flex", flexDirection: "column", justifyContent: "center" }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>口コミ総評</h3>
@@ -1739,7 +1739,7 @@ export default function ReportClient({
                   <span style={{ fontSize: 16, color: "#888", marginLeft: 8 }}>/ 5.0（{displayTotalReviews.toLocaleString()}件）</span>
                 </div>
               </div>
-              <p style={{ fontSize: 15, lineHeight: 1.9, color: "#444", margin: 0 }} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(reviewAnalysis.summary, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
+              <p style={{ fontSize: 16, lineHeight: 1.9, color: "#444", margin: 0 }} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(reviewAnalysis.summary, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
             </div>
           </div>
         </div>
@@ -1754,12 +1754,12 @@ export default function ReportClient({
           pageNum++;
           return (
             <div style={slideStyle} className="slide">
-              <div style={slideBarStyle}><span>{shop.name} — AIによるコメント</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+              <div style={slideBarStyle}><span>{shop.name} — AIによるコメント</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
               <div style={slideBodyStyle}>
                 <div style={stitleStyle}>AIによるコメント</div>
                 <div style={{ background: "#f8f9fa", border: "1px solid #dee2e6", borderRadius: 12, padding: "40px 32px", textAlign: "center" }}>
-                  <p style={{ fontSize: 14, color: "#666", marginBottom: 8 }}>この月（{displayMonth}）のAI総評はまだ生成されていません。</p>
-                  <p style={{ fontSize: 12, color: "#999" }}>最新の分析は {analysisMonth} のデータに基づいています。</p>
+                  <p style={{ fontSize: 16, color: "#666", marginBottom: 8 }}>この月（{displayMonth}）のAI総評はまだ生成されていません。</p>
+                  <p style={{ fontSize: 16, color: "#999" }}>最新の分析は {analysisMonth} のデータに基づいています。</p>
                 </div>
               </div>
             </div>
@@ -1781,7 +1781,7 @@ export default function ReportClient({
 
           return (
       <div key={`ai-comment-${pageIdx}`} style={slideStyle} className="slide">
-        <div style={slideBarStyle}><span>{shop.name} — AIによるコメント{pageLabel}</span><span style={{ fontSize: 11, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBarStyle}><span>{shop.name} — AIによるコメント{pageLabel}</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={stitleStyle}>{isFirst ? "AIによるコメント" : "AIによるコメント（続き）"}</div>
           <div style={{ background: "linear-gradient(135deg,#f0f4ff,#fff)", border: "2px solid #0f3460", borderRadius: 14, padding: "28px 32px", flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", wordBreak: "break-word" }}>
@@ -1796,7 +1796,7 @@ export default function ReportClient({
                 fixedComment = fixedComment.replace(/([^（(])([①②③④⑤⑥⑦⑧⑨⑩])/g, "$1<br>$2");
                 fixedComment = fixedComment.replace(/(.)\s*(\(\d+\))/g, "$1<br>$2");
                 return (
-                <p key={globalIdx} style={{ fontSize: 14, lineHeight: 2, color: "#444", margin: "0 0 16px 0" }}>
+                <p key={globalIdx} style={{ fontSize: 16, lineHeight: 2, color: "#444", margin: "0 0 16px 0" }}>
                   <span style={{ fontWeight: 700, color: "#0f3460", marginRight: 8 }}>{"①②③④⑤⑥⑦⑧⑨⑩"[globalIdx] || `${globalIdx + 1}.`}</span>
                   <span dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(fixedComment, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
                 </p>
@@ -1807,28 +1807,28 @@ export default function ReportClient({
             {isLast && (
             <div style={{ marginTop: "auto", borderTop: "1px solid #dde", paddingTop: 12 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: "#0f3460" }}>メモ（担当者用）</span>
+                <span style={{ fontSize: 16, fontWeight: 600, color: "#0f3460" }}>メモ（担当者用）</span>
                 <div style={{ display: "flex", gap: 6 }}>
                   {!memoEditing ? (
-                    <button onClick={() => setMemoEditing(true)} style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, border: "1px solid #ccd", background: "#fff", cursor: "pointer", color: "#555" }}>
+                    <button onClick={() => setMemoEditing(true)} style={{ fontSize: 16, padding: "3px 10px", borderRadius: 6, border: "1px solid #ccd", background: "#fff", cursor: "pointer", color: "#555" }}>
                       {memo ? "編集" : "追加"}
                     </button>
                   ) : (
                     <>
-                      <button onClick={saveMemo} disabled={memoLoading} style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, border: "none", background: memoLoading ? "#999" : "#0f3460", color: "#fff", cursor: memoLoading ? "wait" : "pointer" }}>{memoLoading ? "保存中..." : "保存"}</button>
-                      <button onClick={() => setMemoEditing(false)} style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, border: "1px solid #ccd", background: "#fff", cursor: "pointer", color: "#555" }}>キャンセル</button>
+                      <button onClick={saveMemo} disabled={memoLoading} style={{ fontSize: 16, padding: "3px 10px", borderRadius: 6, border: "none", background: memoLoading ? "#999" : "#0f3460", color: "#fff", cursor: memoLoading ? "wait" : "pointer" }}>{memoLoading ? "保存中..." : "保存"}</button>
+                      <button onClick={() => setMemoEditing(false)} style={{ fontSize: 16, padding: "3px 10px", borderRadius: 6, border: "1px solid #ccd", background: "#fff", cursor: "pointer", color: "#555" }}>キャンセル</button>
                     </>
                   )}
-                  {memoSaved && <span style={{ fontSize: 10, color: "#0a8f3c" }}>保存しました</span>}
+                  {memoSaved && <span style={{ fontSize: 16, color: "#0a8f3c" }}>保存しました</span>}
                 </div>
               </div>
               {memoEditing ? (
                 <textarea value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="この店舗への所感やメモを記入..."
-                  style={{ width: "100%", minHeight: 60, padding: "8px 10px", fontSize: 13, lineHeight: 1.6, border: "1px solid #ccd", borderRadius: 8, resize: "vertical", fontFamily: "inherit" }} />
+                  style={{ width: "100%", minHeight: 60, padding: "8px 10px", fontSize: 16, lineHeight: 1.6, border: "1px solid #ccd", borderRadius: 8, resize: "vertical", fontFamily: "inherit" }} />
               ) : memo ? (
-                <p style={{ fontSize: 13, lineHeight: 1.8, color: "#444", margin: 0, whiteSpace: "pre-wrap" }}>{memo}</p>
+                <p style={{ fontSize: 16, lineHeight: 1.8, color: "#444", margin: 0, whiteSpace: "pre-wrap" }}>{memo}</p>
               ) : (
-                <p style={{ fontSize: 12, color: "#aaa", margin: 0, fontStyle: "italic" }}>メモなし</p>
+                <p style={{ fontSize: 16, color: "#aaa", margin: 0, fontStyle: "italic" }}>メモなし</p>
               )}
             </div>
             )}
@@ -1844,22 +1844,22 @@ export default function ReportClient({
         <div style={slideStyle} className="slide">
           <div style={slideBarStyle}><span>{shop.name} — 口コミ言語別分析</span></div>
           <div style={slideBodyStyle}>
-            <div style={stitleStyle}>口コミ言語別集計 <span style={{ fontSize: 11, fontWeight: 400, color: "#999" }}>※コメント付き口コミのみ対象（{shop.totalReviews}件中{langStats.reduce((s, st) => s + st.total, 0)}件）</span></div>
+            <div style={stitleStyle}>口コミ言語別集計 <span style={{ fontSize: 16, fontWeight: 400, color: "#999" }}>※コメント付き口コミのみ対象（{shop.totalReviews}件中{langStats.reduce((s, st) => s + st.total, 0)}件）</span></div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 20 }}>
               <div style={{ background: "#fff", borderRadius: 10, padding: "16px 20px", boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
-                <div style={{ fontSize: 11, color: "#888" }}>口コミ総数</div>
+                <div style={{ fontSize: 16, color: "#888" }}>口コミ総数</div>
                 <div style={{ fontSize: 28, fontWeight: 700, color: "#1a2a44" }}>{langStats.reduce((s, st) => s + st.total, 0).toLocaleString()}</div>
               </div>
               <div style={{ background: "#fff", borderRadius: 10, padding: "16px 20px", boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
-                <div style={{ fontSize: 11, color: "#888" }}>低評価（★1-3）</div>
+                <div style={{ fontSize: 16, color: "#888" }}>低評価（★1-3）</div>
                 <div style={{ fontSize: 28, fontWeight: 700, color: "#c0392b" }}>{langStats.reduce((s, st) => s + st.lowRatingCount, 0).toLocaleString()}</div>
               </div>
               <div style={{ background: "#fff", borderRadius: 10, padding: "16px 20px", boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
-                <div style={{ fontSize: 11, color: "#888" }}>検出言語数</div>
+                <div style={{ fontSize: 16, color: "#888" }}>検出言語数</div>
                 <div style={{ fontSize: 28, fontWeight: 700, color: "#2980b9" }}>{langStats.length}</div>
               </div>
             </div>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 16 }}>
               <thead>
                 <tr style={{ borderBottom: "2px solid #e0e0e0" }}>
                   <th style={{ textAlign: "left", padding: "8px 10px", color: "#666", fontWeight: 600 }}>言語</th>
@@ -1911,7 +1911,7 @@ export default function ReportClient({
                 style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: "#999", padding: "0 4px" }}>×</button>
             </div>
             {negativeModal.reviews.length > 0 && (
-              <p style={{ fontSize: 11, color: negativeModal.matched ? "#0a8f3c" : "#999", margin: "0 0 12px", padding: "6px 12px", background: negativeModal.matched ? "#e6f9ee" : "#f8f9fb", borderRadius: 8 }}>
+              <p style={{ fontSize: 16, color: negativeModal.matched ? "#0a8f3c" : "#999", margin: "0 0 12px", padding: "6px 12px", background: negativeModal.matched ? "#e6f9ee" : "#f8f9fb", borderRadius: 8 }}>
                 {negativeModal.matched
                   ? `「${negativeModal.word}」に関連する口コミ ${negativeModal.reviews.length}件`
                   : `キーワードに一致する口コミが見つからなかったため、最新の口コミを表示しています`}
@@ -1924,16 +1924,16 @@ export default function ReportClient({
                 <div key={i} style={{ borderBottom: "1px solid #f0f0f0", padding: "14px 0" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ fontWeight: 700, fontSize: 14, color: "#333" }}>{r.reviewer}</span>
-                      {stars > 0 && <span style={{ color: "#fbc02d", fontSize: 14 }}>{"★".repeat(stars)}{"☆".repeat(5 - stars)}</span>}
+                      <span style={{ fontWeight: 700, fontSize: 16, color: "#333" }}>{r.reviewer}</span>
+                      {stars > 0 && <span style={{ color: "#fbc02d", fontSize: 16 }}>{"★".repeat(stars)}{"☆".repeat(5 - stars)}</span>}
                     </div>
-                    <span style={{ fontSize: 12, color: "#999" }}>{r.date}</span>
+                    <span style={{ fontSize: 16, color: "#999" }}>{r.date}</span>
                   </div>
-                  <p style={{ fontSize: 13, lineHeight: 1.8, color: "#444", margin: "0 0 4px" }}>{r.comment}</p>
+                  <p style={{ fontSize: 16, lineHeight: 1.8, color: "#444", margin: "0 0 4px" }}>{r.comment}</p>
                   {r.reply && (
                     <div style={{ marginTop: 8, padding: "10px 14px", background: "#f0f4ff", borderRadius: 8, borderLeft: "3px solid #4a7fff" }}>
-                      <div style={{ fontSize: 11, fontWeight: 600, color: "#4a7fff", marginBottom: 4 }}>返信済み</div>
-                      <p style={{ fontSize: 12, lineHeight: 1.7, color: "#555", margin: 0 }}>{r.reply}</p>
+                      <div style={{ fontSize: 16, fontWeight: 600, color: "#4a7fff", marginBottom: 4 }}>返信済み</div>
+                      <p style={{ fontSize: 16, lineHeight: 1.7, color: "#555", margin: 0 }}>{r.reply}</p>
                     </div>
                   )}
                 </div>
