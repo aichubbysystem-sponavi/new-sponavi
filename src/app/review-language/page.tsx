@@ -203,76 +203,116 @@ export default function ReviewLanguagePage() {
     return token ? { Authorization: `Bearer ${token}` } : {};
   }
 
-  // CSV統合ダウンロード（3セクション横並び: 口コミ一覧 | 国別サマリー | クレーム詳細）
-  const downloadCSV = () => {
-    const esc = (s: string) => `"${(s || "").replace(/"/g, '""').replace(/\n/g, " ")}"`;
+  // Excelダウンロード（3セクション横並び + デザイン付き）
+  const downloadExcel = async () => {
+    const XLSX = (await import("xlsx-js-style")).default;
     const totalLang = stats.reduce((s, st) => s + st.total, 0);
+    const totalLow = stats.reduce((s, st) => s + st.lowRatingCount, 0);
     const sorted = [...details].sort((a, b) => (b.create_time || "").localeCompare(a.create_time || ""));
     const complaints = sorted.filter(d => d.star_rating >= 1 && d.star_rating <= 2);
 
-    // 各セクションのデータを行配列として構築
-    const COL1 = 7; // 口コミ一覧の列数
-    const COL2 = 11; // 国別サマリーの列数
-    const COL3 = 6; // クレーム詳細の列数
-    const empty1 = Array(COL1).fill("").join(",");
-    const empty2 = Array(COL2).fill("").join(",");
-    const empty3 = Array(COL3).fill("").join(",");
+    // スタイル定義
+    const headerFill = { fgColor: { rgb: "0F3460" } };
+    const headerFont = { color: { rgb: "FFFFFF" }, bold: true, sz: 10 };
+    const titleStyle = { font: { bold: true, sz: 12, color: { rgb: "0F3460" } }, alignment: { horizontal: "center" as const }, fill: { fgColor: { rgb: "E8EDF3" } }, border: { bottom: { style: "thin" as const, color: { rgb: "0F3460" } } } };
+    const hdrStyle = { font: headerFont, fill: headerFill, alignment: { horizontal: "center" as const }, border: { bottom: { style: "thin" as const, color: { rgb: "CCCCCC" } } } };
+    const cellStyle = { font: { sz: 10 }, border: { bottom: { style: "thin" as const, color: { rgb: "EEEEEE" } } } };
+    const numStyle = { ...cellStyle, alignment: { horizontal: "center" as const } };
+    const redStyle = { ...numStyle, font: { sz: 10, color: { rgb: "C0392B" }, bold: true } };
+    const totalRowStyle = { font: { sz: 10, bold: true }, fill: { fgColor: { rgb: "FFF3E0" } }, alignment: { horizontal: "center" as const }, border: { top: { style: "thin" as const, color: { rgb: "0F3460" } }, bottom: { style: "thin" as const, color: { rgb: "0F3460" } } } };
 
-    // セクション1: 口コミ一覧
-    const sec1: string[] = [];
-    sec1.push("口コミ一覧" + "," .repeat(COL1 - 1));
-    sec1.push("投稿日,投稿者,評価,口コミ,返信,言語,推定国");
-    for (const d of sorted) {
-      sec1.push(`${d.create_time?.slice(0, 10) || ""},${esc(d.reviewer_name)},${d.star_rating},${esc(d.comment)},,${esc(d.lang)},${esc(d.country)}`);
-    }
+    const ws: any = {};
+    const merges: any[] = [];
 
-    // セクション2: 国別サマリー
-    const sec2: string[] = [];
-    sec2.push("国別サマリー" + ",".repeat(COL2 - 1));
-    sec2.push("推定国,合計件数,合計比率,★5,★4,★3,★2,★1,低評価(★1-3),低評価比率,低評価内シェア");
-    const totalLow = stats.reduce((s, st) => s + st.lowRatingCount, 0);
-    for (const s of stats) {
-      const pct = totalLang > 0 ? (s.total / totalLang * 100).toFixed(0) + "%" : "0%";
-      const lowPct = s.total > 0 ? (s.lowRatingCount / s.total * 100).toFixed(0) + "%" : "0%";
-      const lowShare = totalLow > 0 ? (s.lowRatingCount / totalLow * 100).toFixed(0) + "%" : "0%";
-      sec2.push(`${s.country},${s.total},${pct},${s.star5 || "-"},${s.star4 || "-"},${s.star3 || "-"},${s.star2 || "-"},${s.star1 || "-"},${s.lowRatingCount},${lowPct},${lowShare}`);
-    }
+    // ── ヘルパー関数 ──
+    const ec = (r: number, c: number) => XLSX.utils.encode_cell({ r, c });
+    const setCell = (r: number, c: number, v: any, s?: any) => { ws[ec(r, c)] = { v, t: typeof v === "number" ? "n" : "s", s: s || cellStyle }; };
+
+    // ═══ セクション1: 口コミ一覧 (列A-G, col 0-6) ═══
+    const C1 = 0;
+    merges.push({ s: { r: 0, c: C1 }, e: { r: 0, c: C1 + 6 } });
+    setCell(0, C1, "口コミ一覧", titleStyle);
+    const hdr1 = ["投稿日", "投稿者", "評価", "口コミ", "返信", "言語", "推定国"];
+    hdr1.forEach((h, i) => setCell(1, C1 + i, h, hdrStyle));
+    sorted.forEach((d, ri) => {
+      const r = ri + 2;
+      setCell(r, C1, d.create_time?.slice(0, 10) || "", cellStyle);
+      setCell(r, C1 + 1, d.reviewer_name || "", cellStyle);
+      setCell(r, C1 + 2, d.star_rating, numStyle);
+      setCell(r, C1 + 3, (d.comment || "").replace(/\n/g, " ").slice(0, 500), cellStyle);
+      setCell(r, C1 + 4, "", cellStyle);
+      setCell(r, C1 + 5, d.lang, cellStyle);
+      setCell(r, C1 + 6, d.country, cellStyle);
+    });
+
+    // ═══ セクション2: 国別サマリー (列I-S, col 8-18) ═══
+    const C2 = 8;
+    merges.push({ s: { r: 0, c: C2 }, e: { r: 0, c: C2 + 10 } });
+    setCell(0, C2, "国別サマリー", titleStyle);
+    const hdr2 = ["推定国", "合計件数", "合計比率", "★5", "★4", "★3", "★2", "★1", "低評価(★1-3)", "低評価比率", "低評価内シェア"];
+    hdr2.forEach((h, i) => setCell(1, C2 + i, h, hdrStyle));
+    stats.forEach((s, ri) => {
+      const r = ri + 2;
+      setCell(r, C2, s.country, cellStyle);
+      setCell(r, C2 + 1, s.total, numStyle);
+      setCell(r, C2 + 2, totalLang > 0 ? Math.round(s.total / totalLang * 100) + "%" : "0%", numStyle);
+      setCell(r, C2 + 3, s.star5 || 0, numStyle);
+      setCell(r, C2 + 4, s.star4 || 0, numStyle);
+      setCell(r, C2 + 5, s.star3 || 0, numStyle);
+      setCell(r, C2 + 6, s.star2 || 0, numStyle);
+      setCell(r, C2 + 7, s.star1 || 0, numStyle);
+      setCell(r, C2 + 8, s.lowRatingCount, redStyle);
+      setCell(r, C2 + 9, s.total > 0 ? Math.round(s.lowRatingCount / s.total * 100) + "%" : "0%", redStyle);
+      setCell(r, C2 + 10, totalLow > 0 ? Math.round(s.lowRatingCount / totalLow * 100) + "%" : "0%", numStyle);
+    });
     // 合計行
+    const tRow = stats.length + 2;
     const t = stats.reduce((a, s) => ({ s5: a.s5 + s.star5, s4: a.s4 + s.star4, s3: a.s3 + s.star3, s2: a.s2 + s.star2, s1: a.s1 + s.star1, low: a.low + s.lowRatingCount }), { s5: 0, s4: 0, s3: 0, s2: 0, s1: 0, low: 0 });
-    const totalLowPct = totalLang > 0 ? (t.low / totalLang * 100).toFixed(0) + "%" : "0%";
-    sec2.push(`合計,${totalLang},100%,${t.s5},${t.s4},${t.s3},${t.s2},${t.s1},${t.low},${totalLowPct},100%`);
+    setCell(tRow, C2, "合計", totalRowStyle);
+    setCell(tRow, C2 + 1, totalLang, totalRowStyle);
+    setCell(tRow, C2 + 2, "100%", totalRowStyle);
+    [t.s5, t.s4, t.s3, t.s2, t.s1].forEach((v, i) => setCell(tRow, C2 + 3 + i, v, totalRowStyle));
+    setCell(tRow, C2 + 8, t.low, { ...totalRowStyle, font: { ...totalRowStyle.font, color: { rgb: "C0392B" } } });
+    setCell(tRow, C2 + 9, totalLang > 0 ? Math.round(t.low / totalLang * 100) + "%" : "0%", totalRowStyle);
+    setCell(tRow, C2 + 10, "100%", totalRowStyle);
 
-    // セクション3: クレーム詳細（★1-2）
-    const sec3: string[] = [];
-    sec3.push("クレーム詳細(★1-2)" + ",".repeat(COL3 - 1));
-    sec3.push("推定国,投稿日,投稿者,評価,口コミ内容,日本語訳");
-    for (const d of complaints) {
+    // ═══ セクション3: クレーム詳細 (列U-Z, col 20-25) ═══
+    const C3 = 20;
+    merges.push({ s: { r: 0, c: C3 }, e: { r: 0, c: C3 + 5 } });
+    setCell(0, C3, "クレーム詳細(★1-2)", { ...titleStyle, font: { ...titleStyle.font, color: { rgb: "C0392B" } } });
+    const hdr3 = ["推定国", "投稿日", "投稿者", "評価", "口コミ内容", "日本語訳"];
+    hdr3.forEach((h, i) => setCell(1, C3 + i, h, hdrStyle));
+    complaints.forEach((d, ri) => {
+      const r = ri + 2;
       const comment = d.comment || "";
       const origMatch = comment.match(/\(Original\)\s*([\s\S]+)/i);
       const transMatch = comment.match(/\(Translated by Google\)\s*([\s\S]*?)(?:\(Original\)|$)/i);
       const original = origMatch ? origMatch[1].trim() : comment.replace(/\(Translated by Google\)/i, "").trim();
       const translation = transMatch ? transMatch[1].trim() : "";
-      sec3.push(`${esc(d.country)},${d.create_time?.slice(0, 10) || ""},${esc(d.reviewer_name)},${d.star_rating},${esc(original)},${esc(translation)}`);
-    }
+      setCell(r, C3, d.country, cellStyle);
+      setCell(r, C3 + 1, d.create_time?.slice(0, 10) || "", cellStyle);
+      setCell(r, C3 + 2, d.reviewer_name || "", cellStyle);
+      setCell(r, C3 + 3, d.star_rating, redStyle);
+      setCell(r, C3 + 4, original.replace(/\n/g, " ").slice(0, 500), cellStyle);
+      setCell(r, C3 + 5, translation.replace(/\n/g, " ").slice(0, 500), cellStyle);
+    });
 
-    // 3セクションを横並びで結合
-    const maxRows = Math.max(sec1.length, sec2.length, sec3.length);
-    let csv = "\uFEFF" + "sep=,\n";
-    for (let i = 0; i < maxRows; i++) {
-      const c1 = i < sec1.length ? sec1[i] : empty1;
-      const c2 = i < sec2.length ? sec2[i] : empty2;
-      const c3 = i < sec3.length ? sec3[i] : empty3;
-      csv += `${c1},,${c2},,${c3}\n`;
-    }
+    // ── ワークシート設定 ──
+    const maxRow = Math.max(sorted.length + 2, stats.length + 3, complaints.length + 2);
+    ws["!ref"] = `A1:${ec(maxRow, 25)}`;
+    ws["!merges"] = merges;
+    ws["!cols"] = [
+      { wch: 11 }, { wch: 16 }, { wch: 5 }, { wch: 50 }, { wch: 5 }, { wch: 10 }, { wch: 10 }, // A-G
+      { wch: 2 }, // H(空)
+      { wch: 10 }, { wch: 8 }, { wch: 8 }, { wch: 5 }, { wch: 5 }, { wch: 5 }, { wch: 5 }, { wch: 5 }, { wch: 9 }, { wch: 8 }, { wch: 10 }, // I-S
+      { wch: 2 }, // T(空)
+      { wch: 10 }, { wch: 11 }, { wch: 16 }, { wch: 5 }, { wch: 50 }, { wch: 50 }, // U-Z
+    ];
 
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "口コミ【国別】");
     const monthLabel = targetMonth ? targetMonth.replace("/", "-") : "全期間";
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `口コミ国別分析_${monthLabel}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    XLSX.writeFile(wb, `口コミ国別分析_${monthLabel}.xlsx`);
   };
 
   const complaintDetails = details.filter(d => d.star_rating >= 1 && d.star_rating <= 2);
@@ -329,9 +369,9 @@ export default function ReviewLanguagePage() {
           </button>
           {stats.length > 0 && (
             <div className="flex gap-2 ml-auto">
-              <button onClick={downloadCSV}
+              <button onClick={downloadExcel}
                 className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700">
-                CSVダウンロード
+                Excelダウンロード
               </button>
             </div>
           )}

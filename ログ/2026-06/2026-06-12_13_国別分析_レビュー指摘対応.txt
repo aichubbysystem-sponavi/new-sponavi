@@ -1,0 +1,124 @@
+## 2026-06-12〜13
+
+### 決定事項
+- 口コミ国別分析ページ（/review-language）を新規作成。GBPアカウントごとに口コミの言語別集計・CSV出力
+- 各店舗レポートに「口コミ言語別集計」セクションを自動追加（2言語以上検出時のみ表示）
+- レポート管理ページにGBPアカウントフィルター追加
+- 顧客マスタにGBPアカウント列追加
+- コードレビュー（chubby-meo_レビュー結果_20260612.md）の指摘対応: #1二重投稿/#2キャッシュ汚染/#5Dropbox URL/#6JST/#7catch/#8ESLint
+- 同名店舗問題は現時点でUNIQUE制約がガード、対応不要と判断
+- cron/sync-reviewsは既に名前ベースに修正済みと確認。重要ナレッジを更新
+- GBP未連携8店舗は7店舗がGBPアカウント未登録（コードの問題ではなくアカウント管理の問題）
+- IDOR認可はレポートサブドメインのクライアント公開前に対応（設計が必要）
+- Google client secretローテーションは保留（他サービスへの影響確認が必要）
+
+### 変更内容（具体的に）
+
+#### 口コミ国別分析ページ（新規）
+- `src/lib/detect-language.ts` 新規: 正規表現ベース言語判定（14言語対応）+ starToNum()
+- `src/app/api/report/review-language-stats/route.ts` 新規: 言語別集計API（POST）
+  - shopNames→shop_id逆引き（完全一致+ilike）でDB検索
+  - Supabase 1000行制限対策: .range()ページネーション
+  - 空コメント除外: .neq("comment", "")
+- `src/app/review-language/page.tsx` 新規: 口コミ国別分析ページ
+  - GBPアカウント選択 → 店舗チェックリスト（個別・複数選択）→ 分析実行
+  - 全選択/全解除/店舗名検索
+  - サマリーカード + 言語×星別クロス集計テーブル + 低評価詳細
+  - CSVダウンロード（集計CSV / 低評価詳細CSV）
+- `src/components/sidebar.tsx`: 「口コミ国別分析」メニュー追加（line 24）
+- `src/lib/roles.ts`: /review-language を president ロールに追加
+
+#### レポートに言語別セクション追加
+- `src/app/report/[shopId]/client.tsx`:
+  - langStats state + useEffectでAPI取得（line 434-456）
+  - AIコメントセクション後に「口コミ言語別集計」スライド追加（line 1847-1908）
+  - IIFEパターンを通常JSX条件レンダリングに変更（非同期state更新で再レンダリングされない問題修正）
+  - 「※コメント付き口コミのみ対象（311件中225件）」注釈追加
+
+#### レポート管理にGBPアカウントフィルター
+- `src/lib/report-data.ts`: ShopListItemにgbpAccountLabel追加（line 133）
+- `src/app/report/page.tsx`: getGbpAccountMap()でGo APIからマッピング取得、shopsにマージ
+- `src/app/report/report-list-client.tsx`:
+  - accountFilter state追加、クライアント側フォールバック取得（Go API /api/gbp/account）
+  - フィルターロジックにGBPアカウント条件追加
+  - アカウントセレクトボックスUI追加
+  - 重複店舗除去（大文字小文字違いをlowercaseで名寄せ、データが多い方を残す）
+
+#### 顧客マスタにGBPアカウント列
+- `src/app/customer-master/page.tsx`: MasterRowにgbpAccountLabel追加、Go APIからアカウントマッピング取得、テーブルに列追加
+
+#### コードレビュー指摘対応
+- `src/app/api/cron/execute-posts/route.ts`:
+  - #1 processPost先頭でstatus=pending→processingクレーム（二重実行防止）
+  - 10分以上processingのままの古いレコードをpendingに自動復旧
+- `src/app/api/report/auto-post/route.ts`:
+  - #2 cachedRootSubfoldersにTTL 10分追加（{ data, ts }形式）
+  - 失敗時はキャッシュしない（成功時のみ保存）
+  - #5 Dropbox共有リンクをハードコードから環境変数(DROPBOX_ROOT_FOLDER_URL)に移動
+- `src/lib/jst-date.ts` 新規: jstToday(), jstCurrentMonth(), jstNow()
+- `src/app/posts/page.tsx`: #6 UTC日付初期化をjstToday()に変更
+- `src/app/grid-ranking/page.tsx`: #6 同上
+- `src/app/api/cron/auto-reply/route.ts`: #7 空catch 4箇所にconsole.error追加
+- `src/app/api/cron/execute-posts/route.ts`: #7 空catch 2箇所にconsole.error追加
+- `src/app/api/cron/sync-reviews/route.ts`: #7 空catch 7箇所にconsole.error追加
+- `src/app/api/cron/sync-shops/route.ts`: #7 空catch 4箇所にconsole.error追加
+- `.eslintrc.json` 新規: #8 {"extends": ["next/core-web-vitals"]}
+
+#### デバッグコード削除
+- `src/app/api/report/review-language-stats/route.ts`: _debugフィールド・debug配列削除
+- `src/app/report/[shopId]/client.tsx`: console.log("[lang-stats]")削除
+- `src/app/review-language/page.tsx`: _debug参照削除
+
+#### 重要ナレッジ更新
+- `重要ナレッジ.txt`: 既解決の問題を[x]に変更、新規未解決問題を追加
+
+### 数値・設定値
+- 言語判定: 14言語対応（日本語/韓国語/中国語/タイ語/ベトナム語/ロシア語/アラビア語/ヒンディー語/インドネシア語/フランス語/ドイツ語/スペイン語/ポルトガル語/イタリア語/英語）
+- 言語別API: バッチサイズ10、ページネーション1000件×最大5ページ
+- Dropboxキャッシュ TTL: 10分（ROOT_CACHE_TTL = 10 * 60 * 1000）
+- 予約投稿processingリカバリ: 10分（staleThreshold）
+- jstToday(): UTC+9時間オフセット
+- 口コミ分析5月分: 228/430で中断（途中）
+- HOTEL B Suites なんば黒門: 225件口コミ、3言語（日本語140/英語83/スペイン語2）
+- Vercel環境変数 DROPBOX_ROOT_FOLDER_URL 追加済み
+- GBP未連携: 8店舗中7店舗がGBPアカウント未登録（1店舗はSpotlight Navigatorに存在）
+
+### 未解決・次回やること
+1. Google client secretローテーション（保留 — 他サービスへの影響確認後）
+2. GBP未連携7店舗のGoogleアカウント特定（社内確認必要）
+3. IDOR認可（レポートサブドメインのクライアント公開前に対応 — トークンベース閲覧認証の設計が必要）
+4. レート制限Redis化（Upstash契約が必要 — 中優先度）
+5. OAuth一元化（13ファイル、7月テスト中に段階的移行）
+6. 口コミ分析5月分の残り（228/430で中断中）
+7. 口コミ分析6月分の実行
+8. 5月AI総評の再生成（cron手動実行）
+9. 口コミ国別分析: JAPAN SELECT 97店舗一括の結果確認
+
+### 注意点・ハマったこと
+- 口コミ国別分析のGET→POST変更: 99店舗の日本語名をURLパラメータに入れるとURL長制限でハング
+- GBP店舗名とGo API店舗名の不一致: GBPアカウントのloc.titleとreviewsテーブルのshop_nameが異なる場合がある。shop_idで検索するか、ilike検索でフォールバック
+- PostgreSQLは大文字小文字を区別: .eq("shop_name", name)は完全一致。"HOTEL B Suites"と"Hotel B Suites"は別物
+- レポートのIIFE+pageNumパターン: 非同期stateの更新でIIFE内のJSXが再レンダリングされない。通常のJSX条件レンダリング{condition && (<div>)}に変更で解決
+- Supabaseデフォルト1000行制限: .select()はlimit未指定で1000行まで。.range()でページネーション必須
+- Set iterationのTypeScriptエラー: `for (const x of mySet)` はdownlevelIterationフラグなしで使えない。`Array.from(mySet)` に変換
+- Dropbox URL環境変数化後: Vercelに DROPBOX_ROOT_FOLDER_URL を設定しないと自動投稿の写真取得が動かない
+- cron/sync-reviewsのID問題は既に修正済みだった（重要ナレッジの記載が古かった）
+
+### コミット履歴（本セッション分）
+- 1a96658 feat: 顧客マスタにGBPアカウント列を追加
+- a6bd168 feat: 口コミ国別分析ページ + レポート管理にGBPアカウントフィルター
+- 1805659 fix: レポート管理のアカウントフィルターをクライアント側フォールバック + 重複店舗除去
+- b13e059 fix: 口コミ国別分析ページをロール権限に追加
+- 314d33c fix: 口コミ国別分析APIをGET→POSTに変更
+- 1620551 fix: 口コミ国別分析APIのSupabase行数制限対策
+- 40fff1c fix: 口コミ国別分析 — GBP店舗名をGo API名にマッチングして検索
+- db58c24 feat: 口コミ国別分析に店舗の個別・複数選択機能追加
+- 84b51bb fix: 口コミ国別分析をshop_id検索に変更
+- 642f606 debug: 口コミ国別分析に検索デバッグ情報を追加
+- f9d990c fix: 言語別APIでshopNames→shop_id逆引き
+- e015b0a debug: レポート言語別セクションにconsole.log追加
+- 4a207c4 fix: レポート言語別セクションがIIFE+pageNumで非表示になる問題
+- 27575a7 feat: 各店舗レポートに口コミ言語別分析セクション追加
+- 6e2ce60 fix: 言語別集計に「コメント付きのみ対象」注釈を追加
+- d24fc33 fix: レビュー指摘の重大バグ2件修正 + ESLint設定追加
+- da5917a fix: コードレビュー指摘対応 — デバッグ削除/Dropbox URL環境変数化/JST統一/catch整理
