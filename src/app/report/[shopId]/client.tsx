@@ -41,13 +41,13 @@ const slideStyle: React.CSSProperties = {
 
 const slideBarStyle: React.CSSProperties = {
   background: "linear-gradient(135deg,#1a1a2e,#0f3460)", color: "#fff",
-  padding: "12px 36px", fontSize: 16, fontWeight: 700,
+  padding: "12px 9px", fontSize: 16, fontWeight: 700,
   display: "flex", justifyContent: "space-between", alignItems: "center",
   flexShrink: 0, letterSpacing: 0.5,
 };
 
 const slideBodyStyle: React.CSSProperties = {
-  flex: 1, padding: "28px 36px", display: "flex", flexDirection: "column",
+  flex: 1, padding: "28px 9px", display: "flex", flexDirection: "column",
   justifyContent: "center", overflow: "hidden",
 };
 
@@ -977,13 +977,13 @@ export default function ReportClient({
 
       {/* ════ P1: ヘッダー + KPI ════ */}
       <div style={slideStyle} className="slide">
-        <div style={{ background: "linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%)", color: "#fff", padding: "28px 36px 20px", flexShrink: 0, position: "relative" }}>
+        <div style={{ background: "linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%)", color: "#fff", padding: "28px 9px 20px", flexShrink: 0, position: "relative" }}>
           <h1 style={{ margin: 0, fontSize: 26, fontWeight: 900, letterSpacing: 1 }}>{shop.name}</h1>
           <div style={{ fontSize: 16, opacity: 0.7, marginTop: 2 }}>MEO対策 レポート報告</div>
           <div style={{ fontSize: 16, opacity: 0.5, marginTop: 6 }}>{shop.address}</div>
           <div style={{ position: "absolute", top: 28, right: 36, background: "rgba(255,255,255,.12)", padding: "7px 18px", borderRadius: 8, fontSize: 16, fontWeight: 600 }}>{shop.period.start} - {shop.period.end}</div>
         </div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", padding: "10px 36px", background: "#e8eaf0", flexShrink: 0 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", padding: "10px 9px", background: "#e8eaf0", flexShrink: 0 }}>
           {[{ lb: "対策開始日", vl: shop.startDate }, { lb: "レポート対象", vl: curLabel }, ...(shop.category ? [{ lb: "業種", vl: shop.category }] : []), { lb: "口コミ合計", vl: `${displayTotalReviews.toLocaleString()}件` }, { lb: "評価", vl: String(shop.rating) }].map((b, i) => (
             <div key={i} style={{ background: "#fff", borderRadius: 10, padding: "7px 14px", fontSize: 16, display: "flex", alignItems: "center", gap: 5, boxShadow: "0 1px 3px rgba(0,0,0,.05)" }}>
               <span style={{ color: "#888" }}>{b.lb}</span><span style={{ fontWeight: 700 }}>{b.vl}</span>
@@ -1298,7 +1298,7 @@ export default function ReportClient({
             <span>{shop.name} — 多地点順位計測</span>
             <span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
           </div>
-          <div style={{ ...slideBodyStyle, padding: "20px 36px", gap: 12 }}>
+          <div style={{ ...slideBodyStyle, padding: "20px 9px", gap: 12 }}>
             <div className="no-print" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
               <span style={{ fontSize: 16, fontWeight: 700, color: "#0f3460" }}>KW:</span>
               {gr.keywords.map((kw, i) => (
