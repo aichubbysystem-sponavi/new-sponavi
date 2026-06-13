@@ -57,39 +57,17 @@ export async function POST(request: NextRequest) {
 
   const supabase = getSupabase();
 
-  // shopNames → shop_idに変換（大文字小文字不一致対策）
-  let resolvedIds: string[] = [...shopIds];
-  if (shopNames.length > 0 && shopIds.length === 0) {
-    for (let i = 0; i < shopNames.length; i += 30) {
-      const batch = shopNames.slice(i, i + 30);
-      // まず完全一致で検索
-      const { data } = await supabase.from("reviews").select("shop_id, shop_name").in("shop_name", batch).limit(1000);
-      if (data && data.length > 0) {
-        const ids = Array.from(new Set(data.map((r: any) => r.shop_id)));
-        resolvedIds.push(...ids);
-      }
-      // 完全一致で見つからなかった名前をilike検索
-      const foundNames = new Set((data || []).map((r: any) => r.shop_name));
-      const notFound = batch.filter(n => !foundNames.has(n));
-      for (const name of notFound) {
-        const { data: iData } = await supabase.from("reviews").select("shop_id").ilike("shop_name", name).limit(1);
-        if (iData && iData.length > 0) resolvedIds.push(iData[0].shop_id);
-      }
-    }
-    resolvedIds = Array.from(new Set(resolvedIds));
-  }
+  // shopNamesがあればshop_nameで直接検索（ID逆引き不要）、shopIdsがあればshop_idで検索
+  const useNameSearch = shopNames.length > 0;
+  const targets = useNameSearch ? shopNames : shopIds;
+  const col = useNameSearch ? "shop_name" : "shop_id";
 
-  // 口コミを取得（常にshop_idで検索）
   let allReviews: any[] = [];
-  const targets = resolvedIds;
-  const col = "shop_id";
   const batchSize = 10;
-  // 口コミを取得（常にshop_idで検索）
 
   for (let i = 0; i < targets.length; i += batchSize) {
     const batch = targets.slice(i, i + batchSize);
 
-    // ページネーション: 1バッチ最大5000件まで取得
     let from = 0;
     const pageSize = 1000;
     while (from < 5000) {
@@ -104,7 +82,7 @@ export async function POST(request: NextRequest) {
       if (error) { console.error("[review-language-stats]", error.message); break; }
       if (!data || data.length === 0) break;
       allReviews.push(...data);
-      if (data.length < pageSize) break; // 最終ページ
+      if (data.length < pageSize) break;
       from += pageSize;
     }
   }
