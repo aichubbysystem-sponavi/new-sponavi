@@ -242,7 +242,8 @@ export default function ReviewLanguagePage() {
     URL.revokeObjectURL(url);
   };
 
-  const filteredDetails = detailLangFilter === "all" ? details : details.filter(d => d.lang === detailLangFilter);
+  const complaintDetails = details.filter(d => d.star_rating >= 1 && d.star_rating <= 2);
+  const filteredDetails = detailLangFilter === "all" ? complaintDetails : complaintDetails.filter(d => d.lang === detailLangFilter);
   const accLabel = selectedAccount === "all" ? "全アカウント" : accounts.find(a => a.name === selectedAccount)?.label || "";
 
   return (
@@ -408,12 +409,77 @@ export default function ReviewLanguagePage() {
         </div>
       )}
 
+      {/* 店舗別 言語内訳 */}
+      {stats.length > 0 && details.length > 0 && (() => {
+        // 店舗ごとの言語集計を計算
+        const shopLangMap = new Map<string, { total: number; langs: Map<string, number>; lowRating: number }>();
+        for (const d of details) {
+          if (!shopLangMap.has(d.shop_name)) shopLangMap.set(d.shop_name, { total: 0, langs: new Map(), lowRating: 0 });
+          const entry = shopLangMap.get(d.shop_name)!;
+          entry.total++;
+          entry.langs.set(d.lang, (entry.langs.get(d.lang) || 0) + 1);
+          if (d.star_rating >= 1 && d.star_rating <= 3) entry.lowRating++;
+        }
+        // 検出された主要言語（日本語以外）の列を動的に決定
+        const allLangs = Array.from(new Set(details.map(d => d.lang))).filter(l => l !== "不明");
+        const jpLang = "日本語";
+        const foreignLangs = allLangs.filter(l => l !== jpLang);
+        // インバウンド比率でソート
+        const shopRows = Array.from(shopLangMap.entries()).map(([name, data]) => {
+          const jpCount = data.langs.get(jpLang) || 0;
+          const foreignCount = data.total - jpCount - (data.langs.get("不明") || 0);
+          const foreignPct = data.total > 0 ? foreignCount / data.total * 100 : 0;
+          return { name, total: data.total, jpCount, foreignCount, foreignPct, lowRating: data.lowRating, langs: data.langs };
+        }).sort((a, b) => b.foreignPct - a.foreignPct || b.total - a.total);
+
+        return (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-100 mb-6">
+          <div className="p-4 border-b border-slate-100">
+            <h3 className="text-sm font-semibold text-slate-700">店舗別 言語内訳（インバウンド比率順）</h3>
+          </div>
+          <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0">
+                <tr className="bg-slate-50 border-b border-slate-200">
+                  <th className="text-left py-2.5 px-3 text-xs font-semibold text-slate-500 sticky left-0 bg-slate-50">店舗名</th>
+                  <th className="text-right py-2.5 px-2 text-xs font-semibold text-slate-500">合計</th>
+                  <th className="text-right py-2.5 px-2 text-xs font-semibold text-slate-500">日本語</th>
+                  {foreignLangs.map(l => (
+                    <th key={l} className="text-right py-2.5 px-2 text-xs font-semibold text-blue-600">{l}</th>
+                  ))}
+                  <th className="text-right py-2.5 px-2 text-xs font-semibold text-blue-700">インバウンド比率</th>
+                  <th className="text-right py-2.5 px-2 text-xs font-semibold text-red-500">低評価</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shopRows.map((row) => (
+                  <tr key={row.name} className="border-b border-slate-50 hover:bg-blue-50/30">
+                    <td className="py-1.5 px-3 text-xs text-slate-700 whitespace-nowrap sticky left-0 bg-white">{row.name}</td>
+                    <td className="py-1.5 px-2 text-right text-xs font-semibold">{row.total}</td>
+                    <td className="py-1.5 px-2 text-right text-xs">{row.jpCount || "-"}</td>
+                    {foreignLangs.map(l => {
+                      const c = row.langs.get(l) || 0;
+                      return <td key={l} className={`py-1.5 px-2 text-right text-xs ${c > 0 ? "text-blue-700 font-semibold" : "text-slate-300"}`}>{c || "-"}</td>;
+                    })}
+                    <td className={`py-1.5 px-2 text-right text-xs font-bold ${row.foreignPct > 20 ? "text-blue-700" : row.foreignPct > 5 ? "text-blue-500" : "text-slate-400"}`}>
+                      {row.foreignPct > 0 ? row.foreignPct.toFixed(1) + "%" : "-"}
+                    </td>
+                    <td className={`py-1.5 px-2 text-right text-xs ${row.lowRating > 0 ? "text-red-600 font-semibold" : "text-slate-300"}`}>{row.lowRating || "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        );
+      })()}
+
       {/* 低評価口コミ詳細 */}
       {details.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-slate-100">
           <div className="p-4 border-b border-slate-100 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <h3 className="text-sm font-semibold text-red-700">低評価口コミ詳細（★1-3）— {filteredDetails.length}件</h3>
+              <h3 className="text-sm font-semibold text-red-700">クレーム詳細（★1-2）— {filteredDetails.length}件</h3>
               <button onClick={() => setShowDetails(!showDetails)}
                 className="text-xs text-slate-400 hover:text-slate-600">
                 {showDetails ? "閉じる" : "表示"}
@@ -423,9 +489,10 @@ export default function ReviewLanguagePage() {
               <select value={detailLangFilter} onChange={(e) => setDetailLangFilter(e.target.value)}
                 className="px-2 py-1 border border-slate-200 rounded text-xs">
                 <option value="all">全言語</option>
-                {stats.filter(s => s.lowRatingCount > 0).map(s => (
-                  <option key={s.lang} value={s.lang}>{s.lang}（{s.lowRatingCount}件）</option>
-                ))}
+                {Array.from(new Set(complaintDetails.map(d => d.lang))).map(lang => {
+                  const cnt = complaintDetails.filter(d => d.lang === lang).length;
+                  return (<option key={lang} value={lang}>{lang}（{cnt}件）</option>);
+                })}
               </select>
             </div>
           </div>
