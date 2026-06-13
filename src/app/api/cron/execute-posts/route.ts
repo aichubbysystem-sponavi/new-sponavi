@@ -43,7 +43,7 @@ async function getAllOAuthTokens(): Promise<string[]> {
             const t = await res.json();
             if (t.access_token) tokenSet.add(t.access_token);
           }
-        } catch {}
+        } catch (e: any) { console.error("[cron/execute-posts] oauth token refresh:", e?.message); }
       }
     }
   }
@@ -65,7 +65,7 @@ async function getAllOAuthTokens(): Promise<string[]> {
               const t = await res.json();
               if (t.access_token) tokenSet.add(t.access_token);
             }
-          } catch {}
+          } catch (e: any) { console.error("[cron/execute-posts] system token refresh:", e?.message); }
         } else if (row.access_token) {
           tokenSet.add(row.access_token);
         }

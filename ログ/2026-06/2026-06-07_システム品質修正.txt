@@ -1,0 +1,50 @@
+## 2026-06-07（追加セッション）
+
+### 決定事項
+- ERR_REQUIRE_ESMの根本原因はws(WebSocket)パッケージのESM wrapper
+- React hydrationはuseState初期値にnew Date()/window.locationを使わない
+- 重複店舗は全maybeSingle()にlimit(1)を付けて安全化
+
+### 変更内容（具体的に）
+
+#### ERR_REQUIRE_ESM修正
+- `next.config.mjs`:
+  - transpilePackages: @supabase/*パッケージ6つ追加
+  - webpack config: サーバーサイドでwsをcommonjs external化
+  - realtimeオプションは型が合わず断念 → webpack externalsで対応
+
+#### React Hydration修正
+- `src/app/posts/page.tsx`:
+  - autoPostDate, scheduleDate, planMonth, bulkGenStart のuseState初期値を空文字列に変更
+  - useEffectで今日の日付を設定（SSR/CSR一致保証）
+- `src/components/auth-guard.tsx`:
+  - isReportDomainをuseState+useEffect内に移動（レンダリング直接のwindow.location参照を除去）
+- `src/components/app-shell.tsx`:（前コミットで済）
+  - window.location.hostnameチェック削除、pathname判定のみに変更
+- `src/components/date-range-picker.tsx`:（前コミットで済）
+  - useDateRangeのnew Date()をuseEffect内に移動
+- Date.now()のレンダリング内使用（6箇所）は日単位計算のためSSR/CSR差は実質ゼロ、修正不要と判断
+
+#### 重複店舗安全化
+- `src/app/api/report/analyze/route.ts`: 5箇所の.eq("name").maybeSingle()にlimit(1)追加
+- `src/app/api/report/grid-ranking/route.ts`: 1箇所にlimit(1)追加
+- `src/lib/report-api.ts`: getShopDbIdsが1件のみ返却（前コミット）
+- `src/lib/gbp-performance.ts`: getCachedPerformanceが最新shop_idのみ使用（前コミット）
+
+### 数値・設定値
+- transpilePackages: 6パッケージ追加
+- webpack externals: ws → commonjs ws
+- maybeSingle()のlimit(1): 6箇所追加
+
+### 未解決・次回やること
+- 検索語句の残り352件同期（ブラウザ操作）
+- AI総評の4月分生成 + 全店舗再生成（ブラウザ操作）
+
+### 注意点・ハマったこと
+- Supabase v2のcreateClientにrealtime: { enabled: false }は型エラー（RealtimeClientOptionsにenabledフィールドがない）
+- 代替案: webpack externalsでwsをcommonjs扱いにすることでESM問題を回避
+- sedで一括置換した際、インデントパターンの違いで一部漏れが発生→手動修正が必要だった
+- realtime無効化オプションを全ファイルに追加→型エラー→全ファイルから削除→webpack方式に切替、という二転三転が発生
+
+### コミット履歴
+1. 82a94d2 - fix: ERR_REQUIRE_ESM根本修正 + Hydration修正 + 重複店舗安全化

@@ -1,0 +1,70 @@
+## 【2026-06-09】セッション4: 同名店舗座標 + Go⇔Supabase同期 + メモ修正 + 表示設定DB化
+
+### 完了した作業（コミット11件）
+
+【1. Places API 住所マッチング（sync-coordinates）】
+- 複数ヒット時にDB住所（state/city/address/full_address）とformattedAddressを照合
+- 検索クエリに住所を含めて精度向上
+- 59da63c
+
+【2. エラーメッセージ具体化（grid-ranking）】
+- APIエラー/Places APIエラーの詳細を表示するよう改善
+- bd4c276
+
+【3. Go API⇔Supabase shops ID不一致対策（sync-coordinates）】
+- shopNameでフォールバック検索追加（Step 1 auto-link + Step 2 座標取得）
+- 469f15a
+
+【4. grid-ranking Supabase shops検索を名前ベースに統一】
+- 3箇所を.eq("id")→.eq("name")に変更（単店舗/いつもの店舗/全店舗計測）
+- 7be4ce6
+
+【5. sync-shopsにGo API→Supabase shops同期ステップ追加】
+- Cron実行時にGo APIの全店舗をSupabaseにupsert（synced: 580確認済み）
+- 既存店舗: 値がある場合のみ住所更新、gbp_location_nameは未設定時のみ補完
+- 新規店舗: Go APIのIDで挿入（ID一致を実現）
+- maxDuration: 60→120秒
+- 35815aa
+
+【6. レポート表示設定をDB保存に変更】
+- localStorage→Supabase DB保存（report_display_settings テーブル新規作成）
+- 別PC/ブラウザでも設定が共有される
+- DB接続失敗時はlocalStorageフォールバック
+- 500msデバウンス、種類ごとに独立タイマー
+- 74381ce
+
+【7. メモ一括追加バグ修正】
+- report_memosテーブルが未作成だった → SQL実行で作成
+- shop.idが店舗名として保存されていた → shop.nameに修正（※実際はid=nameで同値だったが修正）
+- e4f4c10
+
+【8. 選択店舗反映のsyncShopDataバグ修正】
+- shop.id(=店舗名)をそのまま渡していたが、明示的にshop.nameに変換
+- 636cbac
+
+【9. メモの対象月不一致バグ修正（根本原因）】
+- 原因: shop.period（データ最新月=4月）で保存、レポートは対象月セレクタ（5月）で表示→月が不一致
+- 修正: 対象月セレクタ(reportMonth)の値を優先使用、未選択時のみshop.periodにフォールバック
+- c2183b4
+
+### Supabase SQL実行（2件）
+1. report_display_settings テーブル作成
+2. report_memos テーブル作成
+
+### 未解決
+- 「七宝麻辣湯（チーパオマーラータン）札幌大通店」のsync-coordinates座標取得
+  - synced: 580でSupabaseに同期済みだが、名前検索で見つからない
+  - ブラウザキャッシュ or フロントJSバンドル未反映の可能性 → 次回Ctrl+Shift+Rで再確認
+- cron/sync-reviewsのGo API ID→Supabase shops rating/review_count更新が空振り（別issue）
+
+### コミット一覧
+1. 59da63c fix: 同名店舗のPlaces API座標取得を住所マッチングで解決
+2. bd4c276 fix: 多地点順位チェックの座標取得エラーメッセージを具体化
+3. 469f15a fix: Go API⇔Supabase間の店舗ID不一致で座標取得できない問題を修正
+4. 7be4ce6 fix: 多地点順位チェックの座標取得をSupabase shops名前検索に統一
+5. 35815aa feat: sync-shopsにGo API→Supabase shops同期ステップを追加
+6. 74381ce feat: レポート表示設定をDB保存に変更（ブラウザ横断で共有）
+7. e4f4c10 fix: メモ一括追加でshop.idが店舗名として保存されていたバグを修正
+8. 636cbac fix: 選択店舗反映でshop.idを店舗名に変換してからsyncShopDataに渡す
+9. 74332fd debug: memo APIにデバッグ情報追加（一時的）
+10. c2183b4 fix: メモ一括追加で対象月セレクタの値を使用するように修正

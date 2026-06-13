@@ -1,0 +1,79 @@
+## 2026-06-11
+
+### 決定事項
+- 口コミ全店舗同期を3回の実行で完走（162→382→492店舗）
+- React error #31（口コミ分析ページ）の根本原因はVercelタイムアウト時のエラーオブジェクト
+- Chromeバックグラウンドタブ制限がsetTimeoutを遅延させ、タイムアウトが発火しない問題に対処
+- GBP未連携店舗は同期失敗から除外する方針に変更
+- 連続エラー閾値を10→20に引き上げ
+- 同名店舗問題は現時点で対応不要と判断（UNIQUE制約がガード、580店舗すべてユニーク名。新規追加時に同名発生したらサフィックス付与で対応）
+- 口コミ分析5月分: 前回失敗28店舗を再実行 → 4店舗分析成功、24店舗は口コミデータなし等で分析不可
+
+### 変更内容（具体的に）
+
+#### src/app/review-analysis/page.tsx（口コミ分析 React error #31 修正）
+- safeStr()ヘルパー関数を追加（line 32-36）: unknown型を安全に文字列化
+- catch内のreason取得（line 122-123）: rawReasonがオブジェクト({code,id,message})の場合.messageを優先、なければJSON.stringify
+- line 332: {p.reason} → {safeStr(p.reason)} に変更（localStorage由来の失敗リスト表示）
+- line 399: {r.reason} → {safeStr(r.reason)} に変更（分析結果の失敗理由表示）
+
+#### src/app/reviews/page.tsx（口コミ同期 再開永続化 + バックグラウンドタブ対策）
+- syncResumeState初期値をlocalStorage("sync-resume-state")から復元するように変更（line 86-88）
+- persistResumeState()ヘルパー追加（line 574-580）: setSyncResumeState + localStorage書き込みを一元化
+- setSyncResumeState呼び出し3箇所をpersistResumeStateに置換（中断時/連続エラー時/完了時）
+- handleSyncAll内のAPI呼び出し（line 648-654）: 手動setTimeout+AbortControllerを廃止 → AbortSignal.timeout(65s) + Promise.race(70s) + axios timeout(60s) の3重タイムアウトに変更
+- Supabase同期チェック（line 636-646）: Promise.race(10s)タイムアウト追加
+- handleSyncRange内のAPI呼び出し（line 717-720）: 同様に3重タイムアウトに変更
+- ループ毎にsetSyncElapsed更新追加（line 619）: setIntervalが止まっても経過時間反映
+- タイマー表示（line 1068）: 1時間超はH:MM:SS形式に変更
+- no_gbp_locationステータスを失敗リストから除外（line 659）
+- 連続エラー中断閾値: 10→20（line 668）
+
+#### CLAUDE.md
+- 新セッション開始時の読み順を明確化（重要ナレッジ→最新ログ→ログ.txt）
+- ログファイル削除・上書き・要約禁止ルール追加
+
+### 数値・設定値
+- axios timeout: 60,000ms（変更なし）
+- AbortSignal.timeout: 65,000ms（新規追加）
+- Promise.race timeout: 70,000ms（新規追加）
+- Supabase同期チェック timeout: 10,000ms（新規追加）
+- 連続エラー中断閾値: 10 → 20
+- 口コミ同期結果:
+  - 1回目: 162/492店舗、24,784件（1:25:56）連続エラー10回で中断
+  - 2回目: 382/492店舗、56,434件（2:13:36）連続エラー20回で中断
+  - 3回目: 492/492店舗、75,257件（28:00）全店舗完了、エラー0、スキップ12
+- DB口コミ合計: 137,046件
+- GBP未連携店舗: 8件（R CLINIC松濤、通い放題キックボクシング&パーソナルジムFirst上本町店、メンズサロンNoLimit梅田茶屋町店、京都さえ㐂、和牛と中華料理けむり屋&フラワー大阪なんば本店、LUXBE NAIL大阪梅田茶屋町店、メンズサロンNoLimit大阪梅田）
+- 最終同期: 2026/6/11 18:35:00
+- 口コミ分析5月分: 失敗28店舗再実行 → 4店舗成功、失敗24店舗に減少、未分析434→430
+
+### 未解決・次回やること
+1. 口コミ分析 残り430店舗（2026/5）→「未分析のみ」で実行
+2. 口コミ分析 2026/6月分の実行
+3. 5月AI総評 再生成（cron手動実行）
+4. cron/sync-reviews のID修正（Go API ID→名前ベース）— 1h
+5. GBP未連携8店舗のGBPロケーション紐付け確認 — 1h
+6. 検索語句の未同期店舗同期完了
+7. OAuth一元化（13ファイル、段階的に1ファイルずつ）
+8. P2タスク: TypeScript any型27箇所、大規模コンポーネント分割、Cron実行ログ永続化、GBP API 429指数バックオフ
+
+### 注意点・ハマったこと
+- Chromeバックグラウンドタブ制限: setTimeoutが最大1分間隔まで遅延 → 最初の店舗で3時間以上ハングした
+  → AbortSignal.timeout()もブラウザネイティブだが同様に遅延される可能性あり
+  → Promise.raceの組み合わせで多層防御、かつ**タブをアクティブにしたまま**実行する運用で回避
+  → タブを別ウィンドウに分離すればバックグラウンド制限を受けない
+- axiosのtimeoutオプションだけではTCP接続ハングを検知できない
+  → AbortSignal.timeout()でfetch自体を強制切断する必要あり
+- Vercelのエラーレスポンス形式: {error: "string"}ではなく{error: {code, id, message}}オブジェクト
+  → フロントでJSXに{error}をそのまま渡すとReact error #31（Objects are not valid as React child）
+  → safeStr()で防御
+- 同名店舗問題: .eq("name", shopName)が50箇所以上あるが、shops_name_unique制約で現在は全店舗ユニーク名
+  → Go API IDベースに移行するにはspreadsheet.ts/全APIルート/レポートURL構造の全面改修が必要（数日規模）
+  → 現状維持が合理的、新規同名発生時のみサフィックス付与で対応
+
+### コミット履歴（本セッション分）
+- b8f434c fix: 口コミ分析のReact error #31修正 + 口コミ同期の中断・再開・未同期表示
+- 3accd28 fix: 口コミ同期の再開状態をlocalStorageに永続化 + タイムアウト強化
+- 0342e81 fix: 口コミ同期のバックグラウンドタブ対策 — 3重タイムアウト
+- f695685 fix: GBP未連携を失敗から除外 + 連続エラー閾値10→20に引き上げ

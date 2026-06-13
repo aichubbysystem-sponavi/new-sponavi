@@ -1,0 +1,74 @@
+===========================================================
+SPOTLIGHT NAVIGATOR 超重要ナレッジ
+新セッション開始時に必ず読むこと
+===========================================================
+
+## 絶対ルール
+
+### ログは要約して消さない
+- 日々のログファイル（ログ/YYYY-MM/）は絶対に削除・上書き・要約しない
+- 新しいログは別ファイルとして追加するのみ
+- ハマったこと・デバッグ過程・試行錯誤の記録は後で必ず役に立つ
+- 要約が必要な場合は、この重要ナレッジに追記する（元ログはそのまま残す）
+
+## アーキテクチャの罠（最重要）
+
+### Go API と Supabase は別世界
+- 店舗データは2箇所に存在する:
+  - Go API（Cloud Run）の PostgreSQL → /api/shop で返る店舗一覧
+  - Supabase PostgreSQL → reviews, report系, 座標, カテゴリ等
+- IDが異なる。Go APIのshop IDでSupabaseのshopsテーブルを検索しても見つからない
+- 対策: sync-shopsのCronでGo API→Supabaseに毎日同期（2026-06-09追加）
+- Supabaseのshopsを検索する時は name（店舗名）で検索すること、IDで検索しない
+
+### ShopListItem.id は店舗名
+- spreadsheet.ts:796 で `id: shopName` と設定されている
+- レポート管理画面の selected Set にはUUIDではなく店舗名が入る
+- report/[shopId] のURLパスも店舗名（encodeURIComponent済み）
+
+### レポートの「対象月」は3箇所で独立管理される
+- レポート管理画面: reportMonth ステート（対象月セレクタ）
+- shop.period: スプレッドシートデータの最終月（"2026年4月"形式）
+- curLabel: レポート表示側のmonthlyLabelsの最終要素（"2026/4"形式）
+- メモ等を保存する時は reportMonth を優先すること（shop.periodだと月ズレする）
+
+## よくあるバグパターン
+
+### `.includes("")` は常に true
+- 空文字をincludesに渡すとどんな文字列でもtrueになる
+- 対策: `if (shopCity && shopAddress && fa.includes(shopCity) && fa.includes(shopAddress))`
+
+### APIエラーを握りつぶさない
+- Supabaseのテーブルが存在しない時、APIが `{ memo: "" }` を返す設計だと
+  テーブル未作成に気づけない（report_memosで実際に発生）
+- 開発中は `_error` フィールドを返すなどしてデバッグ可能にする
+
+### デバウンスタイマーの共有問題
+- 複数種類の保存を1つのタイマーrefで共有すると、
+  異なる種類の連続トグルで前の保存がキャンセルされる
+- 対策: 種類ごとに独立したタイマー（saveTimersRef.current[field]）
+
+### Go APIの空フィールドでSupabaseを上書き
+- sync時、Go APIの `state: ""` でSupabaseの `state: "北海道"` を消してしまう
+- 対策: 値がある場合のみ updateRow に含める
+
+## Supabase テーブル作成チェックリスト
+新機能でSupabaseテーブルを使う場合、以下を必ず確認:
+1. 本番SupabaseのSQL Editorでテーブル作成済みか
+2. sql/ フォルダにSQLファイルを残したか
+3. APIがテーブル未作成でもエラーを返すか（握りつぶしていないか）
+
+## 本番環境情報
+- フロントエンド: Vercel (new-sponavi) → new-spotlight-navigator.com
+- レポート: report.new-spotlight-navigator.com（同じNext.jsアプリ、ミドルウェアでルーティング）
+- Go API: Cloud Run → spotlight-api-114449938952.asia-northeast1.run.app
+- DB: Supabase (kxxwspavskhhjtiixcep) → 北東アジア（東京）
+- Cron手動実行: curl -H "Authorization: Bearer chubby-cron-secret-20261204" https://new-spotlight-navigator.com/api/cron/sync-shops
+
+## 未解決の既知問題
+- [ ] 七宝麻辣湯（チーパオマーラータン）札幌大通店: sync-coordinatesで座標取得不可（Supabaseに同期済みだが名前検索で不一致、要DB直接確認）
+- [ ] cron/sync-reviews: Go API IDでSupabase shops.rating/review_countを更新 → 空振り（名前ベースに要修正）
+- [ ] Cronタイムアウト: monthly-analysis maxDuration=300では全店舗処理不可能
+- [ ] CSRF対策未実装（POST/PUT/DELETEにOrigin/Refererチェック追加）
+- [ ] DB外部キー制約未追加
+- [ ] DB重複店舗データ統合

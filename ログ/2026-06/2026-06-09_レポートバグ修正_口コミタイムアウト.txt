@@ -1,0 +1,86 @@
+## 【2026-06-09】セッション3: レポートバグ修正 + 口コミタイムアウト + セキュリティ + AI総評パイプライン統一
+
+### 決定事項
+- 口コミページのタイムアウト: DBインデックス追加 + クエリ最適化（estimated count）で対応
+- レポートの順位変動カード: gridKeywords useMemo内で対象月フィルタ（trimmedDataではなく）
+- 前月比0%/口コミ+0件: ▲ではなく→（グレーバッジ）で横ばい表示
+- セキュリティ: JWT検証をSupabase Auth API方式に移行（ECC署名対応）、デバッグAPI削除、認証なし8API修正
+- AI総評のデータソース: フロントと完全統一（performance_metrics_cache + fetchGridRankingLive + supplementGridFromRanking）
+- roles.ts ↔ sidebar.tsx: 確認の結果canShowInSidebarでフィルタ済み、不一致なし
+- Vercel環境変数 SUPABASE_JWT_SECRET: 既に設定済みであることを確認
+
+### 変更内容（具体的に）
+
+【口コミタイムアウト修正】
+- `src/app/reviews/page.tsx`: select("*") → 必要10カラムのみ指定、count: "exact" → "estimated" に統一
+- `src/components/shop-provider.tsx`: 全件未返信カウント "exact" → "estimated"、素fetch → api ヘルパーに統一（2箇所）
+- `src/app/api/webhook/line/route.ts`: LINE webhook内の未返信カウント "exact" → "estimated"
+
+【DB: Supabase SQL Editorで実行】
+- `CREATE INDEX idx_reviews_shop_time ON reviews (shop_id, create_time DESC)`
+- `CREATE INDEX idx_reviews_unreplied_time ON reviews (create_time DESC) WHERE reply_comment IS NULL`
+- `CREATE INDEX idx_reviews_replied_time ON reviews (create_time DESC) WHERE reply_comment IS NOT NULL`
+
+【レポート表示修正】
+- `src/app/report/[shopId]/client.tsx`: gridKeywords useMemo内でcurLabelベースのフィルタ追加（trimmedDataでのgridRankingフィルタは削除 — セクション消失バグの原因だった）
+- `src/app/report/[shopId]/client.tsx`: pctChange関数にisFlat判定追加（0%→true）、badgeStyleにグレー配色（#f0f0f0/#888）、arrow()関数でisFlat時→を返す
+- `src/app/report/[shopId]/client.tsx`: 口コミ増減+0件でkpi.value===0のとき→表示に変更
+
+【セキュリティ修正】
+- `src/lib/auth-verify.ts`: jwtVerify(HS256) → supabase.auth.getUser(token)に全面変更。JWT_SECRET未設定フォールバック削除、署名検証失敗フォールバック削除
+- `src/app/api/debug/` ディレクトリ丸ごと削除（token-check, search-keywords）
+- 認証追加8エンドポイント: users GET, tasks GET, grid-ranking-generate POST, grid-ranking-presets GET/POST/DELETE, customer-sheet GET, setup-cache GET, survey POST
+- `src/app/grid-ranking/page.tsx`: 素fetch → api ヘルパーに統一（7箇所）
+- `src/app/customer-master/page.tsx`: 素fetch → api.get に変更（1箇所）
+
+【AI総評データパイプライン統一】
+- `src/app/api/report/analyze/route.ts`: KPIデータソースをreport_data_cache → performance_metrics_cache（getCachedPerformance）に変更
+- `src/app/api/report/analyze/route.ts`: 月次推移・アクション率の計算もperfCharts/perfLabelsを使用
+- `src/app/api/report/analyze/route.ts`: キーワード順位をfetchGridRankingLive + supplementGridFromRankingの2段階構築に変更
+- `src/app/api/report/analyze/route.ts`: 検索語句の総検索数をsq.latest（上位30件）→ history対象月エントリ全件合計に変更
+- `src/lib/report-api.ts`: fetchGridRankingLive, supplementGridFromRankingをexport化
+
+### 数値・設定値
+- reviewsテーブル: 135,943件 / 202MB / 20+店舗（1店舗1,000件超）
+- Supabase statement timeout: 8秒（Free/Pro共通）
+- 追加インデックス3本（idx_reviews_shop_time, idx_reviews_unreplied_time, idx_reviews_replied_time）
+- reply_commentのBtree複合インデックスはTEXT値が大きすぎてERROR 54000 → 部分インデックスで回避
+- pctChange isFlat閾値: Math.abs(pct) < 0.05
+- isFlat時バッジ色: 背景#f0f0f0 / 文字#888
+
+### 未解決・次回やること
+- 全35店舗の5月AI総評を一括再生成（コード修正は完了、データ再生成のみ）
+- 失敗21店舗の口コミ分析再実行
+- Cronタイムアウト調整（monthly-analysis: maxDuration=300では全店舗処理不可能）
+- P1: CSRF対策（POST/PUT/DELETEにOrigin/Refererチェック追加）
+- P1: 同名店舗のlimit(1)問題（Places API同名3件ヒットで特定不可 — 画面で確認済み）
+- P1: DB外部キー制約追加
+- P1: DB重複店舗データ統合
+- report/[shopId]/client.tsx 内の素fetch（grid-ranking-generate）はレポート公開ページで認証不可。別途検討
+- /api/report/search-reviews, /api/report/memo, /api/report/google-updates, /api/search-keywords/status は読み取り専用で低リスク
+
+### 注意点・ハマったこと
+- gridRankingフィルタをtrimmedData内で行うと、historyが空になりhasGridRanking=falseとなりキーワード・多地点・検索語句セクションが丸ごと消える（16ページ→11ページに）。gridKeywords useMemo内でフィルタすることで解決
+- SupabaseがECC JWT署名キーに移行済みのため、HS256のlegacy JWT secretではユーザートークンを検証できない。supabase.auth.getUser()方式に変更が必要だった
+- AI総評のデータソースがフロントと異なる3箇所: ①KPI(report_data_cache vs performance_metrics_cache) ②キーワード順位(report.keywords vs gridRanking 2段階構築) ③検索語句(latest上位30件 vs history全件)。モグラたたきになった原因は最初にパイプライン全体を読み切らなかったこと
+- reply_commentカラムはTEXT型で一部の値がBtreeインデックスの最大サイズ(2704bytes)を超えるためERROR 54000。部分インデックス(WHERE reply_comment IS NULL / IS NOT NULL)で回避
+- Vercel環境変数SUPABASE_JWT_SECRETは既に設定済みだった（重複追加しようとしてalready existsエラー）
+
+### コミット履歴（本セッション分: 10コミット）
+1. 3fef693 fix: 口コミページのタイムアウト解消（count estimated化 + select最適化）
+2. b7ec690 fix: レポートのキーワード順位変動カードが対象月でフィルタされない問題 + 前月比0%表示修正
+3. 6204219 fix: 口コミ増減+0件で▲表示される問題を修正
+4. da1dd5a fix: セキュリティ修正 — JWT検証強化・デバッグAPI削除・認証なしAPI修正
+5. 52a99ad fix: JWT検証をSupabase Auth API方式に変更（ECC移行対応）
+6. a6f0ae0 fix: gridRankingフィルタをtrimmedDataからgridKeywords useMemoに移動
+7. 5106b81 fix: AI総評の総検索数を全キーワード合計に修正
+8. 7165c48 fix: AI総評のデータソースをフロントと完全統一
+9. 15b4291 fix: AI総評のキーワード順位をDBからリアルタイム取得
+10. 5d0e8e0 fix: AI総評のキーワード順位をフロントと完全同一の2段階構築に統一
+
+### 最終検証結果（5店舗で本番確認）
+- みそラーメンのよし乃 札幌アピア店: KPI・キーワード順位・総検索数・評価 全数値完全一致 ✓
+- きくの商店: KPI・評価・総検索数 全数値完全一致 ✓
+- CHILLRI: KPI・キーワード順位（梅田冷麺6→3位、梅田しゃぶしゃぶ48→34位）・総検索数 全数値完全一致 ✓
+- _WHITE 栄店: AI総評再生成前のため4月データ（再生成で解消）
+- パーソナルジムFirst 本町店: 同上

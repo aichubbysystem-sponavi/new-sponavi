@@ -264,7 +264,7 @@ async function searchDropboxPhotoWithDebug(folderUrl: string, dateCompact: strin
 }
 
 // おおもとDropboxフォルダ（全店舗の写真フォルダが入っている親フォルダ）
-const DROPBOX_ROOT_FOLDER_URL = "https://www.dropbox.com/scl/fo/3wfz63eiz5t4kw5ag2100/AJ5pTKC43xbeIaxVOgCQL9I?rlkey=ngob0xb0csan3fldwvt2ach1u&dl=0";
+const DROPBOX_ROOT_FOLDER_URL = process.env.DROPBOX_ROOT_FOLDER_URL || "";
 
 // おおもとフォルダのサブフォルダ一覧キャッシュ（TTL 10分、失敗時はキャッシュしない）
 let cachedRootSubfolders: { data: { name: string; url: string }[]; ts: number } | null = null;

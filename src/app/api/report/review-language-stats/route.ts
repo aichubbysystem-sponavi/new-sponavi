@@ -84,9 +84,7 @@ export async function POST(request: NextRequest) {
   const targets = resolvedIds;
   const col = "shop_id";
   const batchSize = 10;
-  const debug: string[] = [];
-
-  debug.push(`inputNames=${shopNames.length}, inputIds=${shopIds.length}, resolvedIds=${resolvedIds.length}, first3=${JSON.stringify(resolvedIds.slice(0, 3))}`);
+  // 口コミを取得（常にshop_idで検索）
 
   for (let i = 0; i < targets.length; i += batchSize) {
     const batch = targets.slice(i, i + batchSize);
@@ -103,7 +101,7 @@ export async function POST(request: NextRequest) {
         .neq("comment", "")
         .order("create_time", { ascending: false })
         .range(from, from + pageSize - 1);
-      if (error) { debug.push(`error: ${error.message}`); break; }
+      if (error) { console.error("[review-language-stats]", error.message); break; }
       if (!data || data.length === 0) break;
       allReviews.push(...data);
       if (data.length < pageSize) break; // 最終ページ
@@ -150,14 +148,11 @@ export async function POST(request: NextRequest) {
   const totalReviews = allReviews.length;
   const totalLowRating = stats.reduce((s, st) => s + st.lowRatingCount, 0);
 
-  debug.push(`totalReviews=${allReviews.length}`);
-
   return NextResponse.json({
     totalReviews,
     totalLowRating,
     shopCount: new Set(allReviews.map(r => r.shop_name)).size,
     stats,
     details: details.sort((a, b) => a.star_rating - b.star_rating || a.create_time.localeCompare(b.create_time)),
-    _debug: debug,
   });
 }

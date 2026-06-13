@@ -1,0 +1,43 @@
+## 2026-06-09（セッション4: Hydrationエラー修正・社長報告）
+
+### 決定事項
+- 運用スケジュール確定: 7月数店舗テスト → 8月全店舗展開
+- 社長にSlackで現状報告済み（完成度80〜90%、ロードマップ共有）
+- 6月中の目標: セキュリティ修正 / タイムアウト問題 / 7/1全店舗順位計測準備
+
+### 変更内容（具体的に）
+
+1. `src/components/date-range-picker.tsx`
+   - defaultMinMonth()/defaultMaxMonth(): SSR時は固定値を返すように変更（typeof window === "undefined"チェック追加）
+   - コンポーネント内: useState+useEffectでクライアントサイドのみmin/maxを計算
+   - presetsのuseMemo: new Date()をやめてmax変数基準に変更、依存配列に[min, max]追加
+
+2. `src/app/report/[shopId]/client.tsx`
+   - 行224: new Date()の月末日計算をuseMemo外のインライン→ローカル変数lastDayに抽出
+   - 行568: Maps API URLに&loading=async追加
+
+3. `src/app/report/report-list-client.tsx`
+   - 行202: monthフォールバックのnew Date()を除去（空文字→continueでスキップ）
+   - 行302-310: monthOptionsをuseMemo→useState+useEffectに変更（new Date()をクライアントのみ実行）
+   - 行624: footerのnew Date().getFullYear()→固定値"2026"に変更、suppressHydrationWarning除去
+
+4. `src/app/grid-ranking/page.tsx`
+   - 行356: Maps API URLに&loading=async追加
+
+### コミット
+- b2ecbc7: fix: React hydration error #419 と Google Maps loading警告を修正
+- origin/mainにpush済み → Vercel自動デプロイ
+
+### 解消されるコンソールエラー/警告
+- 赤: Minified React error #419（hydrationミスマッチ）
+- 黄: Google Maps API loaded without loading=async
+
+### 残るコンソール警告
+- 黄: google.maps.Marker is deprecated → AdvancedMarkerElement移行は別タスク（カスタムHTML要素が必要で変更規模大）
+
+### 次回セッションでやること（優先順）
+1. セキュリティ修正（JWT検証バイパス / デバッグAPI削除 / 権限整合性）
+2. Cronタイムアウト修正（monthly-analysis maxDuration調整）
+3. sync-reviews修正（Go API ID→名前ベースに変更）
+4. 5月AI総評再生成（35店舗）+ 口コミ分析再実行（22店舗）
+5. 7/1全店舗順位計測の準備

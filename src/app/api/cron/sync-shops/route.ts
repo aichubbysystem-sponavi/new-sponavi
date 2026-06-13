@@ -42,12 +42,12 @@ async function getDefaultOwnerId(): Promise<string> {
   try {
     const { data } = await supabase.from("owners").select("id").limit(1).maybeSingle();
     if (data?.id) return data.id;
-  } catch {}
+  } catch (e: any) { console.error("[cron/sync-shops] owners table fetch:", e?.message); }
   // 2. 既存shopsからowner_idを推定
   try {
     const { data } = await supabase.from("shops").select("owner_id").not("owner_id", "is", null).limit(1).maybeSingle();
     if (data?.owner_id) return data.owner_id;
-  } catch {}
+  } catch (e: any) { console.error("[cron/sync-shops] shops owner_id lookup:", e?.message); }
   return "";
 }
 
@@ -91,7 +91,7 @@ export async function GET(request: NextRequest) {
       const accData = await accRes.json();
       accounts = (accData || []).map((a: any) => a.name || a.account_name).filter(Boolean);
     }
-  } catch {}
+  } catch (e: any) { console.error("[cron/sync-shops] GBP account list fetch:", e?.message); }
 
   if (accounts.length === 0) {
     // フォールバック: business_groupsから取得
@@ -144,7 +144,7 @@ export async function GET(request: NextRequest) {
                 })
                 .eq("gbp_location_name", locName)
                 .is("gbp_main_category", null);
-            } catch {}
+            } catch (e: any) { console.error("[cron/sync-shops] category update:", e?.message); }
             skipped++;
             continue;
           }

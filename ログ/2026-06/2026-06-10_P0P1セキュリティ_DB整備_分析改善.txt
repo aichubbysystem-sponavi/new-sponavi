@@ -1,0 +1,115 @@
+## 2026-06-10
+
+### 決定事項
+- P0タスク6件を精査 → コード修正必要は2件、残りは既に修正済みまたは手動実行
+- P1タスク6件中5件完了、P1-6（OAuth一元化）は13ファイル同時修正のリスクが高いため7月テスト中に段階的対応
+- monthly-analysisのcron（Haiku）で全店舗ベースライン生成 → いつもの店舗33件はSonnet（高品質）で上書きする運用方針
+- 口コミ分析は15店舗ずつバッチ実行（Claude APIレート制限回避）
+- Vercel Pro maxDuration上限は800秒（900ではない）
+- Supabase DBの既存ユーザーにrole明示設定が必要（デプロイ前提条件）
+
+### 変更内容（具体的に）
+
+#### P0: セキュリティ修正
+- `src/components/role-provider.tsx`: デフォルトロールを "president" → DEFAULT_ROLE("part_time") に変更（line 38, 41）
+- `src/components/sidebar.tsx`: 外部リンク（https://report...）が canShowInSidebar でフィルタされるバグ修正。`item.href.startsWith("http")` チェック追加（line 143, 148）
+- `src/app/api/report/google-updates/route.ts`: verifyAuth認証チェック追加
+- `src/app/api/search-keywords/status/route.ts`: verifyAuth認証チェック追加
+- `src/app/page.tsx`: google-updates呼び出しにAuthorizationヘッダー追加
+- `src/app/search-keywords/client.tsx`: status呼び出しにAuthorizationヘッダー追加 + supabaseインポート追加
+
+#### P1-1: CSRF対策
+- `src/middleware.ts`: POST/PUT/DELETE/PATCHリクエストにOriginチェック追加（壁13）。Cron/WebhookはOriginなしで呼ばれるため除外
+
+#### P1-3: DB外部キー制約（Supabase SQL）
+- post_schedule, survey_responses: shop_id UUID→TEXT型変換
+- FK制約追加: report_analysis(SET NULL), report_display_settings(CASCADE), scheduled_posts(CASCADE), post_schedule(CASCADE), survey_responses(CASCADE)
+- 孤児レコード削除: report_analysis 2件, shop_keywords 2件
+
+#### P1-4: DB重複統合（Supabase SQL）
+- 239店舗の重複レコード492件を削除（最古を残す）
+- 8テーブル（facebook_accounts, fixed_messages, ranking_search_settings, ranking_search_logs, review_reply_settings, shop_group, shop_setting, shop_user）の参照を付け替えてから削除
+- `ALTER TABLE shops ADD CONSTRAINT shops_name_unique UNIQUE (name)` 追加
+
+#### P1-5: 検索語句同期
+- `src/app/api/cron/sync-search-keywords/route.ts`: maxDuration 300→800, TIME_LIMIT 270→750秒
+
+#### monthly-analysis バグ修正（2件）
+- `src/app/api/cron/monthly-analysis/route.ts`:
+  - カラム名修正: month → target_month, rating → average_rating, created_at → analyzed_at + updated_at追加
+  - onConflict: "shop_name,month" → "shop_name,target_month"
+  - 月フォーマット: "2026-05" → "2026/5"（analyze APIと統一）
+  - 既存分析チェック: created_at日付範囲 → target_month完全一致
+  - upsertエラーチェック追加（サイレント失敗を防止）
+  - maxDuration: 300 → 800（Vercel Pro上限）
+  - TIME_LIMIT: 270秒 → 750秒
+
+#### 口コミ分析ページ改善
+- `src/app/review-analysis/page.tsx`:
+  - 15店舗ごとに60秒冷却期間（Claude APIレート制限回避）
+  - 429エラー時は30秒待機して自動再開
+  - 各店舗に「済」「未」バッジ表示（対象月のtarget_monthでリアルタイム取得）
+  - 「未分析のみ」選択ボタン追加
+  - タイムアウト: 180秒 → 280秒（大量口コミ店舗対応）
+
+#### SQL記録
+- `sql/2026-06-10_p1_db_cleanup.sql`: P1-3/P1-4のSQL記録ファイル作成
+
+#### DB制約追加（Supabase SQL）
+- `ALTER TABLE report_analysis ADD CONSTRAINT report_analysis_shop_month_unique UNIQUE (shop_name, target_month)` — upsert onConflictに必要
+
+### 数値・設定値
+- role-provider デフォルト: "president" → "part_time"
+- monthly-analysis maxDuration: 300 → 800
+- monthly-analysis TIME_LIMIT: 270,000ms → 750,000ms
+- monthly-analysis バッチ上限: 50 → 150店舗/回
+- sync-search-keywords maxDuration: 300 → 800
+- sync-search-keywords TIME_LIMIT: 270,000ms → 750,000ms
+- vercel.json monthly-analysis cron: "0 1 1-5 * *" → "0 1 1-10 * *"
+- 口コミ分析フロント タイムアウト: 180,000ms → 280,000ms
+- 口コミ分析バッチサイズ: 15店舗/バッチ、冷却60秒
+- 429エラー待機: 10秒 → 30秒
+- DB: shops重複492件削除、FK制約5テーブル追加、UNIQUE制約3つ追加
+- Supabase auth.users: ai.chubby.system@gmail.com に role="president" 設定
+
+### 未解決・次回やること
+1. 口コミ管理ページ（/reviews）の同期改善 — 今月未同期店舗の表示、失敗店舗の表示、中断・再開機能、59店舗で止まる問題の調査
+2. 口コミ分析の残り435店舗をSonnetで順次実行（「未分析のみ」ボタンで続行可能）
+3. P1-6: OAuth一元化 — 13ファイルが独自にsystem_oauth_tokensアクセス。7月テスト中に1ファイルずつ段階的移行
+4. monthly-analysisのスキップロジックが動作しない（skipped=0）— upsertで上書きされるため実害なしだがAPI無駄呼びになる
+5. KW一括取得で3件見つからず — スプレッドシートに行がないか店舗名の不一致
+6. P2タスク: TypeScript any型27箇所、大規模コンポーネント分割、Cron実行ログ永続化、GBP API 429指数バックオフ
+
+### 注意点・ハマったこと
+- Vercel Pro maxDuration上限は800秒（900で設定→ビルドエラー「maxDuration between 1 and 800 for plan pro」）
+- role-provider.tsxのデフォルトをpart_timeに変更する前に、Supabase DBで既存ユーザーのroleをNULL→presidentに設定必須（やらないとロックアウト）
+- monthly-analysisのupsertがサイレント失敗していた原因2つ:
+  1. カラム名不一致（month→target_monthが正しい、rating→average_ratingが正しい、created_at→analyzed_atが正しい）
+  2. UNIQUE制約なし（onConflict: "shop_name,target_month" にはUNIQUE(shop_name, target_month)が必要）
+  3. Supabase JSクライアントのupsertはエラーをthrowせず{ error }で返す → try/catchでは捕捉不可、明示的にerrorチェック必要
+- Claude Sonnet APIのレート制限: 580店舗連続実行で15店舗あたりで限界。15店舗バッチ+60秒冷却で回避
+- shops.idはTEXT型、一部テーブルのshop_idはUUID型 → FK追加前にALTER COLUMN TYPE text必要
+- reviews/search_query_cacheのshop_idはGo API ID（Supabase shops.idとは異なる）→ FK追加不可
+
+### コミット履歴（本セッション分）
+- 5434dd6 security: P0セキュリティ修正 + Cronタイムアウト拡張
+- 12ee6d4 fix: maxDuration 900→800（Vercel Pro上限は800秒）
+- caf0bdc security: CSRF対策追加 + DB整備SQLログ
+- 226cb89 perf: sync-search-keywords maxDuration 300→800
+- afdf711 fix: monthly-analysis のカラム名バグ修正（month→target_month）
+- 381b7f1 fix: monthly-analysis upsertカラム名修正（rating→average_rating, created_at→analyzed_at）
+- fed8a73 fix: 口コミ分析タイムアウト 180→280秒
+- f690426 feat: 口コミ分析ページ改善（バッチ処理+分析状況表示）
+
+### デプロイ確認結果
+- Vercelデプロイ: 1回目エラー（maxDuration=900）→ 2回目以降成功
+- 本番確認: ダッシュボード表示OK、ロール「社長」OK、レポートページ↗リンク表示OK
+- 検索語句管理: 認証追加後も正常にデータ表示（1073店舗）
+- 全API応答: google-updates/churn-score/tasks/shop 全て200 OK
+- レポートページ: AI総評が正しく表示される（2026/5 Sonnet分析確認済み）
+
+### 手動実行結果
+- 検索語句同期: 949店舗中655件同期済み、227件はGBP側にデータなし、エラー0
+- 5月AI総評（cron Haiku）: 3回実行、144店舗分析完了
+- 6月AI総評（cron Haiku）: 3回実行、288店舗分析完了
+- 5月口コミ分析（フロント Sonnet）: 47/580実行、31店舗完了、8件失敗

@@ -1,0 +1,120 @@
+## 2026-06-10（P0セキュリティ修正 + Cronタイムアウト拡張）
+
+### 決定事項
+- P0タスク6件を精査し、コード修正が必要な箇所を特定・修正
+- Supabase DBで既存ユーザーのrole設定を確認・修正（デプロイ前提条件）
+
+### 変更内容（具体的に）
+
+#### P0-1: JWT署名検証バイパス → 既に修正済み（変更なし）
+- auth-verify.ts は Supabase Auth API (getUser) 方式に変更済み
+- 旧来のJWT_SECRET手動検証・署名バイパスは除去済み
+
+#### P0-2: デバッグAPI削除 → 既に削除済み（変更なし）
+- /api/debug/ ディレクトリにファイルなし
+
+#### P0-3: 権限定義の不一致修正
+- `src/components/role-provider.tsx`: デフォルトロールを "president" → DEFAULT_ROLE ("part_time") に変更（2箇所: line 38, 41）
+- 理由: ロール未設定やエラー時に社長権限が付与される脆弱性
+- 前提: Supabase DBで既存ユーザーのroleを明示設定済み
+  - ai.chubby.system@gmail.com → president（UPDATE実行で設定）
+  - yamada_koa390fdkoli@sponavi.internal → manager（元々設定済み）
+
+#### 追加発見: サイドバー外部リンクバグ修正
+- `src/components/sidebar.tsx`: 外部URL（https://report...）がcanShowInSidebarでフィルタされ全ユーザーで非表示だった
+- 修正: `item.href.startsWith("http")` チェックを追加（2箇所: line 143, 148）
+
+#### 追加発見: 認証なしAPI 2本の修正
+- `src/app/api/search-keywords/status/route.ts`: verifyAuth追加
+- `src/app/api/report/google-updates/route.ts`: verifyAuth追加
+- `src/app/page.tsx`: google-updates呼び出しにAuthorizationヘッダー追加
+- `src/app/search-keywords/client.tsx`: status呼び出しにAuthorizationヘッダー追加 + supabaseインポート追加
+
+#### P0-6: Cronタイムアウト調整
+- `src/app/api/cron/monthly-analysis/route.ts`:
+  - maxDuration: 300 → 800（Vercel Pro上限は800秒。900で一度ビルドエラー→修正）
+  - TIME_LIMIT: 270,000 → 750,000ms
+  - バッチ上限: 50 → 150店舗/回
+- `vercel.json`: cronスケジュール "0 1 1-5 * *" → "0 1 1-10 * *"
+  - 150店舗/回 × 10日 = 1,500店舗分の余裕
+
+#### P0-4/5: AI総評再生成・口コミ分析再実行 → 手動実行が必要
+- コード変更不要
+- Cronエンドポイントで実行可能:
+  curl -H "Authorization: Bearer chubby-cron-secret-20261204" "https://new-spotlight-navigator.com/api/cron/monthly-analysis?month=2026-05"
+- 既存レコードがある場合はSupabaseでDELETE後に再実行
+
+### 数値・設定値
+- 変更ファイル: 8ファイル（+36行, -15行）
+- ビルド: next build 成功（エラーなし）
+
+### 注意点・ハマったこと
+- role-provider.tsx のデフォルトを part_time に変更する際、Supabase DBの既存ユーザーのroleがNULLだとロックアウトされる
+  → デプロイ前にUPDATE auth.users SET raw_user_meta_data = ... WHERE role IS NULL を実行必須
+- サイドバーの外部リンクバグは、canShowInSidebarがパスベースマッチングのみ対応で外部URLを想定していなかったため
+
+### コミット履歴（本セッション分）
+- 5434dd6 security: P0セキュリティ修正 + Cronタイムアウト拡張
+- 12ee6d4 fix: maxDuration 900→800（Vercel Pro上限は800秒）
+- caf0bdc security: CSRF対策追加 + DB整備SQLログ
+- 226cb89 perf: sync-search-keywords maxDuration 300→800
+- afdf711 fix: monthly-analysis のカラム名バグ修正（month→target_month）
+- 381b7f1 fix: monthly-analysis upsertカラム名修正（rating→average_rating, created_at→analyzed_at）
+
+### 追加修正（同セッション後半）
+- f690426 feat: 口コミ分析ページ改善（15店舗バッチ処理+分析状況バッジ+未分析のみボタン）
+- fed8a73 fix: 口コミ分析タイムアウト 180→280秒
+- 381b7f1 fix: monthly-analysis upsertカラム名修正（rating→average_rating, created_at→analyzed_at）
+- afdf711 fix: monthly-analysis カラム名バグ（month→target_month）
+- report_analysis UNIQUE(shop_name, target_month) 制約追加
+
+### 次回やること
+1. 口コミ管理ページ（/reviews）の同期改善:
+   - 今月未同期の店舗を表示
+   - 同期失敗店舗の表示
+   - 中断・再開機能
+   - 進捗の可視化改善（止まった店舗名をハイライト）
+2. 口コミ分析の残り435店舗をSonnetで順次実行（未分析のみボタンで続行可能）
+3. P1-6: OAuth一元化（段階的に）
+4. P2タスク（TypeScript any型、コンポーネント分割等）
+
+### 手動実行結果
+- 検索語句同期: 949店舗中655件同期済み、227件はGBP側にデータなし（skipped）、エラー0
+- 5月AI総評: 290店舗中144件分析完了（残りは口コミなし店舗）
+- 6月AI総評: 290店舗中144件分析完了
+- monthly-analysisのバグ2件を発見・修正:
+  1. カラム名不一致（month→target_month, rating→average_rating, created_at→analyzed_at）
+  2. upsertエラーチェック未実装（サイレント失敗）
+  3. report_analysisテーブルにUNIQUE(shop_name, target_month)制約追加
+
+### P1修正（同セッション追加作業）
+
+#### P1-1: CSRF対策
+- `src/middleware.ts`: POST/PUT/DELETE/PATCHにOriginチェック追加（壁13）
+- Cron/WebhookはOriginなしで呼ばれるため除外
+
+#### P1-2/P1-4: 同名店舗問題 + DB重複統合
+- Supabase SQLで239店舗の重複レコード492件を削除（最古を残す）
+- 8テーブル（facebook_accounts, fixed_messages等）の参照を付け替えてから削除
+- `ALTER TABLE shops ADD CONSTRAINT shops_name_unique UNIQUE (name)` 追加
+- limit(1)問題はUNIQUE制約で自動解決
+
+#### P1-3: DB外部キー制約追加
+- 孤児レコード削除: report_analysis 2件, shop_keywords 2件
+- UUID→TEXT型変換: post_schedule, survey_responses（0行）
+- FK制約追加: report_analysis, report_display_settings, scheduled_posts, post_schedule, survey_responses
+- reviews, search_query_cache はGo API ID使用のためFK追加不可
+
+#### P1-5: 検索語句同期タイムアウト拡張
+- sync-search-keywords: maxDuration 300→800, TIME_LIMIT 270→750秒
+- 手動実行: curl -H "Authorization: Bearer chubby-cron-secret-20261204" https://new-spotlight-navigator.com/api/cron/sync-search-keywords
+
+#### P1-6: OAuth一元化 → 見送り
+- 13ファイルが独自にトークン取得。一括修正は583店舗のGBP連携停止リスクが高い
+- 7月テスト期間中に1ファイルずつ段階的に移行する方針
+
+### デプロイ確認結果
+- Vercelデプロイ: 1回目エラー（maxDuration=900はPro上限超過）→ 2回目成功（800に修正）
+- 本番確認: ダッシュボード表示OK、ロール「社長」OK、レポートページ↗リンク表示OK
+- 検索語句管理: 認証追加後も正常にデータ表示（1073店舗）
+- 全API応答: google-updates/churn-score/tasks/shop 全て200 OK

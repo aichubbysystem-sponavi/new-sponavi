@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useShop } from "@/components/shop-provider";
 import { supabase } from "@/lib/supabase";
+import { jstToday } from "@/lib/jst-date";
 import api from "@/lib/api";
 import { logAudit } from "@/lib/audit-log";
 import DateRangePicker, { useDateRange } from "@/components/date-range-picker";
@@ -175,7 +176,7 @@ export default function PostsPage() {
 
   // SSR安全な日付初期化（hydration不一致防止）
   useEffect(() => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = jstToday();
     const month = new Date().toISOString().slice(0, 7);
     if (!autoPostDate) setAutoPostDate(today);
     if (!scheduleDate) setScheduleDate(today);

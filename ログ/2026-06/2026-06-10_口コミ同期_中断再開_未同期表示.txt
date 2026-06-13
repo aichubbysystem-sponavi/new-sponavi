@@ -1,0 +1,55 @@
+## 2026-06-10（口コミ管理ページ: 中断・再開・未同期店舗表示）
+
+### 決定事項
+- 口コミ全店舗同期の59店舗で止まる問題に対し、根本原因（特定店舗のAPIタイムアウト）の修正ではなく「中断→再開」の運用回避策を実装
+- 今月未同期店舗を可視化し、未同期分のみ一括同期できるようにする
+- 中断ボタンはhandleSyncAll実行中のみ表示（1店舗同期・範囲同期・口コミなし同期では非表示）
+
+### 変更内容（具体的に）
+
+#### src/app/reviews/page.tsx
+- **import追加**: `useRef` を追加
+- **state追加（6個）**:
+  - `syncAbortRef` (useRef<AbortController>) — 中断用
+  - `syncResumeState` — 中断位置・取得済み件数・スキップ数を保持
+  - `syncElapsed` / `syncTimerRef` — 経過時間リアルタイム表示
+  - `showUnsyncedPanel` / `unsyncedShops` / `loadingUnsynced` — 未同期店舗パネル
+- **関数追加（3個）**:
+  - `handleCancelSync()` — AbortControllerでsyncループを安全中断
+  - `fetchUnsyncedShops()` — 今月1日以降synced_at未更新の店舗を抽出（30件ずつバッチ）
+  - unmount時のタイマークリーンアップ useEffect
+- **handleSyncAll リライト**:
+  - AbortController対応（ループ毎にsignal.abortedチェック）
+  - 中断時にsyncResumeStateに位置を保存
+  - 再開時にresumeFrom/resumeTotalSynced/resumeSkippedを引き継ぎ
+  - 経過時間タイマー（1秒間隔setInterval）開始・停止
+  - 連続エラー10回中断時も再開ボタンが出るように
+- **UI追加**:
+  - 同期中: 赤い「中断」ボタン（syncAbortRef.currentがある時のみ）
+  - 中断後: オレンジ点滅「続きから再開（残りN店舗）」ボタン
+  - 青い「今月未同期」ボタン → 未同期店舗パネル表示
+  - 未同期パネル: 店舗一覧（最終同期日付き）+ 「未同期N店舗を同期」ボタン
+  - syncMsg右端に経過時間表示（M:SS形式）
+  - syncMsgの背景色判定に「⏸」を追加
+
+### 数値・設定値
+- 変更したパラメータや閾値はなし（既存の60秒タイムアウト、1秒間隔、7日スキップ等はそのまま）
+- 未同期判定基準: 今月1日以降にsynced_atが更新されているかどうか
+- バッチサイズ: 未同期チェック時30件ずつ（Supabase inクエリ制限対策）
+
+### 未解決・次回やること
+1. 59店舗で止まる根本原因の調査 — 特定店舗（就労継続支援A型事業所あんしんステイ付近）のGBP APIタイムアウトか、OAuthトークン失効か
+2. 口コミ分析の残り435店舗をSonnetで順次実行
+3. P1-6: OAuth一元化（段階的）
+4. P2タスク（TypeScript any型、コンポーネント分割等）
+5. 口コミ管理ページ（/reviews）の同期改善追加案:
+   - 失敗店舗の「この店舗だけ再同期」ボタン
+   - 同期進捗のプログレスバー表示
+
+### 注意点・ハマったこと
+- 中断ボタンの表示条件: `syncing`だけだとhandleSync（1店舗）やhandleSyncRange実行中にも出てしまい、クリックしても何も起きない。`syncAbortRef.current`もチェックしてhandleSyncAll実行中のみ表示に修正
+- setIntervalのクリーンアップ漏れ: コンポーネントunmount時にclearIntervalしないとメモリリーク。useEffectのreturnで対応
+- AbortControllerはfetchのAbortSignalとは別用途。ここではJSループの中断フラグとして使用（signal.abortedをチェック）
+
+### コミット履歴（本セッション分）
+- 未コミット（ビルド確認済み、next build成功）

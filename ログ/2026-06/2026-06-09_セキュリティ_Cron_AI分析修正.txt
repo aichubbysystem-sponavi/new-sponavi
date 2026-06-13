@@ -1,0 +1,86 @@
+## 2026-06-09（セッション5: セキュリティ・Cron・AI分析・レポート認証）
+
+### 決定事項
+- 6月中の目標: セキュリティ修正 / タイムアウト / 7/1全店舗順位計測準備
+- 社長にSlack報告済み（完成度80-90%、7月テスト→8月全店舗）
+- レポートページはログイン必須に変更（クライアントにはPDFで共有する方針）
+- 順位計測のCron化は一旦保留
+
+### 変更内容（具体的に）
+
+#### Hydrationエラー修正（commit b2ecbc7）
+- date-range-picker.tsx: SSR安全なdefaultMinMonth/defaultMaxMonth、presetsのmax基準化
+- report/[shopId]/client.tsx: 月末日計算ローカル変数化
+- report-list-client.tsx: monthフォールバックnew Date()除去、footer年固定値、monthOptionsをuseEffect化
+- grid-ranking/page.tsx, report client: Maps loading=async追加→revert（Map constructorエラー発生のため）
+
+#### Cronタイムアウト + 口コミ同期修正（commit 373feb6）
+- monthly-analysis: 10→50店舗/回、TIME_LIMIT=270秒チェック追加
+- monthly-analysis: Cronスケジュール毎月1日→1-5日（取りこぼし防止）
+- cron/sync-reviews: shops更新 .eq("id", shop.id)→.eq("name", shop.name)
+
+#### Go API ID↔Supabase UUID不一致バグ修正（commit f0d6a22, 74d139e）
+- cron/monthly-analysis: reviews検索 .eq("shop_id", shop.id)→.eq("shop_name", shop.name)
+  → これにより月次AI分析が実際に動作するようになった（以前は常に0件で空振り）
+- dashboard/[shopId]/page.tsx: reviews・report_analysis検索をshop_nameベースに変更
+- report/sync-reviews: shops更新 .eq("id", shop.id)→.eq("name", shop.name)
+
+#### monthly-analysisに月指定パラメータ追加（commit 59a1c1f）
+- ?month=2026-05 で過去月のAI分析を手動実行可能に
+
+#### loading=async revert（commit cb850e2）
+- Maps API loading=asyncでMap constructorエラー発生→元に戻した
+- 将来AdvancedMarkerElement移行時にまとめて対応
+
+#### レポートページ認証必須化（commit 774dce9, 77a6ba1, b6a045e, a5efce4, 15edc1b）
+- app-shell: レポートページのskipAuth除去
+- auth-guard: レポートドメインの認証スキップ除去
+- display-settings PUT, memo POST, search-reviews GET: verifyAuth追加
+- report client/list: 各fetchにAuthorization header追加
+- middleware: /loginをrewrite対象から除外（ログインフォーム正常表示）
+- login/page.tsx: reportサブドメインからのログイン後/reportに遷移
+- layout.tsx: headers()でhost取得→isReportDomainをpropsでAppShellに渡す（SSR安全）
+- app-shell: isReportDomainをprops受け（useEffect判定を廃止、チラつき解消）
+
+### 全コードスキャン結果
+1回目: shop_id不一致パターンを全ファイル調査
+- 問題あり・修正済み: cron/sync-reviews, cron/monthly-analysis, report/sync-reviews, dashboard/page.tsx（計5箇所）
+- 問題なし確認済み: sync-coordinates（Supabase UUID使用）、sync-categories（Supabase UUID使用）
+- フロント側（page.tsx等）: selectedShopIdはGo API ID→reviews.shop_idと一致→正常
+
+2回目: 全コード品質監査（136ファイル）
+- 認証漏れ3箇所→修正済み（display-settings, memo, search-reviews）
+- ランタイムバグ: 0件（split/match/JSON.parse全てガード済み）
+
+3回目: 最終確認（修正済み除外で再スキャン）
+- 確実なバグ: 0件
+
+### 5月AI総評再生成の実行結果
+- 6回バッチ実行: 43+46+46+47+47+47 = 276店舗処理
+- エラー: 0件
+- 残り243店舗: 口コミデータなし（reviewsテーブルに該当なし）でスキップ
+
+### セキュリティ修正の確認
+- JWT検証バイパス: commit 52a99ad で対応済み（Supabase Auth API方式）
+- デバッグAPI: commit da1dd5a で削除済み
+- 権限設定: roles.ts ↔ sidebar.tsx の整合性確認OK
+- レポートページ: ログイン必須化完了
+
+### コミット履歴（本セッション分）
+- b2ecbc7: fix: React hydration error #419 と Google Maps loading警告を修正
+- 373feb6: fix: Cronタイムアウト修正 + 口コミ同期のID不一致修正
+- f0d6a22: fix: monthly-analysis・dashboardの口コミ取得をshop_nameベースに修正
+- 74d139e: fix: report/sync-reviews のshops更新もshop_nameベースに修正
+- 59a1c1f: feat: monthly-analysisに?month=パラメータ対応追加
+- cb850e2: revert: loading=asyncを除去（Map constructorエラーの原因）
+- 774dce9: security: レポートページにログイン必須化 + 3 API認証追加
+- 77a6ba1: fix: reportサブドメインの/loginがリライトされる問題を修正
+- b6a045e: fix: reportサブドメインでログイン後にレポート一覧へ遷移
+- a5efce4: fix: reportサブドメインでサイドバーが表示される問題を修正
+- 15edc1b: fix: reportサブドメイン判定をSSRで行いチラつき解消
+- 全てorigin/mainにpush済み
+
+### 次回やること
+1. 順位計測のCron化（保留中 — 必要になったら作る）
+2. report.new-spotlight-navigator.com でログイン→レポート表示の動作確認
+3. 7月テスト運用開始（同名店舗・DB制約・OAuthリフレッシュ等はテスト中に対応）

@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPOTLIGHT NAVIGATOR 現状報告・残タスク</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', sans-serif; background: #f0f2f5; color: #1a1a2e; line-height: 1.7; }
+
+  .header { background: linear-gradient(135deg, #003D6B 0%, #0a5a9e 100%); color: #fff; padding: 48px 0 36px; text-align: center; }
+  .header h1 { font-size: 28px; font-weight: 800; letter-spacing: 1px; }
+  .header p { margin-top: 8px; font-size: 14px; opacity: .8; }
+  .header .date { display: inline-block; margin-top: 16px; background: rgba(255,255,255,.15); padding: 6px 20px; border-radius: 20px; font-size: 13px; }
+
+  .container { max-width: 960px; margin: -24px auto 60px; padding: 0 20px; }
+
+  .card { background: #fff; border-radius: 16px; box-shadow: 0 2px 12px rgba(0,0,0,.06); padding: 32px; margin-bottom: 28px; }
+  .card h2 { font-size: 20px; font-weight: 800; color: #003D6B; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 3px solid #003D6B; }
+  .card h3 { font-size: 16px; font-weight: 700; color: #333; margin: 24px 0 12px; }
+
+  /* スコアカード */
+  .score-row { display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+  .score-card { flex: 1; min-width: 200px; background: linear-gradient(135deg, #003D6B, #0a5a9e); color: #fff; border-radius: 14px; padding: 24px; text-align: center; }
+  .score-card .number { font-size: 48px; font-weight: 900; line-height: 1; }
+  .score-card .label { font-size: 13px; opacity: .85; margin-top: 6px; }
+  .score-card.green { background: linear-gradient(135deg, #059669, #10b981); }
+  .score-card.orange { background: linear-gradient(135deg, #d97706, #f59e0b); }
+
+  /* システム構成 */
+  .arch-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .arch-item { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; text-align: center; }
+  .arch-item .tech { font-size: 11px; color: #64748b; }
+  .arch-item .name { font-size: 14px; font-weight: 700; color: #003D6B; margin-top: 2px; }
+
+  /* 機能テーブル */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { background: #f1f5f9; color: #475569; font-weight: 700; text-align: left; padding: 10px 12px; border-bottom: 2px solid #e2e8f0; }
+  td { padding: 10px 12px; border-bottom: 1px solid #f1f5f9; }
+  tr:hover td { background: #f8fafc; }
+
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; }
+  .badge-ok { background: #d1fae5; color: #065f46; }
+  .badge-warn { background: #fef3c7; color: #92400e; }
+  .badge-danger { background: #fee2e2; color: #991b1b; }
+  .badge-info { background: #dbeafe; color: #1e40af; }
+
+  .progress-bar { height: 8px; background: #e2e8f0; border-radius: 4px; overflow: hidden; width: 100%; }
+  .progress-fill { height: 100%; border-radius: 4px; background: linear-gradient(90deg, #059669, #10b981); }
+  .progress-fill.mid { background: linear-gradient(90deg, #d97706, #f59e0b); }
+
+  /* タスク */
+  .task-section { margin-bottom: 24px; }
+  .task-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .task-header .priority { padding: 4px 12px; border-radius: 8px; font-size: 12px; font-weight: 800; color: #fff; }
+  .task-header .priority.p0 { background: #dc2626; }
+  .task-header .priority.p1 { background: #d97706; }
+  .task-header .priority.p2 { background: #6366f1; }
+  .task-header .title { font-size: 15px; font-weight: 700; }
+
+  .task-list { list-style: none; }
+  .task-list li { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid #f1f5f9; }
+  .task-list li:last-child { border-bottom: none; }
+  .task-num { background: #f1f5f9; color: #475569; font-size: 11px; font-weight: 800; width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 2px; }
+  .task-body { flex: 1; }
+  .task-body .name { font-weight: 700; font-size: 14px; }
+  .task-body .desc { font-size: 12px; color: #64748b; margin-top: 2px; }
+  .task-body .est { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+
+  /* ロードマップ */
+  .roadmap { position: relative; padding-left: 28px; }
+  .roadmap::before { content: ''; position: absolute; left: 10px; top: 0; bottom: 0; width: 3px; background: #e2e8f0; border-radius: 2px; }
+  .rm-item { position: relative; margin-bottom: 28px; }
+  .rm-item::before { content: ''; position: absolute; left: -22px; top: 6px; width: 14px; height: 14px; border-radius: 50%; border: 3px solid #003D6B; background: #fff; }
+  .rm-item.done::before { background: #059669; border-color: #059669; }
+  .rm-item.current::before { background: #f59e0b; border-color: #f59e0b; box-shadow: 0 0 0 4px rgba(245,158,11,.2); }
+  .rm-item .rm-date { font-size: 12px; font-weight: 800; color: #003D6B; }
+  .rm-item .rm-title { font-size: 15px; font-weight: 700; margin-top: 2px; }
+  .rm-item .rm-desc { font-size: 13px; color: #64748b; margin-top: 4px; }
+
+  /* 比較表 */
+  .compare-table th:first-child { width: 35%; }
+  .compare-table .us { color: #059669; font-weight: 800; }
+  .compare-table .them { color: #94a3b8; }
+
+  .cost-highlight { background: linear-gradient(135deg, #ecfdf5, #d1fae5); border: 2px solid #059669; border-radius: 14px; padding: 24px; text-align: center; margin: 20px 0; }
+  .cost-highlight .big { font-size: 36px; font-weight: 900; color: #059669; }
+  .cost-highlight .sub { font-size: 14px; color: #065f46; margin-top: 4px; }
+
+  @media print {
+    body { background: #fff; }
+    .card { box-shadow: none; border: 1px solid #e2e8f0; break-inside: avoid; }
+    .header { padding: 24px 0; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>SPOTLIGHT NAVIGATOR</h1>
+  <p>MEO対策 統合管理システム — 現状報告・残タスク</p>
+  <div class="date">報告日: 2026年6月9日</div>
+</div>
+
+<div class="container">
+
+<!-- スコアカード -->
+<div class="score-row">
+  <div class="score-card green">
+    <div class="number">90%</div>
+    <div class="label">全体完成度</div>
+  </div>
+  <div class="score-card">
+    <div class="number">18</div>
+    <div class="label">実装済み機能数</div>
+  </div>
+  <div class="score-card">
+    <div class="number">580</div>
+    <div class="label">対応店舗数</div>
+  </div>
+  <div class="score-card orange">
+    <div class="number">6</div>
+    <div class="label">7月前の必須タスク</div>
+  </div>
+</div>
+
+<!-- システム構成 -->
+<div class="card">
+  <h2>システム構成</h2>
+  <div class="arch-grid">
+    <div class="arch-item">
+      <div class="tech">フロントエンド</div>
+      <div class="name">Next.js 14 → Vercel Pro</div>
+    </div>
+    <div class="arch-item">
+      <div class="tech">バックエンド</div>
+      <div class="name">Go API → Cloud Run</div>
+    </div>
+    <div class="arch-item">
+      <div class="tech">データベース</div>
+      <div class="name">Supabase PostgreSQL</div>
+    </div>
+    <div class="arch-item">
+      <div class="tech">AI</div>
+      <div class="name">Claude API</div>
+    </div>
+    <div class="arch-item">
+      <div class="tech">ドメイン</div>
+      <div class="name">new-spotlight-navigator.com</div>
+    </div>
+    <div class="arch-item">
+      <div class="tech">月額コスト</div>
+      <div class="name">約2,000〜3,000円</div>
+    </div>
+  </div>
+</div>
+
+<!-- 機能一覧 -->
+<div class="card">
+  <h2>機能完成度一覧</h2>
+  <table>
+    <thead>
+      <tr><th>#</th><th>機能</th><th>完成度</th><th>状態</th><th>備考</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>1</td><td>ダッシュボード（KPI・予測・アラート）</td><td><div class="progress-bar"><div class="progress-fill" style="width:95%"></div></div></td><td><span class="badge badge-ok">動作OK</span></td><td>予測精度の微調整が残る</td></tr>
+      <tr><td>2</td><td>店舗診断</td><td><div class="progress-bar"><div class="progress-fill" style="width:90%"></div></div></td><td><span class="badge badge-ok">動作OK</span></td><td></td></tr>
+      <tr><td>3</td><td>口コミ管理（同期・返信・テンプレート）</td><td><div class="progress-bar"><div class="progress-fill" style="width:95%"></div></div></td><td><span class="badge badge-ok">動作OK</span></td><td>580店舗一括管理</td></tr>
+      <tr><td>4</td><td>口コミ分析(AI)</td><td><div class="progress-bar"><div class="progress-fill" style="width:95%"></div></div></td><td><span class="badge badge-ok">動作OK</span></td><td>対象月選択・いつもの店舗</td></tr>
+      <tr><td>5</td><td>月次レポート（PDF出力対応）</td><td><div class="progress-bar"><div class="progress-fill" style="width:95%"></div></div></td><td><span class="badge badge-ok">動作OK</span></td><td>月別KPI・AI総評</td></tr>
+      <tr><td>6</td><td>投稿管理・分析（予約・自動投稿）</td><td><div class="progress-bar"><div class="progress-fill" style="width:90%"></div></div></td><td><span class="badge badge-ok">動作OK</span></td><td></td></tr>
+      <tr><td>7</td><td>AIO対策</td><td><div class="progress-bar"><div class="progress-fill mid" style="width:85%"></div></div></td><td><span class="badge badge-ok">動作OK</span></td><td></td></tr>
+      <tr><td>8</td><td>検索語句管理</td><td><div class="progress-bar"><div class="progress-fill" style="width:95%"></div></div></td><td><span class="badge badge-ok">動作OK</span></td><td>GBP Performance API連携</td></tr>
+      <tr><td>9</td><td>多地点順位チェック（グリッド計測）</td><td><div class="progress-bar"><div class="progress-fill" style="width:95%"></div></div></td><td><span class="badge badge-ok">動作OK</span></td><td>いつもの店舗マスター</td></tr>
+      <tr><td>10</td><td>店舗パフォーマンス</td><td><div class="progress-bar"><div class="progress-fill" style="width:90%"></div></div></td><td><span class="badge badge-ok">動作OK</span></td><td></td></tr>
+      <tr><td>11</td><td>基礎情報管理</td><td><div class="progress-bar"><div class="progress-fill" style="width:90%"></div></div></td><td><span class="badge badge-ok">動作OK</span></td><td></td></tr>
+      <tr><td>12</td><td>NAP整合性チェック</td><td><div class="progress-bar"><div class="progress-fill mid" style="width:85%"></div></div></td><td><span class="badge badge-ok">動作OK</span></td><td></td></tr>
+      <tr><td>13</td><td>写真管理</td><td><div class="progress-bar"><div class="progress-fill mid" style="width:85%"></div></div></td><td><span class="badge badge-ok">動作OK</span></td><td></td></tr>
+      <tr><td>14</td><td>AI社長（チャットボット）</td><td><div class="progress-bar"><div class="progress-fill mid" style="width:80%"></div></div></td><td><span class="badge badge-ok">動作OK</span></td><td></td></tr>
+      <tr><td>15</td><td>ユーザー・権限管理</td><td><div class="progress-bar"><div class="progress-fill" style="width:90%"></div></div></td><td><span class="badge badge-ok">動作OK</span></td><td>3ロール制御</td></tr>
+      <tr><td>16</td><td>GBPアカウント管理</td><td><div class="progress-bar"><div class="progress-fill" style="width:90%"></div></div></td><td><span class="badge badge-ok">動作OK</span></td><td>OAuth連携・トークン管理</td></tr>
+      <tr><td>17</td><td>自動処理（Cronジョブ 8本）</td><td><div class="progress-bar"><div class="progress-fill mid" style="width:85%"></div></div></td><td><span class="badge badge-ok">動作OK</span></td><td>口コミ同期・投稿実行等</td></tr>
+      <tr><td>18</td><td>クライアント向けレポートサイト</td><td><div class="progress-bar"><div class="progress-fill" style="width:95%"></div></div></td><td><span class="badge badge-ok">動作OK</span></td><td>サブドメイン配信</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- 残タスク -->
+<div class="card">
+  <h2>残タスク（優先度別）</h2>
+
+  <div class="task-section">
+    <div class="task-header">
+      <span class="priority p0">P0</span>
+      <span class="title">7月テスト前に必須（〜6月末）</span>
+    </div>
+    <ul class="task-list">
+      <li>
+        <span class="task-num">1</span>
+        <div class="task-body">
+          <div class="name">セキュリティ修正（認証強化）</div>
+          <div class="desc">JWT検証の脆弱性修正・不要なデバッグAPIの削除</div>
+          <div class="est">工数: 1日</div>
+        </div>
+      </li>
+      <li>
+        <span class="task-num">2</span>
+        <div class="task-body">
+          <div class="name">権限設定の整合性修正</div>
+          <div class="desc">ロール別アクセス制御の漏れを修正</div>
+          <div class="est">工数: 1時間</div>
+        </div>
+      </li>
+      <li>
+        <span class="task-num">3</span>
+        <div class="task-body">
+          <div class="name">全店舗の5月AI総評を正しいデータで再生成</div>
+          <div class="desc">一部店舗の5月レポートが4月データで生成されている問題の修正</div>
+          <div class="est">工数: 2時間（実行待ち）</div>
+        </div>
+      </li>
+      <li>
+        <span class="task-num">4</span>
+        <div class="task-body">
+          <div class="name">失敗店舗の口コミ分析再実行</div>
+          <div class="desc">タイムアウト延長済み、再実行で解決見込み</div>
+          <div class="est">工数: 1時間（実行待ち）</div>
+        </div>
+      </li>
+      <li>
+        <span class="task-num">5</span>
+        <div class="task-body">
+          <div class="name">Cronジョブのタイムアウト調整</div>
+          <div class="desc">月次自動分析が途中で打ち切られる問題の修正</div>
+          <div class="est">工数: 1時間</div>
+        </div>
+      </li>
+      <li>
+        <span class="task-num">6</span>
+        <div class="task-body">
+          <div class="name">テスト店舗でのレポート最終確認</div>
+          <div class="desc">数店舗で4月・5月レポートの全項目を突き合わせ検証</div>
+          <div class="est">工数: 2時間</div>
+        </div>
+      </li>
+    </ul>
+  </div>
+
+  <div class="task-section">
+    <div class="task-header">
+      <span class="priority p1">P1</span>
+      <span class="title">7月テスト中に対応</span>
+    </div>
+    <ul class="task-list">
+      <li><span class="task-num">7</span><div class="task-body"><div class="name">CSRF対策・セキュリティ強化</div><div class="est">工数: 2時間</div></div></li>
+      <li><span class="task-num">8</span><div class="task-body"><div class="name">同名店舗（フランチャイズ）の識別改善</div><div class="est">工数: 3時間</div></div></li>
+      <li><span class="task-num">9</span><div class="task-body"><div class="name">DB外部キー制約追加（データ整合性）</div><div class="est">工数: 2時間</div></div></li>
+      <li><span class="task-num">10</span><div class="task-body"><div class="name">重複店舗データの統合</div><div class="est">工数: 3時間</div></div></li>
+      <li><span class="task-num">11</span><div class="task-body"><div class="name">検索語句の未同期店舗の同期完了</div><div class="est">工数: 2時間</div></div></li>
+      <li><span class="task-num">12</span><div class="task-body"><div class="name">OAuthトークン管理の最適化</div><div class="est">工数: 3時間</div></div></li>
+    </ul>
+  </div>
+
+  <div class="task-section">
+    <div class="task-header">
+      <span class="priority p2">P2</span>
+      <span class="title">8月全店舗展開前に対応</span>
+    </div>
+    <ul class="task-list">
+      <li><span class="task-num">13</span><div class="task-body"><div class="name">コード品質改善（型安全性・コンポーネント分割）</div><div class="est">工数: 10時間</div></div></li>
+      <li><span class="task-num">14</span><div class="task-body"><div class="name">自動処理のログ永続化・監視体制構築</div><div class="est">工数: 3時間</div></div></li>
+      <li><span class="task-num">15</span><div class="task-body"><div class="name">外部API連携の安定性向上</div><div class="est">工数: 2時間</div></div></li>
+      <li><span class="task-num">16</span><div class="task-body"><div class="name">エラーハンドリングの統一化</div><div class="est">工数: 3時間</div></div></li>
+    </ul>
+  </div>
+</div>
+
+<!-- ロードマップ -->
+<div class="card">
+  <h2>ロードマップ</h2>
+  <div class="roadmap">
+    <div class="rm-item done">
+      <div class="rm-date">2026年4月〜5月</div>
+      <div class="rm-title">基盤開発・本番デプロイ完了</div>
+      <div class="rm-desc">全18機能の実装、580店舗のデータ連携、Vercel/Cloud Run/Supabase構築</div>
+    </div>
+    <div class="rm-item current">
+      <div class="rm-date">2026年6月（現在）</div>
+      <div class="rm-title">品質向上・セキュリティ強化</div>
+      <div class="rm-desc">レポート精度改善、口コミ分析の対象月対応、セキュリティ監査・修正</div>
+    </div>
+    <div class="rm-item">
+      <div class="rm-date">2026年7月</div>
+      <div class="rm-title">数店舗でテスト運用開始</div>
+      <div class="rm-desc">実際のクライアント店舗でレポート配信・操作テスト。フィードバック収集と改善</div>
+    </div>
+    <div class="rm-item">
+      <div class="rm-date">2026年8月</div>
+      <div class="rm-title">全店舗展開</div>
+      <div class="rm-desc">全580店舗への切り替え。安定運用・監視体制の確立</div>
+    </div>
+  </div>
+</div>
+
+<!-- コスト比較 -->
+<div class="card">
+  <h2>他社見積もりとの比較</h2>
+  <div class="cost-highlight">
+    <div class="big">開発費 0円</div>
+    <div class="sub">他社見積もり 550〜1,200万円 → 自社開発で全額削減</div>
+  </div>
+  <table class="compare-table">
+    <thead>
+      <tr><th>比較項目</th><th>他社見積もり</th><th>自社開発（本システム）</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>初期開発費</td><td class="them">550〜1,200万円</td><td class="us">0円</td></tr>
+      <tr><td>月額ランニングコスト</td><td class="them">要見積もり（通常5〜10万円/月）</td><td class="us">約2,000〜3,000円/月</td></tr>
+      <tr><td>AI機能（口コミ分析・自動投稿）</td><td class="them">なし or 別料金</td><td class="us">標準搭載</td></tr>
+      <tr><td>カスタマイズ性</td><td class="them">制限あり</td><td class="us">完全自由</td></tr>
+      <tr><td>対応店舗数</td><td class="them">要確認</td><td class="us">580店舗対応済み</td></tr>
+      <tr><td>レポート自動生成</td><td class="them">手動 or 別料金</td><td class="us">AI自動生成（月別KPI + 総評）</td></tr>
+      <tr><td>多地点順位チェック</td><td class="them">別ツール契約が必要</td><td class="us">標準搭載（7x7グリッド）</td></tr>
+    </tbody>
+  </table>
+</div>
+
+</div>
+</body>
+</html>

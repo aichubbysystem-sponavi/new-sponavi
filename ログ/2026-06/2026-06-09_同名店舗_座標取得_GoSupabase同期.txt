@@ -1,0 +1,64 @@
+## 【2026-06-09】セッション4 前半: 同名店舗のPlaces API座標取得 + Go API⇔Supabase shops同期
+
+### 目的
+P1: 同名店舗のlimit(1)問題（Places APIで同名3件ヒット→特定不可）を修正
+
+### 完了した作業
+
+【1. Places API 住所マッチング（sync-coordinates/route.ts）】
+- selectに住所フィールド追加（state, city, address, full_address）
+- 検索クエリに住所を含めて精度向上（`${shopTitle} ${addressHint}`）
+- 複数ヒット時: formattedAddressとDB住所を照合して絞り込み
+  - 都道府県+市区町村 一致 → 採用
+  - 市区町村+番地 一致 → 採用
+  - full_addressのみの場合: 郵便番号を除いた4文字以上で照合
+  - 一致なし → エラーメッセージに理由を明記
+- 空文字 `.includes("")` = true のバグ修正（`shopCity && shopAddress` ガード）
+
+【2. エラーメッセージ具体化（grid-ranking/page.tsx）】
+- res.data.error（APIエラー: OAuthトークンなし等）を優先表示
+- res.data.message（情報メッセージ）を表示
+- catchブロック: e.response.data.error（日本語エラー）を優先表示
+
+【3. Go API⇔Supabase ID不一致対策（sync-coordinates/route.ts）】
+- フロントからshopNameも送信
+- Step 1（auto-link）+ Step 2（座標取得）にshopName名前フォールバック追加
+- 見つからない場合:「Supabase上に見つかりません」と具体的メッセージ
+
+【4. grid-ranking Supabase shops検索を名前ベースに統一（grid-ranking/page.tsx）】
+- 3箇所を.eq("id", ...)から.eq("name", ...)に変更:
+  - 単店舗座標取得（useEffect内）
+  - いつもの店舗一括計測の座標取得
+  - 全店舗計測の座標取得
+
+【5. sync-shopsにGo API→Supabase shops同期ステップ追加（cron/sync-shops/route.ts）】
+- Cron実行時、Go APIの全店舗をSupabaseにもupsert
+- 既存店舗: 値がある場合のみ住所更新（空文字上書き防止）、gbp_location_nameは未設定時のみ補完
+- 新規店舗: Go APIのIDで挿入（ID一致を実現）
+- maxDuration: 60→120秒に拡大
+- 手動実行で synced: 580 確認済み
+
+### コミット履歴（前半5コミット）
+1. 59da63c fix: 同名店舗のPlaces API座標取得を住所マッチングで解決
+2. bd4c276 fix: 多地点順位チェックの座標取得エラーメッセージを具体化
+3. 469f15a fix: Go API⇔Supabase間の店舗ID不一致で座標取得できない問題を修正
+4. 7be4ce6 fix: 多地点順位チェックの座標取得をSupabase shops名前検索に統一
+5. 35815aa feat: sync-shopsにGo API→Supabase shops同期ステップを追加
+
+### 注意点・ハマったこと
+- `.includes("")`は常にtrueを返す → shopCityやshopAddressが空文字のとき誤マッチする。必ず`shopCity && shopAddress`ガードを入れる
+- Go APIとSupabaseでshopsテーブルのIDが異なる（Go APIはCloud RunのPostgreSQL、SupabaseはSupabase PostgreSQL）。sync-shopsのCronがGo APIにだけ店舗を作成していた
+- sync-shopsのupsert時、Go APIの空フィールドでSupabaseの既存値を上書きしないよう、値がある場合のみupdateRowに含める
+- SupabaseのupsertでonConflict指定が正しくないとinsert失敗してもエラーが隠れる
+- ShopListItem.idには店舗名が入る（UUIDではない）— spreadsheet.ts:796で`id: shopName`
+
+### 未解決・次回やること
+- 「七宝麻辣湯（チーパオマーラータン）札幌大通店」のsync-coordinates座標取得
+  - synced: 580は成功しているが、名前の完全一致検索で見つからない
+  - 可能性: フロントのJSバンドルが古い（Ctrl+Shift+Rで要確認）
+  - 次回: Supabaseダッシュボードで直接shopsテーブルを確認し、名前の完全一致を検証
+
+### 発見した別issue（未対応）
+- cron/sync-reviewsがGo APIのIDでSupabase shops.rating/review_countを更新 → ID不一致で空振り
+  - sync-shopsの同期ステップで新規挿入時はGo API IDを使うので、今後は一致する
+  - 既存店舗（sync前からSupabaseにあった分）はID不一致のまま → 名前ベースに要修正

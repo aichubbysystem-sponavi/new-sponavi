@@ -1,0 +1,49 @@
+## 2026-06-08
+
+### 決定事項
+- 口コミ管理のDateRangePicker初期化前エラーを修正
+- 検索語句同期・口コミ分析の両方にPromise.race強制タイムアウトと中断ボタンを追加
+- 本番動作確認完了: DateRangePicker表示OK、レポート月別KPI OK、コンソールエラーなし
+
+### 変更内容（具体的に）
+- `src/app/reviews/page.tsx`:
+  - dateRangeReady フラグ追加（drStart/drEndが空文字列の場合にSupabaseクエリのフィルタをスキップ）
+  - dateRangeStart/dateRangeEndの計算に空文字列チェック追加
+  - fetchReviewsとキーワード分析の2箇所にdateRangeReadyガード追加
+- `src/app/search-keywords/client.tsx`:
+  - syncOneタイムアウト: 90秒→30秒に短縮
+  - handleBulkSyncのループにPromise.race 35秒強制タイムアウト追加（fetchがAbortSignalに反応しないケース対策）
+- `src/app/review-analysis/page.tsx`:
+  - cancelRef追加（中断ボタン用）
+  - ループ先頭にcancelRef.currentチェック追加
+  - api.postのtimeout: 180秒→60秒に短縮
+  - Promise.race 65秒強制タイムアウト追加
+  - 「中断」ボタンUI追加（running時に赤ボタン表示）
+
+### 数値・設定値
+- 検索語句同期 syncOneタイムアウト: 90秒 → 30秒
+- 検索語句同期 Promise.race強制タイムアウト: 35秒
+- 口コミ分析 api.postタイムアウト: 180秒 → 60秒
+- 口コミ分析 Promise.race強制タイムアウト: 65秒
+
+### 未解決・次回やること
+- 検索語句の残り同期（ブラウザ操作、タイムアウト店舗は自動スキップされる）
+- AI総評の全店舗再生成（ブラウザ操作、中断ボタン追加済み）
+- DB上の重複店舗データ統合 + shopsテーブルへのUNIQUE制約追加（将来課題）
+
+### 注意点・ハマったこと
+- useDateRangeの初期値が空文字列のため、Supabaseクエリに"-01T00:00:00"という無効なタイムスタンプが渡されて400エラーになった → dateRangeReadyフラグで初期化前はフィルタをスキップする必要がある
+- axiosのtimeoutオプションはリクエスト全体ではなくレスポンス待ちのタイムアウト。サーバー側APIが処理中（ハング）の場合は効かない → Promise.raceで二重タイムアウトが必須
+- 中断ボタンが効かない原因: fetchがAbortSignalに反応しない場合、awaitが永久に待機する → Promise.raceで強制タイムアウトすることでループを次に進め、中断チェックに到達させる
+- 中断ボタンを押してから最大35秒（検索語句）/65秒（口コミ分析）待つ可能性がある（即座には止まらない）
+
+### コミット履歴
+1. 36de401 - fix: 口コミ管理の期間フィルタ初期化前エラー修正
+2. c5e030d - fix: 検索語句同期のタイムアウト改善+中断ボタン確実化
+3. a2ab163 - fix: 口コミ分析にタイムアウト+中断ボタン追加
+
+### 本番動作確認結果
+- DateRangePicker: 全ページ表示OK、期間絞り込み動作OK
+- レポート月別KPI: 4月/5月で異なる値を確認（みそラーメンのよし乃 札幌アピア店）
+- コンソール: No errors / Google Maps非推奨警告のみ（動作影響なし）
+- 口コミ管理: dateRangeReady修正後、400エラー解消

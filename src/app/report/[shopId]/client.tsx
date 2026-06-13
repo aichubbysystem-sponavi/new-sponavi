@@ -448,14 +448,9 @@ export default function ReportClient({
         });
         if (res.ok) {
           const d = await res.json();
-          console.log("[lang-stats]", shopName, d.stats?.length, "langs,", d.totalReviews, "reviews");
           setLangStats(d.stats || []);
-        } else {
-          console.warn("[lang-stats] error:", res.status, await res.text().catch(() => ""));
         }
-      } catch (e) {
-        console.warn("[lang-stats] fetch error:", e);
-      }
+      } catch {}
       setLangLoading(false);
     })();
   }, [shopId]);

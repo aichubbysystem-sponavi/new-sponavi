@@ -1,0 +1,104 @@
+## 2026-06-09
+
+### 決定事項
+- 口コミ分析に対象月セレクタを追加（target_monthをDB保存）
+- 多地点チェックの「いつもの店舗」を口コミ分析・検索語句・口コミ管理に反映（双方向）
+- 店舗検索ランキング（/ranking）を完全削除（多地点チェックで代替）
+- 口コミ増減KPIをreviewCounts履歴値から再計算するよう修正
+- 口コミ分析の失敗理由を具体的に表示
+- Proプランに合わせタイムアウトを180秒に延長
+
+### 変更内容（具体的に）
+- `src/app/api/report/analyze/route.ts`:
+  - body.targetMonthを受け取り、curMonthとして使用
+  - effectiveKpisでchartsから対象月のKPIを再構成
+  - 推移・アクション率もtargetMonthのインデックスで参照
+  - 失敗理由（reason）を各ステータスに追加
+  - results配列の型にreason?追加
+
+- `src/app/review-analysis/page.tsx`:
+  - 対象月セレクタ（直近6ヶ月ドロップダウン）追加
+  - targetMonthをAPIリクエストに含める
+  - いつもの店舗ボタン + 追加/削除ボタン
+  - 失敗理由表示（分析結果リスト・永続化パネル両方）
+  - タイムアウト60秒→180秒
+  - 自動選択廃止（ボタン押下で明示的に選択）
+
+- `src/app/search-keywords/client.tsx`:
+  - いつもの店舗ボタン + 追加/削除ボタン
+  - useShopからfavoriteShopIds取得
+
+- `src/app/reviews/page.tsx`:
+  - いつもの店舗同期ボタン追加
+  - handleSyncAllにtargetShopIds引数追加
+
+- `src/components/shop-provider.tsx`:
+  - favoriteShopIds: grid_ranking_presetsから自動取得
+  - addToFavorites/removeFromFavorites: presetsへの追加・削除API
+  - refreshFavorites: プリセット再取得
+
+- `src/lib/report-api.ts`:
+  - getStoredAnalysisに表示月を渡して月別分析を優先取得
+  - フォールバックで最新分析にフォールバック
+
+- `src/app/report/[shopId]/page.tsx`:
+  - targetMonthをclient.tsxにpropsで渡す
+
+- `src/app/report/[shopId]/client.tsx`:
+  - targetMonthをpropsから受け取り（SSR対応）
+  - monthlyLabels.indexOfにゼロパディング正規化追加
+  - displayTotalReviews: reviewCountsトリム済み末尾値を使用
+  - shop.totalReviews参照を全てdisplayTotalReviewsに置換（5箇所）
+  - 口コミ増減KPIのvalueをreviewDeltaから再計算
+  - 前年比もreviewCountsから対象月の13ヶ月前を参照
+
+- `src/components/sidebar.tsx`:
+  - /ranking リンク削除
+
+- `src/lib/roles.ts`:
+  - 3ロール分の/ranking権限削除
+
+- `src/app/ranking/page.tsx` 削除
+- `src/app/api/report/ranking/route.ts` 削除
+- `src/app/api/report/ranking-bulk/route.ts` 削除
+
+### 数値・設定値
+- 口コミ分析タイムアウト: 60秒 → 180秒（Proプラン対応）
+- Promise.race強制タイムアウト: 65秒 → 185秒
+- 対象月セレクタ: 直近6ヶ月
+
+### 検証結果
+- みそラーメンのよし乃 札幌アピア店: 4月/5月 KPI・口コミ増減・AI総評 全項目一致
+- きくの商店: 4月/5月 KPI・口コミ増減・AI総評 全項目一致
+- 有馬焼肉 丞 -TASUKU-: 4月/5月 KPI・口コミ増減 一致確認済み
+
+### 未解決・次回やること
+- 失敗22店舗の口コミ分析再実行（タイムアウト延長済み）
+- 5月AI総評の全店舗再生成（対象月:2026/5で再実行必要）
+- DB重複店舗データ統合 + shopsテーブルUNIQUE制約追加
+- 検索語句の残り同期
+
+### 注意点・ハマったこと
+- monthlyLabelsのフォーマット不一致（"2026/04" vs "2026/4"）でindexOf=-1→月切り替えが効かない店舗があった
+- shop.totalReviewsがリアルタイム値のため、過去月レポートの口コミ増減が常に最新値になっていた
+- 口コミ増減KPIはラベル書き換えのみでvalueが元のままだった（reviewDeltaからの再計算が必要）
+- client.tsxのtargetMonthがuseState("")で初期化→SSR時にトリムが走らない→propsで渡す必要があった
+- Vercel Proプランは最大300秒、Hobbyは60秒→プラン確認が重要
+- AI総評は口コミ分析実行時のKPIデータを使うため、過去月の分析は対象月を指定して再実行が必要
+
+### コミット履歴
+1. db19c5d - feat: 口コミ分析に対象月セレクタ追加
+2. 33ae346 - feat: お気に入り店舗の選択共有機能
+3. efec683 - fix: お気に入り店舗をページ表示時に自動選択
+4. cd93ad1 - fix: お気に入りボタンのUI改善
+5. 894b530 - feat: 多地点チェックの「いつもの店舗」を全ページに反映
+6. af13481 - feat: いつもの店舗の双方向同期
+7. ffab70b - chore: サイドバーから店舗検索ランキングを削除
+8. 7604908 - chore: 店舗検索ランキング（/ranking）を完全削除
+9. 9041a2a - fix: 口コミ増減KPIを表示月の履歴値に修正
+10. e352cd3 - fix: 月切り替えが効かない店舗の修正
+11. 1236e99 - fix: いつもの店舗の自動選択を廃止
+12. e6aed2c - feat: 口コミ分析の失敗理由を表示
+13. 18c3361 - fix: 失敗理由をフロントcatch・永続化パネルにも表示
+14. 63f5b9f - fix: 口コミ分析のタイムアウトを180秒に延長
+15. 5dffb9a - fix: 口コミ増減KPIのvalueを表示月のreviewDeltaから再計算

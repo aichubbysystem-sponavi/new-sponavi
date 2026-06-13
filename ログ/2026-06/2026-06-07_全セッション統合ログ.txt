@@ -1,0 +1,104 @@
+## 2026-06-07
+
+### 決定事項
+- 多地点順位チェックに今月未計測管理＋スキップ機能を追加
+- レポートの?month=パラメータでサーバー側から正しい月のKPI/periodを返すように修正
+- 全データページ（7ページ）に期間範囲フィルタ（DateRangePicker）を追加
+- 検索語句管理は同期管理ツールのため、未同期/GBP未設定店舗は常に表示する設計
+- ERR_REQUIRE_ESMはwebpack externalsでws(WebSocket)をcommonjs扱いにして解決
+- Supabase createClientのrealtime無効化は型が合わず断念 → webpack方式に切替
+- 重複店舗は全maybeSingle()にlimit(1)を付けて安全化、getShopDbIdsは1件のみ返却
+- 店舗診断/AIO/基礎情報/NAP整合性/リードは時系列データでないため期間フィルタ対象外
+
+### 変更内容（具体的に）
+
+#### 多地点順位チェック
+- `src/app/grid-ranking/page.tsx`:
+  - isMeasuredThisMonth()ヘルパー追加
+  - useShop()からshopFilterMode追加取得
+  - 「6月済」/「未計測」バッジ、未計測行オレンジ枠ハイライト
+  - ステータスサマリー「今月: X/Y件 計測済み」表示
+  - いつもの店舗バッチ: Phase 3でlast_measurementから今月計測済みスキップ
+  - 全店舗バッチ: grid_ranking_logsからDB問合せ(limit 10000)でスキップ
+  - ボタンラベル「未計測のみ一括計測（Z/Y店舗）」、全件済みでdisabled
+  - shopFilterMode==="single"条件で計測設定・マップ・グリッド・履歴をラップ
+
+#### レポート月別KPI
+- `src/app/report/[shopId]/page.tsx`: searchParams.monthを受け取りgetReportDataに渡す
+- `src/lib/report-api.ts`:
+  - getReportData(shopId, targetMonth?)にオプション引数追加
+  - normalizedMonthでゼロパディング正規化（"2026/04"→"2026/4"）
+  - キャッシュパス・スプレッドシートパス両方でtargetMonth指定時は該当月をcur/prevに使用
+
+#### 期間範囲フィルタ（DateRangePicker）
+- `src/components/date-range-picker.tsx`: 新規作成
+  - DateRangePicker: 開始月〜終了月セレクター、プリセット（今月/先月/3ヶ月/6ヶ月/1年/全期間）、compact表示
+  - useDateRange hook: startMonth/endMonth状態管理、isInRange/isMonthInRange
+  - SSR安全: useState("")初期値、useEffectで日付設定（hydration不一致防止）
+- `src/app/page.tsx`（ダッシュボード）: perfをfilteredPerfに置換（KPI・テーブル・売上予測）
+- `src/app/reviews/page.tsx`（口コミ管理）: selectedMonth/availableMonthsをDateRangePickerに完全置換、SupabaseクエリにGTE/LT適用
+- `src/app/posts/page.tsx`（投稿管理）: filteredPostsで期間内投稿のみ表示
+- `src/app/ranking/page.tsx`（順位計測）: filteredHistoryで期間内履歴・チャート・サマリーに反映
+- `src/app/search-keywords/client.tsx`（検索語句管理）: latestMonthが範囲内 or 未同期/GBP未設定の店舗を表示
+- `src/app/grid-ranking/page.tsx`（多地点順位）: historyMonth月セレクターをDateRangePickerに置換
+- `src/app/media/page.tsx`（写真管理）: create_timeでフィルタ
+
+#### ERR_REQUIRE_ESM修正
+- `next.config.mjs`:
+  - transpilePackages: @supabase/supabase-js, auth-js, postgrest-js, realtime-js, storage-js, functions-js
+  - webpack config: サーバーサイドでwsをcommonjs external化
+
+#### React Hydration修正
+- `src/app/posts/page.tsx`: autoPostDate/scheduleDate/planMonth/bulkGenStartのuseState初期値を空文字列+useEffect初期化に変更
+- `src/components/auth-guard.tsx`: isReportDomainをuseState+useEffect内に移動
+- `src/components/app-shell.tsx`: window.location.hostnameチェック削除、pathname判定のみに変更
+- `src/components/date-range-picker.tsx`: useDateRangeのnew Date()をuseEffect内に移動
+
+#### 重複店舗安全化
+- `src/lib/report-api.ts`: getShopDbIdsが完全一致でもlimit(1)で1件のみ返却、部分一致もfindで1件のみ
+- `src/lib/gbp-performance.ts`: getCachedPerformanceのshop_nameフォールバック時に最新shop_idのデータだけ使用
+- `src/app/api/report/analyze/route.ts`: 5箇所の.eq("name").maybeSingle()にlimit(1)追加
+- `src/app/api/report/grid-ranking/route.ts`: 1箇所にlimit(1)追加
+
+### 数値・設定値
+- grid_ranking_logsクエリのlimit: デフォルト(1000) → 10000
+- DateRangePicker defaultMinMonth: 36ヶ月（3年分）
+- ダッシュボード/順位/検索語句/多地点/投稿: デフォルト6ヶ月
+- 口コミ管理: デフォルト18ヶ月
+- 写真管理: デフォルト12ヶ月
+- transpilePackages: 6パッケージ追加
+- webpack externals: ws → commonjs ws
+- maybeSingle()のlimit(1): 6箇所追加
+
+### 未解決・次回やること
+- 検索語句の残り352件同期（ブラウザでボタン操作）
+- AI総評の4月分生成 + 全店舗再生成（ブラウザでボタン操作）
+- 本番動作確認: レポート月別KPI / 未計測バッジ / DateRangePicker / hydrationエラー
+- DB上の重複店舗データ統合 + shopsテーブルへのUNIQUE制約追加（将来課題）
+
+### 注意点・ハマったこと
+- selectedShopIdは「全店舗表示」でも前の値が残る → shopFilterModeで判定しないとUI非表示が効かない
+- Supabaseデフォルトlimitは1000行 → 明示的にlimit指定必須
+- Supabase v2のcreateClientにrealtime: { enabled: false }は型エラー（RealtimeClientOptionsにenabledフィールドがない）→ webpack externalsで代替
+- sedで一括置換した際、インデントパターン違いで漏れが多発 → 手動確認必須
+- 「全期間」プリセットのminMonthが18ヶ月だと口コミ3年分が見えない → 36ヶ月に拡大
+- 口コミ管理のselectedMonth削除時、setAvailableMonthsとmonths変数がdead codeとして残りビルドエラー → state削除時は必ずsetter/関連変数も全検索して削除
+- grid-rankingの月セレクター置換時、即時関数の閉じ括弧が壊れてシンタックスエラー → JSX内のパターン変更時は括弧バランスに注意
+- getShopDbIdsでupdated_at順にソートしようとしたが、shopsテーブル（Go API管理）にupdated_atカラムがない可能性 → limit(1)のみで対応
+- 「完璧ですか？」と聞かれるたびに見落としが発覚した → レビュー時はContext/Provider・型定義・カラム存在・dead code・全参照箇所を必ず確認すべき
+
+### コミット履歴（全セッション）
+1. 60b2d4d - feat: 多地点順位チェック — 今月未計測管理＋スキップ機能
+2. d65c770 - fix: 全店舗計測済み時にボタンをdisabled化+グレーアウト
+3. 92848e5 - fix: 全店舗表示時に計測設定・マップ・グリッド・履歴を非表示
+4. 5a163b4 - fix: shopFilterMode=allで計測UI非表示
+5. 4f512ac - fix: grid_ranking_logsクエリにlimit(10000)追加
+6. f1531b1 - fix: レポートの月別KPI/periodがサーバー側で正しい月を返すように修正
+7. 4d25a4d - feat: 全データページに期間範囲フィルタ（DateRangePicker）追加
+8. 22bca68 - fix: 期間フィルタの3つの問題を修正
+9. b257d1b - fix: 全期間プリセットを36ヶ月に拡大 + 口コミの未使用availableMonths削除
+10. a45eb04 - chore: reviews dead code削除
+11. 603ed52 - feat: 検索語句管理にDateRangePicker追加
+12. 5f60634 - fix: ERR_REQUIRE_ESM + React hydration + 重複店舗の3問題を修正
+13. 85f6f7d - fix: getShopDbIdsからupdated_at依存を除去
+14. 82a94d2 - fix: ERR_REQUIRE_ESM根本修正 + Hydration修正 + 重複店舗安全化

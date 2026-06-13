@@ -142,8 +142,7 @@ export default function ReviewLanguagePage() {
         setTotalLowRating(data.totalLowRating || 0);
         setShopCount(data.shopCount || 0);
         if ((data.totalReviews || 0) === 0) {
-          const debugInfo = (data._debug || []).join(" | ");
-          setError(`${targetShopIds.length}店舗を検索しましたが、口コミが0件でした。\n[debug] ${debugInfo}`);
+          setError(`${targetShopIds.length}店舗を検索しましたが、口コミが0件でした。口コミ管理ページで同期してください。`);
         }
       } else {
         const err = await res.json().catch(() => ({ error: "不明なエラー" }));

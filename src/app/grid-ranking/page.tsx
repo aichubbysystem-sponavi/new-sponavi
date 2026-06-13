@@ -4,6 +4,7 @@ import { useEffect, useCallback, useState, useRef, useMemo } from "react";
 import api from "@/lib/api";
 import { useShop } from "@/components/shop-provider";
 import DateRangePicker, { useDateRange } from "@/components/date-range-picker";
+import { jstToday } from "@/lib/jst-date";
 
 interface GridPoint {
   row: number;
@@ -529,7 +530,7 @@ export default function GridRankingPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${shopName}_グリッド順位_${keyword}_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `${shopName}_グリッド順位_${keyword}_${jstToday()}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -544,7 +545,7 @@ export default function GridRankingPage() {
       const a = document.createElement("a");
       a.href = url;
       const shopName = (selectedShop as any)?.name || "shop";
-      a.download = `${shopName}_グリッド順位マップ_${keyword}_${new Date().toISOString().slice(0, 10)}.png`;
+      a.download = `${shopName}_グリッド順位マップ_${keyword}_${jstToday()}.png`;
       a.click();
     } catch {
       setError("PNG生成に失敗しました");

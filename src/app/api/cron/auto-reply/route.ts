@@ -28,7 +28,7 @@ async function refreshOAuthToken(rt: string): Promise<string | null> {
       body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET, refresh_token: rt, grant_type: "refresh_token" }),
     });
     if (res.ok) { const d = await res.json(); return d.access_token || null; }
-  } catch {}
+  } catch (e: any) { console.error("[cron/auto-reply] token refresh:", e?.message); }
   return null;
 }
 
@@ -36,7 +36,7 @@ async function getAllValidTokens(): Promise<string[]> {
   // Go APIにGBP APIを叩かせてトークンリフレッシュ発火
   try {
     await fetch(`${GO_API_URL}/api/gbp/account`, { signal: AbortSignal.timeout(15000) });
-  } catch {}
+  } catch (e: any) { console.error("[cron/auto-reply] Go API token refresh trigger:", e?.message); }
 
   interface TokenRow { access_token: string; refresh_token: string; expiry: string; }
   let allRows: TokenRow[] = [];
@@ -48,7 +48,7 @@ async function getAllValidTokens(): Promise<string[]> {
       .select("access_token, refresh_token, expiry")
       .order("expiry", { ascending: false });
     if (data && data.length > 0) allRows = data as TokenRow[];
-  } catch {}
+  } catch (e: any) { console.error("[cron/auto-reply] Supabase token fetch:", e?.message); }
 
   // 2. フォールバック: PostgreSQL直接接続
   if (allRows.length === 0) {
@@ -110,7 +110,7 @@ async function getLocationMap(token: string): Promise<Map<string, LocMapping>> {
         }
       }
     }
-  } catch {}
+  } catch (e: any) { console.error("[cron/auto-reply] location map fetch:", e?.message); }
   return map;
 }
 
