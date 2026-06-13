@@ -449,8 +449,12 @@ export default function ReportClient({
         if (res.ok) {
           const d = await res.json();
           setLangStats(d.stats || []);
+        } else {
+          console.error("[lang-stats] API error:", res.status, await res.text().catch(() => ""));
         }
-      } catch {}
+      } catch (e) {
+        console.error("[lang-stats] fetch error:", e);
+      }
       setLangLoading(false);
     })();
   }, [shopId]);
@@ -1765,11 +1769,26 @@ export default function ReportClient({
             </div>
           );
         }
-        // コメントを2件ずつに分割（最終ページにメモ欄を付加）
+        // コメントを文字数ベースでページ分割（はみ出し防止）
         const allComments = comments || [];
         const commentPages: { start: number; end: number }[] = [];
-        for (let ci = 0; ci < allComments.length; ci += 2) {
-          commentPages.push({ start: ci, end: Math.min(ci + 2, allComments.length) });
+        const CHARS_FIRST_PAGE = 750; // 最初のページ（ヘッダー分少ない）
+        const CHARS_PER_PAGE = 850;   // 2ページ目以降
+        {
+          let ci = 0;
+          while (ci < allComments.length) {
+            const limit = commentPages.length === 0 ? CHARS_FIRST_PAGE : CHARS_PER_PAGE;
+            let charCount = 0;
+            let end = ci;
+            while (end < allComments.length) {
+              const len = (allComments[end] || "").replace(/<[^>]*>/g, "").length;
+              if (end > ci && charCount + len > limit) break; // 次のコメントを追加すると超過 → 手前で切る（ただし最低1件は入れる）
+              charCount += len;
+              end++;
+            }
+            commentPages.push({ start: ci, end });
+            ci = end;
+          }
         }
         if (commentPages.length === 0) commentPages.push({ start: 0, end: 0 });
 
