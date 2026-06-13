@@ -85,7 +85,7 @@ function pctChange(cur: number, prev: number): { pct: number; text: string; isUp
 
 function buildStackedOptions() {
   return {
-    responsive: true, maintainAspectRatio: true,
+    responsive: true, maintainAspectRatio: true, aspectRatio: 2.2,
     plugins: {
       title: { display: false },
       legend: { position: "top" as const, labels: { font: { family: "Noto Sans JP", size: 11 } } },
@@ -1096,10 +1096,10 @@ export default function ReportClient({
           <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 16 }}>
             <tbody>
               <tr style={{ background: "#f8f9fa" }}>
-                <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60 }}>月</td>
+                <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60, whiteSpace: "nowrap" }}>月</td>
                 {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l.split("/")[1]}月</td>)}
               </tr>
-              <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>モバイル</td>
+              <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>モバイル</td>
                 {charts.searchMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
               <tr style={{ background: "#f8f9fa" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>PC</td>
                 {charts.searchPC.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
@@ -1124,10 +1124,10 @@ export default function ReportClient({
           <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 16 }}>
             <tbody>
               <tr style={{ background: "#f8f9fa" }}>
-                <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60 }}>月</td>
+                <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60, whiteSpace: "nowrap" }}>月</td>
                 {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l.split("/")[1]}月</td>)}
               </tr>
-              <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>モバイル</td>
+              <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>モバイル</td>
                 {charts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
               <tr style={{ background: "#f8f9fa" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>PC</td>
                 {charts.mapPC.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
@@ -1156,7 +1156,7 @@ export default function ReportClient({
           <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 16 }}>
             <tbody>
               <tr style={{ background: "#f8f9fa" }}>
-                <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60 }}>月</td>
+                <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60, whiteSpace: "nowrap" }}>月</td>
                 {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l.split("/")[1]}月</td>)}
               </tr>
               <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>Web</td>
@@ -1210,17 +1210,17 @@ export default function ReportClient({
           <div style={slideBarStyle}><span>{shop.name} — キーワード順位推移</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={{ ...slideBodyStyle, display: "flex", flexDirection: "column", justifyContent: "center" }}>
             <div style={stitleStyle}>キーワード順位推移（直近{rankingHistory.labels.length}ヶ月）</div>
-            <div style={{ overflow: "hidden", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", flex: 1 }}>
+            <div style={{ overflowX: "auto", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", flex: 1, minWidth: 700 }}>
                 <thead>
                   <tr>
-                    <th style={{ background: "#0f3460", color: "#fff", padding: "12px 12px", textAlign: "left", fontWeight: 600, whiteSpace: "nowrap", fontSize: 16, position: "sticky", left: 0 }}>キーワード</th>
+                    <th style={{ background: "#0f3460", color: "#fff", padding: "8px 6px", textAlign: "left", fontWeight: 600, whiteSpace: "nowrap", fontSize: 16, position: "sticky", left: 0 }}>キーワード</th>
                     {rankingHistory.labels.map((l, i) => (
-                      <th key={i} style={{ background: i === rankingHistory.labels.length - 1 ? "#e94560" : "#0f3460", color: "#fff", padding: "12px 8px", textAlign: "center", fontWeight: 600, whiteSpace: "nowrap", fontSize: 16 }}>
+                      <th key={i} style={{ background: i === rankingHistory.labels.length - 1 ? "#e94560" : "#0f3460", color: "#fff", padding: "8px 4px", textAlign: "center", fontWeight: 600, whiteSpace: "nowrap", fontSize: 16 }}>
                         {l}
                       </th>
                     ))}
-                    <th style={{ background: "#0f3460", color: "#fff", padding: "12px 8px", textAlign: "center", fontWeight: 600, fontSize: 16 }}>変動</th>
+                    <th style={{ background: "#0f3460", color: "#fff", padding: "8px 4px", textAlign: "center", fontWeight: 600, fontSize: 16 }}>変動</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1231,12 +1231,12 @@ export default function ReportClient({
                     const diff = latest !== null && prev !== null ? prev - latest : 0;
                     return (
                       <tr key={di} style={{ background: di % 2 === 0 ? "#fff" : "#f8f9fb" }}>
-                        <td style={{ padding: "10px 12px", fontWeight: 700, color: "#333", whiteSpace: "nowrap", borderBottom: "1px solid #eee", fontSize: 16 }}>{ds.word}</td>
+                        <td style={{ padding: "6px 6px", fontWeight: 700, color: "#333", whiteSpace: "nowrap", borderBottom: "1px solid #eee", fontSize: 16 }}>{ds.word}</td>
                         {ds.ranks.map((r, ri) => {
                           const isLatest = ri === rankingHistory.labels.length - 1;
                           return (
                             <td key={ri} style={{
-                              padding: "10px 8px", textAlign: "center", borderBottom: "1px solid #eee", fontSize: 16,
+                              padding: "6px 4px", textAlign: "center", borderBottom: "1px solid #eee", fontSize: 16,
                               fontWeight: r !== null && r <= 3 ? 900 : isLatest ? 700 : 400,
                               color: r === null ? "#ddd" : r <= 3 ? "#0a8f3c" : r <= 5 ? "#0f3460" : r <= 10 ? "#555" : "#999",
                               background: isLatest ? "#fff8f0" : undefined,
@@ -1246,7 +1246,7 @@ export default function ReportClient({
                           );
                         })}
                         <td style={{
-                          padding: "10px 8px", textAlign: "center", borderBottom: "1px solid #eee", fontSize: 16, fontWeight: 700,
+                          padding: "6px 4px", textAlign: "center", borderBottom: "1px solid #eee", fontSize: 16, fontWeight: 700,
                           color: diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888",
                         }}>
                           {diff > 0 ? `↑${diff}` : diff < 0 ? `↓${Math.abs(diff)}` : "→"}
@@ -1497,7 +1497,7 @@ export default function ReportClient({
         const PER_PAGE = 15;
         const page1 = currentKeywords.slice(0, PER_PAGE);
         const page2 = currentKeywords.slice(PER_PAGE, PER_PAGE * 2);
-        const thStyle = (w?: number, groupStart?: boolean): React.CSSProperties => ({ background: "#0f3460", color: "#fff", padding: "10px 6px", textAlign: "center", fontWeight: 600, fontSize: 16, whiteSpace: "nowrap", ...(w ? { width: w } : {}), ...(groupStart ? { borderLeft: "2px solid rgba(255,255,255,0.3)" } : {}) });
+        const thStyle = (w?: number, groupStart?: boolean): React.CSSProperties => ({ background: "#0f3460", color: "#fff", padding: "6px 4px", textAlign: "center", fontWeight: 600, fontSize: 16, whiteSpace: "nowrap", ...(w ? { width: w } : {}), ...(groupStart ? { borderLeft: "2px solid rgba(255,255,255,0.3)" } : {}) });
         const renderSqTable = (rows: typeof currentKeywords, startIdx: number) => (
           <div style={{ overflow: "hidden", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", flex: 1 }}>
@@ -1523,19 +1523,19 @@ export default function ReportClient({
                   const prev2Diff = prev2 !== undefined ? kw.count - prev2 : null;
                   const yoyVal = yoyMap.get(kw.word);
                   const yoyDiff = yoyVal !== undefined ? kw.count - yoyVal : null;
-                  const diffStyle = (d: number | null): React.CSSProperties => ({ padding: "7px 4px", textAlign: "center", fontSize: 16, fontWeight: 600, color: d === null ? "#ccc" : d > 0 ? "#0a8f3c" : d < 0 ? "#c0392b" : "#888" });
+                  const diffStyle = (d: number | null): React.CSSProperties => ({ padding: "4px 2px", textAlign: "center", fontSize: 16, fontWeight: 600, color: d === null ? "#ccc" : d > 0 ? "#0a8f3c" : d < 0 ? "#c0392b" : "#888" });
                   const fmtDiff = (d: number | null) => d === null ? "-" : d > 0 ? `+${d.toLocaleString()}` : d === 0 ? "→" : d.toLocaleString();
                   return (
                     <tr key={`${sqCurrent?.month}-${rank}`} style={{ background: ri % 2 === 0 ? "#fff" : "#f8f9fb", borderBottom: "1px solid #eee" }}>
-                      <td style={{ padding: "7px 8px", textAlign: "center", fontSize: 16, fontWeight: 700, color: rank < 3 ? "#e94560" : rank < 10 ? "#0f3460" : "#888" }}>{rank + 1}</td>
-                      <td style={{ padding: "7px 12px", fontSize: 16, color: "#333" }}>{kw.word}</td>
-                      <td style={{ padding: "7px 6px", textAlign: "center", fontSize: 16, fontWeight: 700, color: "#0f3460" }}>{kw.count.toLocaleString()}</td>
-                      {hasPrev && <td style={{ padding: "7px 6px", textAlign: "center", fontSize: 16, color: "#888", borderLeft: "2px solid #e8edf3" }}>{prev !== undefined ? prev.toLocaleString() : "-"}</td>}
-                      {hasPrev && <td style={{ ...diffStyle(prevDiff), padding: "7px 4px" }}>{fmtDiff(prevDiff)}</td>}
-                      {hasPrev2 && <td style={{ padding: "7px 6px", textAlign: "center", fontSize: 16, color: "#888", borderLeft: "2px solid #e8edf3" }}>{prev2 !== undefined ? prev2.toLocaleString() : "-"}</td>}
-                      {hasPrev2 && <td style={{ ...diffStyle(prev2Diff), padding: "7px 4px" }}>{fmtDiff(prev2Diff)}</td>}
-                      {hasYoy && <td style={{ padding: "7px 6px", textAlign: "center", fontSize: 16, color: "#888", borderLeft: "2px solid #e8edf3" }}>{yoyVal !== undefined ? yoyVal.toLocaleString() : "-"}</td>}
-                      {hasYoy && <td style={{ ...diffStyle(yoyDiff), padding: "7px 4px" }}>{fmtDiff(yoyDiff)}</td>}
+                      <td style={{ padding: "4px 4px", textAlign: "center", fontSize: 16, fontWeight: 700, color: rank < 3 ? "#e94560" : rank < 10 ? "#0f3460" : "#888" }}>{rank + 1}</td>
+                      <td style={{ padding: "4px 6px", fontSize: 16, color: "#333" }}>{kw.word}</td>
+                      <td style={{ padding: "4px 4px", textAlign: "center", fontSize: 16, fontWeight: 700, color: "#0f3460" }}>{kw.count.toLocaleString()}</td>
+                      {hasPrev && <td style={{ padding: "4px 4px", textAlign: "center", fontSize: 16, color: "#888", borderLeft: "2px solid #e8edf3" }}>{prev !== undefined ? prev.toLocaleString() : "-"}</td>}
+                      {hasPrev && <td style={{ ...diffStyle(prevDiff), padding: "4px 2px" }}>{fmtDiff(prevDiff)}</td>}
+                      {hasPrev2 && <td style={{ padding: "4px 4px", textAlign: "center", fontSize: 16, color: "#888", borderLeft: "2px solid #e8edf3" }}>{prev2 !== undefined ? prev2.toLocaleString() : "-"}</td>}
+                      {hasPrev2 && <td style={{ ...diffStyle(prev2Diff), padding: "4px 2px" }}>{fmtDiff(prev2Diff)}</td>}
+                      {hasYoy && <td style={{ padding: "4px 4px", textAlign: "center", fontSize: 16, color: "#888", borderLeft: "2px solid #e8edf3" }}>{yoyVal !== undefined ? yoyVal.toLocaleString() : "-"}</td>}
+                      {hasYoy && <td style={{ ...diffStyle(yoyDiff), padding: "4px 2px" }}>{fmtDiff(yoyDiff)}</td>}
                     </tr>
                   );
                 })}
@@ -1574,7 +1574,7 @@ export default function ReportClient({
             {sqNavBar}
             <span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
           </div>
-          <div style={{ ...slideBodyStyle, display: "flex", flexDirection: "column" }}>
+          <div style={{ ...slideBodyStyle, padding: "10px 9px", display: "flex", flexDirection: "column" }}>
             <div style={stitleStyle}>検索語句ランキング（{sqCurrent?.month || ""}）1〜{Math.min(PER_PAGE, currentKeywords.length)}位</div>
             {sqSummary}
             {renderSqTable(page1, 0)}
@@ -1613,7 +1613,7 @@ export default function ReportClient({
             <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 16 }}>
               <tbody>
                 <tr style={{ background: "#f8f9fa" }}>
-                  <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60 }}>月</td>
+                  <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60, whiteSpace: "nowrap" }}>月</td>
                   {reviewLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l.split("/")[1]}月</td>)}
                 </tr>
                 <tr>
@@ -1666,7 +1666,7 @@ export default function ReportClient({
             <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 16 }}>
               <tbody>
                 <tr style={{ background: "#f8f9fa" }}>
-                  <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60 }}>月</td>
+                  <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60, whiteSpace: "nowrap" }}>月</td>
                   {reviewLabels.slice(1).map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l.split("/")[1]}月</td>)}
                 </tr>
                 <tr>
