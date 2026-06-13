@@ -116,15 +116,16 @@ export default function ReviewLanguagePage() {
   }, [selectedAccount, accounts.length]);
 
   // グローバル店舗セレクタで1店舗選択時 → その店舗だけ選択して自動分析
-  const [autoRunDone, setAutoRunDone] = useState(false);
+  const [autoRunShopId, setAutoRunShopId] = useState<string>("");
   useEffect(() => {
-    if (autoRunDone || !selectedShopId || shopFilterMode !== "single" || shops.length === 0) return;
+    if (!selectedShopId || shopFilterMode !== "single" || shops.length === 0) return;
+    if (selectedShopId === autoRunShopId) return; // 同じ店舗なら再実行しない
     const match = shops.find(s => s.id === selectedShopId);
     if (match) {
       setSelectedShops(new Set([match.id]));
-      setAutoRunDone(true);
+      setAutoRunShopId(selectedShopId);
     }
-  }, [selectedShopId, shopFilterMode, shops.length, autoRunDone]);
+  }, [selectedShopId, shopFilterMode, shops.length, autoRunShopId]);
 
   const toggleShop = (id: string) => {
     setSelectedShops(prev => {
@@ -178,12 +179,12 @@ export default function ReviewLanguagePage() {
     setLoading(false);
   }, [selectedShops, shops, targetMonth]);
 
-  // autoRunDone後に自動でfetchStats実行（グローバル店舗セレクタ連動）
+  // グローバル店舗変更後に自動でfetchStats実行
   useEffect(() => {
-    if (autoRunDone && selectedShops.size > 0 && !loading && stats.length === 0) {
+    if (autoRunShopId && selectedShops.size > 0 && !loading) {
       fetchStats();
     }
-  }, [autoRunDone, selectedShops.size, fetchStats]);
+  }, [autoRunShopId]);
 
   async function getAuthHeaders(): Promise<Record<string, string>> {
     const { data } = await supabase.auth.getSession();
