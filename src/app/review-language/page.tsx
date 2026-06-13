@@ -40,7 +40,7 @@ interface ShopOption {
 }
 
 export default function ReviewLanguagePage() {
-  const { shops } = useShop();
+  const { shops, selectedShopId, shopFilterMode } = useShop();
   const [accounts, setAccounts] = useState<GbpAccount[]>([]);
   const [selectedAccount, setSelectedAccount] = useState<string>("all");
   const [loading, setLoading] = useState(false);
@@ -115,6 +115,17 @@ export default function ReviewLanguagePage() {
     setShopSearch("");
   }, [selectedAccount, accounts.length]);
 
+  // グローバル店舗セレクタで1店舗選択時 → その店舗だけ選択して自動分析
+  const [autoRunDone, setAutoRunDone] = useState(false);
+  useEffect(() => {
+    if (autoRunDone || !selectedShopId || shopFilterMode !== "single" || shops.length === 0) return;
+    const match = shops.find(s => s.id === selectedShopId);
+    if (match) {
+      setSelectedShops(new Set([match.id]));
+      setAutoRunDone(true);
+    }
+  }, [selectedShopId, shopFilterMode, shops.length, autoRunDone]);
+
   const toggleShop = (id: string) => {
     setSelectedShops(prev => {
       const next = new Set(prev);
@@ -166,6 +177,13 @@ export default function ReviewLanguagePage() {
     }
     setLoading(false);
   }, [selectedShops, shops, targetMonth]);
+
+  // autoRunDone後に自動でfetchStats実行（グローバル店舗セレクタ連動）
+  useEffect(() => {
+    if (autoRunDone && selectedShops.size > 0 && !loading && stats.length === 0) {
+      fetchStats();
+    }
+  }, [autoRunDone, selectedShops.size, fetchStats]);
 
   async function getAuthHeaders(): Promise<Record<string, string>> {
     const { data } = await supabase.auth.getSession();
