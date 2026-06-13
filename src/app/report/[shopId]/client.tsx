@@ -1880,9 +1880,9 @@ export default function ReportClient({
       })()}
 
       {/* ════ 口コミ言語別分析 ════ */}
-      {langStats.length > 1 && (
+      {langStats.length > 1 && (() => { pageNum++; return (
         <div style={slideStyle} className="slide">
-          <div style={slideBarStyle}><span>{shop.name} — 口コミ言語別分析</span></div>
+          <div style={slideBarStyle}><span>{shop.name} — 口コミ言語別分析</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={slideBodyStyle}>
             <div style={stitleStyle}>口コミ言語別集計 <span style={{ fontSize: 16, fontWeight: 400, color: "#999" }}>※コメント付き口コミのみ対象（{shop.totalReviews}件中{langStats.reduce((s, st) => s + st.total, 0)}件）</span></div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 20 }}>
@@ -1935,7 +1935,7 @@ export default function ReportClient({
             </table>
           </div>
         </div>
-      )}
+      ); })()}
 
       {/* ワード詳細モーダル（ポジティブ/ネガティブ共用） */}
       {negativeModal && (
