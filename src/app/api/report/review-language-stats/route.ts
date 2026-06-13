@@ -57,33 +57,56 @@ export async function POST(request: NextRequest) {
 
   const supabase = getSupabase();
 
-  // shopNamesがあればshop_nameで直接検索（ID逆引き不要）、shopIdsがあればshop_idで検索
-  const useNameSearch = shopNames.length > 0;
-  const targets = useNameSearch ? shopNames : shopIds;
-  const col = useNameSearch ? "shop_name" : "shop_id";
-
+  // shopNamesがあればshop_nameで検索、shopIdsがあればshop_idで検索
   let allReviews: any[] = [];
-  const batchSize = 10;
+  const pageSize = 1000;
 
-  for (let i = 0; i < targets.length; i += batchSize) {
-    const batch = targets.slice(i, i + batchSize);
+  const fetchByCol = async (col: string, values: string[]) => {
+    for (let i = 0; i < values.length; i += 10) {
+      const batch = values.slice(i, i + 10);
+      let from = 0;
+      while (from < 5000) {
+        const { data, error } = await supabase
+          .from("reviews")
+          .select("shop_name, reviewer_name, star_rating, comment, create_time")
+          .in(col, batch)
+          .not("comment", "is", null)
+          .neq("comment", "")
+          .order("create_time", { ascending: false })
+          .range(from, from + pageSize - 1);
+        if (error) { console.error("[review-language-stats]", error.message); break; }
+        if (!data || data.length === 0) break;
+        allReviews.push(...data);
+        if (data.length < pageSize) break;
+        from += pageSize;
+      }
+    }
+  };
 
-    let from = 0;
-    const pageSize = 1000;
-    while (from < 5000) {
-      const { data, error } = await supabase
-        .from("reviews")
-        .select("shop_name, reviewer_name, star_rating, comment, create_time")
-        .in(col, batch)
-        .not("comment", "is", null)
-        .neq("comment", "")
-        .order("create_time", { ascending: false })
-        .range(from, from + pageSize - 1);
-      if (error) { console.error("[review-language-stats]", error.message); break; }
-      if (!data || data.length === 0) break;
-      allReviews.push(...data);
-      if (data.length < pageSize) break;
-      from += pageSize;
+  if (shopIds.length > 0) {
+    await fetchByCol("shop_id", shopIds);
+  }
+  if (shopNames.length > 0) {
+    await fetchByCol("shop_name", shopNames);
+    // 完全一致で見つからなかった店舗はilike検索でフォールバック
+    if (allReviews.length === 0) {
+      for (const name of shopNames) {
+        let from = 0;
+        while (from < 5000) {
+          const { data } = await supabase
+            .from("reviews")
+            .select("shop_name, reviewer_name, star_rating, comment, create_time")
+            .ilike("shop_name", name)
+            .not("comment", "is", null)
+            .neq("comment", "")
+            .order("create_time", { ascending: false })
+            .range(from, from + pageSize - 1);
+          if (!data || data.length === 0) break;
+          allReviews.push(...data);
+          if (data.length < pageSize) break;
+          from += pageSize;
+        }
+      }
     }
   }
 
