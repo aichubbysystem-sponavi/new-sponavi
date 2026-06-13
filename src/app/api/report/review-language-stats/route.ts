@@ -50,6 +50,7 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
   const shopIds: string[] = body.shopIds || [];
   const shopNames: string[] = body.shopNames || [];
+  const targetMonth: string = body.targetMonth || ""; // "2026/5" 形式（空なら全期間）
 
   if (shopIds.length === 0 && shopNames.length === 0) {
     return NextResponse.json({ error: "shopIds または shopNames が必要です" }, { status: 400 });
@@ -75,7 +76,22 @@ export async function POST(request: NextRequest) {
     resolvedIds = Array.from(new Set(resolvedIds));
   }
 
-  // shop_idで口コミ全件取得
+  // 対象月の日付範囲を計算（"2026/5" → 2026-05-01 〜 2026-05-31）
+  let monthStart = "";
+  let monthEnd = "";
+  if (targetMonth) {
+    const parts = targetMonth.split("/");
+    const y = parseInt(parts[0]);
+    const m = parseInt(parts[1]);
+    if (y && m) {
+      monthStart = `${y}-${String(m).padStart(2, "0")}-01T00:00:00`;
+      const nextM = m === 12 ? 1 : m + 1;
+      const nextY = m === 12 ? y + 1 : y;
+      monthEnd = `${nextY}-${String(nextM).padStart(2, "0")}-01T00:00:00`;
+    }
+  }
+
+  // shop_idで口コミ取得（対象月フィルタ付き）
   let allReviews: any[] = [];
   const pageSize = 1000;
 
@@ -83,12 +99,16 @@ export async function POST(request: NextRequest) {
     const batch = resolvedIds.slice(i, i + 10);
     let from = 0;
     while (from < 5000) {
-      const { data, error } = await supabase
+      let query = supabase
         .from("reviews")
         .select("shop_name, reviewer_name, star_rating, comment, create_time")
         .in("shop_id", batch)
         .not("comment", "is", null)
-        .neq("comment", "")
+        .neq("comment", "");
+      if (monthStart && monthEnd) {
+        query = query.gte("create_time", monthStart).lt("create_time", monthEnd);
+      }
+      const { data, error } = await query
         .order("create_time", { ascending: false })
         .range(from, from + pageSize - 1);
       if (error) { console.error("[review-language-stats]", error.message); break; }

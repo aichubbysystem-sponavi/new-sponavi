@@ -56,6 +56,19 @@ export default function ReviewLanguagePage() {
   const [selectedShops, setSelectedShops] = useState<Set<string>>(new Set());
   const [shopSearch, setShopSearch] = useState("");
 
+  // 対象月セレクタ（直近6ヶ月 + 全期間）
+  const monthOptions = (() => {
+    const opts: { value: string; label: string }[] = [{ value: "", label: "全期間" }];
+    const now = new Date();
+    for (let i = 0; i < 6; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const val = `${d.getFullYear()}/${d.getMonth() + 1}`;
+      opts.push({ value: val, label: val });
+    }
+    return opts;
+  })();
+  const [targetMonth, setTargetMonth] = useState("");
+
   // GBPアカウント一覧を取得 → Go APIの店舗名にマッチング
   useEffect(() => {
     if (shops.length === 0) return;
@@ -130,7 +143,7 @@ export default function ReviewLanguagePage() {
       const res = await fetch("/api/report/review-language-stats", {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ shopIds: targetShopIds }),
+        body: JSON.stringify({ shopIds: targetShopIds, targetMonth }),
         signal: AbortSignal.timeout(120000),
       });
       if (res.ok) {
@@ -152,7 +165,7 @@ export default function ReviewLanguagePage() {
       setError(`通信エラー: ${e?.message || "タイムアウト"}`);
     }
     setLoading(false);
-  }, [selectedShops, shops]);
+  }, [selectedShops, shops, targetMonth]);
 
   async function getAuthHeaders(): Promise<Record<string, string>> {
     const { data } = await supabase.auth.getSession();
@@ -217,6 +230,17 @@ export default function ReviewLanguagePage() {
               <option key={acc.name} value={acc.name}>
                 {acc.label.replace(/\(.*?\)/, "").trim()}（{acc.shopNames.length}店舗）
               </option>
+            ))}
+          </select>
+          <label className="text-sm font-medium text-slate-700">対象月:</label>
+          <select
+            value={targetMonth}
+            onChange={(e) => setTargetMonth(e.target.value)}
+            disabled={loading}
+            className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-1 focus:ring-[#003D6B]"
+          >
+            {monthOptions.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>
           <button
