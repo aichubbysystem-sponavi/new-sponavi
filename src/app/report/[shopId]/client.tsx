@@ -1059,7 +1059,7 @@ export default function ReportClient({
                 {[...monthlyTableData].reverse().map((r, i) => {
                   const isLast = i === 0; // 新しい月が先頭
                   return (
-                    <tr key={i} style={{ background: isLast ? "#f0f4ff" : undefined, fontWeight: isLast ? 600 : undefined }}>
+                    <tr key={i} style={{ background: isLast ? "#cfffE3" : undefined, fontWeight: isLast ? 600 : undefined }}>
                       <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.label}</td>
                       <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.searchMobile.toLocaleString()}</td>
                       <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.searchPC.toLocaleString()}</td>
@@ -1101,9 +1101,9 @@ export default function ReportClient({
               </tr>
               <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>モバイル</td>
                 {charts.searchMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr style={{ background: "#f8f9fa" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>PC</td>
+              <tr style={{ background: "#f8f9fa" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>PC</td>
                 {charts.searchPC.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr><td style={{ padding: "3px 4px", fontWeight: 700, color: "#333" }}>合計</td>
+              <tr><td style={{ padding: "3px 4px", fontWeight: 700, color: "#333", whiteSpace: "nowrap" }}>合計</td>
                 {charts.searchMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700 }}>{(v + charts.searchPC[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
@@ -1129,9 +1129,9 @@ export default function ReportClient({
               </tr>
               <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>モバイル</td>
                 {charts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr style={{ background: "#f8f9fa" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>PC</td>
+              <tr style={{ background: "#f8f9fa" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>PC</td>
                 {charts.mapPC.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr><td style={{ padding: "3px 4px", fontWeight: 700, color: "#333" }}>合計</td>
+              <tr><td style={{ padding: "3px 4px", fontWeight: 700, color: "#333", whiteSpace: "nowrap" }}>合計</td>
                 {charts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700 }}>{(v + charts.mapPC[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
@@ -1159,17 +1159,17 @@ export default function ReportClient({
                 <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60, whiteSpace: "nowrap" }}>月</td>
                 {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l.split("/")[1]}月</td>)}
               </tr>
-              <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>Web</td>
+              <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>Web</td>
                 {charts.websites.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr style={{ background: "#f8f9fa" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>ルート</td>
+              <tr style={{ background: "#f8f9fa" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>ルート</td>
                 {charts.routes.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>通話</td>
+              <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>通話</td>
                 {charts.calls.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr style={{ background: "#f8f9fa" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>メニュー</td>
+              <tr style={{ background: "#f8f9fa" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>メニュー</td>
                 {charts.foodMenus.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666" }}>予約</td>
+              <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>予約</td>
                 {charts.bookings.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr style={{ background: "#e8eaf6" }}><td style={{ padding: "3px 4px", fontWeight: 700, color: "#333" }}>合計</td>
+              <tr style={{ background: "#e8eaf6" }}><td style={{ padding: "3px 4px", fontWeight: 700, color: "#333", whiteSpace: "nowrap" }}>合計</td>
                 {charts.websites.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700 }}>{(v + charts.routes[i] + charts.calls[i] + charts.foodMenus[i] + charts.bookings[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
