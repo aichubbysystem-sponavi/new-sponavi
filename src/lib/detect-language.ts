@@ -41,10 +41,12 @@ export interface LangDetectResult {
 export function detectLanguage(text: string | null | undefined): LangDetectResult {
   if (!text || text.trim().length === 0) return { lang: "不明", country: "不明" };
 
-  const cleaned = text
-    .replace(/\(Original\)[\s\S]*/i, "")     // GBP翻訳の原文マーカー以降を除去
-    .replace(/\(Translated by Google\)/i, "") // 翻訳マーカー除去
-    .trim();
+  // GBP口コミフォーマット: "(Translated by Google) [翻訳] (Original) [原文]"
+  // → 原文（Original以降）があればそちらを判定対象にする
+  const originalMatch = text.match(/\(Original\)\s*([\s\S]+)/i);
+  const cleaned = originalMatch
+    ? originalMatch[1].trim()  // 原文テキストを使用
+    : text.replace(/\(Translated by Google\)/i, "").trim(); // マーカーなしのテキスト
 
   if (!cleaned) return { lang: "不明", country: "不明" };
 
