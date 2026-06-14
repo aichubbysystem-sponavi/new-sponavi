@@ -22,6 +22,10 @@ const nextConfig = {
         destination: "/api/report/:path*", // レポートAPI はNext.js内部で処理
       },
       {
+        source: "/api/pmax/:path*",
+        destination: "/api/pmax/:path*", // P-MAX API はNext.js内部で処理
+      },
+      {
         source: "/api/:path*",
         destination: `${apiUrl}/api/:path*`,
       },

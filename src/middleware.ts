@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 
 // レポートサブドメインのホスト名パターン
 const REPORT_HOSTNAME = "report.new-spotlight-navigator.com";
+const PMAX_HOSTNAME = "p-max.new-spotlight-navigator.com";
 const MAIN_HOSTNAME = "new-spotlight-navigator.com";
 
 // === 壁10: APIレート制限 ===
@@ -48,6 +49,7 @@ const ALLOWED_ORIGINS = [
   `https://${MAIN_HOSTNAME}`,
   `https://www.${MAIN_HOSTNAME}`,
   `https://${REPORT_HOSTNAME}`,
+  `https://${PMAX_HOSTNAME}`,
   "https://new-sponavi.vercel.app",
   "http://localhost:3000",
   "http://localhost:3001",
@@ -86,8 +88,24 @@ export function middleware(request: NextRequest) {
     }
   }
   const isReportSubdomain = hostname === REPORT_HOSTNAME || hostname.startsWith("report.localhost");
+  const isPmaxSubdomain = hostname === PMAX_HOSTNAME || hostname.startsWith("p-max.localhost");
 
   // === サブドメインルーティング ===
+
+  // p-max.* サブドメイン → /pmax/* にリライト
+  if (isPmaxSubdomain) {
+    if (pathname === "/") {
+      const url = request.nextUrl.clone();
+      url.pathname = "/pmax";
+      return addHeaders(NextResponse.rewrite(url), request, false);
+    }
+    if (!pathname.startsWith("/pmax") && !pathname.startsWith("/_next") && !pathname.startsWith("/api") && pathname !== "/favicon.ico" && pathname !== "/login") {
+      const url = request.nextUrl.clone();
+      url.pathname = `/pmax${pathname}`;
+      return addHeaders(NextResponse.rewrite(url), request, false);
+    }
+    return addHeaders(NextResponse.next(), request, false);
+  }
 
   // report.* サブドメイン → /report/* にリライト
   if (isReportSubdomain) {
@@ -105,6 +123,14 @@ export function middleware(request: NextRequest) {
     }
     // report.xxx.com/report/... はそのまま通す
     return addHeaders(NextResponse.next(), request, true);
+  }
+
+  // メインドメインで /pmax にアクセス → サブドメインへリダイレクト（本番のみ）
+  if ((pathname === "/pmax" || pathname.startsWith("/pmax/")) && (hostname === MAIN_HOSTNAME || hostname === `www.${MAIN_HOSTNAME}`)) {
+    const pmaxPath = pathname.replace(/^\/pmax/, "") || "/";
+    const url = new URL(`https://${PMAX_HOSTNAME}${pmaxPath}`);
+    url.search = request.nextUrl.search;
+    return NextResponse.redirect(url, 301);
   }
 
   // メインドメインで /report にアクセス → サブドメインへリダイレクト（本番のみ）

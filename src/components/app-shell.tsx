@@ -9,15 +9,16 @@ import RoleGuard from "@/components/role-guard";
 import ShopProvider from "@/components/shop-provider";
 import FloatingTasks from "@/components/floating-tasks";
 
-export default function AppShell({ children, isReportDomain = false }: { children: React.ReactNode; isReportDomain?: boolean }) {
+export default function AppShell({ children, isReportDomain = false, isPmaxDomain = false }: { children: React.ReactNode; isReportDomain?: boolean; isPmaxDomain?: boolean }) {
   const pathname = usePathname();
 
   const isLoginPage = pathname === "/login";
   const isReportPage = isReportDomain || pathname === "/report" || pathname.startsWith("/report/");
+  const isPmaxPage = isPmaxDomain || pathname === "/pmax" || pathname.startsWith("/pmax/");
 
   return (
     <AuthGuard>
-      {isLoginPage || isReportPage ? (
+      {isLoginPage || isReportPage || isPmaxPage ? (
         children
       ) : (
         <RoleProvider>

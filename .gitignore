@@ -48,6 +48,8 @@ next-env.d.ts
 .claude/
 client_secret*.json
 メモ.txt
+◆広告専用◆/
+get-ads-token.js
 ログ.txt
 貼り付け用.txt
 

@@ -20,11 +20,12 @@ export default function RootLayout({
   const headersList = headers();
   const host = headersList.get("host") || "";
   const isReportDomain = host.startsWith("report.");
+  const isPmaxDomain = host.startsWith("p-max.");
 
   return (
     <html lang="ja">
       <body className="antialiased bg-white text-[#324567]">
-        <AppShell isReportDomain={isReportDomain}>{children}</AppShell>
+        <AppShell isReportDomain={isReportDomain} isPmaxDomain={isPmaxDomain}>{children}</AppShell>
       </body>
     </html>
   );
