@@ -1,10 +1,10 @@
 /**
  * Google Ads API ヘルパー
- * Google Ads API v17 (REST) を使用してレポートデータを取得
+ * Google Ads API v20 (REST) を使用してレポートデータを取得
  */
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
-const ADS_API_URL = "https://googleads.googleapis.com/v17";
+const ADS_API_URL = "https://googleads.googleapis.com/v20";
 
 let cachedAccessToken: { token: string; expiresAt: number } | null = null;
 
@@ -44,7 +44,7 @@ async function executeGaql(customerId: string, query: string): Promise<any[]> {
   const mccId = process.env.GOOGLE_ADS_MCC_ID!;
 
   const res = await fetch(
-    `${ADS_API_URL}/customers/${customerId}/googleAds:searchStream`,
+    `${ADS_API_URL}/customers/${customerId}/googleAds:search`,
     {
       method: "POST",
       headers: {
@@ -53,7 +53,7 @@ async function executeGaql(customerId: string, query: string): Promise<any[]> {
         "login-customer-id": mccId,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query, pageSize: 10000 }),
     }
   );
 
@@ -63,16 +63,7 @@ async function executeGaql(customerId: string, query: string): Promise<any[]> {
   }
 
   const data = await res.json();
-  // searchStream は配列で返る、各要素に results がある
-  const results: any[] = [];
-  if (Array.isArray(data)) {
-    for (const batch of data) {
-      if (batch.results) {
-        results.push(...batch.results);
-      }
-    }
-  }
-  return results;
+  return data.results || [];
 }
 
 /** MCC配下の全アカウント（クライアント）を取得 */
@@ -94,7 +85,7 @@ export async function listAccounts(): Promise<
   `;
 
   const results = await executeGaql(mccId, query);
-  return results.map((r) => ({
+  return results.map((r: any) => ({
     customerId: r.customerClient.clientCustomer.replace("customers/", ""),
     name: r.customerClient.descriptiveName || "",
     status: r.customerClient.status || "",
@@ -182,7 +173,7 @@ export async function getCampaignMonthly(
 
   const results = await executeGaql(customerId, query);
 
-  return results.map((r) => ({
+  return results.map((r: any) => ({
     campaignName: r.campaign?.name || "",
     campaignId: String(r.campaign?.id || ""),
     month: r.segments?.month || "",
@@ -229,7 +220,7 @@ export async function getCampaignDaily(
 
   const results = await executeGaql(customerId, query);
 
-  return results.map((r) => ({
+  return results.map((r: any) => ({
     campaignName: r.campaign?.name || "",
     campaignId: String(r.campaign?.id || ""),
     date: r.segments?.date || "",
