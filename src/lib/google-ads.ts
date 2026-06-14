@@ -53,7 +53,7 @@ async function executeGaql(customerId: string, query: string): Promise<any[]> {
         "login-customer-id": mccId,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ query, pageSize: 10000 }),
+      body: JSON.stringify({ query }),
     }
   );
 
