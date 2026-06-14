@@ -237,6 +237,7 @@ export default function PmaxReportPage() {
     setLoading(true);
     setError("");
 
+    const now = new Date();
     const curMonth = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, "0")}`;
     const prevMonth = `${now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear()}/${String(now.getMonth() === 0 ? 12 : now.getMonth()).padStart(2, "0")}`;
 
