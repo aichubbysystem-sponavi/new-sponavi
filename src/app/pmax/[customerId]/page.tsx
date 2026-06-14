@@ -7,15 +7,13 @@ import {
   CategoryScale,
   LinearScale,
   BarElement,
-  LineElement,
-  PointElement,
   Title,
   Tooltip,
   Legend,
 } from "chart.js";
-import { Bar, Line } from "react-chartjs-2";
+import { Bar } from "react-chartjs-2";
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend);
+ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
 // ==============================
 // 型定義
@@ -44,28 +42,113 @@ type MonthlyData = { campaigns: Record<string, CampaignRow[]> };
 type DailyData = { campaigns: Record<string, CampaignRow[]> };
 
 // ==============================
+// 定数 (MEOレポート準拠)
+// ==============================
+const SLIDE_W = 1123;
+const SLIDE_H = 794;
+
+const kpiTopColors = [
+  "linear-gradient(90deg,#4fc3f7,#0288d1)",
+  "linear-gradient(90deg,#81c784,#388e3c)",
+  "linear-gradient(90deg,#ffb74d,#f57c00)",
+  "linear-gradient(90deg,#ba68c8,#7b1fa2)",
+  "linear-gradient(90deg,#e57373,#d32f2f)",
+  "linear-gradient(90deg,#4db6ac,#00897b)",
+  "linear-gradient(90deg,#7986cb,#3949ab)",
+  "linear-gradient(90deg,#ffd54f,#fbc02d)",
+];
+
+const chartColors = [
+  "rgba(79,195,247,.75)",
+  "rgba(129,199,132,.75)",
+  "rgba(255,183,77,.75)",
+  "rgba(186,104,200,.75)",
+  "rgba(231,115,115,.75)",
+  "rgba(77,182,172,.75)",
+  "rgba(121,134,203,.75)",
+  "rgba(255,213,79,.75)",
+];
+
+const chartBorderColors = [
+  "rgba(2,136,209,1)",
+  "rgba(56,142,60,1)",
+  "rgba(245,124,0,1)",
+  "rgba(123,31,162,1)",
+  "rgba(211,47,47,1)",
+  "rgba(0,137,123,1)",
+  "rgba(57,73,171,1)",
+  "rgba(251,192,45,1)",
+];
+
+// ==============================
+// スタイル定数
+// ==============================
+const slideStyle: React.CSSProperties = {
+  width: SLIDE_W,
+  minHeight: SLIDE_H,
+  margin: "20px auto",
+  background: "#f0f2f5",
+  borderRadius: 8,
+  overflow: "hidden",
+  boxShadow: "0 8px 40px rgba(0,0,0,.4)",
+  display: "flex",
+  flexDirection: "column",
+  pageBreakAfter: "always",
+  pageBreakInside: "avoid",
+};
+
+const slideBarStyle: React.CSSProperties = {
+  background: "linear-gradient(135deg,#1a1a2e,#0f3460)",
+  color: "#fff",
+  padding: "12px 36px",
+  fontSize: 16,
+  fontWeight: 700,
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  flexShrink: 0,
+  letterSpacing: 0.5,
+};
+
+const slideBodyStyle: React.CSSProperties = {
+  flex: 1,
+  padding: "28px 36px",
+  display: "flex",
+  flexDirection: "column",
+  justifyContent: "center",
+  overflow: "hidden",
+};
+
+const stitleStyle: React.CSSProperties = {
+  fontSize: 17,
+  fontWeight: 700,
+  color: "#0f3460",
+  borderLeft: "4px solid #e94560",
+  paddingLeft: 12,
+  marginBottom: 16,
+};
+
+// ==============================
 // ユーティリティ
 // ==============================
-const formatCost = (micros: number) =>
-  `¥${Math.round(micros / 1_000_000).toLocaleString()}`;
-
-const formatCpc = (micros: number) =>
-  `¥${Math.round(micros / 1_000_000).toLocaleString()}`;
-
+const formatCost = (micros: number) => `¥${Math.round(micros / 1_000_000).toLocaleString()}`;
+const formatCpc = (micros: number) => `¥${Math.round(micros / 1_000_000).toLocaleString()}`;
 const formatCtr = (ctr: number) => `${(ctr * 100).toFixed(2)}%`;
-
 const formatMonth = (m: string) => {
   if (!m) return "";
   const d = new Date(m);
   return `${d.getFullYear()}/${d.getMonth() + 1}`;
 };
-
+const formatMonthShort = (m: string) => {
+  if (!m) return "";
+  const d = new Date(m);
+  return `${d.getMonth() + 1}月`;
+};
 const formatDate = (d: string) => {
   if (!d) return "";
   return d.replace(/^(\d{4})-(\d{2})-(\d{2})$/, "$2/$3");
 };
 
-// 日付ヘルパー
 function getDateRange(monthsBack: number) {
   const end = new Date();
   const start = new Date();
@@ -83,11 +166,37 @@ function getCurrentMonthRange() {
   return { startDate: fmt(start), endDate: fmt(end) };
 }
 
-// チャート色
-const COLORS = [
-  "#003D6B", "#E67E22", "#27AE60", "#8E44AD", "#E74C3C",
-  "#3498DB", "#F39C12", "#1ABC9C", "#9B59B6", "#2ECC71",
-];
+function getPrevMonthRange() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const end = new Date(now.getFullYear(), now.getMonth(), 0);
+  const fmt = (d: Date) => d.toISOString().split("T")[0];
+  return { startDate: fmt(start), endDate: fmt(end) };
+}
+
+// 前月比バッジ
+function MomBadge({ current, previous }: { current: number; previous: number }) {
+  if (previous === 0 && current === 0) return <span style={badgeStyle(false, true)}>→ 0.0% 前月比</span>;
+  if (previous === 0) return <span style={badgeStyle(true)}>▲ NEW 前月比</span>;
+  const pct = ((current - previous) / previous) * 100;
+  const isUp = pct > 0;
+  const isFlat = Math.abs(pct) < 0.5;
+  const arrow = isFlat ? "→" : isUp ? "▲" : "▼";
+  const text = `${arrow} ${isFlat ? "0.0" : (isUp ? "+" : "") + pct.toFixed(1)}%（${previous.toLocaleString()}→${current.toLocaleString()}）前月比`;
+  return <span style={badgeStyle(isUp, isFlat)}>{text}</span>;
+}
+
+function badgeStyle(isUp: boolean, isFlat?: boolean): React.CSSProperties {
+  return {
+    display: "inline-block",
+    padding: "2px 7px",
+    borderRadius: 16,
+    fontSize: 11,
+    fontWeight: 600,
+    background: isFlat ? "#f0f0f0" : isUp ? "#e6f9ee" : "#fde8e8",
+    color: isFlat ? "#888" : isUp ? "#0a8f3c" : "#c0392b",
+  };
+}
 
 // ==============================
 // メインコンポーネント
@@ -96,19 +205,20 @@ export default function PmaxReportPage() {
   const { customerId } = useParams<{ customerId: string }>();
   const router = useRouter();
 
-  const [activeTab, setActiveTab] = useState(0);
   const [accountName, setAccountName] = useState("");
   const [summary, setSummary] = useState<SummaryData | null>(null);
+  const [prevSummary, setPrevSummary] = useState<SummaryData | null>(null);
   const [monthlyData, setMonthlyData] = useState<MonthlyData | null>(null);
   const [dailyData, setDailyData] = useState<DailyData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // データ取得
   useEffect(() => {
     if (!customerId) return;
 
     const { startDate: mStart, endDate: mEnd } = getDateRange(12);
+    const { startDate: cStart, endDate: cEnd } = getCurrentMonthRange();
+    const { startDate: pStart, endDate: pEnd } = getPrevMonthRange();
     const { startDate: dStart, endDate: dEnd } = getCurrentMonthRange();
 
     setLoading(true);
@@ -116,18 +226,17 @@ export default function PmaxReportPage() {
 
     Promise.all([
       fetch(`/api/pmax/accounts`).then((r) => r.json()),
-      fetch(`/api/pmax/summary?customerId=${customerId}&startDate=${mStart}&endDate=${mEnd}`).then((r) => r.json()),
+      fetch(`/api/pmax/summary?customerId=${customerId}&startDate=${cStart}&endDate=${cEnd}`).then((r) => r.json()),
+      fetch(`/api/pmax/summary?customerId=${customerId}&startDate=${pStart}&endDate=${pEnd}`).then((r) => r.json()),
       fetch(`/api/pmax/monthly?customerId=${customerId}&startDate=${mStart}&endDate=${mEnd}`).then((r) => r.json()),
       fetch(`/api/pmax/daily?customerId=${customerId}&startDate=${dStart}&endDate=${dEnd}`).then((r) => r.json()),
     ])
-      .then(([accountsRes, summaryRes, monthlyRes, dailyRes]) => {
-        const acct = (accountsRes.accounts || []).find(
-          (a: any) => a.customerId === customerId
-        );
+      .then(([accountsRes, summaryRes, prevSummaryRes, monthlyRes, dailyRes]) => {
+        const acct = (accountsRes.accounts || []).find((a: any) => a.customerId === customerId);
         setAccountName(acct?.name || customerId);
-
         if (summaryRes.error) throw new Error(summaryRes.error);
         setSummary(summaryRes);
+        setPrevSummary(prevSummaryRes.error ? null : prevSummaryRes);
         setMonthlyData(monthlyRes);
         setDailyData(dailyRes);
       })
@@ -135,14 +244,13 @@ export default function PmaxReportPage() {
       .finally(() => setLoading(false));
   }, [customerId]);
 
-  const tabs = ["サマリー", "グラフ", "月次推移", "日次データ"];
-
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin w-10 h-10 border-3 border-[#003D6B] border-t-transparent rounded-full mx-auto" />
-          <p className="mt-4 text-sm text-slate-500">レポートデータを取得中...</p>
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#1a1a2e" }}>
+        <div style={{ textAlign: "center", color: "#fff" }}>
+          <div style={{ width: 40, height: 40, border: "3px solid rgba(255,255,255,.3)", borderTopColor: "#e94560", borderRadius: "50%", animation: "spin 1s linear infinite", margin: "0 auto" }} />
+          <p style={{ marginTop: 16, fontSize: 14, opacity: 0.7 }}>レポートデータを取得中...</p>
+          <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
         </div>
       </div>
     );
@@ -150,11 +258,11 @@ export default function PmaxReportPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-6">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-6 max-w-lg w-full">
-          <h2 className="text-lg font-bold text-red-700 mb-2">エラー</h2>
-          <p className="text-sm text-red-600">{error}</p>
-          <button onClick={() => router.push("/pmax")} className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#1a1a2e", padding: 24 }}>
+        <div style={{ background: "#fff", borderRadius: 12, padding: 32, maxWidth: 500, width: "100%" }}>
+          <h2 style={{ color: "#c0392b", fontSize: 18, fontWeight: 700, marginBottom: 8 }}>エラー</h2>
+          <p style={{ color: "#666", fontSize: 14 }}>{error}</p>
+          <button onClick={() => router.push("/pmax")} style={{ marginTop: 16, padding: "8px 20px", background: "#0f3460", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14 }}>
             戻る
           </button>
         </div>
@@ -162,305 +270,305 @@ export default function PmaxReportPage() {
     );
   }
 
+  const now = new Date();
+  const currentMonth = `${now.getFullYear()}/${now.getMonth() + 1}`;
+  const periodStart = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, "0")}/01`;
+  const periodEnd = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, "0")}/${new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()}`;
+
+  const totalPages = 2 + (monthlyData ? Object.keys(monthlyData.campaigns).length : 0) + (dailyData ? Object.keys(dailyData.campaigns).length : 0);
+  let pageNum = 0;
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
-      {/* ヘッダー */}
-      <header className="bg-white border-b border-slate-200 shadow-sm sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <button onClick={() => router.push("/pmax")} className="text-slate-400 hover:text-slate-700">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
-            <div>
-              <h1 className="text-lg font-bold text-slate-800">{accountName}</h1>
-              <p className="text-xs text-slate-400">
-                ID: {customerId.replace(/(\d{3})(\d{3})(\d{4})/, "$1-$2-$3")}
-              </p>
+    <div style={{ background: "#1a1a2e", minHeight: "100vh", paddingBottom: 40 }}>
+      {/* トップバー */}
+      <div className="no-print" style={{ background: "rgba(0,0,0,0.3)", padding: "12px 32px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100, backdropFilter: "blur(10px)" }}>
+        <button onClick={() => router.push("/pmax")} style={{ color: "rgba(255,255,255,0.8)", background: "none", border: "none", cursor: "pointer", fontSize: 14 }}>
+          ← アカウント一覧に戻る
+        </button>
+        <div style={{ display: "flex", gap: 12 }}>
+          <span style={{ fontSize: 12, color: "#4fc3f7", background: "rgba(79,195,247,0.15)", padding: "4px 12px", borderRadius: 20, border: "1px solid rgba(79,195,247,0.3)" }}>
+            P-MAX広告レポート
+          </span>
+        </div>
+      </div>
+
+      {/* ===== P1: サマリー ===== */}
+      {summary && (() => {
+        pageNum++;
+        const kpis = [
+          { label: "総表示回数", value: summary.impressions, prev: prevSummary?.impressions || 0, format: (v: number) => v.toLocaleString() },
+          { label: "総クリック", value: summary.clicks, prev: prevSummary?.clicks || 0, format: (v: number) => v.toLocaleString() },
+          { label: "総広告費", value: summary.costMicros, prev: prevSummary?.costMicros || 0, format: (v: number) => formatCost(v) },
+          { label: "合計来店数", value: 0, prev: 0, format: (v: number) => v.toLocaleString(), placeholder: true },
+          { label: "電話", value: 0, prev: 0, format: (v: number) => v.toLocaleString(), placeholder: true },
+          { label: "経路案内", value: 0, prev: 0, format: (v: number) => v.toLocaleString(), placeholder: true },
+          { label: "メニュークリック", value: 0, prev: 0, format: (v: number) => v.toLocaleString(), placeholder: true },
+          { label: "予約", value: 0, prev: 0, format: (v: number) => v.toLocaleString(), placeholder: true },
+          { label: "保存・共有", value: 0, prev: 0, format: (v: number) => v.toLocaleString(), placeholder: true },
+        ];
+
+        return (
+          <div style={slideStyle}>
+            {/* ヘッダー */}
+            <div style={{ background: "linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%)", color: "#fff", padding: "28px 36px 20px", flexShrink: 0, position: "relative" }}>
+              <h1 style={{ margin: 0, fontSize: 26, fontWeight: 900, letterSpacing: 1 }}>{accountName}</h1>
+              <div style={{ fontSize: 13, opacity: 0.7, marginTop: 2 }}>P-MAX広告 レポート報告</div>
+              <div style={{ position: "absolute", top: 28, right: 36, background: "rgba(255,255,255,.12)", padding: "7px 18px", borderRadius: 8, fontSize: 13, fontWeight: 600 }}>
+                {periodStart} - {periodEnd}
+              </div>
+            </div>
+
+            {/* 情報バー */}
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", padding: "10px 36px", background: "#e8eaf0", flexShrink: 0 }}>
+              <div style={{ background: "#fff", borderRadius: 10, padding: "7px 14px", fontSize: 12, display: "flex", alignItems: "center", gap: 5, boxShadow: "0 1px 3px rgba(0,0,0,.05)" }}>
+                <span style={{ color: "#888" }}>レポート対象</span>
+                <span style={{ fontWeight: 700 }}>{currentMonth}</span>
+              </div>
+              <div style={{ background: "#fff", borderRadius: 10, padding: "7px 14px", fontSize: 12, display: "flex", alignItems: "center", gap: 5, boxShadow: "0 1px 3px rgba(0,0,0,.05)" }}>
+                <span style={{ color: "#888" }}>広告タイプ</span>
+                <span style={{ fontWeight: 700 }}>P-MAX</span>
+              </div>
+              <div style={{ background: "#fff", borderRadius: 10, padding: "7px 14px", fontSize: 12, display: "flex", alignItems: "center", gap: 5, boxShadow: "0 1px 3px rgba(0,0,0,.05)" }}>
+                <span style={{ color: "#888" }}>アカウントID</span>
+                <span style={{ fontWeight: 700 }}>{customerId.replace(/(\d{3})(\d{3})(\d{4})/, "$1-$2-$3")}</span>
+              </div>
+            </div>
+
+            {/* KPIカード */}
+            <div style={{ flex: 1, padding: "20px 36px", overflow: "hidden" }}>
+              <div style={stitleStyle}>主要指標サマリー（{currentMonth}）</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+                {kpis.map((kpi, i) => (
+                  <div key={kpi.label} style={{ background: "#fff", borderRadius: 12, padding: "14px 16px", position: "relative", overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                    <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: 3, background: kpiTopColors[i % 8] }} />
+                    <div style={{ fontSize: 12, color: "#888", fontWeight: 500 }}>{kpi.label}</div>
+                    <div style={{ fontSize: 26, fontWeight: 900, lineHeight: 1.1, margin: "4px 0", color: (kpi as any).placeholder ? "#ccc" : undefined }}>
+                      {(kpi as any).placeholder ? "—" : kpi.format(kpi.value)}
+                    </div>
+                    {!(kpi as any).placeholder ? (
+                      <MomBadge current={kpi.label === "総広告費" ? Math.round(kpi.value / 1_000_000) : kpi.value} previous={kpi.label === "総広告費" ? Math.round(kpi.prev / 1_000_000) : kpi.prev} />
+                    ) : (
+                      <span style={{ fontSize: 10, color: "#bbb" }}>スプレッドシート連携予定</span>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
-        {/* タブ */}
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="flex gap-1 border-t border-slate-100 pt-1">
-            {tabs.map((tab, i) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(i)}
-                className={`px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors ${
-                  activeTab === i
-                    ? "bg-[#003D6B] text-white"
-                    : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
-                }`}
-              >
-                {tab}
-              </button>
-            ))}
+        );
+      })()}
+
+      {/* ===== P2: 棒グラフ（広告指標推移） ===== */}
+      {monthlyData && (() => {
+        pageNum++;
+        const campaignNames = Object.keys(monthlyData.campaigns);
+        const allMonths = Array.from(new Set(Object.values(monthlyData.campaigns).flat().map(r => r.month).filter(Boolean))).sort() as string[];
+
+        // 表示回数の積み上げ棒グラフデータ
+        const datasets = campaignNames.map((name, i) => {
+          const rows = monthlyData.campaigns[name];
+          const monthMap = new Map(rows.map(r => [r.month, r.impressions]));
+          return {
+            label: name,
+            data: allMonths.map(m => monthMap.get(m) || 0),
+            backgroundColor: chartColors[i % chartColors.length],
+            borderColor: chartBorderColors[i % chartBorderColors.length],
+            borderWidth: 1,
+          };
+        });
+
+        // 月別合計
+        const monthTotals = allMonths.map((_, mi) => datasets.reduce((s, ds) => s + (ds.data[mi] || 0), 0));
+
+        return (
+          <div style={slideStyle}>
+            <div style={slideBarStyle}>
+              <span>{accountName} — 広告表示回数推移</span>
+              <span>{pageNum} / {totalPages}</span>
+            </div>
+            <div style={slideBodyStyle}>
+              <div style={{ height: 350 }}>
+                <Bar
+                  data={{ labels: allMonths.map(formatMonthShort), datasets }}
+                  options={{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                      legend: { position: "top", labels: { font: { size: 11 } } },
+                      tooltip: {
+                        mode: "index",
+                        intersect: false,
+                        callbacks: { afterBody: (items) => "合計: " + items.reduce((s, i) => s + (i.raw as number), 0).toLocaleString() },
+                      },
+                    },
+                    scales: {
+                      x: { stacked: true, grid: { display: false } },
+                      y: { stacked: true, beginAtZero: true, grid: { color: "#f0f0f0" }, ticks: { callback: (v) => Number(v).toLocaleString() } },
+                    },
+                  }}
+                />
+              </div>
+              {/* テーブル */}
+              <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 11 }}>
+                <tbody>
+                  <tr style={{ background: "#f8f9fa" }}>
+                    <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 70 }}>月</td>
+                    {allMonths.map(m => <td key={m} style={{ textAlign: "center", padding: "3px 4px", fontWeight: 600, color: "#666" }}>{formatMonthShort(m)}</td>)}
+                  </tr>
+                  {campaignNames.map((name, i) => (
+                    <tr key={name} style={{ background: i % 2 === 0 ? "#fff" : "#f8f9fb" }}>
+                      <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", fontSize: 10, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 70 }}>{name}</td>
+                      {allMonths.map(m => {
+                        const row = monthlyData.campaigns[name].find(r => r.month === m);
+                        return <td key={m} style={{ textAlign: "center", padding: "3px 4px" }}>{(row?.impressions || 0).toLocaleString()}</td>;
+                      })}
+                    </tr>
+                  ))}
+                  <tr style={{ background: "#e8eaf0", fontWeight: 700 }}>
+                    <td style={{ padding: "3px 4px", color: "#333" }}>合計</td>
+                    {monthTotals.map((t, i) => <td key={i} style={{ textAlign: "center", padding: "3px 4px", color: "#333" }}>{t.toLocaleString()}</td>)}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
-      </header>
+        );
+      })()}
 
-      {/* コンテンツ */}
-      <main className="max-w-7xl mx-auto px-6 py-6">
-        {activeTab === 0 && summary && <SummaryTab data={summary} />}
-        {activeTab === 1 && monthlyData && <ChartTab data={monthlyData} />}
-        {activeTab === 2 && monthlyData && <MonthlyTab data={monthlyData} />}
-        {activeTab === 3 && dailyData && <DailyTab data={dailyData} />}
-      </main>
-    </div>
-  );
-}
+      {/* ===== P3: 言語別月次推移 ===== */}
+      {monthlyData && Object.entries(monthlyData.campaigns).map(([campaignName, rows]) => {
+        pageNum++;
+        const sortedRows = [...rows].sort((a, b) => (a.month || "").localeCompare(b.month || ""));
 
-// ==============================
-// ページ1: サマリー
-// ==============================
-function SummaryTab({ data }: { data: SummaryData }) {
-  const cards = [
-    { label: "総表示回数", value: data.impressions.toLocaleString(), icon: "👁" },
-    { label: "総クリック", value: data.clicks.toLocaleString(), icon: "👆" },
-    { label: "総広告費", value: formatCost(data.costMicros), icon: "💰" },
-    { label: "クリック率", value: formatCtr(data.interactionRate), icon: "📊" },
-    { label: "コンバージョン", value: Math.round(data.conversions).toLocaleString(), icon: "🎯" },
-    {
-      label: "平均CPC",
-      value: data.clicks > 0 ? formatCpc(data.costMicros / data.clicks) : "¥0",
-      icon: "💵",
-    },
-  ];
+        const impressionsData = {
+          labels: sortedRows.map(r => formatMonthShort(r.month || "")),
+          datasets: [
+            {
+              label: "表示回数",
+              data: sortedRows.map(r => r.impressions),
+              backgroundColor: "rgba(79,195,247,.75)",
+              borderColor: "rgba(2,136,209,1)",
+              borderWidth: 1,
+            },
+          ],
+        };
 
-  return (
-    <div>
-      <h2 className="text-base font-semibold text-slate-700 mb-4">直近12ヶ月 サマリー</h2>
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        {cards.map((card) => (
-          <div key={card.label} className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-            <p className="text-xs text-slate-500 mb-1">{card.label}</p>
-            <p className="text-2xl font-bold text-slate-800">{card.value}</p>
+        return (
+          <div key={campaignName} style={slideStyle}>
+            <div style={slideBarStyle}>
+              <span>{accountName} — {campaignName} 月次推移</span>
+              <span>{pageNum} / {totalPages}</span>
+            </div>
+            <div style={slideBodyStyle}>
+              <div style={{ height: 280 }}>
+                <Bar
+                  data={impressionsData}
+                  options={{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                      x: { grid: { display: false } },
+                      y: { beginAtZero: true, grid: { color: "#f0f0f0" }, ticks: { callback: (v) => Number(v).toLocaleString() } },
+                    },
+                  }}
+                />
+              </div>
+              {/* データテーブル */}
+              <table style={{ width: "95%", margin: "12px auto 0", borderCollapse: "collapse", fontSize: 11 }}>
+                <thead>
+                  <tr>
+                    <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600 }}>月</th>
+                    {sortedRows.map((r, i) => (
+                      <th key={i} style={{ background: i === sortedRows.length - 1 ? "#e94560" : "#0f3460", color: "#fff", padding: "6px 4px", fontWeight: 600, textAlign: "center" }}>
+                        {formatMonthShort(r.month || "")}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td style={{ padding: "4px 8px", fontWeight: 600, color: "#666", background: "#f8f9fa" }}>表示回数</td>
+                    {sortedRows.map((r, i) => <td key={i} style={{ textAlign: "center", padding: "4px", background: i === sortedRows.length - 1 ? "#fff8f0" : undefined }}>{r.impressions.toLocaleString()}</td>)}
+                  </tr>
+                  <tr style={{ background: "#f8f9fb" }}>
+                    <td style={{ padding: "4px 8px", fontWeight: 600, color: "#666" }}>クリック数</td>
+                    {sortedRows.map((r, i) => <td key={i} style={{ textAlign: "center", padding: "4px", background: i === sortedRows.length - 1 ? "#fff8f0" : undefined }}>{r.clicks.toLocaleString()}</td>)}
+                  </tr>
+                  <tr>
+                    <td style={{ padding: "4px 8px", fontWeight: 600, color: "#666", background: "#f8f9fa" }}>クリック率</td>
+                    {sortedRows.map((r, i) => <td key={i} style={{ textAlign: "center", padding: "4px", background: i === sortedRows.length - 1 ? "#fff8f0" : undefined }}>{formatCtr(r.ctr)}</td>)}
+                  </tr>
+                  <tr style={{ background: "#f8f9fb" }}>
+                    <td style={{ padding: "4px 8px", fontWeight: 600, color: "#666" }}>平均CPC</td>
+                    {sortedRows.map((r, i) => <td key={i} style={{ textAlign: "center", padding: "4px", background: i === sortedRows.length - 1 ? "#fff8f0" : undefined }}>{formatCpc(r.averageCpc)}</td>)}
+                  </tr>
+                  <tr>
+                    <td style={{ padding: "4px 8px", fontWeight: 600, color: "#666", background: "#f8f9fa" }}>広告費</td>
+                    {sortedRows.map((r, i) => <td key={i} style={{ textAlign: "center", padding: "4px", fontWeight: 700, background: i === sortedRows.length - 1 ? "#fff8f0" : undefined }}>{formatCost(r.costMicros)}</td>)}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+        );
+      })}
 
-// ==============================
-// ページ2: グラフ
-// ==============================
-function ChartTab({ data }: { data: MonthlyData }) {
-  const campaignNames = Object.keys(data.campaigns);
+      {/* ===== P4: 言語別日次データ ===== */}
+      {dailyData && Object.entries(dailyData.campaigns).map(([campaignName, rows]) => {
+        pageNum++;
+        const sortedRows = [...rows].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
 
-  // 全月を集約
-  const allMonths = useMemo(() => {
-    const set = new Set<string>();
-    for (const rows of Object.values(data.campaigns)) {
-      for (const r of rows) if (r.month) set.add(r.month);
-    }
-    return Array.from(set).sort();
-  }, [data]);
-
-  // 表示回数の棒グラフ
-  const impressionsChart = useMemo(() => ({
-    labels: allMonths.map(formatMonth),
-    datasets: campaignNames.map((name, i) => {
-      const rows = data.campaigns[name];
-      const monthMap = new Map(rows.map((r) => [r.month, r.impressions]));
-      return {
-        label: name,
-        data: allMonths.map((m) => monthMap.get(m) || 0),
-        backgroundColor: COLORS[i % COLORS.length],
-      };
-    }),
-  }), [data, allMonths, campaignNames]);
-
-  // 広告費の棒グラフ
-  const costChart = useMemo(() => ({
-    labels: allMonths.map(formatMonth),
-    datasets: campaignNames.map((name, i) => {
-      const rows = data.campaigns[name];
-      const monthMap = new Map(rows.map((r) => [r.month, Math.round(r.costMicros / 1_000_000)]));
-      return {
-        label: name,
-        data: allMonths.map((m) => monthMap.get(m) || 0),
-        backgroundColor: COLORS[i % COLORS.length],
-      };
-    }),
-  }), [data, allMonths, campaignNames]);
-
-  const barOptions = {
-    responsive: true,
-    plugins: { legend: { position: "top" as const } },
-    scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } },
-  };
-
-  return (
-    <div className="space-y-8">
-      <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
-        <h3 className="text-sm font-semibold text-slate-700 mb-4">月別 表示回数（キャンペーン別）</h3>
-        <Bar data={impressionsChart} options={barOptions} />
-      </div>
-      <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
-        <h3 className="text-sm font-semibold text-slate-700 mb-4">月別 広告費（キャンペーン別）</h3>
-        <Bar data={costChart} options={{ ...barOptions, scales: { ...barOptions.scales, y: { ...barOptions.scales.y, ticks: { callback: (v: any) => `¥${v.toLocaleString()}` } } } }} />
-      </div>
-    </div>
-  );
-}
-
-// ==============================
-// ページ3: 月次推移（言語別テーブル）
-// ==============================
-function MonthlyTab({ data }: { data: MonthlyData }) {
-  const campaignNames = Object.keys(data.campaigns);
-  const [selected, setSelected] = useState(campaignNames[0] || "");
-
-  const rows = data.campaigns[selected] || [];
-
-  return (
-    <div>
-      <div className="flex items-center gap-3 mb-4 flex-wrap">
-        <h2 className="text-base font-semibold text-slate-700">月次推移</h2>
-        <div className="flex gap-2 flex-wrap">
-          {campaignNames.map((name) => (
-            <button
-              key={name}
-              onClick={() => setSelected(name)}
-              className={`px-3 py-1.5 text-xs rounded-full border transition-colors ${
-                selected === name
-                  ? "bg-[#003D6B] text-white border-[#003D6B]"
-                  : "bg-white text-slate-600 border-slate-200 hover:border-[#003D6B]/30"
-              }`}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-slate-50 border-b border-slate-200">
-              <th className="px-4 py-3 text-left font-medium text-slate-600">月</th>
-              <th className="px-4 py-3 text-right font-medium text-slate-600">表示回数</th>
-              <th className="px-4 py-3 text-right font-medium text-slate-600">クリック数</th>
-              <th className="px-4 py-3 text-right font-medium text-slate-600">クリック率</th>
-              <th className="px-4 py-3 text-right font-medium text-slate-600">平均CPC</th>
-              <th className="px-4 py-3 text-right font-medium text-slate-600">広告費</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, i) => (
-              <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
-                <td className="px-4 py-3 text-slate-700">{formatMonth(row.month || "")}</td>
-                <td className="px-4 py-3 text-right text-slate-800">{row.impressions.toLocaleString()}</td>
-                <td className="px-4 py-3 text-right text-slate-800">{row.clicks.toLocaleString()}</td>
-                <td className="px-4 py-3 text-right text-slate-800">{formatCtr(row.ctr)}</td>
-                <td className="px-4 py-3 text-right text-slate-800">{formatCpc(row.averageCpc)}</td>
-                <td className="px-4 py-3 text-right font-medium text-slate-800">{formatCost(row.costMicros)}</td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">データがありません</td></tr>
-            )}
-          </tbody>
-          {rows.length > 0 && (
-            <tfoot>
-              <tr className="bg-slate-50 font-semibold">
-                <td className="px-4 py-3 text-slate-700">合計</td>
-                <td className="px-4 py-3 text-right text-slate-800">{rows.reduce((s, r) => s + r.impressions, 0).toLocaleString()}</td>
-                <td className="px-4 py-3 text-right text-slate-800">{rows.reduce((s, r) => s + r.clicks, 0).toLocaleString()}</td>
-                <td className="px-4 py-3 text-right text-slate-800">
-                  {formatCtr(rows.reduce((s, r) => s + r.clicks, 0) / Math.max(rows.reduce((s, r) => s + r.impressions, 0), 1))}
-                </td>
-                <td className="px-4 py-3 text-right text-slate-800">
-                  {formatCpc(rows.reduce((s, r) => s + r.costMicros, 0) / Math.max(rows.reduce((s, r) => s + r.clicks, 0), 1))}
-                </td>
-                <td className="px-4 py-3 text-right text-slate-800">{formatCost(rows.reduce((s, r) => s + r.costMicros, 0))}</td>
-              </tr>
-            </tfoot>
-          )}
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ==============================
-// ページ4: 日次データ（言語別テーブル）
-// ==============================
-function DailyTab({ data }: { data: DailyData }) {
-  const campaignNames = Object.keys(data.campaigns);
-  const [selected, setSelected] = useState(campaignNames[0] || "");
-
-  const rows = data.campaigns[selected] || [];
-
-  return (
-    <div>
-      <div className="flex items-center gap-3 mb-4 flex-wrap">
-        <h2 className="text-base font-semibold text-slate-700">日次データ（今月）</h2>
-        <div className="flex gap-2 flex-wrap">
-          {campaignNames.map((name) => (
-            <button
-              key={name}
-              onClick={() => setSelected(name)}
-              className={`px-3 py-1.5 text-xs rounded-full border transition-colors ${
-                selected === name
-                  ? "bg-[#003D6B] text-white border-[#003D6B]"
-                  : "bg-white text-slate-600 border-slate-200 hover:border-[#003D6B]/30"
-              }`}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-slate-50 border-b border-slate-200">
-              <th className="px-4 py-3 text-left font-medium text-slate-600">日付</th>
-              <th className="px-4 py-3 text-right font-medium text-slate-600">表示回数</th>
-              <th className="px-4 py-3 text-right font-medium text-slate-600">クリック数</th>
-              <th className="px-4 py-3 text-right font-medium text-slate-600">クリック率</th>
-              <th className="px-4 py-3 text-right font-medium text-slate-600">平均CPC</th>
-              <th className="px-4 py-3 text-right font-medium text-slate-600">広告費</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, i) => (
-              <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
-                <td className="px-4 py-3 text-slate-700">{formatDate(row.date || "")}</td>
-                <td className="px-4 py-3 text-right text-slate-800">{row.impressions.toLocaleString()}</td>
-                <td className="px-4 py-3 text-right text-slate-800">{row.clicks.toLocaleString()}</td>
-                <td className="px-4 py-3 text-right text-slate-800">{formatCtr(row.ctr)}</td>
-                <td className="px-4 py-3 text-right text-slate-800">{formatCpc(row.averageCpc)}</td>
-                <td className="px-4 py-3 text-right font-medium text-slate-800">{formatCost(row.costMicros)}</td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">データがありません</td></tr>
-            )}
-          </tbody>
-          {rows.length > 0 && (
-            <tfoot>
-              <tr className="bg-slate-50 font-semibold">
-                <td className="px-4 py-3 text-slate-700">合計</td>
-                <td className="px-4 py-3 text-right text-slate-800">{rows.reduce((s, r) => s + r.impressions, 0).toLocaleString()}</td>
-                <td className="px-4 py-3 text-right text-slate-800">{rows.reduce((s, r) => s + r.clicks, 0).toLocaleString()}</td>
-                <td className="px-4 py-3 text-right text-slate-800">
-                  {formatCtr(rows.reduce((s, r) => s + r.clicks, 0) / Math.max(rows.reduce((s, r) => s + r.impressions, 0), 1))}
-                </td>
-                <td className="px-4 py-3 text-right text-slate-800">
-                  {formatCpc(rows.reduce((s, r) => s + r.costMicros, 0) / Math.max(rows.reduce((s, r) => s + r.clicks, 0), 1))}
-                </td>
-                <td className="px-4 py-3 text-right text-slate-800">{formatCost(rows.reduce((s, r) => s + r.costMicros, 0))}</td>
-              </tr>
-            </tfoot>
-          )}
-        </table>
-      </div>
+        return (
+          <div key={`daily-${campaignName}`} style={{ ...slideStyle, minHeight: "auto" }}>
+            <div style={slideBarStyle}>
+              <span>{accountName} — {campaignName} 日次データ</span>
+              <span>{pageNum} / {totalPages}</span>
+            </div>
+            <div style={{ ...slideBodyStyle, padding: "16px 24px" }}>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600, position: "sticky", left: 0, zIndex: 1 }}>日付</th>
+                      <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600, textAlign: "center" }}>表示回数</th>
+                      <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600, textAlign: "center" }}>クリック数</th>
+                      <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600, textAlign: "center" }}>クリック率</th>
+                      <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600, textAlign: "center" }}>平均CPC</th>
+                      <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600, textAlign: "center" }}>広告費</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedRows.map((r, i) => (
+                      <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#f8f9fb" }}>
+                        <td style={{ padding: "4px 8px", fontWeight: 600, color: "#666" }}>{formatDate(r.date || "")}</td>
+                        <td style={{ textAlign: "center", padding: "4px 8px" }}>{r.impressions.toLocaleString()}</td>
+                        <td style={{ textAlign: "center", padding: "4px 8px" }}>{r.clicks.toLocaleString()}</td>
+                        <td style={{ textAlign: "center", padding: "4px 8px" }}>{formatCtr(r.ctr)}</td>
+                        <td style={{ textAlign: "center", padding: "4px 8px" }}>{formatCpc(r.averageCpc)}</td>
+                        <td style={{ textAlign: "center", padding: "4px 8px", fontWeight: 700 }}>{formatCost(r.costMicros)}</td>
+                      </tr>
+                    ))}
+                    {/* 合計行 */}
+                    <tr style={{ background: "#e8eaf0", fontWeight: 700 }}>
+                      <td style={{ padding: "6px 8px", color: "#333" }}>合計</td>
+                      <td style={{ textAlign: "center", padding: "6px 8px", color: "#333" }}>{sortedRows.reduce((s, r) => s + r.impressions, 0).toLocaleString()}</td>
+                      <td style={{ textAlign: "center", padding: "6px 8px", color: "#333" }}>{sortedRows.reduce((s, r) => s + r.clicks, 0).toLocaleString()}</td>
+                      <td style={{ textAlign: "center", padding: "6px 8px", color: "#333" }}>
+                        {formatCtr(sortedRows.reduce((s, r) => s + r.clicks, 0) / Math.max(sortedRows.reduce((s, r) => s + r.impressions, 0), 1))}
+                      </td>
+                      <td style={{ textAlign: "center", padding: "6px 8px", color: "#333" }}>
+                        {formatCpc(sortedRows.reduce((s, r) => s + r.costMicros, 0) / Math.max(sortedRows.reduce((s, r) => s + r.clicks, 0), 1))}
+                      </td>
+                      <td style={{ textAlign: "center", padding: "6px 8px", color: "#333" }}>{formatCost(sortedRows.reduce((s, r) => s + r.costMicros, 0))}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
