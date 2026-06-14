@@ -41,6 +41,17 @@ type CampaignRow = {
 type MonthlyData = { campaigns: Record<string, CampaignRow[]> };
 type DailyData = { campaigns: Record<string, CampaignRow[]> };
 
+type GbpRow = {
+  month: string;
+  shopName: string;
+  totalVisits: number;
+  phone: number;
+  directions: number;
+  website: number;
+  menuClicks: number;
+  saveShare: number;
+};
+
 // ==============================
 // 定数 (MEOレポート準拠)
 // ==============================
@@ -210,6 +221,8 @@ export default function PmaxReportPage() {
   const [prevSummary, setPrevSummary] = useState<SummaryData | null>(null);
   const [monthlyData, setMonthlyData] = useState<MonthlyData | null>(null);
   const [dailyData, setDailyData] = useState<DailyData | null>(null);
+  const [gbpCurrent, setGbpCurrent] = useState<GbpRow | null>(null);
+  const [gbpPrev, setGbpPrev] = useState<GbpRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -224,6 +237,9 @@ export default function PmaxReportPage() {
     setLoading(true);
     setError("");
 
+    const curMonth = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const prevMonth = `${now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear()}/${String(now.getMonth() === 0 ? 12 : now.getMonth()).padStart(2, "0")}`;
+
     Promise.all([
       fetch(`/api/pmax/accounts`).then((r) => r.json()),
       fetch(`/api/pmax/summary?customerId=${customerId}&startDate=${cStart}&endDate=${cEnd}`).then((r) => r.json()),
@@ -231,14 +247,28 @@ export default function PmaxReportPage() {
       fetch(`/api/pmax/monthly?customerId=${customerId}&startDate=${mStart}&endDate=${mEnd}`).then((r) => r.json()),
       fetch(`/api/pmax/daily?customerId=${customerId}&startDate=${dStart}&endDate=${dEnd}`).then((r) => r.json()),
     ])
-      .then(([accountsRes, summaryRes, prevSummaryRes, monthlyRes, dailyRes]) => {
+      .then(async ([accountsRes, summaryRes, prevSummaryRes, monthlyRes, dailyRes]) => {
         const acct = (accountsRes.accounts || []).find((a: any) => a.customerId === customerId);
-        setAccountName(acct?.name || customerId);
+        const name = acct?.name || customerId;
+        setAccountName(name);
         if (summaryRes.error) throw new Error(summaryRes.error);
         setSummary(summaryRes);
         setPrevSummary(prevSummaryRes.error ? null : prevSummaryRes);
         setMonthlyData(monthlyRes);
         setDailyData(dailyRes);
+
+        // GBPデータ取得（エラーでも広告データは表示する）
+        try {
+          const gbpRes = await fetch(`/api/pmax/gbp?shopName=${encodeURIComponent(name)}`).then(r => r.json());
+          if (gbpRes.data && gbpRes.data.length > 0) {
+            const curRow = gbpRes.data.find((r: GbpRow) => r.month === curMonth);
+            const prevRow = gbpRes.data.find((r: GbpRow) => r.month === prevMonth);
+            if (curRow) setGbpCurrent(curRow);
+            if (prevRow) setGbpPrev(prevRow);
+          }
+        } catch (e) {
+          console.warn("GBPデータ取得失敗（広告データは表示）:", e);
+        }
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
@@ -299,12 +329,12 @@ export default function PmaxReportPage() {
           { label: "総表示回数", value: summary.impressions, prev: prevSummary?.impressions || 0, format: (v: number) => v.toLocaleString() },
           { label: "総クリック", value: summary.clicks, prev: prevSummary?.clicks || 0, format: (v: number) => v.toLocaleString() },
           { label: "総広告費", value: summary.costMicros, prev: prevSummary?.costMicros || 0, format: (v: number) => formatCost(v) },
-          { label: "合計来店数", value: 0, prev: 0, format: (v: number) => v.toLocaleString(), placeholder: true },
-          { label: "電話", value: 0, prev: 0, format: (v: number) => v.toLocaleString(), placeholder: true },
-          { label: "経路案内", value: 0, prev: 0, format: (v: number) => v.toLocaleString(), placeholder: true },
-          { label: "メニュークリック", value: 0, prev: 0, format: (v: number) => v.toLocaleString(), placeholder: true },
-          { label: "予約", value: 0, prev: 0, format: (v: number) => v.toLocaleString(), placeholder: true },
-          { label: "保存・共有", value: 0, prev: 0, format: (v: number) => v.toLocaleString(), placeholder: true },
+          { label: "合計来店数", value: gbpCurrent?.totalVisits || 0, prev: gbpPrev?.totalVisits || 0, format: (v: number) => v.toLocaleString(), gbp: true },
+          { label: "電話", value: gbpCurrent?.phone || 0, prev: gbpPrev?.phone || 0, format: (v: number) => v.toLocaleString(), gbp: true },
+          { label: "経路案内", value: gbpCurrent?.directions || 0, prev: gbpPrev?.directions || 0, format: (v: number) => v.toLocaleString(), gbp: true },
+          { label: "メニュークリック", value: gbpCurrent?.menuClicks || 0, prev: gbpPrev?.menuClicks || 0, format: (v: number) => v.toLocaleString(), gbp: true },
+          { label: "予約", value: gbpCurrent?.website || 0, prev: gbpPrev?.website || 0, format: (v: number) => v.toLocaleString(), gbp: true },
+          { label: "保存・共有", value: gbpCurrent?.saveShare || 0, prev: gbpPrev?.saveShare || 0, format: (v: number) => v.toLocaleString(), gbp: true },
         ];
 
         return (
@@ -342,14 +372,10 @@ export default function PmaxReportPage() {
                   <div key={kpi.label} style={{ background: "#fff", borderRadius: 12, padding: "14px 16px", position: "relative", overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", justifyContent: "center" }}>
                     <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: 3, background: kpiTopColors[i % 8] }} />
                     <div style={{ fontSize: 12, color: "#888", fontWeight: 500 }}>{kpi.label}</div>
-                    <div style={{ fontSize: 26, fontWeight: 900, lineHeight: 1.1, margin: "4px 0", color: (kpi as any).placeholder ? "#ccc" : undefined }}>
-                      {(kpi as any).placeholder ? "—" : kpi.format(kpi.value)}
+                    <div style={{ fontSize: 26, fontWeight: 900, lineHeight: 1.1, margin: "4px 0" }}>
+                      {kpi.format(kpi.value)}
                     </div>
-                    {!(kpi as any).placeholder ? (
-                      <MomBadge current={kpi.label === "総広告費" ? Math.round(kpi.value / 1_000_000) : kpi.value} previous={kpi.label === "総広告費" ? Math.round(kpi.prev / 1_000_000) : kpi.prev} />
-                    ) : (
-                      <span style={{ fontSize: 10, color: "#bbb" }}>スプレッドシート連携予定</span>
-                    )}
+                    <MomBadge current={kpi.label === "総広告費" ? Math.round(kpi.value / 1_000_000) : kpi.value} previous={kpi.label === "総広告費" ? Math.round(kpi.prev / 1_000_000) : kpi.prev} />
                   </div>
                 ))}
               </div>
