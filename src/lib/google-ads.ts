@@ -1,10 +1,10 @@
 /**
  * Google Ads API ヘルパー
- * Google Ads API v18 (REST) を使用してレポートデータを取得
+ * Google Ads API v17 (REST) を使用してレポートデータを取得
  */
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
-const ADS_API_URL = "https://googleads.googleapis.com/v18";
+const ADS_API_URL = "https://googleads.googleapis.com/v17";
 
 let cachedAccessToken: { token: string; expiresAt: number } | null = null;
 
