@@ -4,7 +4,7 @@
  */
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
-const ADS_API_URL = "https://googleads.googleapis.com/v20";
+const ADS_API_URL = "https://googleads.googleapis.com/v23";
 
 let cachedAccessToken: { token: string; expiresAt: number } | null = null;
 
