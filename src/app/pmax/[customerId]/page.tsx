@@ -493,140 +493,139 @@ export default function PmaxReportPage() {
         );
       })()}
 
-      {/* ===== P3: 言語別月次推移 ===== */}
-      {monthlyData && Object.entries(monthlyData.campaigns).slice(0, maxLangs).map(([campaignName, rows]) => {
-        pageNum++;
-        const sortedRows = [...rows].sort((a, b) => (a.month || "").localeCompare(b.month || ""));
+      {/* ===== P3+: 言語別 月次→日次ペア ===== */}
+      {(() => {
+        const campaignNames = monthlyData ? Object.keys(monthlyData.campaigns).slice(0, maxLangs) : [];
+        return campaignNames.map((campaignName) => {
+          const monthlyRows = monthlyData?.campaigns[campaignName] || [];
+          const dailyRows = dailyData?.campaigns[campaignName] || [];
+          const sortedMonthly = [...monthlyRows].sort((a, b) => (a.month || "").localeCompare(b.month || ""));
+          const sortedDaily = [...dailyRows].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
 
-        const impressionsData = {
-          labels: sortedRows.map(r => formatMonthShort(r.month || "")),
-          datasets: [
-            {
+          const impressionsData = {
+            labels: sortedMonthly.map(r => formatMonthShort(r.month || "")),
+            datasets: [{
               label: "表示回数",
-              data: sortedRows.map(r => r.impressions),
+              data: sortedMonthly.map(r => r.impressions),
               backgroundColor: "rgba(79,195,247,.75)",
               borderColor: "rgba(2,136,209,1)",
               borderWidth: 1,
-            },
-          ],
-        };
+            }],
+          };
 
-        return (
-          <div key={campaignName} style={slideStyle}>
-            <div style={slideBarStyle}>
-              <span>{accountName} — {campaignName} 月次推移</span>
-              <span>{pageNum} / {totalPages}</span>
-            </div>
-            <div style={slideBodyStyle}>
-              <div style={{ height: 280 }}>
-                <Bar
-                  data={impressionsData}
-                  options={{
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
-                    scales: {
-                      x: { grid: { display: false } },
-                      y: { beginAtZero: true, grid: { color: "#f0f0f0" }, ticks: { callback: (v) => Number(v).toLocaleString() } },
-                    },
-                  }}
-                />
-              </div>
-              {/* データテーブル */}
-              <table style={{ width: "95%", margin: "12px auto 0", borderCollapse: "collapse", fontSize: 11 }}>
-                <thead>
-                  <tr>
-                    <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600 }}>月</th>
-                    {sortedRows.map((r, i) => (
-                      <th key={i} style={{ background: i === sortedRows.length - 1 ? "#e94560" : "#0f3460", color: "#fff", padding: "6px 4px", fontWeight: 600, textAlign: "center" }}>
-                        {formatMonthShort(r.month || "")}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td style={{ padding: "4px 8px", fontWeight: 600, color: "#666", background: "#f8f9fa" }}>表示回数</td>
-                    {sortedRows.map((r, i) => <td key={i} style={{ textAlign: "center", padding: "4px", background: i === sortedRows.length - 1 ? "#fff8f0" : undefined }}>{r.impressions.toLocaleString()}</td>)}
-                  </tr>
-                  <tr style={{ background: "#f8f9fb" }}>
-                    <td style={{ padding: "4px 8px", fontWeight: 600, color: "#666" }}>クリック数</td>
-                    {sortedRows.map((r, i) => <td key={i} style={{ textAlign: "center", padding: "4px", background: i === sortedRows.length - 1 ? "#fff8f0" : undefined }}>{r.clicks.toLocaleString()}</td>)}
-                  </tr>
-                  <tr>
-                    <td style={{ padding: "4px 8px", fontWeight: 600, color: "#666", background: "#f8f9fa" }}>クリック率</td>
-                    {sortedRows.map((r, i) => <td key={i} style={{ textAlign: "center", padding: "4px", background: i === sortedRows.length - 1 ? "#fff8f0" : undefined }}>{formatCtr(r.ctr)}</td>)}
-                  </tr>
-                  <tr style={{ background: "#f8f9fb" }}>
-                    <td style={{ padding: "4px 8px", fontWeight: 600, color: "#666" }}>平均CPC</td>
-                    {sortedRows.map((r, i) => <td key={i} style={{ textAlign: "center", padding: "4px", background: i === sortedRows.length - 1 ? "#fff8f0" : undefined }}>{formatCpc(r.averageCpc)}</td>)}
-                  </tr>
-                  <tr>
-                    <td style={{ padding: "4px 8px", fontWeight: 600, color: "#666", background: "#f8f9fa" }}>広告費</td>
-                    {sortedRows.map((r, i) => <td key={i} style={{ textAlign: "center", padding: "4px", fontWeight: 700, background: i === sortedRows.length - 1 ? "#fff8f0" : undefined }}>{formatCost(r.costMicros)}</td>)}
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        );
-      })}
-
-      {/* ===== P4: 言語別日次データ ===== */}
-      {dailyData && Object.entries(dailyData.campaigns).slice(0, maxLangs).map(([campaignName, rows]) => {
-        pageNum++;
-        const sortedRows = [...rows].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
-
-        return (
-          <div key={`daily-${campaignName}`} style={{ ...slideStyle, minHeight: "auto" }}>
-            <div style={slideBarStyle}>
-              <span>{accountName} — {campaignName} 日次データ</span>
-              <span>{pageNum} / {totalPages}</span>
-            </div>
-            <div style={{ ...slideBodyStyle, padding: "16px 24px" }}>
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
-                  <thead>
-                    <tr>
-                      <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600, position: "sticky", left: 0, zIndex: 1 }}>日付</th>
-                      <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600, textAlign: "center" }}>表示回数</th>
-                      <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600, textAlign: "center" }}>クリック数</th>
-                      <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600, textAlign: "center" }}>クリック率</th>
-                      <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600, textAlign: "center" }}>平均CPC</th>
-                      <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600, textAlign: "center" }}>広告費</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sortedRows.map((r, i) => (
-                      <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#f8f9fb" }}>
-                        <td style={{ padding: "4px 8px", fontWeight: 600, color: "#666" }}>{formatDate(r.date || "")}</td>
-                        <td style={{ textAlign: "center", padding: "4px 8px" }}>{r.impressions.toLocaleString()}</td>
-                        <td style={{ textAlign: "center", padding: "4px 8px" }}>{r.clicks.toLocaleString()}</td>
-                        <td style={{ textAlign: "center", padding: "4px 8px" }}>{formatCtr(r.ctr)}</td>
-                        <td style={{ textAlign: "center", padding: "4px 8px" }}>{formatCpc(r.averageCpc)}</td>
-                        <td style={{ textAlign: "center", padding: "4px 8px", fontWeight: 700 }}>{formatCost(r.costMicros)}</td>
+          return (
+            <div key={campaignName}>
+              {/* 月次ページ */}
+              <div style={slideStyle}>
+                <div style={slideBarStyle}>
+                  <span>{accountName} — {campaignName} 月次推移</span>
+                  <span style={{ visibility: "hidden" }}>0</span>
+                </div>
+                <div style={slideBodyStyle}>
+                  <div style={{ height: 280 }}>
+                    <Bar
+                      data={impressionsData}
+                      options={{
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                          x: { grid: { display: false } },
+                          y: { beginAtZero: true, grid: { color: "#f0f0f0" }, ticks: { callback: (v) => Number(v).toLocaleString() } },
+                        },
+                      }}
+                    />
+                  </div>
+                  <table style={{ width: "95%", margin: "12px auto 0", borderCollapse: "collapse", fontSize: 11 }}>
+                    <thead>
+                      <tr>
+                        <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600 }}>月</th>
+                        {sortedMonthly.map((r, i) => (
+                          <th key={i} style={{ background: i === sortedMonthly.length - 1 ? "#e94560" : "#0f3460", color: "#fff", padding: "6px 4px", fontWeight: 600, textAlign: "center" }}>
+                            {formatMonthShort(r.month || "")}
+                          </th>
+                        ))}
                       </tr>
-                    ))}
-                    {/* 合計行 */}
-                    <tr style={{ background: "#e8eaf0", fontWeight: 700 }}>
-                      <td style={{ padding: "6px 8px", color: "#333" }}>合計</td>
-                      <td style={{ textAlign: "center", padding: "6px 8px", color: "#333" }}>{sortedRows.reduce((s, r) => s + r.impressions, 0).toLocaleString()}</td>
-                      <td style={{ textAlign: "center", padding: "6px 8px", color: "#333" }}>{sortedRows.reduce((s, r) => s + r.clicks, 0).toLocaleString()}</td>
-                      <td style={{ textAlign: "center", padding: "6px 8px", color: "#333" }}>
-                        {formatCtr(sortedRows.reduce((s, r) => s + r.clicks, 0) / Math.max(sortedRows.reduce((s, r) => s + r.impressions, 0), 1))}
-                      </td>
-                      <td style={{ textAlign: "center", padding: "6px 8px", color: "#333" }}>
-                        {formatCpc(sortedRows.reduce((s, r) => s + r.costMicros, 0) / Math.max(sortedRows.reduce((s, r) => s + r.clicks, 0), 1))}
-                      </td>
-                      <td style={{ textAlign: "center", padding: "6px 8px", color: "#333" }}>{formatCost(sortedRows.reduce((s, r) => s + r.costMicros, 0))}</td>
-                    </tr>
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td style={{ padding: "4px 8px", fontWeight: 600, color: "#666", background: "#f8f9fa" }}>表示回数</td>
+                        {sortedMonthly.map((r, i) => <td key={i} style={{ textAlign: "center", padding: "4px", background: i === sortedMonthly.length - 1 ? "#fff8f0" : undefined }}>{r.impressions.toLocaleString()}</td>)}
+                      </tr>
+                      <tr style={{ background: "#f8f9fb" }}>
+                        <td style={{ padding: "4px 8px", fontWeight: 600, color: "#666" }}>クリック数</td>
+                        {sortedMonthly.map((r, i) => <td key={i} style={{ textAlign: "center", padding: "4px", background: i === sortedMonthly.length - 1 ? "#fff8f0" : undefined }}>{r.clicks.toLocaleString()}</td>)}
+                      </tr>
+                      <tr>
+                        <td style={{ padding: "4px 8px", fontWeight: 600, color: "#666", background: "#f8f9fa" }}>クリック率</td>
+                        {sortedMonthly.map((r, i) => <td key={i} style={{ textAlign: "center", padding: "4px", background: i === sortedMonthly.length - 1 ? "#fff8f0" : undefined }}>{formatCtr(r.ctr)}</td>)}
+                      </tr>
+                      <tr style={{ background: "#f8f9fb" }}>
+                        <td style={{ padding: "4px 8px", fontWeight: 600, color: "#666" }}>平均CPC</td>
+                        {sortedMonthly.map((r, i) => <td key={i} style={{ textAlign: "center", padding: "4px", background: i === sortedMonthly.length - 1 ? "#fff8f0" : undefined }}>{formatCpc(r.averageCpc)}</td>)}
+                      </tr>
+                      <tr>
+                        <td style={{ padding: "4px 8px", fontWeight: 600, color: "#666", background: "#f8f9fa" }}>広告費</td>
+                        {sortedMonthly.map((r, i) => <td key={i} style={{ textAlign: "center", padding: "4px", fontWeight: 700, background: i === sortedMonthly.length - 1 ? "#fff8f0" : undefined }}>{formatCost(r.costMicros)}</td>)}
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
               </div>
+
+              {/* 日次ページ（同じ言語の直後） */}
+              {sortedDaily.length > 0 && (
+                <div style={{ ...slideStyle, minHeight: "auto" }}>
+                  <div style={slideBarStyle}>
+                    <span>{accountName} — {campaignName} 日次データ</span>
+                    <span style={{ visibility: "hidden" }}>0</span>
+                  </div>
+                  <div style={{ ...slideBodyStyle, padding: "16px 24px" }}>
+                    <div style={{ overflowX: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                        <thead>
+                          <tr>
+                            <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600, position: "sticky", left: 0, zIndex: 1 }}>日付</th>
+                            <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600, textAlign: "center" }}>表示回数</th>
+                            <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600, textAlign: "center" }}>クリック数</th>
+                            <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600, textAlign: "center" }}>クリック率</th>
+                            <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600, textAlign: "center" }}>平均CPC</th>
+                            <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600, textAlign: "center" }}>広告費</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sortedDaily.map((r, i) => (
+                            <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#f8f9fb" }}>
+                              <td style={{ padding: "4px 8px", fontWeight: 600, color: "#666" }}>{formatDate(r.date || "")}</td>
+                              <td style={{ textAlign: "center", padding: "4px 8px" }}>{r.impressions.toLocaleString()}</td>
+                              <td style={{ textAlign: "center", padding: "4px 8px" }}>{r.clicks.toLocaleString()}</td>
+                              <td style={{ textAlign: "center", padding: "4px 8px" }}>{formatCtr(r.ctr)}</td>
+                              <td style={{ textAlign: "center", padding: "4px 8px" }}>{formatCpc(r.averageCpc)}</td>
+                              <td style={{ textAlign: "center", padding: "4px 8px", fontWeight: 700 }}>{formatCost(r.costMicros)}</td>
+                            </tr>
+                          ))}
+                          <tr style={{ background: "#e8eaf0", fontWeight: 700 }}>
+                            <td style={{ padding: "6px 8px", color: "#333" }}>合計</td>
+                            <td style={{ textAlign: "center", padding: "6px 8px", color: "#333" }}>{sortedDaily.reduce((s, r) => s + r.impressions, 0).toLocaleString()}</td>
+                            <td style={{ textAlign: "center", padding: "6px 8px", color: "#333" }}>{sortedDaily.reduce((s, r) => s + r.clicks, 0).toLocaleString()}</td>
+                            <td style={{ textAlign: "center", padding: "6px 8px", color: "#333" }}>
+                              {formatCtr(sortedDaily.reduce((s, r) => s + r.clicks, 0) / Math.max(sortedDaily.reduce((s, r) => s + r.impressions, 0), 1))}
+                            </td>
+                            <td style={{ textAlign: "center", padding: "6px 8px", color: "#333" }}>
+                              {formatCpc(sortedDaily.reduce((s, r) => s + r.costMicros, 0) / Math.max(sortedDaily.reduce((s, r) => s + r.clicks, 0), 1))}
+                            </td>
+                            <td style={{ textAlign: "center", padding: "6px 8px", color: "#333" }}>{formatCost(sortedDaily.reduce((s, r) => s + r.costMicros, 0))}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-        );
-      })}
+          );
+        });
+      })()}
     </div>
   );
 }

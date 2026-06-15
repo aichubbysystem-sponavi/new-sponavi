@@ -21,15 +21,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(summary);
   } catch (error: any) {
     console.error("Failed to get summary:", error);
-    const envDebug = {
-      CLIENT_ID_prefix: (process.env.GOOGLE_ADS_CLIENT_ID || "").slice(0, 12),
-      CLIENT_SECRET_prefix: (process.env.GOOGLE_ADS_CLIENT_SECRET || "").slice(0, 8),
-      REFRESH_TOKEN_prefix: (process.env.GOOGLE_ADS_REFRESH_TOKEN || "").slice(0, 8),
-      MCC_ID: process.env.GOOGLE_ADS_MCC_ID || "",
-      DEV_TOKEN_prefix: (process.env.GOOGLE_ADS_DEVELOPER_TOKEN || "").slice(0, 8),
-    };
     return NextResponse.json(
-      { error: error.message || "サマリーの取得に失敗しました", _envLengths: envDebug },
+      { error: error.message || "サマリーの取得に失敗しました" },
       { status: 500 }
     );
   }
