@@ -308,7 +308,10 @@ export default function PmaxReportPage() {
   const periodStart = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, "0")}/01`;
   const periodEnd = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, "0")}/${new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()}`;
 
-  const totalPages = 2 + (monthlyData ? Object.keys(monthlyData.campaigns).length : 0) + (dailyData ? Object.keys(dailyData.campaigns).length : 0);
+  const maxLangs = 4;
+  const monthlyCampaignCount = monthlyData ? Math.min(Object.keys(monthlyData.campaigns).length, maxLangs) : 0;
+  const dailyCampaignCount = dailyData ? Math.min(Object.keys(dailyData.campaigns).length, maxLangs) : 0;
+  const totalPages = 2 + monthlyCampaignCount + dailyCampaignCount;
   let pageNum = 0;
 
   return (
@@ -388,75 +391,100 @@ export default function PmaxReportPage() {
         );
       })()}
 
-      {/* ===== P2: 棒グラフ（広告指標推移） ===== */}
+      {/* ===== P2: 言語別指標サマリー（当月） ===== */}
       {monthlyData && (() => {
         pageNum++;
-        const campaignNames = Object.keys(monthlyData.campaigns);
-        const allMonths = Array.from(new Set(Object.values(monthlyData.campaigns).flat().map(r => r.month).filter(Boolean))).sort() as string[];
+        const campaignNames = Object.keys(monthlyData.campaigns).slice(0, 4);
 
-        // 表示回数の積み上げ棒グラフデータ
-        const datasets = campaignNames.map((name, i) => {
+        // 当月データを集計（各キャンペーンの最新月）
+        const campaignTotals = campaignNames.map((name) => {
           const rows = monthlyData.campaigns[name];
-          const monthMap = new Map(rows.map(r => [r.month, r.impressions]));
+          const sorted = [...rows].sort((a, b) => (b.month || "").localeCompare(a.month || ""));
+          const latest = sorted[0];
           return {
-            label: name,
-            data: allMonths.map(m => monthMap.get(m) || 0),
-            backgroundColor: chartColors[i % chartColors.length],
-            borderColor: chartBorderColors[i % chartBorderColors.length],
-            borderWidth: 1,
+            name,
+            impressions: rows.reduce((s, r) => s + r.impressions, 0),
+            clicks: rows.reduce((s, r) => s + r.clicks, 0),
+            costMicros: rows.reduce((s, r) => s + r.costMicros, 0),
+            ctr: latest ? latest.ctr : 0,
+            avgCpc: latest ? latest.averageCpc : 0,
           };
         });
 
-        // 月別合計
-        const monthTotals = allMonths.map((_, mi) => datasets.reduce((s, ds) => s + (ds.data[mi] || 0), 0));
+        const metrics = [
+          { key: "impressions" as const, label: "表示回数", format: (v: number) => v.toLocaleString(), color: "rgba(79,195,247,.75)", border: "rgba(2,136,209,1)" },
+          { key: "clicks" as const, label: "クリック数", format: (v: number) => v.toLocaleString(), color: "rgba(129,199,132,.75)", border: "rgba(56,142,60,1)" },
+          { key: "costMicros" as const, label: "広告費", format: (v: number) => formatCost(v), color: "rgba(255,183,77,.75)", border: "rgba(245,124,0,1)" },
+        ];
 
         return (
           <div style={slideStyle}>
             <div style={slideBarStyle}>
-              <span>{accountName} — 広告表示回数推移</span>
+              <span>{accountName} — 言語別 広告指標</span>
               <span>{pageNum} / {totalPages}</span>
             </div>
             <div style={slideBodyStyle}>
-              <div style={{ height: 350 }}>
-                <Bar
-                  data={{ labels: allMonths.map(formatMonthShort), datasets }}
-                  options={{
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                      legend: { position: "top", labels: { font: { size: 11 } } },
-                      tooltip: {
-                        mode: "index",
-                        intersect: false,
-                        callbacks: { afterBody: (items) => "合計: " + items.reduce((s, i) => s + (i.raw as number), 0).toLocaleString() },
-                      },
-                    },
-                    scales: {
-                      x: { stacked: true, grid: { display: false } },
-                      y: { stacked: true, beginAtZero: true, grid: { color: "#f0f0f0" }, ticks: { callback: (v) => Number(v).toLocaleString() } },
-                    },
-                  }}
-                />
+              <div style={stitleStyle}>言語（キャンペーン）別 指標比較</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+                {metrics.map((metric) => (
+                  <div key={metric.key}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#0f3460", marginBottom: 8, textAlign: "center" }}>{metric.label}</div>
+                    <div style={{ height: 220 }}>
+                      <Bar
+                        data={{
+                          labels: campaignTotals.map(c => c.name),
+                          datasets: [{
+                            label: metric.label,
+                            data: campaignTotals.map(c => c[metric.key]),
+                            backgroundColor: campaignTotals.map((_, i) => chartColors[i % chartColors.length]),
+                            borderColor: campaignTotals.map((_, i) => chartBorderColors[i % chartBorderColors.length]),
+                            borderWidth: 1,
+                          }],
+                        }}
+                        options={{
+                          responsive: true,
+                          maintainAspectRatio: false,
+                          plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => metric.format(ctx.raw as number) } } },
+                          scales: {
+                            x: { grid: { display: false }, ticks: { font: { size: 10 } } },
+                            y: { beginAtZero: true, grid: { color: "#f0f0f0" }, ticks: { callback: (v) => metric.key === "costMicros" ? formatCost(Number(v)) : Number(v).toLocaleString(), font: { size: 10 } } },
+                          },
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
               </div>
               {/* テーブル */}
-              <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 11 }}>
-                <tbody>
-                  <tr style={{ background: "#f8f9fa" }}>
-                    <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 70 }}>月</td>
-                    {allMonths.map(m => <td key={m} style={{ textAlign: "center", padding: "3px 4px", fontWeight: 600, color: "#666" }}>{formatMonthShort(m)}</td>)}
+              <table style={{ width: "95%", margin: "16px auto 0", borderCollapse: "collapse", fontSize: 11 }}>
+                <thead>
+                  <tr>
+                    <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600 }}>言語</th>
+                    <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600, textAlign: "center" }}>表示回数</th>
+                    <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600, textAlign: "center" }}>クリック数</th>
+                    <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600, textAlign: "center" }}>クリック率</th>
+                    <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600, textAlign: "center" }}>平均CPC</th>
+                    <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600, textAlign: "center" }}>広告費</th>
                   </tr>
-                  {campaignNames.map((name, i) => (
-                    <tr key={name} style={{ background: i % 2 === 0 ? "#fff" : "#f8f9fb" }}>
-                      <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", fontSize: 10, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 70 }}>{name}</td>
-                      {allMonths.map(m => {
-                        const row = monthlyData.campaigns[name].find(r => r.month === m);
-                        return <td key={m} style={{ textAlign: "center", padding: "3px 4px" }}>{(row?.impressions || 0).toLocaleString()}</td>;
-                      })}
+                </thead>
+                <tbody>
+                  {campaignTotals.map((c, i) => (
+                    <tr key={c.name} style={{ background: i % 2 === 0 ? "#fff" : "#f8f9fb" }}>
+                      <td style={{ padding: "5px 8px", fontWeight: 600, color: "#666" }}>{c.name}</td>
+                      <td style={{ textAlign: "center", padding: "5px 8px" }}>{c.impressions.toLocaleString()}</td>
+                      <td style={{ textAlign: "center", padding: "5px 8px" }}>{c.clicks.toLocaleString()}</td>
+                      <td style={{ textAlign: "center", padding: "5px 8px" }}>{c.impressions > 0 ? formatCtr(c.clicks / c.impressions) : "0.00%"}</td>
+                      <td style={{ textAlign: "center", padding: "5px 8px" }}>{c.clicks > 0 ? formatCpc(c.costMicros / c.clicks) : "¥0"}</td>
+                      <td style={{ textAlign: "center", padding: "5px 8px", fontWeight: 700 }}>{formatCost(c.costMicros)}</td>
                     </tr>
                   ))}
                   <tr style={{ background: "#e8eaf0", fontWeight: 700 }}>
-                    <td style={{ padding: "3px 4px", color: "#333" }}>合計</td>
-                    {monthTotals.map((t, i) => <td key={i} style={{ textAlign: "center", padding: "3px 4px", color: "#333" }}>{t.toLocaleString()}</td>)}
+                    <td style={{ padding: "5px 8px", color: "#333" }}>合計</td>
+                    <td style={{ textAlign: "center", padding: "5px 8px", color: "#333" }}>{campaignTotals.reduce((s, c) => s + c.impressions, 0).toLocaleString()}</td>
+                    <td style={{ textAlign: "center", padding: "5px 8px", color: "#333" }}>{campaignTotals.reduce((s, c) => s + c.clicks, 0).toLocaleString()}</td>
+                    <td style={{ textAlign: "center", padding: "5px 8px", color: "#333" }}>{formatCtr(campaignTotals.reduce((s, c) => s + c.clicks, 0) / Math.max(campaignTotals.reduce((s, c) => s + c.impressions, 0), 1))}</td>
+                    <td style={{ textAlign: "center", padding: "5px 8px", color: "#333" }}>{formatCpc(campaignTotals.reduce((s, c) => s + c.costMicros, 0) / Math.max(campaignTotals.reduce((s, c) => s + c.clicks, 0), 1))}</td>
+                    <td style={{ textAlign: "center", padding: "5px 8px", color: "#333" }}>{formatCost(campaignTotals.reduce((s, c) => s + c.costMicros, 0))}</td>
                   </tr>
                 </tbody>
               </table>
@@ -466,7 +494,7 @@ export default function PmaxReportPage() {
       })()}
 
       {/* ===== P3: 言語別月次推移 ===== */}
-      {monthlyData && Object.entries(monthlyData.campaigns).map(([campaignName, rows]) => {
+      {monthlyData && Object.entries(monthlyData.campaigns).slice(0, maxLangs).map(([campaignName, rows]) => {
         pageNum++;
         const sortedRows = [...rows].sort((a, b) => (a.month || "").localeCompare(b.month || ""));
 
@@ -545,7 +573,7 @@ export default function PmaxReportPage() {
       })}
 
       {/* ===== P4: 言語別日次データ ===== */}
-      {dailyData && Object.entries(dailyData.campaigns).map(([campaignName, rows]) => {
+      {dailyData && Object.entries(dailyData.campaigns).slice(0, maxLangs).map(([campaignName, rows]) => {
         pageNum++;
         const sortedRows = [...rows].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
 
