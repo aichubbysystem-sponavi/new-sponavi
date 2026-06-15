@@ -67,6 +67,8 @@ const kpiTopColors = [
   "linear-gradient(90deg,#4db6ac,#00897b)",
   "linear-gradient(90deg,#7986cb,#3949ab)",
   "linear-gradient(90deg,#ffd54f,#fbc02d)",
+  "linear-gradient(90deg,#90caf9,#1565c0)",
+  "linear-gradient(90deg,#a5d6a7,#2e7d32)",
 ];
 
 const chartColors = [
@@ -334,8 +336,9 @@ export default function PmaxReportPage() {
           { label: "電話", value: gbpCurrent?.phone || 0, prev: gbpPrev?.phone || 0, format: (v: number) => v.toLocaleString(), gbp: true },
           { label: "経路案内", value: gbpCurrent?.directions || 0, prev: gbpPrev?.directions || 0, format: (v: number) => v.toLocaleString(), gbp: true },
           { label: "メニュークリック", value: gbpCurrent?.menuClicks || 0, prev: gbpPrev?.menuClicks || 0, format: (v: number) => v.toLocaleString(), gbp: true },
-          { label: "予約", value: gbpCurrent?.website || 0, prev: gbpPrev?.website || 0, format: (v: number) => v.toLocaleString(), gbp: true },
+          { label: "予約", value: 0, prev: 0, format: (v: number) => v.toLocaleString(), gbp: true },
           { label: "保存・共有", value: gbpCurrent?.saveShare || 0, prev: gbpPrev?.saveShare || 0, format: (v: number) => v.toLocaleString(), gbp: true },
+          { label: "WEBサイト", value: gbpCurrent?.website || 0, prev: gbpPrev?.website || 0, format: (v: number) => v.toLocaleString(), gbp: true },
         ];
 
         return (
