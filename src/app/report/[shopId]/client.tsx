@@ -1120,16 +1120,16 @@ export default function ReportClient({
           </div>
           <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 16 }}>
             <tbody>
-              <tr style={{ background: "#f8f9fa" }}>
-                <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60, whiteSpace: "nowrap" }}>月</td>
-                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l.split("/")[1]}月</td>)}
+              <tr style={{ background: "#0f3460" }}>
+                <td style={{ padding: "3px 4px", fontWeight: 600, color: "#fff", width: 60, whiteSpace: "nowrap" }}>月</td>
+                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#fff", fontWeight: 600 }}>{l.split("/")[1]}月</td>)}
               </tr>
-              <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>モバイル</td>
-                {charts.searchMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr style={{ background: "#f8f9fa" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>PC</td>
-                {charts.searchPC.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr><td style={{ padding: "3px 4px", fontWeight: 700, color: "#333", whiteSpace: "nowrap" }}>合計</td>
-                {charts.searchMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700 }}>{(v + charts.searchPC[i]).toLocaleString()}</td>)}</tr>
+              <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#333", whiteSpace: "nowrap" }}>モバイル</td>
+                {charts.searchMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#333" }}>{v.toLocaleString()}</td>)}</tr>
+              <tr style={{ background: "#f0f2f5" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#333", whiteSpace: "nowrap" }}>PC</td>
+                {charts.searchPC.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#333" }}>{v.toLocaleString()}</td>)}</tr>
+              <tr><td style={{ padding: "3px 4px", fontWeight: 700, color: "#111", whiteSpace: "nowrap" }}>合計</td>
+                {charts.searchMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700, color: "#111" }}>{(v + charts.searchPC[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
         </div>
@@ -1148,16 +1148,16 @@ export default function ReportClient({
           </div>
           <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 16 }}>
             <tbody>
-              <tr style={{ background: "#f8f9fa" }}>
-                <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60, whiteSpace: "nowrap" }}>月</td>
-                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l.split("/")[1]}月</td>)}
+              <tr style={{ background: "#0f3460" }}>
+                <td style={{ padding: "3px 4px", fontWeight: 600, color: "#fff", width: 60, whiteSpace: "nowrap" }}>月</td>
+                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#fff", fontWeight: 600 }}>{l.split("/")[1]}月</td>)}
               </tr>
-              <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>モバイル</td>
-                {charts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr style={{ background: "#f8f9fa" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>PC</td>
-                {charts.mapPC.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr><td style={{ padding: "3px 4px", fontWeight: 700, color: "#333", whiteSpace: "nowrap" }}>合計</td>
-                {charts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700 }}>{(v + charts.mapPC[i]).toLocaleString()}</td>)}</tr>
+              <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#333", whiteSpace: "nowrap" }}>モバイル</td>
+                {charts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#333" }}>{v.toLocaleString()}</td>)}</tr>
+              <tr style={{ background: "#f0f2f5" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#333", whiteSpace: "nowrap" }}>PC</td>
+                {charts.mapPC.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#333" }}>{v.toLocaleString()}</td>)}</tr>
+              <tr><td style={{ padding: "3px 4px", fontWeight: 700, color: "#111", whiteSpace: "nowrap" }}>合計</td>
+                {charts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700, color: "#111" }}>{(v + charts.mapPC[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
           <div style={{ fontSize: 16, color: "#999", textAlign: "right", margin: "4px 16px 0", fontStyle: "italic" }}>※ 2025年11月以降、Google Business Profile APIの計測仕様変更により数値が大幅に変動する場合があります</div>
