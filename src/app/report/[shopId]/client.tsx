@@ -1084,20 +1084,20 @@ export default function ReportClient({
                 {[...monthlyTableData].reverse().map((r, i) => {
                   const isLast = i === 0; // 新しい月が先頭
                   return (
-                    <tr key={i} style={{ background: isLast ? "#cfffE3" : undefined, fontWeight: isLast ? 600 : undefined }}>
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.label}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.searchMobile.toLocaleString()}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.searchPC.toLocaleString()}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.searchTotal.toLocaleString()}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.mapMobile.toLocaleString()}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.mapPC.toLocaleString()}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.mapTotal.toLocaleString()}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.websites.toLocaleString()}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.routes.toLocaleString()}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.calls.toLocaleString()}</td>
-                      {hasFoodMenus && <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.foodMenus.toLocaleString()}</td>}
-                      {hasBookings && <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0" }}>{r.bookings.toLocaleString()}</td>}
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #f0f0f0", fontWeight: 700 }}>{r.totalActions.toLocaleString()}</td>
+                    <tr key={i} style={{ background: isLast ? "#cfffE3" : i % 2 === 1 ? "#eef1f6" : "#fff", fontWeight: isLast ? 600 : undefined }}>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.label}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.searchMobile.toLocaleString()}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.searchPC.toLocaleString()}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.searchTotal.toLocaleString()}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.mapMobile.toLocaleString()}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.mapPC.toLocaleString()}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.mapTotal.toLocaleString()}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.websites.toLocaleString()}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.routes.toLocaleString()}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.calls.toLocaleString()}</td>
+                      {hasFoodMenus && <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.foodMenus.toLocaleString()}</td>}
+                      {hasBookings && <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.bookings.toLocaleString()}</td>}
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", fontWeight: 700, color: "#222" }}>{r.totalActions.toLocaleString()}</td>
                     </tr>
                   );
                 })}
@@ -1180,21 +1180,21 @@ export default function ReportClient({
           </div>
           <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 16 }}>
             <tbody>
-              <tr style={{ background: "#f8f9fa" }}>
-                <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60, whiteSpace: "nowrap" }}>月</td>
-                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888" }}>{l.split("/")[1]}月</td>)}
+              <tr style={{ background: "#0f3460" }}>
+                <td style={{ padding: "3px 4px", fontWeight: 600, color: "#fff", width: 60, whiteSpace: "nowrap" }}>月</td>
+                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#fff", fontWeight: 600 }}>{l.split("/")[1]}月</td>)}
               </tr>
-              <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>Web</td>
+              <tr style={{ background: "#dce3ed" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>Web</td>
                 {charts.websites.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr style={{ background: "#f8f9fa" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>ルート</td>
+              <tr style={{ background: "#eef1f6" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>ルート</td>
                 {charts.routes.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>通話</td>
+              <tr style={{ background: "#dce3ed" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>通話</td>
                 {charts.calls.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr style={{ background: "#f8f9fa" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>メニュー</td>
+              <tr style={{ background: "#eef1f6" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>メニュー</td>
                 {charts.foodMenus.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>予約</td>
+              <tr style={{ background: "#dce3ed" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>予約</td>
                 {charts.bookings.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr style={{ background: "#e8eaf6" }}><td style={{ padding: "3px 4px", fontWeight: 700, color: "#333", whiteSpace: "nowrap" }}>合計</td>
+              <tr style={{ background: "#c5d0e0" }}><td style={{ padding: "3px 4px", fontWeight: 700, color: "#333", whiteSpace: "nowrap" }}>合計</td>
                 {charts.websites.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700 }}>{(v + charts.routes[i] + charts.calls[i] + charts.foodMenus[i] + charts.bookings[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
