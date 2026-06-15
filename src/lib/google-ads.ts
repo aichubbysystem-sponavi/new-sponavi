@@ -23,6 +23,7 @@ async function getAccessToken(): Promise<string> {
       refresh_token: process.env.GOOGLE_ADS_REFRESH_TOKEN!,
       grant_type: "refresh_token",
     }),
+    cache: "no-store",
   });
 
   const tokenText = await res.text();
@@ -57,6 +58,7 @@ async function executeGaql(customerId: string, query: string): Promise<any[]> {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ query }),
+      cache: "no-store",
     }
   );
 
