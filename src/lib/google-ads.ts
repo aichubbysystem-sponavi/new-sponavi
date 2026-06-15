@@ -26,7 +26,6 @@ async function getAccessToken(): Promise<string> {
     cache: "no-store",
   });
 
-  const tokenText = await res.text();
   const data = await res.json();
   if (!data.access_token) {
     throw new Error(`Failed to get access token: ${JSON.stringify(data)}`);
