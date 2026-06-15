@@ -25,9 +25,11 @@ async function getAccessToken(): Promise<string> {
     }),
   });
 
-  const data = await res.json();
+  const tokenText = await res.text();
+  let data: any;
+  try { data = JSON.parse(tokenText); } catch { throw new Error(`Token response not JSON: ${tokenText.slice(0, 200)}`); }
   if (!data.access_token) {
-    throw new Error(`Failed to get access token: ${JSON.stringify(data)}`);
+    throw new Error(`Failed to get access token: ${tokenText.slice(0, 300)}`);
   }
 
   cachedAccessToken = {
@@ -35,6 +37,7 @@ async function getAccessToken(): Promise<string> {
     expiresAt: Date.now() + (data.expires_in || 3600) * 1000,
   };
 
+  console.log(`[google-ads] token refreshed, len=${data.access_token.length}, expires_in=${data.expires_in}`);
   return data.access_token;
 }
 
@@ -59,7 +62,7 @@ async function executeGaql(customerId: string, query: string): Promise<any[]> {
 
   if (!res.ok) {
     const errorText = await res.text();
-    throw new Error(`Google Ads API error (${res.status}): ${errorText}`);
+    throw new Error(`Google Ads API error (${res.status}): ${errorText}\n[debug] token_len=${accessToken.length}, token_prefix=${accessToken.slice(0, 10)}, mcc=${mccId}, dev_token_len=${(process.env.GOOGLE_ADS_DEVELOPER_TOKEN || "").length}`);
   }
 
   const data = await res.json();
