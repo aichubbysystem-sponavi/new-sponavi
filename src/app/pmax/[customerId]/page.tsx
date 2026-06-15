@@ -255,8 +255,8 @@ export default function PmaxReportPage() {
         if (summaryRes.error) throw new Error(summaryRes.error);
         setSummary(summaryRes);
         setPrevSummary(prevSummaryRes.error ? null : prevSummaryRes);
-        setMonthlyData(monthlyRes);
-        setDailyData(dailyRes);
+        setMonthlyData(monthlyRes?.campaigns ? monthlyRes : null);
+        setDailyData(dailyRes?.campaigns ? dailyRes : null);
 
         // GBPデータ取得（エラーでも広告データは表示する）
         try {

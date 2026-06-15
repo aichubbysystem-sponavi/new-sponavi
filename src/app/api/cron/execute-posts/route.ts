@@ -254,8 +254,8 @@ export async function GET(request: NextRequest) {
   const supabase = getSupabase();
   const now = new Date().toISOString();
 
-  // 10分以上processingのまま残っているレコードをpendingに戻す（クラッシュリカバリ）
-  const staleThreshold = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  // 5分以上processingのまま残っているレコードをpendingに戻す（クラッシュリカバリ）
+  const staleThreshold = new Date(Date.now() - 5 * 60 * 1000).toISOString();
   await supabase
     .from("scheduled_posts")
     .update({ status: "pending" })
@@ -361,9 +361,14 @@ export async function GET(request: NextRequest) {
         errors++;
       }
     } catch (e: any) {
-      await supabase.from("scheduled_posts").update({
-        status: "error", error_detail: (e?.message || "不明な例外").slice(0, 300),
-      }).eq("id", post.id);
+      try {
+        await supabase.from("scheduled_posts").update({
+          status: "error", error_detail: (e?.message || "不明な例外").slice(0, 300),
+        }).eq("id", post.id);
+      } catch (dbErr: any) {
+        // DB更新自体が失敗した場合、ログ出力して次回のstaleリカバリに委ねる
+        console.error(`[cron/execute-posts] DB更新失敗 post=${post.id}: ${dbErr?.message}`);
+      }
       errors++;
     }
   }

@@ -127,6 +127,8 @@ export default function Dashboard() {
 
   // 悪い口コミアラート取得（選択中の店舗でフィルタ、なければ全店舗）
   useEffect(() => {
+    let cancelled = false;
+
     let query = supabase
       .from("bad_review_alerts")
       .select("*")
@@ -134,7 +136,8 @@ export default function Dashboard() {
       .order("created_at", { ascending: false })
       .limit(5);
     if (selectedShopId) query = query.eq("shop_id", selectedShopId);
-    query.then(({ data }) => setBadAlerts(data || []));
+    query.then(({ data, error }) => { if (!cancelled) setBadAlerts(error ? [] : (data || [])); });
+
     // 写真TOP5（選択店舗でフィルタ）
     let mediaQuery = supabase
       .from("media")
@@ -142,7 +145,7 @@ export default function Dashboard() {
       .order("view_count", { ascending: false })
       .limit(5);
     if (selectedShopId) mediaQuery = mediaQuery.eq("shop_id", selectedShopId);
-    mediaQuery.then(({ data }) => setTopPhotos(data || []));
+    mediaQuery.then(({ data, error }) => { if (!cancelled) setTopPhotos(error ? [] : (data || [])); });
 
     // 順位サマリー取得
     if (selectedShopId) {
@@ -154,13 +157,23 @@ export default function Dashboard() {
         .order("searched_at", { ascending: false })
         .limit(50)
         .then(({ data }) => {
+          if (cancelled) return;
           if (!data || data.length === 0) { setRankingSummary([]); return; }
-          const groups = new Map<string, { rank: number; prevRank: number }>();
+          // キーワード別にグループ化し、異なる計測日のデータからprevRankを取得
+          const groups = new Map<string, { rank: number; prevRank: number; latestDate: string }>();
           for (const log of data) {
             let kw: string;
             try { kw = JSON.parse(log.search_words).join(", "); } catch { kw = log.search_words; }
-            if (!groups.has(kw)) groups.set(kw, { rank: log.rank, prevRank: 0 });
-            else if (groups.get(kw)!.prevRank === 0) groups.get(kw)!.prevRank = log.rank;
+            const logDate = (log.searched_at || "").slice(0, 10); // YYYY-MM-DD
+            if (!groups.has(kw)) {
+              groups.set(kw, { rank: log.rank, prevRank: 0, latestDate: logDate });
+            } else {
+              const g = groups.get(kw)!;
+              // 同一日のデータはスキップし、異なる計測日のデータをprevRankとする
+              if (g.prevRank === 0 && logDate !== g.latestDate) {
+                g.prevRank = log.rank;
+              }
+            }
           }
           setRankingSummary(Array.from(groups.entries()).slice(0, 5).map(([kw, d]) => ({
             keyword: kw, rank: d.rank, prevRank: d.prevRank || d.rank,
@@ -169,11 +182,14 @@ export default function Dashboard() {
 
       // 投稿数取得
       api.get(`/api/shop/${selectedShopId}/local_post`).then((res) => {
+        if (cancelled) return;
         const posts = res.data?.localPosts || [];
         const last30 = posts.filter((p: any) => p.createTime && Date.now() - new Date(p.createTime).getTime() < 30 * 24 * 60 * 60 * 1000);
         setPostCount(last30.length);
-      }).catch(() => setPostCount(0));
+      }).catch(() => { if (!cancelled) setPostCount(0) });
     }
+
+    return () => { cancelled = true; };
   }, [selectedShopId]);
 
   const v = (n: number | null | undefined) => n ?? 0;
