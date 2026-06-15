@@ -81,3 +81,18 @@ SPOTLIGHT NAVIGATOR 超重要ナレッジ
 - [ ] GBP未連携8店舗のロケーション紐付け
 - [ ] レポートサブドメインのIDOR認可（クライアント公開前に対応必要）
 - [ ] Google client secretローテーション（保留中）
+- [ ] パスワード平文保存 (api/report/users/route.ts) → password_display廃止
+- [ ] P-MAX全エンドポイント認証なし → セッション認証追加
+- [ ] Supabase新APIキー形式(sb_publishable_*)による/auth/v1/token 400エラー
+
+## Next.js fetchキャッシュの罠（2026-06-16発見）
+- Next.js 14のサーバーサイドfetch()はデフォルトでレスポンスをキャッシュする
+- Google OAuthトークン交換もキャッシュされ、古い無効なアクセストークンが返り続ける
+- 対策: 外部API呼び出しには必ず `cache: "no-store"` を付ける
+- google-ads.ts のgetAccessToken()とexecuteGaql()に適用済み
+
+## Vercelプロジェクト2つ問題
+- CLIが接続: spotlight-navigators-projects/new-sponavi（誤）
+- 本番: aichubbysystem-6689s-projects/new-sponavi（正）
+- 環境変数変更は必ずVercelダッシュボード(aichubbysystem-6689s-projects)から行うこと
+- Vercel Sensitive環境変数は編集時にValueが空に見える仕様。必ず値を貼り直してSave

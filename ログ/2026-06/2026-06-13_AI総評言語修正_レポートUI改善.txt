@@ -4,70 +4,97 @@
 - AI総評に口コミ言語別集計データを渡し、存在しない言語の推測記述を防止
 - detectLanguageの根本バグ修正: 翻訳テキストではなく原文(Original)を判定対象に変更
 - レポートページ(report/[shopId])の最小フォントサイズを16pxに統一
-- KPIサマリーを4×2→3×3グリッドに変更
-- レポート全体の左右paddingを36px→9pxに縮小
-- チャート・テーブルのはみ出し問題4件を修正
-- 口コミ言語別集計APIのshop_id逆引きを削除し高速化
+- KPIサマリーを4×2→3×3グリッドに変更、左右paddingを36px→9pxに縮小
+- チャート・テーブルのはみ出し問題を修正（チャート高さ/改行防止/テーブルpadding）
+- AIコメントを文字数ベースでページ分割（固定2件/ページ → 750/850字で動的分割）
+- 口コミ国別分析ページに対象月フィルター追加、グローバル店舗セレクタと連動
+- 口コミ国別分析に店舗別言語内訳テーブル追加（インバウンド比率順）
+- ダウンロードをCSV → Excel(.xlsx)に変更（デザイン付き3セクション横並び）
 
 ### 変更内容（具体的に）
 
 #### src/lib/detect-language.ts — 言語判定の根本バグ修正
-- GBP口コミ "(Translated by Google) [翻訳] (Original) [原文]" のフォーマットで、(Original)以降を削除して翻訳テキストを判定していた
+- GBP口コミ "(Translated by Google) [翻訳] (Original) [原文]" で(Original)以降を削除して翻訳テキストを判定していた
 - 修正: (Original)がある場合はその後ろ（原文テキスト）を判定対象にする
-- これにより韓国語・タイ語・ベトナム語等がGoogleに日本語翻訳されても正しい原文言語が検出される
-- みそラーメンのよし乃: 修正前3言語(日・英・中) → 修正後7言語(日・英・韓・中・仏・タイ・越)
+- typeof text !== "string" チェック追加（DBから非文字列が来た場合の防御）
 
 #### src/app/api/report/analyze/route.ts — AI総評に言語データ追加
 - analyzeWithClaude() と tryAnalyze() に langStatsText?: string パラメータ追加
 - POST handler内: Supabaseからreviews.commentを直接取得（DB生コメント）してdetectLanguageで言語集計生成
-- プロンプトに【口コミ言語別集計】セクションを口コミテキスト直後に挿入
-- commentsルールに「集計に含まれない言語を推測で記述することは厳禁」追加（langStatsTextがある時のみ）
+- プロンプトに【口コミ言語別集計】セクション挿入 + 推測記述禁止ルール追加
 - デバッグログ追加: [analyze] ${shop.name}: langStats=X言語検出
 
 #### src/app/api/cron/monthly-analysis/route.ts — cronにも言語データ追加
 - 口コミ言語別集計を生成（reviews.commentをそのままdetectLanguageに渡す）
 - プロンプトに【口コミ言語別集計】セクション + 推測記述禁止ルール追加
 
-#### src/app/api/report/review-language-stats/route.ts — API高速化
-- shopNames→shop_id逆引き（reviewsテーブル2回検索+ilike検索、27行）を完全削除
-- shopNamesがあればshop_nameで直接検索、shopIdsがあればshop_idで検索（5行に簡素化）
-- DB往復が半減し表示速度が改善（約10秒→数秒）
+#### src/app/api/report/review-language-stats/route.ts — API改善
+- shopName→shop_id→全件検索の2段階を維持（shop_name直接検索は名前バリエーション問題で断念）
+- ilike検索フォールバック復元
+- targetMonthパラメータ追加（create_timeでgte/ltフィルタ）
+- 全口コミのdetails返却（★1-3制限を解除 → 全件返却に変更）
+- detectLanguage呼び出しをtry-catchで保護
 
-#### src/app/report/[shopId]/client.tsx — レポートUI改善（8項目）
-1. 最小フォントサイズ16px統一: fontSize 9〜15px を全て16pxに引き上げ（133箇所）、fontSize: "11px"(文字列) → "16px"
-2. KPIサマリーグリッド: gridTemplateColumns repeat(4,1fr) → repeat(3,1fr)
-3. 左右padding統一: slideBarStyle/slideBodyStyle/ヘッダー/メタ情報バー/多地点順位の全5箇所 36px→9px
-4. チャート高さ縮小: buildStackedOptions()にaspectRatio: 2.2追加
-5. チャートテーブルの改行防止: 全ラベルセル（月/モバイル/PC/Web/ルート/通話/メニュー/予約/合計）にwhiteSpace: "nowrap"追加
-6. キーワード順位推移テーブルはみ出し: overflow: hidden → overflowX: auto、セルpadding 12px→6px、テーブルminWidth: 700
-7. 検索語句テーブル15位はみ出し: slideBody padding 28px→10px、thStyle padding 10px→6px、tdセル padding 7px→4px
+#### src/app/report/[shopId]/client.tsx — レポートUI改善
+1. 最小フォントサイズ16px統一: fontSize 9〜15pxを全て16pxに引き上げ（133箇所）
+2. KPIサマリーグリッド: repeat(4,1fr) → repeat(3,1fr)
+3. 左右padding統一: 全5箇所 36px→9px
+4. チャート高さ縮小: aspectRatio: 2.2追加
+5. チャートテーブルの改行防止: 全ラベルセルにwhiteSpace: "nowrap"
+6. キーワード順位推移テーブルはみ出し: overflowX: auto + padding縮小 + minWidth: 700
+7. 検索語句テーブル15位はみ出し: slideBody/th/td各padding縮小
 8. 最新月背景色: #f0f4ff → #cfffE3（薄緑）
-9. AIコメント本文: fontSize 16→17px、コンテナpadding 28px 32px→16px 20px、overflow: hidden維持（PDF対応）
+9. AIコメント本文: fontSize 17px、コンテナpadding 16px 20px、overflow: hidden（PDF対応）
+10. AIコメントのページ分割: 固定2件/ページ → 文字数ベース（初回750字/以降850字）
+11. totalPages計算をページ分割ロジックと同期 + 口コミ言語別分析ページをtotalPagesに追加
+12. 口コミ言語別分析スライドにpageNum++ + ページ番号表示追加
+13. 言語集計APIのエラーをconsole.errorで出力
+
+#### src/app/review-language/page.tsx — 口コミ国別分析ページ大幅強化
+- 対象月セレクタ追加（直近6ヶ月+全期間）、月変更時に自動再分析
+- グローバル店舗セレクタ連動: autoRunShopIdで店舗変更時に再選択+再分析
+- 店舗別言語内訳テーブル追加: インバウンド比率順ソート、外国語列は動的生成
+- 低評価詳細 → クレーム詳細(★1-2)に変更
+- ダウンロード: CSV → Excel(.xlsx)。xlsx-js-styleで3セクション横並び+デザイン付き
+  - セル結合、紺ヘッダー白文字、低評価赤文字、合計行オレンジ背景、列幅自動設定
+  - ファイル名: 口コミ国別分析_{対象月}.xlsx
+
+#### package.json
+- xlsx-js-style ライブラリ追加
+
+#### 重要ナレッジ.txt
+- detectLanguageの仕様変更を追記（GBP原文を判定する）
 
 ### 数値・設定値
 - 最小フォントサイズ: 16px（report/[shopId]のみ）
 - AIコメント本文: 17px
+- AIコメントページ分割: 初回750字 / 以降850字
 - チャートaspectRatio: 2.2
 - 左右padding: 9px（全スライド統一）
 - KPIグリッド: 3列
 - 最新月行背景色: #cfffE3
 - 言語集計limit: 1000件
-- HOTEL B Suites再分析結果: 修正前「日・韓・中・英語圏」→修正後「日本語62%・英語37%・スペイン語1%」
+- HOTEL B Suites再分析: 修正前「日・韓・中・英語圏」→修正後「日本語62%・英語37%・スペイン語1%」
 - みそラーメンのよし乃: 修正前3言語→修正後7言語（日550/英22/韓14/中14/仏1/タイ1/越1）
+- Excel列幅: 口コミ列50wch、投稿日11wch、推定国10wch等
 
 ### 未解決・次回やること
 - 他店舗のAI総評は古い分析のまま。detectLanguage修正を反映するには口コミ分析ページで「分析済みも再分析」が必要（全店舗一括推奨）
 - フォントサイズ16px化による他店舗でのレイアウト崩れの可能性（口コミが極端に多い/少ない店舗で未確認）
-- 重要ナレッジの更新: detectLanguageの仕様変更を追記すべき
+- 口コミ国別分析ページに各店舗ごとの詳細言語分析ビュー（次回実装候補）
 
 ### 注意点・ハマったこと
 - detectLanguageの(Original)処理が逆だった: 原文を捨てて翻訳テキストを判定していた。GBPの口コミフォーマットを正確に理解していないと気づけないバグ
-- fetchReviewsの加工済みcomment vs DB生コメント: fetchReviewsは(Original)以降を抽出（原文側）、detectLanguageは(Original)以降を除去（翻訳側）で判定対象が逆になる。review-language-stats APIと同じ処理パス（DB生コメント→detectLanguage）で統一
-- shop.idの正体: review-analysis/page.tsxのshopsはuseShop()（Go API由来）→ shop.id = Go API ID。ShopListItem.id = 店舗名（spreadsheet.ts:796）はレポート管理画面の別データソース
-- review-language-stats APIのshop_id逆引き: reviewsテーブルを2回検索していたのが10秒遅延の主因。shop_nameで直接検索に変更で解消
+- fetchReviewsの加工済みcomment vs DB生コメント: 判定対象テキストが逆になる。review-language-stats APIと同じ処理パス（DB生コメント→detectLanguage）で統一
+- shop.idの正体: review-analysis/page.tsxのshopsはuseShop()（Go API由来）= Go API ID。ShopListItem.id = 店舗名はレポート管理画面の別データソース
+- shop_name直接検索への簡素化は失敗: 同一店舗の口コミでもshop_nameカラムの値にバリエーションがある（スペース差異等）。name→ID→IDで全件検索の2段階が必須
 - AIコメントのoverflow: auto（スクロール）はPDFダウンロード時にスクロール内の内容が切れるためhiddenに戻した
+- AIコメントのページ分割は文字数ベース（750/850字）。totalPages計算も同じロジックで同期する必要がある
+- 口コミ言語別分析スライドのpageNum++が欠けていた（IIFE形式に変更で対応）
+- CSV縦1列問題: Excelが日本語環境でカンマ区切りを認識しない → 最終的にExcel(.xlsx)に移行で根本解決
+- autoRunDoneフラグでは店舗変更時に再実行されない → autoRunShopId（前回実行店舗ID記録）に変更で解決
 
-### コミット履歴
+### コミット履歴（27件）
 - 233d323 fix: AI総評に口コミ言語別集計データを渡し、存在しない言語の推測記述を防止
 - df8ab4b style: レポートページの最小フォントサイズを16pxに統一
 - 3ee5856 style: KPIサマリーのパディング縮小+グリッドを3×3に変更
@@ -85,8 +112,11 @@
 - 811b20f fix: 言語別集計APIをshopName→shop_id→全件検索の2段階に復元
 - 2fdbcfa fix: AIコメントのページ数計算を文字数ベースに同期 + 言語別分析を総ページ数に含める
 - 62ea340 fix: 口コミ言語別分析スライドにページ番号を追加
-
-### 追加の注意点（セッション後半で判明）
-- shop_name直接検索への簡素化は失敗: 同一店舗の口コミでもshop_nameカラムの値にバリエーションがある（スペース差異等）。name→ID→IDで全件検索の2段階が必須
-- AIコメントのページ分割は文字数ベース（750/850字）。totalPages計算も同じロジックで同期する必要がある
-- 口コミ言語別分析スライドのpageNum++が欠けていた（IIFE形式に変更で対応）
+- 777403a feat: 口コミ国別分析ページに対象月フィルターを追加
+- 7eb2d28 feat: 口コミ国別分析をグローバル店舗セレクタと連動
+- 7f95b65 feat: 口コミ国別分析のCSVを3セクション統合ダウンロードに変更
+- 01d8e2d feat: 口コミ国別分析に店舗別言語内訳テーブルを追加
+- 2c526c1 fix: ヘッダー店舗変更時に口コミ国別分析を自動再実行
+- 8c96834 fix: CSV縦1列問題の修正 + 対象月変更時の自動再分析
+- b8567c3 feat: CSV出力を3セクション横並びレイアウトに変更
+- 5086db3 feat: 口コミ国別分析のダウンロードをExcel(.xlsx)に変更

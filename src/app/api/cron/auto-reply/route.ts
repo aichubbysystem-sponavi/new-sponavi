@@ -143,12 +143,12 @@ export async function GET(request: NextRequest) {
 
   const supabase = getSupabase();
 
-  // 自動返信設定がある店舗を取得（Go APIのreview_reply_settingと同等）
-  // Supabaseにreview_auto_reply_settingsテーブルがなければ、全店舗の★4-5に自動返信
+  // 自動返信設定がある店舗を取得（解約店舗を除外）
   const { data: shops } = await supabase
     .from("shops")
     .select("id, name, gbp_location_name")
-    .not("gbp_location_name", "is", null);
+    .not("gbp_location_name", "is", null)
+    .is("cancelled_at", null);
 
   if (!shops || shops.length === 0) {
     return NextResponse.json({ success: true, message: "店舗なし", replied: 0 });

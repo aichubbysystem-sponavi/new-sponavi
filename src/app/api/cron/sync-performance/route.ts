@@ -26,12 +26,13 @@ export async function GET(request: NextRequest) {
   const startTime = Date.now();
   const TIME_LIMIT = 270_000;
 
-  // 1. GBP設定済みの全店舗を取得
+  // 1. GBP設定済みの全店舗を取得（解約店舗を除外）
   const { data: shops, error } = await supabase
     .from("shops")
     .select("id, name, gbp_location_name")
     .not("gbp_location_name", "is", null)
-    .neq("gbp_location_name", "");
+    .neq("gbp_location_name", "")
+    .is("cancelled_at", null);
 
   if (error || !shops || shops.length === 0) {
     return NextResponse.json({ error: "No shops found" }, { status: 200 });

@@ -1,0 +1,32 @@
+## 【2026-06-15】全コード監査・バグ修正・P-MAX復旧
+
+### 決定事項
+- 全148ファイルのコード監査実施（Critical 3件、High 7件、Medium 8件、Low 4件）
+- 機能面の欠陥4件を即時修正（レースコンディション、prevRank計算、投稿エラー、P-MAXクラッシュ）
+- セキュリティ3件（パスワード平文保存、P-MAX認証なし、ブルートフォース対策）は次回対応
+- Google Ads リフレッシュトークンはcurl直接交換方式に統一（OAuth Playground不使用）
+- GCP OAuth同意画面は既に本番公開済みだった（テストモードではなかった）
+
+### 変更内容（具体的に）
+- `src/app/page.tsx`: useEffect(L128-177)にcancelledフラグ+cleanup追加。店舗切替時のレースコンディション防止。Supabase PromiseLikeに合わせて.catch→{data, error}形式に変更。prevRank計算をsearched_atの日付(YYYY-MM-DD)比較に変更し同日データをスキップ
+- `src/app/api/cron/execute-posts/route.ts`: catchブロック(L363-368)にDB更新の二重try-catch追加。staleリカバリ閾値を10分→5分に変更(L257-258)
+- `src/app/pmax/[customerId]/page.tsx`: setMonthlyData/setDailyData(L258-259)で.campaignsが存在しない場合nullをセット（API 500時のObject.keysクラッシュ防止）
+- `◆広告専用◆/認証情報.txt`: リフレッシュトークンを2026-06-15取得分に更新、curl交換の注意書き追加
+
+### 数値・設定値
+- execute-posts staleリカバリ閾値: 10分 → 5分
+- Google Ads Refresh Token: `1//0ebWh9ce138GrCgYIARAAGA4SNwF-L9Ir...`（認証情報.txtに全文記載）
+- Vercel本番プロジェクト: `aichubbysystem-6689s-projects/new-sponavi`（CLIの`spotlight-navigators-projects`は誤り）
+
+### 未解決・次回やること
+- パスワード平文保存 (api/report/users/route.ts L62,23) → password_displayカラム廃止、GETからパスワード除外
+- P-MAX全エンドポイント認証なし (api/pmax/*) → セッション認証追加
+- ブルートフォース対策 (lib/password-validation.ts L55-102) → サーバー側ログイン試行制限追加
+- Vercel CLI接続先を正しいプロジェクトに切り替える
+
+### 注意点・ハマったこと
+- OAuth Playgroundの「トークンと交換」ボタンを押すとPlaygroundが自動失効させる場合がある → 必ずブラウザ認証後のcodeをcurlで直接交換すること
+- Vercel CLIが接続していたプロジェクト(spotlight-navigators-projects)と本番(aichubbysystem-6689s-projects)が別物だった → CLIでenv addしたものは本番に反映されない。環境変数変更はVercelダッシュボードで行うこと
+- Supabaseの.then()はPromiseLikeで.catch()メソッドがない → TypeErrorになる。{data, error}の分割代入でエラーハンドリングする
+- GCP OAuth同意画面は既に「本番」公開済みだった。トークン失効の真因は不明（Google側の一時的失効 or 複数回の認証フローによる旧トークン無効化の可能性）
+- 昨日(6/14)取得のトークンが1日で失効 → 本番モードでも再認証時にprompt=consentで古いトークンが無効化されることがある

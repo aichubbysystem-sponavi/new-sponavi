@@ -101,8 +101,14 @@ export default function ShopProvider({ children }: { children: React.ReactNode }
 
   const fetchShops = useCallback(async () => {
     try {
-      const res = await api.get("/api/shop");
-      const data: Shop[] = Array.isArray(res.data) ? res.data : [];
+      const [res, cancelRes] = await Promise.all([
+        api.get("/api/shop"),
+        api.get("/api/report/shop-cancel").then(r => r.data?.cancelled || []).catch(() => []),
+      ]);
+      const allData: Shop[] = Array.isArray(res.data) ? res.data : [];
+      // 解約店舗をサイドバーの店舗一覧から除外
+      const cancelledIds = new Set((cancelRes as { id: string }[]).map(c => c.id));
+      const data = allData.filter(s => !cancelledIds.has(s.id));
       setShops(data);
       setApiConnected(true);
       if (data.length > 0 && !selectedShopId) {

@@ -251,7 +251,22 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "店舗取得失敗" }, { status: 500 });
   }
 
-  // 3.5 契約中の店舗のみに絞り込み（API代節約）
+  // 3.5 解約店舗を除外
+  try {
+    const supabaseForCancel = getSupabase();
+    const { data: cancelledData } = await supabaseForCancel
+      .from("shops")
+      .select("id")
+      .not("cancelled_at", "is", null);
+    if (cancelledData && cancelledData.length > 0) {
+      const cancelledIds = new Set(cancelledData.map(c => c.id));
+      const beforeCount = shops.length;
+      shops = shops.filter(s => !cancelledIds.has(s.id));
+      console.log(`[cron/sync-reviews] Cancelled filter: ${beforeCount} → ${shops.length} active shops`);
+    }
+  } catch (e: any) { console.error("[cron/sync-reviews] cancelled filter:", e?.message); }
+
+  // 3.6 契約中の店舗のみに絞り込み（API代節約）
   try {
     const { fetchCustomerSheet } = await import("@/lib/customer-sheet");
     const custMap = await fetchCustomerSheet();

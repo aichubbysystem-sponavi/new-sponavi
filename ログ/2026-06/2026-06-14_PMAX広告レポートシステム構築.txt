@@ -1,0 +1,64 @@
+===================================================
+2026-06-14 P-MAX広告レポートシステム構築
+===================================================
+
+【目的】
+P-MAX広告のレポートをMEOレポートと同じデザインで自動生成
+サブドメイン: p-max.new-spotlight-navigator.com
+
+【完了した作業】
+
+1. Google Ads API認証セットアップ
+   - GCPプロジェクト: RPAchubby（既存流用）
+   - Google Ads API有効化
+   - OAuth Client: ウェブ クライアント 1（286436056923-0o56...）
+   - 開発者トークン: ベーシックアクセス（既存流用）
+   - MCC ID: 385-915-0713
+   - Refresh Token取得: chubby1204.meo@gmail.com で認証（読み取り専用権限）
+   - 認証情報: ◆広告専用◆/認証情報.txt に保存
+
+2. API実装
+   - src/lib/google-ads.ts: Google Ads API v23 REST ヘルパー
+   - src/lib/pmax-sheet.ts: スプレッドシートCSVエクスポート経由でGBPデータ取得
+   - /api/pmax/accounts: MCC配下全アカウント一覧（98アカウント）
+   - /api/pmax/summary: アカウント別サマリー指標
+   - /api/pmax/monthly: キャンペーン別月次データ
+   - /api/pmax/daily: キャンペーン別日次データ
+   - /api/pmax/gbp: スプレッドシートからGBP指標取得
+
+3. UI実装（MEOレポート準拠デザイン）
+   - src/app/pmax/page.tsx: アカウント選択ページ（検索付き）
+   - src/app/pmax/[customerId]/page.tsx: 4ページレポート
+     - P1: 3x3 KPIカード（前月比バッジ付き）
+       - 1列目: 総表示回数/総クリック/総広告費（Google Ads API）
+       - 2列目: 合計来店数/電話/経路案内（スプレッドシート）
+       - 3列目: メニュークリック/予約/保存共有（スプレッドシート）
+     - P2: キャンペーン別表示回数の積み上げ棒グラフ + テーブル
+     - P3: 言語（キャンペーン）別月次推移（棒グラフ + 5指標テーブル）
+     - P4: 言語別日次データテーブル
+
+4. インフラ
+   - middleware.ts: p-max.* サブドメインルーティング追加
+   - next.config.mjs: /api/pmax/* のGo APIプロキシ除外
+   - app-shell.tsx/layout.tsx: P-MAXドメインはサイドバーなし
+   - .gitignore: ◆広告専用◆/ と get-ads-token.js 追加
+   - Vercelドメイン: p-max.new-spotlight-navigator.com（aichubbysystem-チーム）
+   - DNS: お名前.com CNAME + TXT設定済み
+   - Vercel環境変数: GOOGLE_ADS_* 5つ設定済み
+
+【トラブルシューティング】
+- Google Ads API v18/v17/v20: すべて廃止済み → v23で解決
+- searchStream → search に変更（REST互換性）
+- pageSize: v23では固定サイズ、パラメータ不要
+- OAuth Playground: ad@chubby.co.jp がWorkspace制限でブロック → ローカルスクリプトで取得
+- redirect_uri_mismatch: GCPリダイレクトURI設定で解決
+- now変数スコープ: useEffect内とレンダリング部で別々に定義
+
+【GBPデータ連携の注意点】
+- スプレッドシート: 1wludlpnMw7xithCJc3-9iIkjnhx2RFSWR9A8ihOsJ4A
+- タブ: Google広告 店舗別データ (gid=372148068)
+- 店舗名の部分一致でマッチ（Google Adsアカウント名 ↔ スプレッドシート店舗名）
+- スプレッドシートに該当店舗がない場合は0表示
+
+【既存システムへの影響】
+- なし（全てp-max.*サブドメインまたは/pmax/*パスで独立）

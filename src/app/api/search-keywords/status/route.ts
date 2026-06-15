@@ -48,10 +48,11 @@ export async function GET(request: Request) {
   const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
   const expectedMonth = getExpectedMonthJST();
 
-  // 1. Get all shops (paginated to bypass 1000 row limit)
-  const allShops = await fetchAll<{ id: string; name: string; gbp_location_name: string | null }>(
-    supabase, "shops", "id, name, gbp_location_name", "name", true
+  // 1. Get all active shops (解約店舗を除外, paginated to bypass 1000 row limit)
+  const allShopsRaw = await fetchAll<{ id: string; name: string; gbp_location_name: string | null; cancelled_at: string | null }>(
+    supabase, "shops", "id, name, gbp_location_name, cancelled_at", "name", true
   );
+  const allShops = allShopsRaw.filter(s => !s.cancelled_at);
 
   if (allShops.length === 0) {
     return NextResponse.json({ error: "No shops found" }, { status: 500 });

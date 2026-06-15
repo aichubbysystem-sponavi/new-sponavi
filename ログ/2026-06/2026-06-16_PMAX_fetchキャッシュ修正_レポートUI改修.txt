@@ -1,0 +1,48 @@
+## 【2026-06-16】P-MAX fetchキャッシュ修正・レポートUI改修
+
+### 決定事項
+- P-MAX API 401の根本原因はNext.js 14のfetchキャッシュだった → `cache: "no-store"` で解決
+- P-MAXレポートのページ構成を確定: P1サマリー → P2言語別比較 → P3+言語ごとに月次→日次ペア（MAX4言語）
+- WEBサイトKPIカードを追加、予約はwebsiteデータの誤用を修正
+- アカウント選択ページをMEOレポート管理画面風にリニューアル
+- GBP指標（合計来店数・電話・経路案内・WEBサイト等）はスプレッドシートにデータがあるアカウントのみ表示される仕様
+
+### 変更内容（具体的に）
+- `src/lib/google-ads.ts`: getAccessToken()とexecuteGaql()の両fetchに`cache: "no-store"`追加。`res.text()`の残骸による二重読み取り(Body already read)バグ修正。デバッグコード削除
+- `src/app/pmax/[customerId]/page.tsx`:
+  - WEBサイトKPIカード追加（10カード目、スプレッドシートJ列のwebsiteデータ）
+  - 予約カードの値をwebsite→0に修正（予約データソースは別途接続必要）
+  - kpiTopColors配列を8→10色に拡張
+  - P2を「言語別指標比較」に変更（表示回数・クリック・広告費の3つの棒グラフ + 集計テーブル）
+  - 月次と日次を言語ごとにペアで表示（P3: 言語A月次 → P4: 言語A日次 → P5: 言語B月次...）
+  - 月次・日次ページをMAX4言語に制限（`slice(0, maxLangs)`）
+  - monthlyData/dailyDataのnullガード（API 500時のObject.keysクラッシュ防止）
+- `src/app/pmax/page.tsx`: アカウント選択ページ全面リニューアル
+  - KPIバー: 管理アカウント数/総表示回数/総クリック/総広告費
+  - 月別フィルタ: 過去12ヶ月選択可能
+  - カードUI: 各アカウントに表示・クリック・広告費をプログレッシブ表示
+  - 5並列でサマリー取得、AbortController対応
+- `src/app/api/pmax/summary/route.ts`: デバッグ用_envLengths出力を追加→削除（調査用の一時変更）
+- `◆広告専用◆/認証情報.txt`: リフレッシュトークン更新、curl交換の注意書き追加
+
+### 数値・設定値
+- maxLangs: 4（月次・日次ページの最大言語数）
+- KPIカード数: 9→10（WEBサイト追加）
+- kpiTopColors: 8色→10色
+- アカウントサマリー並列取得: 5並列（BATCH=5）
+- Google Ads Refresh Token: `1//0ebWh9ce138Gr...`（認証情報.txtに全文）
+- Vercel本番プロジェクト: `aichubbysystem-6689s-projects/new-sponavi`
+
+### 未解決・次回やること
+- セキュリティ3件: パスワード平文保存/P-MAX認証なし/ブルートフォース対策（前回から持ち越し）
+- Supabase 400エラー: 新APIキー形式（sb_publishable_*）への対応。/auth/v1/tokenが400を返す
+- 予約カードのデータソース接続（現在は0固定）
+- Vercel CLI接続先を正しいプロジェクト(aichubbysystem-6689s-projects)に切り替える
+- GBP指標が0のアカウント: スプレッドシートにデータ追加が必要
+
+### 注意点・ハマったこと
+- **Next.js 14のfetchキャッシュが最大の罠**: サーバーサイドのfetch()はデフォルトでレスポンスをキャッシュする。Google OAuthトークン交換もキャッシュされ、古い（無効な）アクセストークンが返り続ける。`cache: "no-store"` 必須
+- **Vercel Sensitive環境変数の挙動**: 編集画面を開くとValueが空に見える（セキュリティ仕様）。空のままSaveすると値が空で上書きされる。毎回正しい値を貼り直してからSave
+- **res.text()とres.json()の二重呼び出し**: fetchレスポンスのbodyは1回しか読めない。デバッグでres.text()を追加した後にres.json()を残すと「Body has already been read」エラー
+- **Vercelプロジェクト2つ問題（継続）**: CLIは`spotlight-navigators-projects`、本番は`aichubbysystem-6689s-projects`。環境変数変更は必ずVercelダッシュボードから
+- **GCP OAuth同意画面は既に本番公開済みだった**: トークン失効の原因はテストモードではなく、別要因（複数回の認証フローによる旧トークン無効化の可能性）

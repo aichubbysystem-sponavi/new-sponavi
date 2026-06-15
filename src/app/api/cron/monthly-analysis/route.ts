@@ -43,11 +43,12 @@ export async function GET(request: NextRequest) {
     ? `${rawMonth.split("-")[0]}/${parseInt(rawMonth.split("-")[1])}`
     : rawMonth;
 
-  // 全店舗取得
+  // 全店舗取得（解約店舗を除外）
   const { data: shops } = await supabase
     .from("shops")
     .select("id, name")
-    .not("gbp_location_name", "is", null);
+    .not("gbp_location_name", "is", null)
+    .is("cancelled_at", null);
 
   if (!shops || shops.length === 0) {
     return NextResponse.json({ success: true, message: "店舗なし", analyzed: 0 });

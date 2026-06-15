@@ -24,9 +24,11 @@ interface MasterRow {
   service: "meo" | "pmax" | "both" | "none";
   reviewCount: number;
   status: "active" | "paused" | "churned";
+  cancelledAt: string | null;
 }
 
 type FilterService = "all" | "meo" | "pmax" | "both" | "none";
+type FilterStatus = "all" | "active" | "cancelled";
 
 export default function CustomerMasterPage() {
   const [shops, setShops] = useState<MasterRow[]>([]);
@@ -36,6 +38,7 @@ export default function CustomerMasterPage() {
   const [success, setSuccess] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [filterService, setFilterService] = useState<FilterService>("all");
+  const [filterStatus, setFilterStatus] = useState<FilterStatus>("active");
   const [filterGbp, setFilterGbp] = useState<"all" | "connected" | "disconnected">("all");
   const [sortKey, setSortKey] = useState<keyof MasterRow>("shopName");
   const [sortAsc, setSortAsc] = useState(true);
@@ -65,12 +68,16 @@ export default function CustomerMasterPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [shopRes, ownerRes, custRes, gbpAccRes] = await Promise.all([
+      const [shopRes, ownerRes, custRes, gbpAccRes, cancelRes] = await Promise.all([
         api.get("/api/shop"),
         api.get("/api/owner"),
         api.get("/api/report/customer-sheet").then(r => r.data || { customers: [] }).catch(() => ({ customers: [] })),
         api.get("/api/gbp/account", { timeout: 15000 }).then(r => r.data || []).catch(() => []),
+        api.get("/api/report/shop-cancel").then(r => r.data?.cancelled || []).catch(() => []),
       ]);
+      // 解約店舗マップ: shopId → cancelled_at
+      const cancelledMap = new Map<string, string>();
+      for (const c of cancelRes) cancelledMap.set(c.id, c.cancelled_at);
       const shopData: Shop[] = Array.isArray(shopRes.data) ? shopRes.data : [];
       const ownerData: Owner[] = Array.isArray(ownerRes.data) ? ownerRes.data : [];
       setOwners(ownerData);
@@ -127,6 +134,7 @@ export default function CustomerMasterPage() {
           service,
           reviewCount: 0,
           status: "active" as const,
+          cancelledAt: cancelledMap.get(s.id) || null,
         };
       }));
     } catch { setError("API接続エラー"); } finally { setLoading(false); }
@@ -244,23 +252,39 @@ export default function CustomerMasterPage() {
     let r = shops.filter((row) => {
       if (searchQuery && !fuzzyMatch(searchQuery, row.shopId, row.shopName, row.ownerName, row.agentName, row.city, row.state, row.phone)) return false;
       if (filterService !== "all" && row.service !== filterService) return false;
+      if (filterStatus === "active" && row.cancelledAt) return false;
+      if (filterStatus === "cancelled" && !row.cancelledAt) return false;
       if (filterGbp === "connected" && !row.gbpConnected) return false;
       if (filterGbp === "disconnected" && row.gbpConnected) return false;
       return true;
     });
     r.sort((a, b) => sortAsc ? String(a[sortKey]).localeCompare(String(b[sortKey]), "ja") : String(b[sortKey]).localeCompare(String(a[sortKey]), "ja"));
     return r;
-  }, [shops, searchQuery, filterService, filterGbp, sortKey, sortAsc]);
+  }, [shops, searchQuery, filterService, filterStatus, filterGbp, sortKey, sortAsc]);
 
   const hs = (k: keyof MasterRow) => { if (sortKey === k) setSortAsc(!sortAsc); else { setSortKey(k); setSortAsc(true); } };
   const si = (k: keyof MasterRow) => sortKey !== k ? "↕" : sortAsc ? "↑" : "↓";
 
   // サマリー計算
-  const meoCount = shops.filter(s => s.service === "meo" || s.service === "both").length;
-  const pmaxCount = shops.filter(s => s.service === "pmax" || s.service === "both").length;
-  const bothCount = shops.filter(s => s.service === "both").length;
-  const noneCount = shops.filter(s => s.service === "none").length;
-  const gbpConnected = shops.filter(s => s.gbpConnected).length;
+  const activeShops = shops.filter(s => !s.cancelledAt);
+  const cancelledCount = shops.filter(s => !!s.cancelledAt).length;
+  const meoCount = activeShops.filter(s => s.service === "meo" || s.service === "both").length;
+  const pmaxCount = activeShops.filter(s => s.service === "pmax" || s.service === "both").length;
+  const bothCount = activeShops.filter(s => s.service === "both").length;
+  const noneCount = activeShops.filter(s => s.service === "none").length;
+  const gbpConnected = activeShops.filter(s => s.gbpConnected).length;
+
+  // 解約設定/解除
+  const handleToggleCancel = async (shopId: string, shopName: string, currentlyCancelled: boolean) => {
+    const action = currentlyCancelled ? "解約を解除" : "解約に設定";
+    if (!confirm(`「${shopName}」を${action}しますか？${currentlyCancelled ? "" : "\n\n解約店舗は検索語句管理等の機能から除外されます。"}`)) return;
+    try {
+      await api.post("/api/report/shop-cancel", { shopId, cancel: !currentlyCancelled });
+      setSuccess(`「${shopName}」を${action}しました`);
+      setTimeout(() => setSuccess(""), 3000);
+      await fetchData();
+    } catch { setError(`${action}に失敗しました`); }
+  };
 
   const serviceLabel = (s: string) => {
     switch (s) {
@@ -278,30 +302,34 @@ export default function CustomerMasterPage() {
     </div>
 
     {/* ── サマリーカード ── */}
-    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
-      <button onClick={() => setFilterService("all")} className={`bg-white rounded-xl p-4 border shadow-sm text-left transition hover:shadow-md ${filterService === "all" ? "border-[#003D6B] ring-2 ring-[#003D6B]/20" : "border-slate-200"}`}>
+    <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 mb-6">
+      <button onClick={() => { setFilterService("all"); setFilterStatus("active"); }} className={`bg-white rounded-xl p-4 border shadow-sm text-left transition hover:shadow-md ${filterStatus === "active" && filterService === "all" ? "border-[#003D6B] ring-2 ring-[#003D6B]/20" : "border-slate-200"}`}>
         <p className="text-[10px] text-slate-400 font-medium">全店舗</p>
-        <p className="text-2xl font-black text-[#003D6B] mt-1">{shops.length}</p>
+        <p className="text-2xl font-black text-[#003D6B] mt-1">{activeShops.length}</p>
       </button>
-      <button onClick={() => setFilterService("meo")} className={`bg-white rounded-xl p-4 border shadow-sm text-left transition hover:shadow-md ${filterService === "meo" ? "border-blue-500 ring-2 ring-blue-500/20" : "border-slate-200"}`}>
+      <button onClick={() => { setFilterService("meo"); setFilterStatus("active"); }} className={`bg-white rounded-xl p-4 border shadow-sm text-left transition hover:shadow-md ${filterService === "meo" ? "border-blue-500 ring-2 ring-blue-500/20" : "border-slate-200"}`}>
         <p className="text-[10px] text-blue-500 font-medium">MEO対策</p>
         <p className="text-2xl font-black text-blue-600 mt-1">{meoCount}</p>
       </button>
-      <button onClick={() => setFilterService("pmax")} className={`bg-white rounded-xl p-4 border shadow-sm text-left transition hover:shadow-md ${filterService === "pmax" ? "border-amber-500 ring-2 ring-amber-500/20" : "border-slate-200"}`}>
+      <button onClick={() => { setFilterService("pmax"); setFilterStatus("active"); }} className={`bg-white rounded-xl p-4 border shadow-sm text-left transition hover:shadow-md ${filterService === "pmax" ? "border-amber-500 ring-2 ring-amber-500/20" : "border-slate-200"}`}>
         <p className="text-[10px] text-amber-500 font-medium">P-MAX</p>
         <p className="text-2xl font-black text-amber-600 mt-1">{pmaxCount}</p>
       </button>
-      <button onClick={() => setFilterService("both")} className={`bg-white rounded-xl p-4 border shadow-sm text-left transition hover:shadow-md ${filterService === "both" ? "border-purple-500 ring-2 ring-purple-500/20" : "border-slate-200"}`}>
+      <button onClick={() => { setFilterService("both"); setFilterStatus("active"); }} className={`bg-white rounded-xl p-4 border shadow-sm text-left transition hover:shadow-md ${filterService === "both" ? "border-purple-500 ring-2 ring-purple-500/20" : "border-slate-200"}`}>
         <p className="text-[10px] text-purple-500 font-medium">両方</p>
         <p className="text-2xl font-black text-purple-600 mt-1">{bothCount}</p>
       </button>
-      <button onClick={() => setFilterGbp(filterGbp === "connected" ? "all" : "connected")} className={`bg-white rounded-xl p-4 border shadow-sm text-left transition hover:shadow-md ${filterGbp === "connected" ? "border-green-500 ring-2 ring-green-500/20" : "border-slate-200"}`}>
+      <button onClick={() => { setFilterGbp(filterGbp === "connected" ? "all" : "connected"); setFilterStatus("active"); }} className={`bg-white rounded-xl p-4 border shadow-sm text-left transition hover:shadow-md ${filterGbp === "connected" ? "border-green-500 ring-2 ring-green-500/20" : "border-slate-200"}`}>
         <p className="text-[10px] text-green-500 font-medium">GBP接続済</p>
         <p className="text-2xl font-black text-green-600 mt-1">{gbpConnected}</p>
       </button>
-      <button onClick={() => setFilterService("none")} className={`bg-white rounded-xl p-4 border shadow-sm text-left transition hover:shadow-md ${filterService === "none" ? "border-slate-400 ring-2 ring-slate-400/20" : "border-slate-200"}`}>
+      <button onClick={() => { setFilterService("none"); setFilterStatus("active"); }} className={`bg-white rounded-xl p-4 border shadow-sm text-left transition hover:shadow-md ${filterService === "none" ? "border-slate-400 ring-2 ring-slate-400/20" : "border-slate-200"}`}>
         <p className="text-[10px] text-slate-400 font-medium">契約未登録</p>
         <p className="text-2xl font-black text-slate-500 mt-1">{noneCount}</p>
+      </button>
+      <button onClick={() => { setFilterStatus("cancelled"); setFilterService("all"); setFilterGbp("all"); }} className={`bg-white rounded-xl p-4 border shadow-sm text-left transition hover:shadow-md ${filterStatus === "cancelled" ? "border-red-500 ring-2 ring-red-500/20" : "border-slate-200"}`}>
+        <p className="text-[10px] text-red-500 font-medium">解約店舗</p>
+        <p className="text-2xl font-black text-red-600 mt-1">{cancelledCount}</p>
       </button>
     </div>
 
@@ -342,9 +370,10 @@ export default function CustomerMasterPage() {
           <button onClick={() => setCoordResult(null)} className="ml-2 text-amber-400 hover:text-amber-600">×</button>
         </div>
       )}
-      {(searchQuery || filterService !== "all" || filterGbp !== "all") && (
+      {(searchQuery || filterService !== "all" || filterStatus !== "active" || filterGbp !== "all") && (
         <div className="flex items-center gap-2 mt-2">
           <span className="text-xs text-slate-500">{filtered.length}件表示</span>
+          {filterStatus !== "active" && <button onClick={() => setFilterStatus("active")} className="text-[10px] px-2 py-0.5 rounded-full bg-red-50 text-red-600 hover:bg-red-100">解約店舗のみ ×</button>}
           {filterService !== "all" && <button onClick={() => setFilterService("all")} className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200">契約: {filterService === "meo" ? "MEO" : filterService === "pmax" ? "P-MAX" : filterService === "both" ? "両方" : "未登録"} ×</button>}
           {filterGbp !== "all" && <button onClick={() => setFilterGbp("all")} className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200">GBP: {filterGbp === "connected" ? "接続済" : "未接続"} ×</button>}
         </div>
@@ -526,9 +555,12 @@ export default function CustomerMasterPage() {
             {filtered.length === 0 ? (
               <tr><td colSpan={8} className="py-12 text-center text-slate-400">{shops.length === 0 ? "店舗が登録されていません" : "該当なし"}</td></tr>
             ) : filtered.map((row) => (
-              <tr key={row.shopId} className="border-b border-slate-50 hover:bg-blue-50/30 transition">
+              <tr key={row.shopId} className={`border-b border-slate-50 transition ${row.cancelledAt ? "bg-red-50/40 hover:bg-red-50/60" : "hover:bg-blue-50/30"}`}>
                 <td className="py-2.5 px-3">
-                  <span className="font-medium text-slate-800 text-[13px]">{row.shopName}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className={`font-medium text-[13px] ${row.cancelledAt ? "text-slate-400 line-through" : "text-slate-800"}`}>{row.shopName}</span>
+                    {row.cancelledAt && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-100 text-red-600">解約</span>}
+                  </div>
                   <span className="block text-[10px] text-slate-400 font-mono">{row.shopId.slice(0, 8)}...</span>
                 </td>
                 <td className="py-2.5 px-2 text-center">{serviceLabel(row.service)}</td>
@@ -550,6 +582,10 @@ export default function CustomerMasterPage() {
                     {row.gbpConnected && (
                       <button onClick={() => handleUnlinkGbp(row.shopId, row.shopName)} className="text-[10px] px-2 py-1 bg-orange-50 text-orange-600 rounded hover:bg-orange-100 transition">ロケーション解除</button>
                     )}
+                    <button
+                      onClick={() => handleToggleCancel(row.shopId, row.shopName, !!row.cancelledAt)}
+                      className={`text-[10px] px-2 py-1 rounded transition ${row.cancelledAt ? "bg-green-50 text-green-600 hover:bg-green-100" : "bg-red-50 text-red-600 hover:bg-red-100"}`}
+                    >{row.cancelledAt ? "解約解除" : "解約"}</button>
                     <button onClick={() => handleDelete(row.shopId, row.shopName)} className="text-[10px] px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition">削除</button>
                   </div>
                 </td>
