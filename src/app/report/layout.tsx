@@ -40,16 +40,20 @@ export default function ReportLayout({
               pointer-events: none !important;
             }
 
+            @page { size: A4 landscape; margin: 0; }
+
             @media print {
+              * {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
               body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
               .no-print { display: none !important; }
               .slide { margin: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
-              @page { size: A4 landscape; margin: 0; }
 
               /* print用スライドを表示 */
               .grid-print-slide {
                 display: flex !important;
-              }
               }
               /* 全KW比較: 2つ目以降は非表示（1ページ目のみ表示） */
               .grid-kw-comparison-sub {
