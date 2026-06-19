@@ -587,7 +587,7 @@ export default function ReportClient({
       }
       onAdd() {
         this.div = document.createElement("div");
-        this.div.style.cssText = `position:absolute;width:36px;height:36px;border-radius:50%;background:${this.color};border:2px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:bold;font-size:14px;font-family:'Noto Sans JP',Arial,sans-serif;line-height:1;box-sizing:border-box;`;
+        this.div.style.cssText = `position:absolute;width:36px;height:36px;border-radius:50%;background:${this.color};border:2px solid #fff;color:#fff;font-weight:bold;font-size:14px;font-family:Arial,sans-serif;line-height:32px;text-align:center;box-sizing:border-box;user-select:none;`;
         this.div.textContent = this.rank > 0 ? String(this.rank) : "-";
         const panes = this.getPanes();
         panes?.overlayMouseTarget.appendChild(this.div);
@@ -794,7 +794,7 @@ export default function ReportClient({
                 return `<td style="padding:5px 4px;text-align:center;font-size:12px;font-weight:${v!==null&&v<=5?900:600};color:${c};border-bottom:1px solid #eee;">${v !== null ? v : "-"}</td>`;
               }).join("") + `<td style="padding:5px 4px;text-align:center;font-size:12px;border-bottom:1px solid #eee;">${diffStr}</td>`;
               const block = document.createElement("div");
-              block.innerHTML = `<div style="font-size:13px;font-weight:700;color:#0f3460;margin-bottom:2px;">「${kw}」</div>
+              block.innerHTML = `<div style="font-size:13px;font-weight:700;color:#0f3460;margin-bottom:6px;">「${kw}」</div>
                 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:6px;overflow:hidden;"><thead><tr>${thRow}</tr></thead><tbody><tr>${tdRow}</tr></tbody></table>`;
               rightCol.appendChild(block);
             });
