@@ -688,7 +688,15 @@ export default function ReportClient({
       hiddenGridSlides.forEach(el => { el.style.position = "static"; el.style.left = "auto"; el.style.pointerEvents = "auto"; });
       const compSubs = document.querySelectorAll<HTMLElement>(".grid-kw-comparison-sub");
       compSubs.forEach(el => { el.dataset.prevDisplay = el.style.display; el.style.display = "none"; });
-      await new Promise(r => setTimeout(r, 300));
+      // hiddenスライドが表示に戻った後、全KWのGoogle Mapsを再描画
+      if (gridRanking) {
+        await new Promise(r => setTimeout(r, 200));
+        gridRanking.keywords.forEach(kw => renderGridMapForKw(kw));
+        // Mapsタイル読み込み待ち
+        await new Promise(r => setTimeout(r, 2000));
+      } else {
+        await new Promise(r => setTimeout(r, 300));
+      }
 
       // 全スライドをキャプチャ（gridスライドは個別キャプチャ後にペアで合成）
       let pageIdx = 0;
