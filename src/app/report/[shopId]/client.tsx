@@ -554,7 +554,7 @@ export default function ReportClient({
     // 既存マップを破棄して毎回新規作成（キーワード切替時の描画ズレ防止）
     if (gridGoogleMapRefs.current[kw]) {
       // 既存マーカー削除
-      (gridMarkersRefs.current[kw] || []).forEach(m => { if (m.setMap) m.setMap(null); });
+      (gridMarkersRefs.current[kw] || []).forEach(m => m.setMap(null));
       gridMarkersRefs.current[kw] = [];
     }
 
@@ -572,49 +572,18 @@ export default function ReportClient({
     const bounds = new window.google.maps.LatLngBounds();
     const rankColor = (r: number) => r <= 0 ? "#6B7280" : r <= 3 ? "#16A34A" : r <= 10 ? "#2563EB" : r <= 20 ? "#F59E0B" : "#EF4444";
 
-    // HTMLオーバーレイでマーカーを描画（html2canvasで正確にキャプチャ可能）
-    class RankOverlay extends window.google.maps.OverlayView {
-      position: any;
-      div: HTMLDivElement | null = null;
-      rank: number;
-      color: string;
-      constructor(pos: any, rank: number, color: string, map: any) {
-        super();
-        this.position = pos;
-        this.rank = rank;
-        this.color = color;
-        this.setMap(map);
-      }
-      onAdd() {
-        this.div = document.createElement("div");
-        this.div.style.cssText = `position:absolute;width:36px;height:36px;border-radius:50%;background:${this.color};border:2px solid #fff;box-sizing:border-box;user-select:none;display:grid;place-items:center;color:#fff;font-weight:bold;font-size:13px;font-family:Arial,Helvetica,sans-serif;line-height:1;`;
-        this.div.textContent = this.rank > 0 ? String(this.rank) : "-";
-        const panes = this.getPanes();
-        panes?.overlayMouseTarget.appendChild(this.div);
-      }
-      draw() {
-        if (!this.div) return;
-        const proj = this.getProjection();
-        if (!proj) return;
-        const point = proj.fromLatLngToDivPixel(this.position);
-        if (point) {
-          this.div.style.left = `${point.x - 18}px`;
-          this.div.style.top = `${point.y - 18}px`;
-        }
-      }
-      onRemove() {
-        if (this.div) { this.div.remove(); this.div = null; }
-      }
-    }
-
     pts.forEach(pt => {
-      const overlay = new RankOverlay(
-        new window.google.maps.LatLng(pt.lat, pt.lng),
-        pt.rank,
-        rankColor(pt.rank),
-        gmap
-      );
-      gridMarkersRefs.current[kw].push(overlay);
+      const marker = new window.google.maps.Marker({
+        position: { lat: pt.lat, lng: pt.lng },
+        map: gmap,
+        icon: {
+          path: window.google.maps.SymbolPath.CIRCLE,
+          fillColor: rankColor(pt.rank), fillOpacity: 0.9,
+          strokeColor: "#fff", strokeWeight: 2, scale: 18,
+        },
+        label: { text: pt.rank > 0 ? String(pt.rank) : "-", color: "#fff", fontWeight: "bold", fontSize: "14px" },
+      });
+      gridMarkersRefs.current[kw].push(marker);
       bounds.extend({ lat: pt.lat, lng: pt.lng });
     });
 
