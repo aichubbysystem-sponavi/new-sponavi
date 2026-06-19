@@ -848,7 +848,7 @@ export default function ReportClient({
   if (hasReviews) totalPages += 2; // 口コミ件数推移, 月間増加数
   if (showKeywords) totalPages++;
   if (showRankingHistory) totalPages++;
-  if (showGridRanking) totalPages += gridRanking!.keywords.length;
+  if (showGridRanking) totalPages += 1 + Math.ceil(gridRanking!.keywords.length / 2); // サマリー1ページ + マップ2KW/ページ
   if (langStats.length > 1) totalPages++; // 口コミ言語別分析
   if (showSearchQueries) totalPages++;
 
@@ -1419,7 +1419,8 @@ export default function ReportClient({
         const activeMonthI = defaultMonthI;
         const monthData = recentHistory[activeMonthI];
         const prevMonthData = activeMonthI > 0 ? recentHistory[activeMonthI - 1] : null;
-        const gridPageBase = pageNum + 1;
+        pageNum++; // サマリーページ（PDF用）
+        const gridPageBase = pageNum;
 
         // キーワードを2つずつペアにグループ化（PDF時に1ページ2KW表示用）
         const kwPairs: string[][] = [];
@@ -1427,10 +1428,11 @@ export default function ReportClient({
           kwPairs.push(gr.keywords.slice(i, i + 2));
         }
 
-        return kwPairs.map((pair, pairI) => (
+        return kwPairs.map((pair, pairI) => {
+          pageNum++; // ペア単位で1ページ（PDF基準）
+          return (
           <div key={`grid-pair-${pairI}`} className="grid-kw-pair">
             {pair.map((loopKw, kwInPair) => {
-              pageNum++;
               const kwI = pairI * 2 + kwInPair;
               const isActive = kwI === gridKwIdx;
               const snapshot = monthData?.snapshots.find(s => s.keyword === loopKw);
@@ -1604,7 +1606,8 @@ export default function ReportClient({
               );
             })}
           </div>
-        ));
+        );
+        });
       })()}
 
       {/* ════ 検索語句（月切り替え対応） ════ */}
@@ -1966,33 +1969,11 @@ export default function ReportClient({
                 );
               })}
             </div>
-            {/* メモ欄（最終ページのみ） */}
-            {isLast && (
+            {/* メモ欄（最終ページのみ、内容がある場合のみ表示） */}
+            {isLast && memo && (
             <div style={{ marginTop: "auto", borderTop: "1px solid #dde", paddingTop: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                <span style={{ fontSize: 16, fontWeight: 600, color: "#0f3460" }}>メモ（担当者用）</span>
-                <div style={{ display: "flex", gap: 6 }}>
-                  {!memoEditing ? (
-                    <button onClick={() => setMemoEditing(true)} style={{ fontSize: 16, padding: "3px 10px", borderRadius: 6, border: "1px solid #ccd", background: "#fff", cursor: "pointer", color: "#555" }}>
-                      {memo ? "編集" : "追加"}
-                    </button>
-                  ) : (
-                    <>
-                      <button onClick={saveMemo} disabled={memoLoading} style={{ fontSize: 16, padding: "3px 10px", borderRadius: 6, border: "none", background: memoLoading ? "#999" : "#0f3460", color: "#fff", cursor: memoLoading ? "wait" : "pointer" }}>{memoLoading ? "保存中..." : "保存"}</button>
-                      <button onClick={() => setMemoEditing(false)} style={{ fontSize: 16, padding: "3px 10px", borderRadius: 6, border: "1px solid #ccd", background: "#fff", cursor: "pointer", color: "#555" }}>キャンセル</button>
-                    </>
-                  )}
-                  {memoSaved && <span style={{ fontSize: 16, color: "#0a8f3c" }}>保存しました</span>}
-                </div>
-              </div>
-              {memoEditing ? (
-                <textarea value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="この店舗への所感やメモを記入..."
-                  style={{ width: "100%", minHeight: 60, padding: "8px 10px", fontSize: 16, lineHeight: 1.6, border: "1px solid #ccd", borderRadius: 8, resize: "vertical", fontFamily: "inherit" }} />
-              ) : memo ? (
-                <p style={{ fontSize: 16, lineHeight: 1.8, color: "#444", margin: 0, whiteSpace: "pre-wrap" }}>{memo}</p>
-              ) : (
-                <p style={{ fontSize: 16, color: "#aaa", margin: 0, fontStyle: "italic" }}>メモなし</p>
-              )}
+              <span style={{ fontSize: 16, fontWeight: 600, color: "#0f3460", marginBottom: 6, display: "block" }}>メモ（担当者用）</span>
+              <p style={{ fontSize: 16, lineHeight: 1.8, color: "#444", margin: 0, whiteSpace: "pre-wrap" }}>{memo}</p>
             </div>
             )}
           </div>
