@@ -785,7 +785,7 @@ export default function ReportClient({
           // マップコンテナ
           const mapDiv = document.createElement("div");
           mapDiv.className = "grid-print-map";
-          mapDiv.style.cssText = `flex:1;border-radius:12px;overflow:hidden;background:#e8edf5;min-height:300px;`;
+          mapDiv.style.cssText = `width:100%;height:500px;border-radius:12px;overflow:hidden;background:#e8edf5;`;
           mapSlot.appendChild(mapDiv);
           // 凡例
           const legend = document.createElement("div");
@@ -875,8 +875,13 @@ export default function ReportClient({
         new window.google.maps.Marker({ position: { lat: cLat, lng: cLng }, map: gmap, icon: { path: window.google.maps.SymbolPath.BACKWARD_CLOSED_ARROW, fillColor: "#000", fillOpacity: 1, strokeColor: "#fff", strokeWeight: 2, scale: 6 }, zIndex: 999 });
         gmap.fitBounds(bounds, 40);
 
-        // タイル読み込み待ち
-        await new Promise(r => setTimeout(r, 2000));
+        // Mapsのidle（タイル描画完了）を待つ + フォールバックタイムアウト
+        await new Promise<void>(r => {
+          let resolved = false;
+          const done = () => { if (!resolved) { resolved = true; r(); } };
+          window.google.maps.event.addListenerOnce(gmap, "idle", () => setTimeout(done, 500));
+          setTimeout(done, 3000); // フォールバック
+        });
       }
 
       // 全マップの描画完了を追加で待つ
