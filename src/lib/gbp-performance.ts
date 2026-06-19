@@ -87,6 +87,7 @@ async function getPerformanceApiToken(): Promise<string | null> {
         client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET,
         refresh_token: data.refresh_token, grant_type: "refresh_token",
       }),
+      cache: "no-store",
       signal: AbortSignal.timeout(10000),
     });
     if (!res.ok) {
@@ -149,6 +150,7 @@ export async function fetchPerformanceFromGBP(
   try {
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
       signal: AbortSignal.timeout(30000),
     });
 

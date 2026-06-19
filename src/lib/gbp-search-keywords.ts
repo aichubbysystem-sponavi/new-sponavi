@@ -77,6 +77,7 @@ async function getPerformanceApiToken(): Promise<string | null> {
         refresh_token: refreshToken,
         grant_type: "refresh_token",
       }),
+      cache: "no-store",
       signal: AbortSignal.timeout(10000),
     });
     if (!res.ok) {
@@ -110,6 +111,7 @@ async function fetchOneMonth(
   try {
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
       signal: AbortSignal.timeout(15000),
     });
 
