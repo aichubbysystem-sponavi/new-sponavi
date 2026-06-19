@@ -688,26 +688,37 @@ export default function ReportClient({
       hiddenGridSlides.forEach(el => { el.style.position = "static"; el.style.left = "auto"; el.style.pointerEvents = "auto"; });
       const compSubs = document.querySelectorAll<HTMLElement>(".grid-kw-comparison-sub");
       compSubs.forEach(el => { el.dataset.prevDisplay = el.style.display; el.style.display = "none"; });
-      // hiddenスライドが表示に戻った後、全KWのGoogle Mapsを再描画
-      if (gridRanking) {
-        await new Promise(r => setTimeout(r, 200));
-        gridRanking.keywords.forEach(kw => renderGridMapForKw(kw));
-        // Mapsタイル読み込み待ち
-        await new Promise(r => setTimeout(r, 2000));
-      } else {
-        await new Promise(r => setTimeout(r, 300));
-      }
+      await new Promise(r => setTimeout(r, 300));
+
+      // gridスライドのKW名リストを作成（マップ描画用）
+      const gridSlideKws: string[] = [];
+      allSlides.forEach(sl => {
+        if (sl.classList.contains("grid-kw-slide")) {
+          const titleEl = sl.querySelector(".grid-kw-title");
+          if (titleEl) {
+            const m = titleEl.textContent?.match(/「(.+?)」/);
+            if (m) gridSlideKws.push(m[1]);
+          }
+        }
+      });
 
       // 全スライドをキャプチャ（gridスライドは個別キャプチャ後にペアで合成）
       let pageIdx = 0;
       const gridCanvases: HTMLCanvasElement[] = [];
-      let firstGridSeen = false;
+      let gridCaptureIdx = 0;
 
       for (let i = 0; i < allSlides.length; i++) {
         const slide = allSlides[i] as HTMLElement;
 
         if (slide.classList.contains("grid-kw-slide")) {
-          // gridスライドを個別にキャプチャして溜める
+          // このスライドのマップを描画→スクロールして表示→タイル読み込み待ち
+          const kw = gridSlideKws[gridCaptureIdx] || "";
+          if (kw && window.google?.maps) {
+            slide.scrollIntoView({ block: "center" });
+            renderGridMapForKw(kw);
+            await new Promise(r => setTimeout(r, 1500));
+          }
+          gridCaptureIdx++;
           const canvas = await html2canvas(slide, {
             scale: 2, useCORS: true, logging: false, backgroundColor: "#f0f2f5",
           });
