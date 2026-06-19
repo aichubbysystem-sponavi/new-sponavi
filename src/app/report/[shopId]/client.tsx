@@ -828,9 +828,9 @@ export default function ReportClient({
               // 左
               const leftTitleCanvas = await renderKwTitle(gr.keywords[m] || "");
               const ltAspect = leftTitleCanvas.width / leftTitleCanvas.height;
-              const ltW = Math.min(halfW - 10, 120);
-              const ltH = ltW / ltAspect;
-              pdf.addImage(leftTitleCanvas.toDataURL("image/png"), "PNG", 5, 3, ltW, ltH);
+              const ltH = 6;
+              const ltW = ltH * ltAspect;
+              pdf.addImage(leftTitleCanvas.toDataURL("image/png"), "PNG", 5, 2, ltW, ltH);
               const leftImg = mapCanvases[m].toDataURL("image/jpeg", 0.92);
               const leftAspect = mapCanvases[m].height / mapCanvases[m].width;
               const leftAvailH = pdfH - titleMmH - 4;
@@ -842,9 +842,9 @@ export default function ReportClient({
               if (m + 1 < mapCanvases.length) {
                 const rightTitleCanvas = await renderKwTitle(gr.keywords[m + 1] || "");
                 const rtAspect = rightTitleCanvas.width / rightTitleCanvas.height;
-                const rtW = Math.min(halfW - 10, 120);
-                const rtH = rtW / rtAspect;
-                pdf.addImage(rightTitleCanvas.toDataURL("image/png"), "PNG", halfW + 5, 3, rtW, rtH);
+                const rtH = 6;
+                const rtW = rtH * rtAspect;
+                pdf.addImage(rightTitleCanvas.toDataURL("image/png"), "PNG", halfW + 5, 2, rtW, rtH);
                 const rightImg = mapCanvases[m + 1].toDataURL("image/jpeg", 0.92);
                 const rightAspect = mapCanvases[m + 1].height / mapCanvases[m + 1].width;
                 const rightAvailH = pdfH - titleMmH - 4;
