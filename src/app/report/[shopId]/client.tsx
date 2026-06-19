@@ -882,7 +882,7 @@ export default function ReportClient({
     let pages = 0;
     let ci = 0;
     while (ci < ac.length) {
-      const limit = pages === 0 ? 450 : 400;
+      const limit = pages === 0 ? 400 : 350;
       let charCount = 0;
       let end = ci;
       while (end < ac.length) {
@@ -1346,6 +1346,7 @@ export default function ReportClient({
                 {charts.searchMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700, color: "#fff" }}>{(v + charts.searchPC[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
+          <div style={{ fontSize: 16, color: "#d32f2f", textAlign: "right", margin: "4px 16px 0", fontWeight: 600 }}>※ 2025年11月以降、Google Business Profile APIの計測仕様変更により数値が大幅に変動する場合があります</div>
         </div>
       </div>
 
@@ -1372,6 +1373,8 @@ export default function ReportClient({
                 {charts.websites.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
               <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>ルート</td>
                 {charts.routes.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
+              <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#888", whiteSpace: "nowrap", fontStyle: "italic" }}>通話</td>
+                {charts.calls.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888", fontStyle: "italic" }}>{v.toLocaleString()}</td>)}</tr>
               <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>メニュー</td>
                 {charts.foodMenus.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
               <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>予約</td>
@@ -1380,13 +1383,7 @@ export default function ReportClient({
                 {charts.websites.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700, color: "#fff" }}>{(v + charts.routes[i] + charts.calls[i] + charts.foodMenus[i] + charts.bookings[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
-          <table style={{ width: "95%", margin: "4px auto 0", borderCollapse: "collapse", fontSize: 14 }}>
-            <tbody>
-              <tr style={{ background: "#f8f9fa" }}><td style={{ padding: "2px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap", width: 60 }}>通話</td>
-                {charts.calls.map((v, i) => <td key={i} style={{ padding: "2px 2px", textAlign: "center", color: "#888" }}>{v.toLocaleString()}</td>)}</tr>
-            </tbody>
-          </table>
-          <div style={{ fontSize: 13, color: "#aaa", textAlign: "right", margin: "2px 16px 0" }}>※ 通話は件数が少ないためグラフから分離</div>
+          <div style={{ fontSize: 13, color: "#aaa", textAlign: "right", margin: "2px 16px 0" }}>※ 通話は件数が少ないためグラフから分離して表示</div>
         </div>
       </div>
 
@@ -1838,9 +1835,9 @@ export default function ReportClient({
                   <td style={{ padding: "3px 4px", fontWeight: 600, color: "#fff", width: 60, whiteSpace: "nowrap" }}>月</td>
                   {reviewLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#fff", fontWeight: 600 }}>{l.split("/")[1]}月</td>)}
                 </tr>
-                <tr style={{ background: "#0f3460" }}>
-                  <td style={{ padding: "3px 4px", fontWeight: 700, color: "#fff" }}>件数</td>
-                  {reviewCounts.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700, color: "#fff" }}>{v.toLocaleString()}</td>)}
+                <tr style={{ background: "#fff" }}>
+                  <td style={{ padding: "3px 4px", fontWeight: 700, color: "#333" }}>件数</td>
+                  {reviewCounts.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700 }}>{v.toLocaleString()}</td>)}
                 </tr>
               </tbody>
             </table>
@@ -1996,8 +1993,8 @@ export default function ReportClient({
         // コメントを文字数ベースでページ分割（はみ出し防止）
         const allComments = comments || [];
         const commentPages: { start: number; end: number }[] = [];
-        const CHARS_FIRST_PAGE = 450;  // 見出し+箇条書きで高さを消費するため1コメント=1ページに
-        const CHARS_PER_PAGE = 400;   // 最終ページはメモ欄があるのでさらに控えめに
+        const CHARS_FIRST_PAGE = 400;  // 見出し+箇条書きで高さを消費するため控えめに
+        const CHARS_PER_PAGE = 350;   // 最終ページはメモ欄があるのでさらに控えめに
         {
           let ci = 0;
           while (ci < allComments.length) {
