@@ -684,62 +684,156 @@ export default function ReportClient({
       // PDF用の一時的なDOM変更
       const noPrintEls = document.querySelectorAll<HTMLElement>(".no-print");
       noPrintEls.forEach(el => { el.dataset.prevDisplay = el.style.display; el.style.display = "none"; });
-      const hiddenGridSlides = document.querySelectorAll<HTMLElement>(".grid-kw-hidden");
-      hiddenGridSlides.forEach(el => { el.style.position = "static"; el.style.left = "auto"; el.style.pointerEvents = "auto"; });
-      const compSubs = document.querySelectorAll<HTMLElement>(".grid-kw-comparison-sub");
-      compSubs.forEach(el => { el.dataset.prevDisplay = el.style.display; el.style.display = "none"; });
-      await new Promise(r => setTimeout(r, 300));
+      await new Promise(r => setTimeout(r, 200));
 
-      // gridスライドのKW名リストを作成（マップ描画用）
-      const gridSlideKws: string[] = [];
-      allSlides.forEach(sl => {
-        if (sl.classList.contains("grid-kw-slide")) {
-          const titleEl = sl.querySelector(".grid-kw-title");
-          if (titleEl) {
-            const m = titleEl.textContent?.match(/「(.+?)」/);
-            if (m) gridSlideKws.push(m[1]);
-          }
-        }
-      });
-
-      // 全スライドをキャプチャ（gridスライドは個別キャプチャ後にペアで合成）
+      // 通常スライド（grid以外）をキャプチャ
       let pageIdx = 0;
-      const gridCanvases: HTMLCanvasElement[] = [];
-      let gridCaptureIdx = 0;
+      let gridInsertDone = false;
 
       for (let i = 0; i < allSlides.length; i++) {
         const slide = allSlides[i] as HTMLElement;
 
         if (slide.classList.contains("grid-kw-slide")) {
-          // このスライドのマップを描画→スクロールして表示→タイル読み込み待ち
-          const kw = gridSlideKws[gridCaptureIdx] || "";
-          if (kw && window.google?.maps) {
-            slide.scrollIntoView({ block: "center" });
-            renderGridMapForKw(kw);
-            await new Promise(r => setTimeout(r, 1500));
-          }
-          gridCaptureIdx++;
-          const canvas = await html2canvas(slide, {
-            scale: 2, useCORS: true, logging: false, backgroundColor: "#f0f2f5",
-          });
-          gridCanvases.push(canvas);
+          if (gridInsertDone) continue; // gridスライドは独自処理で1回だけ
+          gridInsertDone = true;
 
-          // 次のスライドもgridか確認
-          const nextSlide = allSlides[i + 1] as HTMLElement | undefined;
-          const nextIsGrid = nextSlide?.classList.contains("grid-kw-slide");
+          // ── グリッドランキングPDF: 独自レイアウト ──
+          if (gridRanking && gridRanking.keywords.length > 0) {
+            const gr = gridRanking;
+            const filteredHistory = gr.history.filter(h => monthToNum(h.month) <= monthToNum(curLabel));
+            const recentHistory = filteredHistory.slice(-6);
+            const latestMonth = recentHistory[recentHistory.length - 1];
+            const prevMonth = recentHistory.length >= 2 ? recentHistory[recentHistory.length - 2] : null;
 
-          // ペアが揃った or 最後のgridスライド → PDFページに合成
-          if (gridCanvases.length === 2 || !nextIsGrid) {
-            if (pageIdx > 0) pdf.addPage();
-            // 2つ（or 1つ）の画像を上下に配置
-            const count = gridCanvases.length;
-            const halfH = pdfH / 2;
-            for (let g = 0; g < count; g++) {
-              const imgData = gridCanvases[g].toDataURL("image/jpeg", 0.92);
-              pdf.addImage(imgData, "JPEG", 0, g * halfH, pdfW, halfH);
+            // ── PDF Grid P1: サマリーページ（全KW比較 + 各KW月別推移） ──
+            const summaryDiv = document.createElement("div");
+            summaryDiv.style.cssText = `width:${SLIDE_W}px;height:${SLIDE_H}px;background:#f0f2f5;display:flex;flex-direction:column;overflow:hidden;position:fixed;left:0;top:0;z-index:99999;font-family:'Noto Sans JP',sans-serif;`;
+
+            // ヘッダー
+            const header = document.createElement("div");
+            header.style.cssText = `background:linear-gradient(135deg,#1a1a2e,#0f3460);color:#fff;padding:12px 9px;font-size:16px;font-weight:700;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;`;
+            header.innerHTML = `<span>${shop.name} — 多地点順位計測 サマリー</span>`;
+            summaryDiv.appendChild(header);
+
+            const body = document.createElement("div");
+            body.style.cssText = `flex:1;padding:16px 24px;display:flex;gap:24px;overflow:hidden;`;
+
+            // 左: 全KW比較テーブル
+            const leftCol = document.createElement("div");
+            leftCol.style.cssText = `flex:0 0 480px;display:flex;flex-direction:column;`;
+            if (latestMonth) {
+              const th = `<tr>${["キーワード","平均順位","前月比","計測地点"].map((t,ti) => `<th style="background:#0f3460;color:#fff;padding:8px 12px;text-align:${ti===0?"left":"center"};font-size:15px;">${t}</th>`).join("")}</tr>`;
+              const rows = latestMonth.snapshots.map((s, si) => {
+                const ps = prevMonth?.snapshots.find(p => p.keyword === s.keyword);
+                const diff = ps ? ps.avgRank - s.avgRank : 0;
+                const dc = diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888";
+                const ds = ps ? (diff > 0 ? `↑${diff.toFixed(1)}` : diff < 0 ? `↓${Math.abs(diff).toFixed(1)}` : "→") : "-";
+                const rc = s.avgRank <= 3 ? "#15803d" : s.avgRank <= 10 ? "#1d4ed8" : s.avgRank <= 20 ? "#b45309" : "#999";
+                return `<tr style="background:${si%2===0?"#fff":"#f8f9fb"}">
+                  <td style="padding:8px 12px;font-size:15px;border-bottom:1px solid #eee;">${s.keyword}</td>
+                  <td style="padding:8px 12px;text-align:center;font-size:15px;font-weight:800;color:${rc};border-bottom:1px solid #eee;">${s.avgRank}</td>
+                  <td style="padding:8px 12px;text-align:center;font-size:15px;font-weight:700;color:${dc};border-bottom:1px solid #eee;">${ds}</td>
+                  <td style="padding:8px 12px;text-align:center;font-size:15px;color:#888;border-bottom:1px solid #eee;">${s.gridSize}×${s.gridSize}</td>
+                </tr>`;
+              }).join("");
+              leftCol.innerHTML = `<h3 style="font-size:16px;font-weight:700;color:#0f3460;margin:0 0 8px;">全キーワード比較（${latestMonth.month}）</h3>
+                <div style="border-radius:10px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.04);">
+                  <table style="width:100%;border-collapse:collapse;background:#fff;"><thead>${th}</thead><tbody>${rows}</tbody></table>
+                </div>`;
             }
+            body.appendChild(leftCol);
+
+            // 右: 各KWの月別平均順位
+            const rightCol = document.createElement("div");
+            rightCol.style.cssText = `flex:1;display:flex;flex-direction:column;gap:10px;overflow:hidden;`;
+            const trendMonthLabels = recentHistory.map(h => h.month.replace(/^\d{4}\//, "") + "月");
+            gr.keywords.forEach(kw => {
+              const data = recentHistory.map(h => {
+                const s = h.snapshots.find(s => s.keyword === kw);
+                return s ? s.avgRank : null;
+              });
+              const valid = data.filter((v): v is number => v !== null);
+              const diffStr = valid.length >= 2 ? (() => {
+                const d = valid[valid.length - 2] - valid[valid.length - 1];
+                return d > 0 ? `<span style="color:#0a8f3c;font-weight:700;">↑${d.toFixed(1)}</span>` : d < 0 ? `<span style="color:#c0392b;font-weight:700;">↓${Math.abs(d).toFixed(1)}</span>` : `<span style="color:#888;">→</span>`;
+              })() : `<span style="color:#888;">→</span>`;
+              const thRow = trendMonthLabels.map((l, li) => `<th style="background:${li===trendMonthLabels.length-1?"#e94560":"#0f3460"};color:#fff;padding:5px 4px;text-align:center;font-weight:600;font-size:12px;white-space:nowrap;">${l}</th>`).join("") + `<th style="background:#0f3460;color:#fff;padding:5px 4px;text-align:center;font-weight:600;font-size:12px;">変動</th>`;
+              const tdRow = data.map((v, vi) => {
+                const c = v === null ? "#ddd" : v <= 3 ? "#15803d" : v <= 10 ? "#1d4ed8" : v <= 20 ? "#b45309" : "#999";
+                return `<td style="padding:5px 4px;text-align:center;font-size:12px;font-weight:${v!==null&&v<=5?900:600};color:${c};border-bottom:1px solid #eee;">${v !== null ? v : "-"}</td>`;
+              }).join("") + `<td style="padding:5px 4px;text-align:center;font-size:12px;border-bottom:1px solid #eee;">${diffStr}</td>`;
+              const block = document.createElement("div");
+              block.innerHTML = `<div style="font-size:13px;font-weight:700;color:#0f3460;margin-bottom:2px;">「${kw}」</div>
+                <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:6px;overflow:hidden;"><thead><tr>${thRow}</tr></thead><tbody><tr>${tdRow}</tr></tbody></table>`;
+              rightCol.appendChild(block);
+            });
+            body.appendChild(rightCol);
+            summaryDiv.appendChild(body);
+            document.body.appendChild(summaryDiv);
+            await new Promise(r => setTimeout(r, 100));
+
+            const summaryCanvas = await html2canvas(summaryDiv, {
+              scale: 2, useCORS: true, logging: false, backgroundColor: "#f0f2f5",
+              width: SLIDE_W, height: SLIDE_H,
+            });
+            if (pageIdx > 0) pdf.addPage();
+            pdf.addImage(summaryCanvas.toDataURL("image/jpeg", 0.92), "JPEG", 0, 0, pdfW, pdfH);
             pageIdx++;
-            gridCanvases.length = 0;
+            summaryDiv.remove();
+
+            // ── PDF Grid P2+: マップ左右2枚/ページ ──
+            // アクティブKWのマップ領域をキャプチャ（これは既に描画済み）
+            const activeSlide = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden)");
+            const mapCanvases: HTMLCanvasElement[] = [];
+
+            for (let kwIdx = 0; kwIdx < gr.keywords.length; kwIdx++) {
+              const kw = gr.keywords[kwIdx];
+              // KWを切り替えてマップ描画
+              setGridKwIdx(kwIdx);
+              await new Promise(r => setTimeout(r, 100));
+              // マップを再描画
+              renderGridMapForKw(kw);
+              await new Promise(r => setTimeout(r, 1500));
+              // アクティブスライドのマップ領域をキャプチャ
+              const currentActive = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden)");
+              if (currentActive) {
+                const mapArea = currentActive.querySelector<HTMLElement>(".grid-kw-map-area");
+                if (mapArea) {
+                  const mc = await html2canvas(mapArea, {
+                    scale: 2, useCORS: true, logging: false, backgroundColor: "#f0f2f5",
+                  });
+                  mapCanvases.push(mc);
+                }
+              }
+            }
+
+            // マップを左右2枚ずつPDFページに配置
+            const halfW = pdfW / 2;
+            for (let m = 0; m < mapCanvases.length; m += 2) {
+              if (pageIdx > 0) pdf.addPage();
+              // 左
+              const leftImg = mapCanvases[m].toDataURL("image/jpeg", 0.92);
+              const leftAspect = mapCanvases[m].height / mapCanvases[m].width;
+              const leftImgH = Math.min(halfW * leftAspect, pdfH);
+              const leftImgW = leftImgH / leftAspect;
+              const leftX = (halfW - leftImgW) / 2;
+              const leftY = (pdfH - leftImgH) / 2;
+              pdf.addImage(leftImg, "JPEG", leftX, leftY, leftImgW, leftImgH);
+              // 右
+              if (m + 1 < mapCanvases.length) {
+                const rightImg = mapCanvases[m + 1].toDataURL("image/jpeg", 0.92);
+                const rightAspect = mapCanvases[m + 1].height / mapCanvases[m + 1].width;
+                const rightImgH = Math.min(halfW * rightAspect, pdfH);
+                const rightImgW = rightImgH / rightAspect;
+                const rightX = halfW + (halfW - rightImgW) / 2;
+                const rightY = (pdfH - rightImgH) / 2;
+                pdf.addImage(rightImg, "JPEG", rightX, rightY, rightImgW, rightImgH);
+              }
+              pageIdx++;
+            }
+
+            // gridKwIdxを元に戻す
+            setGridKwIdx(0);
           }
         } else {
           const canvas = await html2canvas(slide, {
@@ -754,8 +848,6 @@ export default function ReportClient({
 
       // DOM変更を元に戻す
       noPrintEls.forEach(el => { el.style.display = el.dataset.prevDisplay || ""; delete el.dataset.prevDisplay; });
-      hiddenGridSlides.forEach(el => { el.style.position = ""; el.style.left = ""; el.style.pointerEvents = ""; });
-      compSubs.forEach(el => { el.style.display = el.dataset.prevDisplay || ""; delete el.dataset.prevDisplay; });
 
       pdf.save(`${shop.name}_レポート_${curLabel.replace("/", "-")}.pdf`);
     } catch (err) {
