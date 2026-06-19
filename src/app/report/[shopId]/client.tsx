@@ -794,61 +794,49 @@ export default function ReportClient({
               // マップを再描画
               renderGridMapForKw(kw);
               await new Promise(r => setTimeout(r, 1500));
-              // アクティブスライドのタイトル+マップ領域をキャプチャ
+              // アクティブスライドのマップ領域をキャプチャ（DOM移動せず）
               const currentActive = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden)");
               if (currentActive) {
-                const titleEl = currentActive.querySelector<HTMLElement>(".grid-kw-title");
                 const mapArea = currentActive.querySelector<HTMLElement>(".grid-kw-map-area");
                 if (mapArea) {
-                  // タイトル+マップを一時ラッパーにまとめてキャプチャ
-                  const wrapper = document.createElement("div");
-                  wrapper.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:8px;background:#f0f2f5;padding:12px;";
-                  if (titleEl) {
-                    const titleClone = titleEl.cloneNode(true) as HTMLElement;
-                    titleClone.style.cssText = "font-size:18px;font-weight:700;color:#0f3460;border-left:4px solid #e94560;padding-left:12px;align-self:flex-start;";
-                    wrapper.appendChild(titleClone);
-                  }
-                  // mapAreaの親から一時的に切り離さず、wrapperをmapAreaの前に挿入してキャプチャ
-                  const mapParent = mapArea.parentElement!;
-                  const mapIdx = Array.from(mapParent.children).indexOf(mapArea);
-                  wrapper.appendChild(mapArea);
-                  currentActive.querySelector(".grid-kw-body")?.appendChild(wrapper);
-                  await new Promise(r => setTimeout(r, 50));
-                  const mc = await html2canvas(wrapper, {
+                  const mc = await html2canvas(mapArea, {
                     scale: 2, useCORS: true, logging: false, backgroundColor: "#f0f2f5",
                   });
                   mapCanvases.push(mc);
-                  // mapAreaを元の位置に戻す
-                  if (mapIdx >= mapParent.children.length) {
-                    mapParent.appendChild(mapArea);
-                  } else {
-                    mapParent.insertBefore(mapArea, mapParent.children[mapIdx]);
-                  }
-                  wrapper.remove();
                 }
               }
             }
 
-            // マップを左右2枚ずつPDFページに配置
+            // マップを左右2枚ずつPDFページに配置（KW名タイトル付き）
             const halfW = pdfW / 2;
+            const titleH = 10; // タイトル用の高さ(mm)
             for (let m = 0; m < mapCanvases.length; m += 2) {
               if (pageIdx > 0) pdf.addPage();
               // 左
+              const leftKwName = gr.keywords[m] || "";
+              pdf.setFont("helvetica", "bold");
+              pdf.setFontSize(12);
+              pdf.setTextColor(15, 52, 96);
+              pdf.text(`${leftKwName}`, 8, titleH);
               const leftImg = mapCanvases[m].toDataURL("image/jpeg", 0.92);
               const leftAspect = mapCanvases[m].height / mapCanvases[m].width;
-              const leftImgH = Math.min(halfW * leftAspect, pdfH);
+              const leftAvailH = pdfH - titleH - 4;
+              const leftImgH = Math.min(halfW * leftAspect, leftAvailH);
               const leftImgW = leftImgH / leftAspect;
               const leftX = (halfW - leftImgW) / 2;
-              const leftY = (pdfH - leftImgH) / 2;
+              const leftY = titleH + 2;
               pdf.addImage(leftImg, "JPEG", leftX, leftY, leftImgW, leftImgH);
               // 右
               if (m + 1 < mapCanvases.length) {
+                const rightKwName = gr.keywords[m + 1] || "";
+                pdf.text(`${rightKwName}`, halfW + 8, titleH);
                 const rightImg = mapCanvases[m + 1].toDataURL("image/jpeg", 0.92);
                 const rightAspect = mapCanvases[m + 1].height / mapCanvases[m + 1].width;
-                const rightImgH = Math.min(halfW * rightAspect, pdfH);
+                const rightAvailH = pdfH - titleH - 4;
+                const rightImgH = Math.min(halfW * rightAspect, rightAvailH);
                 const rightImgW = rightImgH / rightAspect;
                 const rightX = halfW + (halfW - rightImgW) / 2;
-                const rightY = (pdfH - rightImgH) / 2;
+                const rightY = titleH + 2;
                 pdf.addImage(rightImg, "JPEG", rightX, rightY, rightImgW, rightImgH);
               }
               pageIdx++;
