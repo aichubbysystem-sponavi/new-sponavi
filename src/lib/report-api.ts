@@ -323,7 +323,8 @@ export async function getReportData(shopId: string, targetMonth?: string): Promi
           // パフォーマンスメトリクス（performance_metrics_cache → 月次推移・KPIを上書き）
           try {
             const { getCachedPerformance } = await import("./gbp-performance");
-            const perfData = await getCachedPerformance(shopRow.id, shopName);
+            const rawPerfData = await getCachedPerformance(shopRow.id, shopName);
+            const perfData = rawPerfData.slice(-13);
             if (perfData.length > 0) {
               const labels = perfData.map(p => p.month);
               // targetMonth指定時: 該当月をcurとして使用、なければ最新月
@@ -433,7 +434,8 @@ export async function getReportData(shopId: string, targetMonth?: string): Promi
       // パフォーマンスメトリクス上書き
       try {
         const { getCachedPerformance } = await import("./gbp-performance");
-        const perfData = await getCachedPerformance(shopRow.id, shopName);
+        const rawPerfData2 = await getCachedPerformance(shopRow.id, shopName);
+        const perfData = rawPerfData2.slice(-13);
         if (perfData.length > 0) {
           const labels = perfData.map(p => p.month);
           // targetMonth指定時: 該当月をcurとして使用、なければ最新月

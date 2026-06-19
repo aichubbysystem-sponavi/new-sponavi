@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
     if (Date.now() - startTime > TIME_LIMIT) break;
 
     try {
-      const result = await syncShopPerformance(shop.id, shop.name, shop.gbp_location_name, 12);
+      const result = await syncShopPerformance(shop.id, shop.name, shop.gbp_location_name);
       if (result.success) {
         synced++;
       } else {

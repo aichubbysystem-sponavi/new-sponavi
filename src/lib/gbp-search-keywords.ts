@@ -148,7 +148,7 @@ async function fetchOneMonth(
  */
 export async function fetchSearchKeywordsFromGBP(
   locationPath: string,
-  months: number = 12
+  months: number = 13
 ): Promise<MonthlyKeywords[]> {
   const token = await getPerformanceApiToken();
   if (!token) return [];
@@ -271,7 +271,7 @@ export async function getSearchKeywords(
   if (locationFullPath) {
     try {
       console.log(`[gbp-keywords] API fetch start: ${shopName} (${locationFullPath})`);
-      const apiData = await fetchSearchKeywordsFromGBP(locationFullPath, 12);
+      const apiData = await fetchSearchKeywordsFromGBP(locationFullPath);
       if (apiData.length > 0) {
         // キャッシュに保存（失敗しても続行）
         try { await cacheSearchKeywords(shopId, shopName, apiData); } catch {}
@@ -319,7 +319,7 @@ export async function syncShopSearchKeywords(
   shopId: string,
   shopName: string,
   gbpLocationName: string,
-  months: number = 12
+  months: number = 13
 ): Promise<{ success: boolean; latestMonth?: string; totalMonths?: number; topKeywords?: { word: string; count: number }[]; error?: string }> {
   // 1. GBP API取得
   const apiData = await fetchSearchKeywordsFromGBP(gbpLocationName, months);
