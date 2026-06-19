@@ -32,7 +32,7 @@ import {
 } from "@/lib/report-utils";
 import {
   slideStyle, slideBarStyle, slideBodyStyle, stitleStyle,
-  kpiTopColors, apiNoteStyle, API_NOTE_TEXT,
+  kpiTopColors,
 } from "./report-styles";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, Filler);
@@ -1205,7 +1205,6 @@ export default function ReportClient({
                 {charts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700, color: "#fff" }}>{(v + charts.mapPC[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
-          <div style={apiNoteStyle}>{API_NOTE_TEXT}</div>
         </div>
       </div>
 
@@ -1234,7 +1233,6 @@ export default function ReportClient({
                 {charts.searchMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700, color: "#fff" }}>{(v + charts.searchPC[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
-          <div style={apiNoteStyle}>{API_NOTE_TEXT}</div>
         </div>
       </div>
 
