@@ -5,15 +5,8 @@
 
 // ── 型定義 ──
 
-export interface KPI {
-  label: string;
-  value: number;
-  prevValue: number;
-  unit: string;
-  compareLabel?: string;
-  momValue?: number | null;
-  yoyValue?: number | null;
-}
+import type { KPI } from "./report-data";
+export type { KPI };
 
 export interface PctChangeResult {
   pct: number;

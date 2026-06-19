@@ -172,6 +172,17 @@ describe("reorderKpis", () => {
     const result = reorderKpis(kpis);
     expect(result).toEqual(kpis);
   });
+
+  it("検索が先頭でない場合は並べ替えない", () => {
+    const kpis = makeKpis(["ウェブサイトクリック", "Google検索 合計", "Googleマップ 合計"]);
+    const result = reorderKpis(kpis);
+    expect(result[0].label).toBe("ウェブサイトクリック");
+    expect(result[1].label).toBe("Google検索 合計");
+  });
+
+  it("空配列", () => {
+    expect(reorderKpis([])).toEqual([]);
+  });
 });
 
 describe("formatAIComment", () => {
