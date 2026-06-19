@@ -1613,14 +1613,14 @@ export default function ReportClient({
         const capped = currentKeywords.slice(0, PER_PAGE * 2);
         const page1 = capped.slice(0, PER_PAGE);
         const page2 = capped.slice(PER_PAGE);
-        const thStyle = (w?: number, groupStart?: boolean): React.CSSProperties => ({ background: "#0f3460", color: "#fff", padding: "6px 4px", textAlign: "center", fontWeight: 600, fontSize: 16, whiteSpace: "nowrap", ...(w ? { width: w } : {}), ...(groupStart ? { borderLeft: "2px solid rgba(255,255,255,0.3)" } : {}) });
+        const thStyle = (w?: number, groupStart?: boolean): React.CSSProperties => ({ background: "#0f3460", color: "#fff", padding: "4px 4px", textAlign: "center", fontWeight: 600, fontSize: 14, whiteSpace: "nowrap", ...(w ? { width: w } : {}), ...(groupStart ? { borderLeft: "2px solid rgba(255,255,255,0.3)" } : {}) });
         const renderSqTable = (rows: typeof currentKeywords, startIdx: number) => (
           <div style={{ overflow: "hidden", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", flex: 1 }}>
               <thead>
                 <tr>
                   <th style={thStyle(40)}>順位</th>
-                  <th style={{ ...thStyle(), textAlign: "left", padding: "10px 12px" }}>検索語句</th>
+                  <th style={{ ...thStyle(), textAlign: "left", padding: "4px 8px" }}>検索語句</th>
                   <th style={thStyle(65)}>検索数</th>
                   {hasPrev && <th style={thStyle(50, true)}>前月</th>}
                   {hasPrev && <th style={thStyle(50)}>前月比</th>}
@@ -1639,19 +1639,19 @@ export default function ReportClient({
                   const prev2Diff = prev2 !== undefined ? kw.count - prev2 : null;
                   const yoyVal = yoyMap.get(kw.word);
                   const yoyDiff = yoyVal !== undefined ? kw.count - yoyVal : null;
-                  const diffStyle = (d: number | null): React.CSSProperties => ({ padding: "4px 2px", textAlign: "center", fontSize: 16, fontWeight: 600, color: d === null ? "#ccc" : d > 0 ? "#0a8f3c" : d < 0 ? "#c0392b" : "#888" });
+                  const diffStyle = (d: number | null): React.CSSProperties => ({ padding: "2px 2px", textAlign: "center", fontSize: 14, fontWeight: 600, color: d === null ? "#ccc" : d > 0 ? "#0a8f3c" : d < 0 ? "#c0392b" : "#888" });
                   const fmtDiff = (d: number | null) => d === null ? "-" : d > 0 ? `+${d.toLocaleString()}` : d === 0 ? "→" : d.toLocaleString();
                   return (
                     <tr key={`${sqCurrent?.month}-${rank}`} style={{ background: ri % 2 === 0 ? "#fff" : "#f8f9fb", borderBottom: "1px solid #eee" }}>
-                      <td style={{ padding: "4px 4px", textAlign: "center", fontSize: 16, fontWeight: 700, color: rank < 3 ? "#e94560" : rank < 10 ? "#0f3460" : "#888" }}>{rank + 1}</td>
-                      <td style={{ padding: "4px 6px", fontSize: 16, color: "#333" }}>{kw.word}</td>
-                      <td style={{ padding: "4px 4px", textAlign: "center", fontSize: 16, fontWeight: 700, color: "#0f3460" }}>{kw.count.toLocaleString()}</td>
-                      {hasPrev && <td style={{ padding: "4px 4px", textAlign: "center", fontSize: 16, color: "#888", borderLeft: "2px solid #e8edf3" }}>{prev !== undefined ? prev.toLocaleString() : "-"}</td>}
-                      {hasPrev && <td style={{ ...diffStyle(prevDiff), padding: "4px 2px" }}>{fmtDiff(prevDiff)}</td>}
-                      {hasPrev2 && <td style={{ padding: "4px 4px", textAlign: "center", fontSize: 16, color: "#888", borderLeft: "2px solid #e8edf3" }}>{prev2 !== undefined ? prev2.toLocaleString() : "-"}</td>}
-                      {hasPrev2 && <td style={{ ...diffStyle(prev2Diff), padding: "4px 2px" }}>{fmtDiff(prev2Diff)}</td>}
-                      {hasYoy && <td style={{ padding: "4px 4px", textAlign: "center", fontSize: 16, color: "#888", borderLeft: "2px solid #e8edf3" }}>{yoyVal !== undefined ? yoyVal.toLocaleString() : "-"}</td>}
-                      {hasYoy && <td style={{ ...diffStyle(yoyDiff), padding: "4px 2px" }}>{fmtDiff(yoyDiff)}</td>}
+                      <td style={{ padding: "2px 4px", textAlign: "center", fontSize: 14, fontWeight: 700, color: rank < 3 ? "#e94560" : rank < 10 ? "#0f3460" : "#888" }}>{rank + 1}</td>
+                      <td style={{ padding: "2px 6px", fontSize: 14, color: "#333" }}>{kw.word}</td>
+                      <td style={{ padding: "2px 4px", textAlign: "center", fontSize: 14, fontWeight: 700, color: "#0f3460" }}>{kw.count.toLocaleString()}</td>
+                      {hasPrev && <td style={{ padding: "2px 4px", textAlign: "center", fontSize: 14, color: "#888", borderLeft: "2px solid #e8edf3" }}>{prev !== undefined ? prev.toLocaleString() : "-"}</td>}
+                      {hasPrev && <td style={{ ...diffStyle(prevDiff) }}>{fmtDiff(prevDiff)}</td>}
+                      {hasPrev2 && <td style={{ padding: "2px 4px", textAlign: "center", fontSize: 14, color: "#888", borderLeft: "2px solid #e8edf3" }}>{prev2 !== undefined ? prev2.toLocaleString() : "-"}</td>}
+                      {hasPrev2 && <td style={{ ...diffStyle(prev2Diff) }}>{fmtDiff(prev2Diff)}</td>}
+                      {hasYoy && <td style={{ padding: "2px 4px", textAlign: "center", fontSize: 14, color: "#888", borderLeft: "2px solid #e8edf3" }}>{yoyVal !== undefined ? yoyVal.toLocaleString() : "-"}</td>}
+                      {hasYoy && <td style={{ ...diffStyle(yoyDiff) }}>{fmtDiff(yoyDiff)}</td>}
                     </tr>
                   );
                 })}
@@ -1668,15 +1668,15 @@ export default function ReportClient({
           </div>
         );
         const sqSummary = (
-          <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 12, padding: "6px 16px 2px", fontSize: 16 }}>
-            <span style={{ color: "#555", fontWeight: 500 }}>総検索数: <strong style={{ color: "#0f3460", fontSize: 16 }}>{totalCount.toLocaleString()}</strong></span>
+          <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 12, padding: "2px 16px 2px", fontSize: 14 }}>
+            <span style={{ color: "#555", fontWeight: 500 }}>総検索数: <strong style={{ color: "#0f3460", fontSize: 15 }}>{totalCount.toLocaleString()}</strong></span>
             {totalDiff !== null && (
-              <span style={{ fontSize: 16, fontWeight: 600, color: totalDiff > 0 ? "#0a8f3c" : totalDiff < 0 ? "#c0392b" : "#888" }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: totalDiff > 0 ? "#0a8f3c" : totalDiff < 0 ? "#c0392b" : "#888" }}>
                 前月比: {totalDiff > 0 ? `+${totalDiff.toLocaleString()}` : totalDiff === 0 ? "→" : totalDiff.toLocaleString()}
               </span>
             )}
             {yoyTotalDiff !== null && (
-              <span style={{ fontSize: 16, fontWeight: 600, color: yoyTotalDiff > 0 ? "#0a8f3c" : yoyTotalDiff < 0 ? "#c0392b" : "#888" }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: yoyTotalDiff > 0 ? "#0a8f3c" : yoyTotalDiff < 0 ? "#c0392b" : "#888" }}>
                 前年比: {yoyTotalDiff > 0 ? `+${yoyTotalDiff.toLocaleString()}` : yoyTotalDiff === 0 ? "→" : yoyTotalDiff.toLocaleString()}
               </span>
             )}
