@@ -712,6 +712,12 @@ export default function ReportClient({
       const pdfW = 297;
       const pdfH = 210;
 
+      // フォント読み込み完了を待つ（テキスト位置ズレ防止）
+      await document.fonts.ready;
+
+      // スクロール位置をリセット（html2canvasの座標計算を安定化）
+      window.scrollTo(0, 0);
+
       // PDF用の一時的なDOM変更
       const noPrintEls = document.querySelectorAll<HTMLElement>(".no-print");
       noPrintEls.forEach(el => { el.dataset.prevDisplay = el.style.display; el.style.display = "none"; });
