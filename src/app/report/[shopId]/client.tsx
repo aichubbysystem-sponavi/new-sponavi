@@ -316,9 +316,9 @@ export default function ReportClient({
   const [sqMonthIdx, setSqMonthIdx] = useState(-1); // -1 = 最新月
   const [gridKwIdx, setGridKwIdx] = useState(0);
   const [gridMonthIdx, setGridMonthIdx] = useState(-1); // -1 = 最新月
-  const gridMapRef = useRef<HTMLDivElement>(null);
-  const gridGoogleMapRef = useRef<any>(null);
-  const gridMarkersRef = useRef<any[]>([]);
+  const gridMapRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const gridGoogleMapRefs = useRef<Record<string, any>>({});
+  const gridMarkersRefs = useRef<Record<string, any[]>>({});
   const curLabel = monthlyLabels[monthlyLabels.length - 1] || "";
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const [memo, setMemo] = useState("");
@@ -524,12 +524,16 @@ export default function ReportClient({
   const activeGridMonthI = gridMonthIdx >= 0 && gridMonthIdx < gridRecentHistory.length ? gridMonthIdx : gridRecentHistory.length - 1;
   const activeGridSnapshot = gridRecentHistory[activeGridMonthI]?.snapshots.find(s => s.keyword === activeGridKw);
 
-  // Google Maps JS API読み込み + マーカー描画
-  const renderGridMap = useCallback(() => {
-    if (!gridMapRef.current || !activeGridSnapshot || !window.google?.maps) return;
-    let pts = activeGridSnapshot.results;
+  // Google Maps JS API読み込み + マーカー描画（キーワード別）
+  const renderGridMapForKw = useCallback((kw: string) => {
+    const mapEl = gridMapRefs.current[kw];
+    if (!mapEl || !window.google?.maps) return;
+    const monthI = gridMonthIdx >= 0 && gridMonthIdx < gridRecentHistory.length ? gridMonthIdx : gridRecentHistory.length - 1;
+    const snap = gridRecentHistory[monthI]?.snapshots.find(s => s.keyword === kw);
+    if (!snap) return;
+    let pts = snap.results;
     if (pts.length === 0) return;
-    const gs = activeGridSnapshot.gridSize;
+    const gs = snap.gridSize;
 
     // 座標なしデータ（overrides）の場合、shop.lat/lngから仮座標を生成
     const hasCoords = pts.some(p => p.lat && p.lng);
@@ -547,20 +551,23 @@ export default function ReportClient({
     const cLat = centerPt?.lat ?? pts.reduce((s, p) => s + p.lat, 0) / pts.length;
     const cLng = centerPt?.lng ?? pts.reduce((s, p) => s + p.lng, 0) / pts.length;
 
-    if (!gridGoogleMapRef.current) {
-      gridGoogleMapRef.current = new window.google.maps.Map(gridMapRef.current, {
-        center: { lat: cLat, lng: cLng }, zoom: 13,
-        mapTypeControl: true, streetViewControl: false, fullscreenControl: false,
-        styles: [
-          { featureType: "poi", stylers: [{ visibility: "off" }] },
-          { featureType: "transit", stylers: [{ visibility: "off" }] },
-        ],
-      });
+    // 既存マップを破棄して毎回新規作成（キーワード切替時の描画ズレ防止）
+    if (gridGoogleMapRefs.current[kw]) {
+      // 既存マーカー削除
+      (gridMarkersRefs.current[kw] || []).forEach(m => m.setMap(null));
+      gridMarkersRefs.current[kw] = [];
     }
 
-    // 既存マーカー削除
-    gridMarkersRef.current.forEach(m => m.setMap(null));
-    gridMarkersRef.current = [];
+    const gmap = new window.google.maps.Map(mapEl, {
+      center: { lat: cLat, lng: cLng }, zoom: 13,
+      mapTypeControl: true, streetViewControl: false, fullscreenControl: false,
+      styles: [
+        { featureType: "poi", stylers: [{ visibility: "off" }] },
+        { featureType: "transit", stylers: [{ visibility: "off" }] },
+      ],
+    });
+    gridGoogleMapRefs.current[kw] = gmap;
+    gridMarkersRefs.current[kw] = [];
 
     const bounds = new window.google.maps.LatLngBounds();
     const rankColor = (r: number) => r <= 0 ? "#6B7280" : r <= 3 ? "#16A34A" : r <= 10 ? "#2563EB" : r <= 20 ? "#F59E0B" : "#EF4444";
@@ -568,7 +575,7 @@ export default function ReportClient({
     pts.forEach(pt => {
       const marker = new window.google.maps.Marker({
         position: { lat: pt.lat, lng: pt.lng },
-        map: gridGoogleMapRef.current,
+        map: gmap,
         icon: {
           path: window.google.maps.SymbolPath.CIRCLE,
           fillColor: rankColor(pt.rank), fillOpacity: 0.9,
@@ -576,42 +583,48 @@ export default function ReportClient({
         },
         label: { text: pt.rank > 0 ? String(pt.rank) : "-", color: "#fff", fontWeight: "bold", fontSize: "16px" },
       });
-      gridMarkersRef.current.push(marker);
+      gridMarkersRefs.current[kw].push(marker);
       bounds.extend({ lat: pt.lat, lng: pt.lng });
     });
 
     // 店舗中心マーカー
     const cm = new window.google.maps.Marker({
-      position: { lat: cLat, lng: cLng }, map: gridGoogleMapRef.current,
+      position: { lat: cLat, lng: cLng }, map: gmap,
       icon: { path: window.google.maps.SymbolPath.BACKWARD_CLOSED_ARROW, fillColor: "#000", fillOpacity: 1, strokeColor: "#fff", strokeWeight: 2, scale: 6 },
       zIndex: 999,
     });
-    gridMarkersRef.current.push(cm);
-    gridGoogleMapRef.current.fitBounds(bounds, 40);
-  }, [activeGridSnapshot, shop.lat, shop.lng]);
+    gridMarkersRefs.current[kw].push(cm);
+    gmap.fitBounds(bounds, 40);
+  }, [gridRecentHistory, gridMonthIdx, shop.lat, shop.lng]);
 
   useEffect(() => {
-    if (!showGridRanking || !activeGridSnapshot) return;
+    if (!showGridRanking || !gridRanking) return;
     const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "";
     if (!apiKey) return;
 
+    const renderAllMaps = () => {
+      if (!window.google?.maps) return;
+      gridRanking.keywords.forEach(kw => {
+        if (gridMapRefs.current[kw]) renderGridMapForKw(kw);
+      });
+    };
+
     const tryRender = () => {
-      if (window.google?.maps && gridMapRef.current) { renderGridMap(); return; }
-      // まだスクリプト未読み込み
+      if (window.google?.maps) { renderAllMaps(); return; }
       const existing = document.getElementById("google-maps-script");
-      if (existing) { existing.addEventListener("load", renderGridMap); return; }
+      if (existing) { existing.addEventListener("load", renderAllMaps); return; }
       const script = document.createElement("script");
       script.id = "google-maps-script";
       script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=marker`;
       script.async = true; script.defer = true;
-      script.onload = renderGridMap;
+      script.onload = renderAllMaps;
       document.head.appendChild(script);
     };
 
     // DOMにマウントされるまで少し待つ
-    const timer = setTimeout(tryRender, 100);
+    const timer = setTimeout(tryRender, 300);
     return () => clearTimeout(timer);
-  }, [showGridRanking, activeGridSnapshot, renderGridMap]);
+  }, [showGridRanking, gridRanking, renderGridMapForKw]);
 
   // ワードクリック: 直近1年の口コミからAPI検索（全件表示）
   const handleWordClick = async (word: string, _source: any, type: "positive" | "negative") => {
@@ -1286,14 +1299,11 @@ export default function ReportClient({
         </div>
       ); })()}
 
-      {/* ════ 多地点順位計測（キーワード切り替え・月切り替え） ════ */}
-      {showGridRanking && (() => { pageNum++;
+      {/* ════ 多地点順位計測（キーワードごとに1ページ、PDF時は2KW/ページ） ════ */}
+      {showGridRanking && (() => {
         const gr = gridRanking!;
-        // レポート対象月以前の直近6ヶ月に絞る（今月分は含めない）
         const filteredHistory = gr.history.filter(h => monthToNum(h.month) <= monthToNum(curLabel));
         const recentHistory = filteredHistory.slice(-6);
-        const activeKw = gr.keywords[gridKwIdx] || gr.keywords[0];
-        // デフォルト表示月をレポート対象月（curLabel）に合わせる
         const defaultMonthI = (() => {
           if (gridMonthIdx >= 0 && gridMonthIdx < recentHistory.length) return gridMonthIdx;
           const curIdx = recentHistory.findIndex(h => h.month === curLabel);
@@ -1301,183 +1311,180 @@ export default function ReportClient({
         })();
         const activeMonthI = defaultMonthI;
         const monthData = recentHistory[activeMonthI];
-        const snapshot = monthData?.snapshots.find(s => s.keyword === activeKw);
         const prevMonthData = activeMonthI > 0 ? recentHistory[activeMonthI - 1] : null;
-        const prevSnapshot = prevMonthData?.snapshots.find(s => s.keyword === activeKw);
-        const trendLabels = recentHistory.map(h => h.month.replace(/^\d{4}\//, "") + "月");
-        const trendData = recentHistory.map(h => {
-          const s = h.snapshots.find(s => s.keyword === activeKw);
-          return s ? s.avgRank : null;
-        });
-        const gridSize = snapshot?.gridSize || 7;
-        const gridRankColor = (rank: number) => {
-          if (rank <= 0) return { bg: "#f3f4f6", color: "#9ca3af" };
-          if (rank <= 3) return { bg: "#dcfce7", color: "#15803d" };
-          if (rank <= 10) return { bg: "#dbeafe", color: "#1d4ed8" };
-          if (rank <= 20) return { bg: "#fef3c7", color: "#b45309" };
-          return { bg: "#fee2e2", color: "#dc2626" };
-        };
-        return (
-        <div style={slideStyle} className="slide">
-          <div style={slideBarStyle}>
-            <span>{shop.name} — 多地点順位計測</span>
-            <span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
-          </div>
-          <div style={{ ...slideBodyStyle, padding: "20px 9px", gap: 12 }}>
-            <div className="no-print" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ fontSize: 16, fontWeight: 700, color: "#0f3460" }}>KW:</span>
-              {gr.keywords.map((kw, i) => (
-                <button key={kw} onClick={() => setGridKwIdx(i)}
-                  style={{ padding: "5px 14px", borderRadius: 20, fontSize: 16, fontWeight: 600, border: "none", cursor: "pointer",
-                    background: i === (gridKwIdx < gr.keywords.length ? gridKwIdx : 0) ? "#0f3460" : "#e8edf3",
-                    color: i === (gridKwIdx < gr.keywords.length ? gridKwIdx : 0) ? "#fff" : "#555" }}>
-                  {kw}
-                </button>
-              ))}
-            </div>
-            <div className="no-print" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ fontSize: 16, fontWeight: 700, color: "#0f3460" }}>月:</span>
-              {recentHistory.map((h, i) => (
-                <button key={h.month} onClick={() => setGridMonthIdx(i)}
-                  style={{ padding: "4px 10px", borderRadius: 14, fontSize: 16, fontWeight: 600, border: "none", cursor: "pointer",
-                    background: i === activeMonthI ? "#e94560" : "#f0f2f5",
-                    color: i === activeMonthI ? "#fff" : "#666" }}>
-                  {h.month.replace(/^\d{4}\//, "")}月
-                </button>
-              ))}
-            </div>
-            <div style={stitleStyle}>多地点順位 —「{activeKw}」{monthData ? ` (${monthData.month})` : ""}</div>
-            <div style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }}>
-              <div style={{ flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                {snapshot ? (
-                  <>
-                    <div ref={gridMapRef} style={{ width: 440, height: 400, borderRadius: 12, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,.15)", background: "#e8edf5" }} />
-                    <div style={{ display: "flex", gap: 10, fontSize: 16, color: "#555", marginTop: 2 }}>
-                      <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#16A34A", display: "inline-block" }} />1-3位</span>
-                      <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#2563EB", display: "inline-block" }} />4-10位</span>
-                      <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#F59E0B", display: "inline-block" }} />11-20位</span>
-                      <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#EF4444", display: "inline-block" }} />21位~</span>
-                      <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#6B7280", display: "inline-block" }} />圏外</span>
-                    </div>
-                    <div style={{ fontSize: 16, color: "#555", textAlign: "center" }}>
-                      平均順位: <span style={{ fontSize: 22, fontWeight: 900, color: "#e94560" }}>{snapshot.avgRank}</span>位
-                      {prevSnapshot && (() => {
-                        const diff = prevSnapshot.avgRank - snapshot.avgRank;
-                        return diff !== 0 ? (
-                          <span style={{ marginLeft: 8, fontSize: 16, fontWeight: 700, color: diff > 0 ? "#0a8f3c" : "#c0392b" }}>
-                            {diff > 0 ? `↑${diff.toFixed(1)}` : `↓${Math.abs(diff).toFixed(1)}`}
-                          </span>
-                        ) : null;
-                      })()}
-                    </div>
-                  </>
-                ) : (
-                  <div style={{ padding: 40, textAlign: "center" }}>
-                    <div style={{ color: "#999", fontSize: 16, marginBottom: 12 }}>この月のデータなし</div>
-                    {(() => {
-                      const kwData = keywords.find(k => k.word === activeKw);
-                      const centerRank = kwData?.rank || 0;
-                      return centerRank > 0 ? (
-                        <button className="no-print" onClick={async () => {
-                          setGridGenerating(true);
-                          try {
-                            await fetch("/api/report/grid-ranking-generate", {
-                              method: "POST", headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ shopId: shopId, shopName: shop.name, keyword: activeKw, month: monthData?.month || curLabel, centerRank }),
-                            });
-                            window.location.reload();
-                          } catch {} finally { setGridGenerating(false); }
-                        }} disabled={gridGenerating}
-                        style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: gridGenerating ? "#999" : "#0f3460", color: "#fff", fontSize: 16, fontWeight: 600, cursor: gridGenerating ? "wait" : "pointer" }}>
-                          {gridGenerating ? "生成中..." : `「${activeKw}」${centerRank}位からグリッド自動生成`}
-                        </button>
-                      ) : <div style={{ color: "#bbb", fontSize: 16 }}>キーワード順位データがありません</div>;
-                    })()}
-                  </div>
-                )}
-              </div>
-              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8, minWidth: 0 }}>
-                <h4 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", margin: 0 }}>「{activeKw}」月別平均順位</h4>
-                <div style={{ overflow: "auto", borderRadius: 10, boxShadow: "0 1px 4px rgba(0,0,0,.04)", flex: 1 }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
-                    <thead>
-                      <tr>
-                        {trendLabels.map((l, i) => (
-                          <th key={i} style={{ background: i === activeMonthI ? "#e94560" : "#0f3460", color: "#fff", padding: "10px 6px", textAlign: "center", fontWeight: 600, fontSize: 16, whiteSpace: "nowrap" }}>{l}</th>
-                        ))}
-                        <th style={{ background: "#0f3460", color: "#fff", padding: "10px 6px", textAlign: "center", fontWeight: 600, fontSize: 16 }}>変動</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        {trendData.map((v, i) => (
-                          <td key={i} style={{
-                            padding: "12px 6px", textAlign: "center", fontSize: 16, fontWeight: v !== null && v <= 5 ? 900 : 600,
-                            color: v === null ? "#ddd" : v <= 3 ? "#15803d" : v <= 10 ? "#1d4ed8" : v <= 20 ? "#b45309" : "#999",
-                            background: i === activeMonthI ? "#fff8f0" : undefined, borderBottom: "1px solid #eee",
-                          }}>
-                            {v !== null ? v : "-"}
-                          </td>
-                        ))}
-                        {(() => {
-                          const valid = trendData.filter((v): v is number => v !== null);
-                          if (valid.length < 2) return <td style={{ padding: "12px 6px", textAlign: "center", color: "#888", borderBottom: "1px solid #eee" }}>→</td>;
-                          const diff = valid[valid.length - 2] - valid[valid.length - 1];
-                          return (
-                            <td style={{ padding: "12px 6px", textAlign: "center", fontSize: 16, fontWeight: 700, borderBottom: "1px solid #eee",
-                              color: diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
-                              {diff > 0 ? `↑${diff.toFixed(1)}` : diff < 0 ? `↓${Math.abs(diff).toFixed(1)}` : "→"}
-                            </td>
-                          );
-                        })()}
-                      </tr>
-                    </tbody>
-                  </table>
+
+        // キーワードを2つずつペアにグループ化（PDF時に1ページ2KW表示用）
+        const kwPairs: string[][] = [];
+        for (let i = 0; i < gr.keywords.length; i += 2) {
+          kwPairs.push(gr.keywords.slice(i, i + 2));
+        }
+
+        return kwPairs.map((pair, pairI) => (
+          <div key={`grid-pair-${pairI}`} className="grid-kw-pair">
+            {pair.map((loopKw, kwInPair) => {
+              pageNum++;
+              const kwI = pairI * 2 + kwInPair;
+              const snapshot = monthData?.snapshots.find(s => s.keyword === loopKw);
+              const prevSnapshot = prevMonthData?.snapshots.find(s => s.keyword === loopKw);
+              const trendLabels = recentHistory.map(h => h.month.replace(/^\d{4}\//, "") + "月");
+              const trendData = recentHistory.map(h => {
+                const s = h.snapshots.find(s => s.keyword === loopKw);
+                return s ? s.avgRank : null;
+              });
+              return (
+              <div key={`grid-${kwI}`} style={slideStyle} className="slide grid-kw-slide">
+                <div style={slideBarStyle} className="grid-kw-header">
+                  <span>{shop.name} — 多地点順位計測</span>
+                  <span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
                 </div>
-                {monthData && monthData.snapshots.length > 1 && (
-                  <>
-                    <h4 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", margin: "8px 0 0" }}>全キーワード比較（{monthData.month}）</h4>
-                    <div style={{ overflow: "auto", borderRadius: 10, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
-                      <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
-                        <thead>
-                          <tr>
-                            <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "left", fontSize: 16 }}>キーワード</th>
-                            <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "center", fontSize: 16 }}>平均順位</th>
-                            <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "center", fontSize: 16 }}>前月比</th>
-                            <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "center", fontSize: 16 }}>計測地点</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {monthData.snapshots.map((s, si) => {
-                            const ps = prevMonthData?.snapshots.find(p => p.keyword === s.keyword);
-                            const diff = ps ? ps.avgRank - s.avgRank : 0;
-                            return (
-                              <tr key={si} style={{ background: s.keyword === activeKw ? "#fff8f0" : si % 2 === 0 ? "#fff" : "#f8f9fb" }}>
-                                <td style={{ padding: "8px 12px", fontWeight: s.keyword === activeKw ? 700 : 500, fontSize: 16, borderBottom: "1px solid #eee" }}>{s.keyword}</td>
-                                <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 16, fontWeight: 800, borderBottom: "1px solid #eee",
-                                  color: s.avgRank <= 3 ? "#15803d" : s.avgRank <= 10 ? "#1d4ed8" : s.avgRank <= 20 ? "#b45309" : "#999" }}>
-                                  {s.avgRank}
-                                </td>
-                                <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 16, fontWeight: 700, borderBottom: "1px solid #eee",
-                                  color: diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
-                                  {ps ? (diff > 0 ? `↑${diff.toFixed(1)}` : diff < 0 ? `↓${Math.abs(diff).toFixed(1)}` : "→") : "-"}
-                                </td>
-                                <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 16, color: "#888", borderBottom: "1px solid #eee" }}>
-                                  {s.gridSize}×{s.gridSize}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                <div style={{ ...slideBodyStyle, padding: "20px 9px", gap: 12 }} className="grid-kw-body">
+                  <div className="no-print" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 16, fontWeight: 700, color: "#0f3460" }}>月:</span>
+                    {recentHistory.map((h, i) => (
+                      <button key={h.month} onClick={() => setGridMonthIdx(i)}
+                        style={{ padding: "4px 10px", borderRadius: 14, fontSize: 16, fontWeight: 600, border: "none", cursor: "pointer",
+                          background: i === activeMonthI ? "#e94560" : "#f0f2f5",
+                          color: i === activeMonthI ? "#fff" : "#666" }}>
+                        {h.month.replace(/^\d{4}\//, "")}月
+                      </button>
+                    ))}
+                  </div>
+                  <div style={stitleStyle} className="grid-kw-title">多地点順位 —「{loopKw}」{monthData ? ` (${monthData.month})` : ""}</div>
+                  <div style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }} className="grid-kw-content">
+                    <div style={{ flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }} className="grid-kw-map-area">
+                      {snapshot ? (
+                        <>
+                          <div ref={el => { gridMapRefs.current[loopKw] = el; }} className="grid-map-container" style={{ width: 440, height: 400, borderRadius: 12, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,.15)", background: "#e8edf5" }} />
+                          <div className="grid-kw-legend" style={{ display: "flex", gap: 10, fontSize: 16, color: "#555", marginTop: 2 }}>
+                            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#16A34A", display: "inline-block" }} />1-3位</span>
+                            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#2563EB", display: "inline-block" }} />4-10位</span>
+                            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#F59E0B", display: "inline-block" }} />11-20位</span>
+                            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#EF4444", display: "inline-block" }} />21位~</span>
+                            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#6B7280", display: "inline-block" }} />圏外</span>
+                          </div>
+                          <div className="grid-kw-avg" style={{ fontSize: 16, color: "#555", textAlign: "center" }}>
+                            平均順位: <span style={{ fontSize: 22, fontWeight: 900, color: "#e94560" }}>{snapshot.avgRank}</span>位
+                            {prevSnapshot && (() => {
+                              const diff = prevSnapshot.avgRank - snapshot.avgRank;
+                              return diff !== 0 ? (
+                                <span style={{ marginLeft: 8, fontSize: 16, fontWeight: 700, color: diff > 0 ? "#0a8f3c" : "#c0392b" }}>
+                                  {diff > 0 ? `↑${diff.toFixed(1)}` : `↓${Math.abs(diff).toFixed(1)}`}
+                                </span>
+                              ) : null;
+                            })()}
+                          </div>
+                        </>
+                      ) : (
+                        <div style={{ padding: 40, textAlign: "center" }}>
+                          <div style={{ color: "#999", fontSize: 16, marginBottom: 12 }}>この月のデータなし</div>
+                          {(() => {
+                            const kwData = keywords.find(k => k.word === loopKw);
+                            const centerRank = kwData?.rank || 0;
+                            return centerRank > 0 ? (
+                              <button className="no-print" onClick={async () => {
+                                setGridGenerating(true);
+                                try {
+                                  await fetch("/api/report/grid-ranking-generate", {
+                                    method: "POST", headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ shopId: shopId, shopName: shop.name, keyword: loopKw, month: monthData?.month || curLabel, centerRank }),
+                                  });
+                                  window.location.reload();
+                                } catch {} finally { setGridGenerating(false); }
+                              }} disabled={gridGenerating}
+                              style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: gridGenerating ? "#999" : "#0f3460", color: "#fff", fontSize: 16, fontWeight: 600, cursor: gridGenerating ? "wait" : "pointer" }}>
+                                {gridGenerating ? "生成中..." : `「${loopKw}」${centerRank}位からグリッド自動生成`}
+                              </button>
+                            ) : <div style={{ color: "#bbb", fontSize: 16 }}>キーワード順位データがありません</div>;
+                          })()}
+                        </div>
+                      )}
                     </div>
-                  </>
-                )}
+                    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8, minWidth: 0 }} className="grid-kw-tables">
+                      <h4 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", margin: 0 }}>「{loopKw}」月別平均順位</h4>
+                      <div style={{ overflow: "auto", borderRadius: 10, boxShadow: "0 1px 4px rgba(0,0,0,.04)", flex: 1 }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
+                          <thead>
+                            <tr>
+                              {trendLabels.map((l, i) => (
+                                <th key={i} style={{ background: i === activeMonthI ? "#e94560" : "#0f3460", color: "#fff", padding: "10px 6px", textAlign: "center", fontWeight: 600, fontSize: 16, whiteSpace: "nowrap" }}>{l}</th>
+                              ))}
+                              <th style={{ background: "#0f3460", color: "#fff", padding: "10px 6px", textAlign: "center", fontWeight: 600, fontSize: 16 }}>変動</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              {trendData.map((v, i) => (
+                                <td key={i} style={{
+                                  padding: "12px 6px", textAlign: "center", fontSize: 16, fontWeight: v !== null && v <= 5 ? 900 : 600,
+                                  color: v === null ? "#ddd" : v <= 3 ? "#15803d" : v <= 10 ? "#1d4ed8" : v <= 20 ? "#b45309" : "#999",
+                                  background: i === activeMonthI ? "#fff8f0" : undefined, borderBottom: "1px solid #eee",
+                                }}>
+                                  {v !== null ? v : "-"}
+                                </td>
+                              ))}
+                              {(() => {
+                                const valid = trendData.filter((v): v is number => v !== null);
+                                if (valid.length < 2) return <td style={{ padding: "12px 6px", textAlign: "center", color: "#888", borderBottom: "1px solid #eee" }}>→</td>;
+                                const diff = valid[valid.length - 2] - valid[valid.length - 1];
+                                return (
+                                  <td style={{ padding: "12px 6px", textAlign: "center", fontSize: 16, fontWeight: 700, borderBottom: "1px solid #eee",
+                                    color: diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
+                                    {diff > 0 ? `↑${diff.toFixed(1)}` : diff < 0 ? `↓${Math.abs(diff).toFixed(1)}` : "→"}
+                                  </td>
+                                );
+                              })()}
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                      {monthData && monthData.snapshots.length > 1 && (
+                        <div className="grid-kw-comparison">
+                          <h4 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", margin: "8px 0 0" }}>全キーワード比較（{monthData.month}）</h4>
+                          <div style={{ overflow: "auto", borderRadius: 10, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
+                            <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
+                              <thead>
+                                <tr>
+                                  <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "left", fontSize: 16 }}>キーワード</th>
+                                  <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "center", fontSize: 16 }}>平均順位</th>
+                                  <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "center", fontSize: 16 }}>前月比</th>
+                                  <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "center", fontSize: 16 }}>計測地点</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {monthData.snapshots.map((s, si) => {
+                                  const ps = prevMonthData?.snapshots.find(p => p.keyword === s.keyword);
+                                  const diff = ps ? ps.avgRank - s.avgRank : 0;
+                                  return (
+                                    <tr key={si} style={{ background: s.keyword === loopKw ? "#fff8f0" : si % 2 === 0 ? "#fff" : "#f8f9fb" }}>
+                                      <td style={{ padding: "8px 12px", fontWeight: s.keyword === loopKw ? 700 : 500, fontSize: 16, borderBottom: "1px solid #eee" }}>{s.keyword}</td>
+                                      <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 16, fontWeight: 800, borderBottom: "1px solid #eee",
+                                        color: s.avgRank <= 3 ? "#15803d" : s.avgRank <= 10 ? "#1d4ed8" : s.avgRank <= 20 ? "#b45309" : "#999" }}>
+                                        {s.avgRank}
+                                      </td>
+                                      <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 16, fontWeight: 700, borderBottom: "1px solid #eee",
+                                        color: diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
+                                        {ps ? (diff > 0 ? `↑${diff.toFixed(1)}` : diff < 0 ? `↓${Math.abs(diff).toFixed(1)}` : "→") : "-"}
+                                      </td>
+                                      <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 16, color: "#888", borderBottom: "1px solid #eee" }}>
+                                        {s.gridSize}×{s.gridSize}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
+              );
+            })}
           </div>
-        </div>
-      ); })()}
+        ));
+      })()}
 
       {/* ════ 検索語句（月切り替え対応） ════ */}
       {showSearchQueries && (() => { pageNum++;
