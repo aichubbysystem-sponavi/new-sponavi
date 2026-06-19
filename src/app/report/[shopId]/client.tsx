@@ -711,27 +711,7 @@ export default function ReportClient({
           mapDiv.className = "grid-print-map";
           mapDiv.style.cssText = `width:100%;height:500px;border-radius:12px;overflow:hidden;background:#e8edf5;`;
           mapSlot.appendChild(mapDiv);
-          // 凡例
-          const legend = document.createElement("div");
-          legend.style.cssText = `display:flex;gap:10px;font-size:13px;color:#555;margin-top:6px;justify-content:center;`;
-          legend.innerHTML = [
-            { c: "#2563EB", t: "1-3位" }, { c: "#16A34A", t: "4-10位" }, { c: "#F59E0B", t: "11-20位" }, { c: "#EF4444", t: "21位~" }, { c: "#6B7280", t: "圏外" },
-          ].map(x => `<span style="display:flex;align-items:center;gap:3px;"><span style="width:10px;height:10px;border-radius:50%;background:${x.c};display:inline-block;"></span>${x.t}</span>`).join("");
-          mapSlot.appendChild(legend);
-          // 平均順位
-          const snap = latestMonth?.snapshots.find(s => s.keyword === kwName);
-          const prevSnap = prevMonth?.snapshots.find(s => s.keyword === kwName);
-          if (snap) {
-            const avgDiv = document.createElement("div");
-            avgDiv.style.cssText = `font-size:14px;color:#555;text-align:center;margin-top:4px;`;
-            let avgHtml = `平均順位: <span style="font-size:20px;font-weight:900;color:#e94560;">${snap.avgRank}</span>位`;
-            if (prevSnap) {
-              const d = prevSnap.avgRank - snap.avgRank;
-              if (d !== 0) avgHtml += ` <span style="font-weight:700;color:${d > 0 ? "#0a8f3c" : "#c0392b"};">${d > 0 ? `↑${d.toFixed(1)}` : `↓${Math.abs(d).toFixed(1)}`}</span>`;
-            }
-            avgDiv.innerHTML = avgHtml;
-            mapSlot.appendChild(avgDiv);
-          }
+          // 凡例・平均順位はキャプチャ画像内に含まれるため、ここでは追加しない
           pairSlide.appendChild(mapSlot);
         }
         mapPairSlides.push(pairSlide);
