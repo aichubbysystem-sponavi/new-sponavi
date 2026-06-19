@@ -882,7 +882,7 @@ export default function ReportClient({
     let pages = 0;
     let ci = 0;
     while (ci < ac.length) {
-      const limit = pages === 0 ? 400 : 350;
+      const limit = pages === 0 ? 420 : 420;
       let charCount = 0;
       let end = ci;
       while (end < ac.length) {
@@ -1993,8 +1993,8 @@ export default function ReportClient({
         // コメントを文字数ベースでページ分割（はみ出し防止）
         const allComments = comments || [];
         const commentPages: { start: number; end: number }[] = [];
-        const CHARS_FIRST_PAGE = 400;  // 見出し+箇条書きで高さを消費するため控えめに
-        const CHARS_PER_PAGE = 350;   // 最終ページはメモ欄があるのでさらに控えめに
+        const CHARS_FIRST_PAGE = 420;  // メモ欄込みで1ページに収まる上限（実測: 17行×約25文字）
+        const CHARS_PER_PAGE = 420;
         {
           let ci = 0;
           while (ci < allComments.length) {
