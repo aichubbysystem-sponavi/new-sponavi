@@ -587,11 +587,9 @@ export default function ReportClient({
       }
       onAdd() {
         this.div = document.createElement("div");
-        this.div.style.cssText = `position:absolute;width:36px;height:36px;border-radius:50%;background:${this.color};border:2px solid #fff;text-align:center;line-height:32px;box-sizing:border-box;user-select:none;overflow:hidden;`;
-        const span = document.createElement("span");
-        span.style.cssText = `color:#fff;font-weight:bold;font-size:13px;font-family:Arial,Helvetica,sans-serif;position:relative;top:-3px;`;
-        span.textContent = this.rank > 0 ? String(this.rank) : "-";
-        this.div.appendChild(span);
+        this.div.style.cssText = `position:absolute;width:36px;height:36px;border-radius:50%;background:${this.color};border:2px solid #fff;box-sizing:border-box;user-select:none;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:bold;font-size:13px;font-family:Arial,Helvetica,sans-serif;line-height:1;`;
+        this.div.textContent = this.rank > 0 ? String(this.rank) : "-";
+        this.div.dataset.rank = this.div.textContent;
         const panes = this.getPanes();
         panes?.overlayMouseTarget.appendChild(this.div);
       }
@@ -844,12 +842,32 @@ export default function ReportClient({
         // マップ再描画
         renderGridMapForKw(kw);
         await new Promise(r => setTimeout(r, 2000));
-        // マップ領域をキャプチャ
+        // マップ領域をキャプチャ → Canvas上にテキストを直接描画
         const mapArea = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden) .grid-kw-map-area");
         if (mapArea) {
           const canvas = await html2canvas(mapArea, { scale: 2, useCORS: true, logging: false, backgroundColor: "#f0f2f5" });
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            // マップコンテナ内のオーバーレイdivの位置を取得してCanvas上にテキスト描画
+            const mapContainer = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden) .grid-map-container");
+            const mapAreaRect = mapArea.getBoundingClientRect();
+            if (mapContainer) {
+              const overlays = mapContainer.querySelectorAll<HTMLElement>("div[data-rank]");
+              overlays.forEach(ov => {
+                const rect = ov.getBoundingClientRect();
+                // mapArea基準の座標に変換（scale:2倍）
+                const cx = (rect.left - mapAreaRect.left + rect.width / 2) * 2;
+                const cy = (rect.top - mapAreaRect.top + rect.height / 2) * 2;
+                const text = ov.dataset.rank || "";
+                ctx.font = "bold 26px Arial, Helvetica, sans-serif";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillStyle = "#fff";
+                ctx.fillText(text, cx, cy);
+              });
+            }
+          }
           const imgDataUrl = canvas.toDataURL("image/png");
-          // 対応するprint用スロットのマップコンテナにimg要素として埋め込み
           const slot = mapSlots[kwIdx];
           if (slot) {
             const mapDiv = slot.querySelector<HTMLElement>(".grid-print-map");
