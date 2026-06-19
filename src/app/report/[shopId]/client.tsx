@@ -794,15 +794,37 @@ export default function ReportClient({
               // マップを再描画
               renderGridMapForKw(kw);
               await new Promise(r => setTimeout(r, 1500));
-              // アクティブスライドのマップ領域をキャプチャ
+              // アクティブスライドのタイトル+マップ領域をキャプチャ
               const currentActive = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden)");
               if (currentActive) {
+                const titleEl = currentActive.querySelector<HTMLElement>(".grid-kw-title");
                 const mapArea = currentActive.querySelector<HTMLElement>(".grid-kw-map-area");
                 if (mapArea) {
-                  const mc = await html2canvas(mapArea, {
+                  // タイトル+マップを一時ラッパーにまとめてキャプチャ
+                  const wrapper = document.createElement("div");
+                  wrapper.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:8px;background:#f0f2f5;padding:12px;";
+                  if (titleEl) {
+                    const titleClone = titleEl.cloneNode(true) as HTMLElement;
+                    titleClone.style.cssText = "font-size:18px;font-weight:700;color:#0f3460;border-left:4px solid #e94560;padding-left:12px;align-self:flex-start;";
+                    wrapper.appendChild(titleClone);
+                  }
+                  // mapAreaの親から一時的に切り離さず、wrapperをmapAreaの前に挿入してキャプチャ
+                  const mapParent = mapArea.parentElement!;
+                  const mapIdx = Array.from(mapParent.children).indexOf(mapArea);
+                  wrapper.appendChild(mapArea);
+                  currentActive.querySelector(".grid-kw-body")?.appendChild(wrapper);
+                  await new Promise(r => setTimeout(r, 50));
+                  const mc = await html2canvas(wrapper, {
                     scale: 2, useCORS: true, logging: false, backgroundColor: "#f0f2f5",
                   });
                   mapCanvases.push(mc);
+                  // mapAreaを元の位置に戻す
+                  if (mapIdx >= mapParent.children.length) {
+                    mapParent.appendChild(mapArea);
+                  } else {
+                    mapParent.insertBefore(mapArea, mapParent.children[mapIdx]);
+                  }
+                  wrapper.remove();
                 }
               }
             }
