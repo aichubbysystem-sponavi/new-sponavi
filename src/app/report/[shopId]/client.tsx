@@ -2036,7 +2036,7 @@ export default function ReportClient({
                 // 既存の【見出し】を除去（client側で統一付与するため）
                 fixedComment = fixedComment.replace(/^【[^】]*】\s*/g, "");
                 // client側で見出しを付与
-                const headings = ["数値分析", "口コミ傾向と強み", "改善策"];
+                const headings = ["数値分析", "口コミ傾向と強み", "改善策", "改善点", "施策提案"];
                 const heading = headings[globalIdx] || "";
                 // 箇条書き「・」を改行+インデントに
                 fixedComment = fixedComment.replace(/(^|[^<])・/gm, '$1<br>・');
