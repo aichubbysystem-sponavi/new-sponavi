@@ -580,6 +580,7 @@ export default function ReportClient({
           path: window.google.maps.SymbolPath.CIRCLE,
           fillColor: rankColor(pt.rank), fillOpacity: 0.9,
           strokeColor: "#fff", strokeWeight: 2, scale: 18,
+          labelOrigin: new window.google.maps.Point(0, 0),
         },
         label: { text: pt.rank > 0 ? String(pt.rank) : "-", color: "#fff", fontWeight: "bold", fontSize: "16px" },
       });
