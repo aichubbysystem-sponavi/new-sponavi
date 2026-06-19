@@ -128,8 +128,9 @@ ${langSection}
   "positive_words": ["ポジティブワード1", "ポジティブワード2", ...最大5個],
   "negative_words": ["ネガティブワード1", ...最大5個],
   "summary": "口コミ分析の総評（100文字以内）",
-  "comments": ["担当者コメント1", "担当者コメント2", ...5項目]
-}`;
+  "comments": ["【数値分析】箇条書きで3〜5項目。端的に", "【口コミ傾向と強み】箇条書きで3〜5項目", "【改善策】a) b) c) で3〜4つの施策提案"]
+}
+各コメントは200〜350文字以内。冗長な説明不要。分析と洞察のみ。`;
 
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
