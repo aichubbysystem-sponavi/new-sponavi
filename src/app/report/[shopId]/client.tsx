@@ -1303,7 +1303,7 @@ export default function ReportClient({
                 {charts.searchMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
               <tr style={{ background: "#eef1f6" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>PC</td>
                 {charts.searchPC.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr style={{ background: "#c5d0e0" }}><td style={{ padding: "3px 4px", fontWeight: 700, color: "#333", whiteSpace: "nowrap" }}>合計</td>
+              <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 700, color: "#333", whiteSpace: "nowrap" }}>合計</td>
                 {charts.searchMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700 }}>{(v + charts.searchPC[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
@@ -1331,7 +1331,7 @@ export default function ReportClient({
                 {charts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
               <tr style={{ background: "#eef1f6" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>PC</td>
                 {charts.mapPC.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr style={{ background: "#c5d0e0" }}><td style={{ padding: "3px 4px", fontWeight: 700, color: "#333", whiteSpace: "nowrap" }}>合計</td>
+              <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 700, color: "#333", whiteSpace: "nowrap" }}>合計</td>
                 {charts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700 }}>{(v + charts.mapPC[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
@@ -1369,7 +1369,7 @@ export default function ReportClient({
                 {charts.foodMenus.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
               <tr style={{ background: "#dce3ed" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>予約</td>
                 {charts.bookings.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr style={{ background: "#c5d0e0" }}><td style={{ padding: "3px 4px", fontWeight: 700, color: "#333", whiteSpace: "nowrap" }}>合計</td>
+              <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 700, color: "#333", whiteSpace: "nowrap" }}>合計</td>
                 {charts.websites.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700 }}>{(v + charts.routes[i] + charts.calls[i] + charts.foodMenus[i] + charts.bookings[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
