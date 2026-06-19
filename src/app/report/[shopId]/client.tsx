@@ -824,71 +824,44 @@ export default function ReportClient({
         });
       }
 
-      // ── 4. マップを描画 ──
-      // print用スライドを表示
-      insertedEls.forEach(el => { el.style.display = "flex"; });
-      await new Promise(r => setTimeout(r, 200));
-
-      // 各マップスロットにGoogle Mapsを描画
+      // ── 4. 既存のアクティブスライドでKW切替→マップキャプチャ→画像埋め込み ──
+      const html2canvas = (await import("html2canvas")).default;
       const mapSlots = document.querySelectorAll<HTMLElement>(".grid-print-map-slot");
-      for (let s = 0; s < mapSlots.length; s++) {
-        const slot = mapSlots[s];
-        const kwName = slot.dataset.kw || "";
-        const mapContainer = slot.querySelector<HTMLElement>(".grid-print-map");
-        if (!mapContainer || !window.google?.maps) continue;
+      const origGridKwIdx = gridKwIdx;
 
-        const monthI = recentHistory.length - 1;
-        const snap = recentHistory[monthI]?.snapshots.find(ss => ss.keyword === kwName);
-        if (!snap || snap.results.length === 0) continue;
-
-        let pts = snap.results;
-        const gs = snap.gridSize;
-        const hasCoords = pts.some(p => p.lat && p.lng);
-        if (!hasCoords && shop.lat && shop.lng) {
-          const center = Math.floor(gs / 2);
-          pts = pts.map(p => ({ ...p, lat: shop.lat + ((p.row - center) * 1000 * -0.000009), lng: shop.lng + ((p.col - center) * 1000 * 0.000011) }));
+      for (let kwIdx = 0; kwIdx < gr.keywords.length; kwIdx++) {
+        const kw = gr.keywords[kwIdx];
+        // 既存のアクティブスライドでKW切替
+        setGridKwIdx(kwIdx);
+        await new Promise(r => setTimeout(r, 300));
+        // スライドをビューポートに表示
+        const activeSlide = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden)");
+        if (activeSlide) activeSlide.scrollIntoView({ block: "center" });
+        await new Promise(r => setTimeout(r, 100));
+        // マップ再描画
+        renderGridMapForKw(kw);
+        await new Promise(r => setTimeout(r, 2000));
+        // マップ領域をキャプチャ
+        const mapArea = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden) .grid-kw-map-area");
+        if (mapArea) {
+          const canvas = await html2canvas(mapArea, { scale: 2, useCORS: true, logging: false, backgroundColor: "#f0f2f5" });
+          const imgDataUrl = canvas.toDataURL("image/png");
+          // 対応するprint用スロットのマップコンテナにimg要素として埋め込み
+          const slot = mapSlots[kwIdx];
+          if (slot) {
+            const mapDiv = slot.querySelector<HTMLElement>(".grid-print-map");
+            if (mapDiv) {
+              mapDiv.style.background = "none";
+              mapDiv.innerHTML = `<img src="${imgDataUrl}" style="width:100%;height:100%;object-fit:contain;border-radius:12px;" />`;
+            }
+          }
         }
-        const centerPt = pts.find(p => p.row === Math.floor(gs / 2) && p.col === Math.floor(gs / 2));
-        const cLat = centerPt?.lat ?? pts.reduce((s, p) => s + p.lat, 0) / pts.length;
-        const cLng = centerPt?.lng ?? pts.reduce((s, p) => s + p.lng, 0) / pts.length;
-
-        const gmap = new window.google.maps.Map(mapContainer, {
-          center: { lat: cLat, lng: cLng }, zoom: 13,
-          mapTypeControl: true, streetViewControl: false, fullscreenControl: false,
-          styles: [{ featureType: "poi", stylers: [{ visibility: "off" }] }, { featureType: "transit", stylers: [{ visibility: "off" }] }],
-        });
-        const bounds = new window.google.maps.LatLngBounds();
-        const rankColor = (r: number) => r <= 0 ? "#6B7280" : r <= 3 ? "#16A34A" : r <= 10 ? "#2563EB" : r <= 20 ? "#F59E0B" : "#EF4444";
-
-        class PrintOverlay extends window.google.maps.OverlayView {
-          position: any; div: HTMLDivElement | null = null; rank: number; color: string;
-          constructor(pos: any, rank: number, color: string, map: any) { super(); this.position = pos; this.rank = rank; this.color = color; this.setMap(map); }
-          onAdd() { this.div = document.createElement("div"); this.div.style.cssText = `position:absolute;width:36px;height:36px;border-radius:50%;background:${this.color};border:2px solid #fff;color:#fff;font-weight:bold;font-size:14px;font-family:Arial,sans-serif;line-height:32px;text-align:center;box-sizing:border-box;`; this.div.textContent = this.rank > 0 ? String(this.rank) : "-"; this.getPanes()?.overlayMouseTarget.appendChild(this.div); }
-          draw() { if (!this.div) return; const p = this.getProjection()?.fromLatLngToDivPixel(this.position); if (p) { this.div.style.left = `${p.x - 18}px`; this.div.style.top = `${p.y - 18}px`; } }
-          onRemove() { this.div?.remove(); this.div = null; }
-        }
-
-        pts.forEach(pt => {
-          new PrintOverlay(new window.google.maps.LatLng(pt.lat, pt.lng), pt.rank, rankColor(pt.rank), gmap);
-          bounds.extend({ lat: pt.lat, lng: pt.lng });
-        });
-        new window.google.maps.Marker({ position: { lat: cLat, lng: cLng }, map: gmap, icon: { path: window.google.maps.SymbolPath.BACKWARD_CLOSED_ARROW, fillColor: "#000", fillOpacity: 1, strokeColor: "#fff", strokeWeight: 2, scale: 6 }, zIndex: 999 });
-        gmap.fitBounds(bounds, 40);
-
-        // Mapsのidle（タイル描画完了）を待つ + フォールバックタイムアウト
-        await new Promise<void>(r => {
-          let resolved = false;
-          const done = () => { if (!resolved) { resolved = true; r(); } };
-          window.google.maps.event.addListenerOnce(gmap, "idle", () => setTimeout(done, 500));
-          setTimeout(done, 3000); // フォールバック
-        });
       }
+      // KWを元に戻す
+      setGridKwIdx(origGridKwIdx);
 
-      // 全マップの描画完了を追加で待つ
-      await new Promise(r => setTimeout(r, 1000));
-
-      // ── 5. print用スライドを表示したままwindow.print() ──
-      // 元のgridスライドを非表示
+      // ── 5. print用スライドを表示、元のgridスライドを非表示 ──
+      insertedEls.forEach(el => { el.style.display = "flex"; });
       document.querySelectorAll<HTMLElement>(".grid-kw-pair").forEach(el => { el.dataset.prevDisplay = el.style.display; el.style.display = "none"; });
 
       // スクロールを先頭に戻してから印刷
