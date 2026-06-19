@@ -64,23 +64,46 @@ const METRIC_MAP: Record<string, keyof MonthlyPerformance> = {
 };
 
 async function getPerformanceApiToken(): Promise<string | null> {
-  if (!GBP_CLIENT_ID || !GBP_CLIENT_SECRET) return null;
+  if (!GBP_CLIENT_ID || !GBP_CLIENT_SECRET) {
+    console.error("[gbp-perf] GBP_CLIENT_ID or GBP_CLIENT_SECRET not set");
+    return null;
+  }
   const supabase = getSupabase();
-  const { data } = await supabase.from("system_oauth_tokens").select("refresh_token").limit(1).maybeSingle();
-  if (!data?.refresh_token) return null;
+  const { data, error: dbErr } = await supabase.from("system_oauth_tokens").select("refresh_token").limit(1).maybeSingle();
+  if (dbErr) {
+    console.error("[gbp-perf] DB error fetching refresh_token:", dbErr.message);
+    return null;
+  }
+  if (!data?.refresh_token) {
+    console.error("[gbp-perf] No refresh_token in system_oauth_tokens");
+    return null;
+  }
 
-  const res = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET,
-      refresh_token: data.refresh_token, grant_type: "refresh_token",
-    }),
-    signal: AbortSignal.timeout(10000),
-  });
-  if (!res.ok) return null;
-  const tokenData = await res.json();
-  return tokenData.access_token || null;
+  try {
+    const res = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET,
+        refresh_token: data.refresh_token, grant_type: "refresh_token",
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => "");
+      console.error(`[gbp-perf] Token refresh failed: ${res.status} ${errBody.slice(0, 500)}`);
+      return null;
+    }
+    const tokenData = await res.json();
+    if (!tokenData.access_token) {
+      console.error("[gbp-perf] Token response has no access_token:", JSON.stringify(tokenData).slice(0, 300));
+      return null;
+    }
+    return tokenData.access_token;
+  } catch (e: any) {
+    console.error("[gbp-perf] Token refresh exception:", e?.message);
+    return null;
+  }
 }
 
 function emptyMonth(month: string): MonthlyPerformance {
