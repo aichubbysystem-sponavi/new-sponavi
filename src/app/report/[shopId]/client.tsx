@@ -587,7 +587,7 @@ export default function ReportClient({
       }
       onAdd() {
         this.div = document.createElement("div");
-        this.div.style.cssText = `position:absolute;width:36px;height:36px;border-radius:50%;background:${this.color};border:2px solid #fff;color:#fff;font-weight:bold;font-size:14px;font-family:Arial,sans-serif;line-height:32px;text-align:center;box-sizing:border-box;user-select:none;`;
+        this.div.style.cssText = `position:absolute;width:36px;height:36px;border-radius:50%;background:${this.color};border:2px solid #fff;color:#fff;font-weight:bold;font-size:13px;font-family:Arial,Helvetica,sans-serif;display:flex;align-items:center;justify-content:center;box-sizing:border-box;user-select:none;line-height:1;padding:0;`;
         this.div.textContent = this.rank > 0 ? String(this.rank) : "-";
         const panes = this.getPanes();
         panes?.overlayMouseTarget.appendChild(this.div);
