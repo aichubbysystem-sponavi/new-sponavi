@@ -827,14 +827,22 @@ export default function ReportClient({
               const kw = gr.keywords[kwIdx];
               // KWを切り替えてマップ描画
               setGridKwIdx(kwIdx);
+              // React state反映を待つ
+              await new Promise(r => setTimeout(r, 300));
+              // アクティブスライドをビューポートに表示
+              const currentActive = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden)");
+              if (currentActive) {
+                currentActive.scrollIntoView({ block: "center" });
+              }
               await new Promise(r => setTimeout(r, 100));
               // マップを再描画
               renderGridMapForKw(kw);
-              await new Promise(r => setTimeout(r, 1500));
-              // アクティブスライドのマップ領域をキャプチャ（DOM移動せず）
-              const currentActive = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden)");
-              if (currentActive) {
-                const mapArea = currentActive.querySelector<HTMLElement>(".grid-kw-map-area");
+              // タイル読み込み待ち
+              await new Promise(r => setTimeout(r, 2000));
+              // マップ領域をキャプチャ
+              const activeSlideNow = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden)");
+              if (activeSlideNow) {
+                const mapArea = activeSlideNow.querySelector<HTMLElement>(".grid-kw-map-area");
                 if (mapArea) {
                   const mc = await html2canvas(mapArea, {
                     scale: 2, useCORS: true, logging: false, backgroundColor: "#f0f2f5",
