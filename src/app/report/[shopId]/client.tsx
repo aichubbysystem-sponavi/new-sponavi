@@ -807,37 +807,50 @@ export default function ReportClient({
               }
             }
 
+            // KW名タイトルを画像化するヘルパー
+            const renderKwTitle = async (kwName: string): Promise<HTMLCanvasElement> => {
+              const el = document.createElement("div");
+              el.style.cssText = `font-family:'Noto Sans JP',sans-serif;font-size:20px;font-weight:700;color:#0f3460;border-left:5px solid #e94560;padding:4px 0 4px 12px;background:#f0f2f5;display:inline-block;position:fixed;left:0;top:0;z-index:99999;`;
+              el.textContent = `多地点順位 —「${kwName}」`;
+              document.body.appendChild(el);
+              await new Promise(r => setTimeout(r, 50));
+              const c = await html2canvas(el, { scale: 2, logging: false, backgroundColor: "#f0f2f5" });
+              el.remove();
+              return c;
+            };
+
             // マップを左右2枚ずつPDFページに配置（KW名タイトル付き）
             const halfW = pdfW / 2;
-            const titleH = 10; // タイトル用の高さ(mm)
+            const titleMmH = 8;
             for (let m = 0; m < mapCanvases.length; m += 2) {
               if (pageIdx > 0) pdf.addPage();
               // 左
-              const leftKwName = gr.keywords[m] || "";
-              pdf.setFont("helvetica", "bold");
-              pdf.setFontSize(12);
-              pdf.setTextColor(15, 52, 96);
-              pdf.text(`${leftKwName}`, 8, titleH);
+              const leftTitleCanvas = await renderKwTitle(gr.keywords[m] || "");
+              const ltAspect = leftTitleCanvas.width / leftTitleCanvas.height;
+              const ltW = Math.min(halfW - 10, 120);
+              const ltH = ltW / ltAspect;
+              pdf.addImage(leftTitleCanvas.toDataURL("image/png"), "PNG", 5, 3, ltW, ltH);
               const leftImg = mapCanvases[m].toDataURL("image/jpeg", 0.92);
               const leftAspect = mapCanvases[m].height / mapCanvases[m].width;
-              const leftAvailH = pdfH - titleH - 4;
+              const leftAvailH = pdfH - titleMmH - 4;
               const leftImgH = Math.min(halfW * leftAspect, leftAvailH);
               const leftImgW = leftImgH / leftAspect;
               const leftX = (halfW - leftImgW) / 2;
-              const leftY = titleH + 2;
-              pdf.addImage(leftImg, "JPEG", leftX, leftY, leftImgW, leftImgH);
+              pdf.addImage(leftImg, "JPEG", leftX, titleMmH + 2, leftImgW, leftImgH);
               // 右
               if (m + 1 < mapCanvases.length) {
-                const rightKwName = gr.keywords[m + 1] || "";
-                pdf.text(`${rightKwName}`, halfW + 8, titleH);
+                const rightTitleCanvas = await renderKwTitle(gr.keywords[m + 1] || "");
+                const rtAspect = rightTitleCanvas.width / rightTitleCanvas.height;
+                const rtW = Math.min(halfW - 10, 120);
+                const rtH = rtW / rtAspect;
+                pdf.addImage(rightTitleCanvas.toDataURL("image/png"), "PNG", halfW + 5, 3, rtW, rtH);
                 const rightImg = mapCanvases[m + 1].toDataURL("image/jpeg", 0.92);
                 const rightAspect = mapCanvases[m + 1].height / mapCanvases[m + 1].width;
-                const rightAvailH = pdfH - titleH - 4;
+                const rightAvailH = pdfH - titleMmH - 4;
                 const rightImgH = Math.min(halfW * rightAspect, rightAvailH);
                 const rightImgW = rightImgH / rightAspect;
                 const rightX = halfW + (halfW - rightImgW) / 2;
-                const rightY = titleH + 2;
-                pdf.addImage(rightImg, "JPEG", rightX, rightY, rightImgW, rightImgH);
+                pdf.addImage(rightImg, "JPEG", rightX, titleMmH + 2, rightImgW, rightImgH);
               }
               pageIdx++;
             }
