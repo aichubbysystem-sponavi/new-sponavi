@@ -906,6 +906,14 @@ export default function ReportClient({
         } else {
           const canvas = await html2canvas(slide, {
             scale: 2, useCORS: true, logging: false, backgroundColor: "#f0f2f5",
+            onclone: (clonedDoc: Document) => {
+              const fix = clonedDoc.createElement("style");
+              fix.textContent = `
+                td, th { line-height: 1.1 !important; vertical-align: middle !important; }
+                span, div, p { line-height: 1.3 !important; }
+              `;
+              clonedDoc.head.appendChild(fix);
+            },
           });
           const imgData = canvas.toDataURL("image/jpeg", 0.92);
           if (pageIdx > 0) pdf.addPage();
