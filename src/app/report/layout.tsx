@@ -92,14 +92,8 @@ export default function ReportLayout({
                 padding: 4px 4px !important;
                 font-size: 12px !important;
               }
-              .grid-kw-comparison th,
-              .grid-kw-comparison td {
-                padding: 3px 6px !important;
-                font-size: 11px !important;
-              }
-              .grid-kw-comparison h4 {
-                margin-top: 2px !important;
-                font-size: 11px !important;
+              .grid-kw-comparison {
+                display: none !important;
               }
             }
           `,
