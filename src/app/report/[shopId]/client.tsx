@@ -841,7 +841,7 @@ export default function ReportClient({
             // KW名タイトルを画像化するヘルパー
             const renderKwTitle = async (kwName: string): Promise<HTMLCanvasElement> => {
               const el = document.createElement("div");
-              el.style.cssText = `font-family:'Noto Sans JP',sans-serif;font-size:20px;font-weight:700;color:#0f3460;border-left:5px solid #e94560;padding:4px 0 4px 12px;background:#f0f2f5;display:inline-block;position:fixed;left:0;top:0;z-index:99999;`;
+              el.style.cssText = `font-family:'Noto Sans JP',sans-serif;font-size:32px;font-weight:700;color:#0f3460;border-left:6px solid #e94560;padding:6px 0 6px 14px;background:#f0f2f5;display:inline-block;position:fixed;left:0;top:0;z-index:99999;`;
               el.textContent = `多地点順位 —「${kwName}」`;
               document.body.appendChild(el);
               await new Promise(r => setTimeout(r, 50));
@@ -852,13 +852,13 @@ export default function ReportClient({
 
             // マップを左右2枚ずつPDFページに配置（KW名タイトル付き）
             const halfW = pdfW / 2;
-            const titleMmH = 8;
+            const titleMmH = 14;
             for (let m = 0; m < mapCanvases.length; m += 2) {
               if (pageIdx > 0) pdf.addPage();
               // 左
               const leftTitleCanvas = await renderKwTitle(gr.keywords[m] || "");
               const ltAspect = leftTitleCanvas.width / leftTitleCanvas.height;
-              const ltH = 6;
+              const ltH = 9;
               const ltW = ltH * ltAspect;
               pdf.addImage(leftTitleCanvas.toDataURL("image/png"), "PNG", 5, 2, ltW, ltH);
               const leftImg = mapCanvases[m].toDataURL("image/jpeg", 0.92);
@@ -872,7 +872,7 @@ export default function ReportClient({
               if (m + 1 < mapCanvases.length) {
                 const rightTitleCanvas = await renderKwTitle(gr.keywords[m + 1] || "");
                 const rtAspect = rightTitleCanvas.width / rightTitleCanvas.height;
-                const rtH = 6;
+                const rtH = 9;
                 const rtW = rtH * rtAspect;
                 pdf.addImage(rightTitleCanvas.toDataURL("image/png"), "PNG", halfW + 5, 2, rtW, rtH);
                 const rightImg = mapCanvases[m + 1].toDataURL("image/jpeg", 0.92);
