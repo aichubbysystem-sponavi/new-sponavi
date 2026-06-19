@@ -23,22 +23,17 @@ export async function POST(request: NextRequest) {
   const comments: string[] = body.comments;
   const targetMonth: string | undefined = body.targetMonth;
 
-  if (!shopName || !Array.isArray(comments)) {
-    return NextResponse.json({ error: "shopName and comments[] required" }, { status: 400 });
+  if (!shopName || !Array.isArray(comments) || !targetMonth) {
+    return NextResponse.json({ error: "shopName, comments[], targetMonth required" }, { status: 400 });
   }
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-  let query = supabase
+  const { error } = await supabase
     .from("report_analysis")
     .update({ comments, updated_at: new Date().toISOString() })
-    .eq("shop_name", shopName);
-
-  if (targetMonth) {
-    query = query.eq("target_month", targetMonth);
-  }
-
-  const { error } = await query;
+    .eq("shop_name", shopName)
+    .eq("target_month", targetMonth);
 
   if (error) {
     console.error("[update-comments] DB error:", error.message);

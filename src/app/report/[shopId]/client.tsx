@@ -279,10 +279,13 @@ export default function ReportClient({
 
   // AIコメント編集
   const [editingComments, setEditingComments] = useState<string[] | null>(null);
+  const [savedComments, setSavedComments] = useState<string[] | null>(null);
   const [commentSaving, setCommentSaving] = useState(false);
   const [commentSaved, setCommentSaved] = useState(false);
+  const [commentError, setCommentError] = useState("");
   const isEditingComments = editingComments !== null;
-  const displayComments = editingComments ?? comments ?? [];
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const displayComments = editingComments ?? savedComments ?? comments ?? [];
   const [showSettings, setShowSettings] = useState(false);
   const [negativeModal, setNegativeModal] = useState<{ word: string; reviews: { reviewer: string; comment: string; reply?: string | null; date: string; starRating: string }[]; type?: "positive" | "negative"; matched?: boolean } | null>(null);
   const [editingGridCell, setEditingGridCell] = useState<{ row: number; col: number } | null>(null);
@@ -388,6 +391,13 @@ export default function ReportClient({
       return next;
     });
   };
+
+  // ログイン状態チェック
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setIsLoggedIn(!!data.session?.access_token);
+    });
+  }, []);
 
   // 口コミ言語別データ
   const [langStats, setLangStats] = useState<{ lang: string; country: string; total: number; star1: number; star2: number; star3: number; star4: number; star5: number; lowRatingCount: number }[]>([]);
@@ -634,23 +644,31 @@ export default function ReportClient({
   const saveComments = async () => {
     if (!editingComments) return;
     setCommentSaving(true);
+    setCommentError("");
     try {
       const authH = await getAuthHeaders();
+      if (!authH.Authorization) {
+        setCommentError("ログインが必要です");
+        setCommentSaving(false);
+        return;
+      }
       const res = await fetch("/api/report/update-comments", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authH },
         body: JSON.stringify({ shopName: shop.name, comments: editingComments, targetMonth: trimmedData.analysisTargetMonth || curLabel }),
       });
       if (res.ok) {
-        // trimmedDataのcommentsを更新（re-renderで反映）
-        if (trimmedData.comments) {
-          trimmedData.comments.splice(0, trimmedData.comments.length, ...editingComments);
-        }
+        setSavedComments([...editingComments]);
         setEditingComments(null);
         setCommentSaved(true);
         setTimeout(() => setCommentSaved(false), 2000);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setCommentError(err.error || `保存に失敗しました (${res.status})`);
       }
-    } catch {}
+    } catch (e: any) {
+      setCommentError("通信エラー: " + (e?.message || ""));
+    }
     setCommentSaving(false);
   };
 
@@ -1904,17 +1922,18 @@ export default function ReportClient({
       <div key={`ai-comment-${pageIdx}`} style={slideStyle} className="slide">
         <div style={slideBarStyle}>
           <span>{shop.name} — AIによるコメント{pageLabel}</span>
-          {isFirst && (
+          {isFirst && isLoggedIn && (
             <div className="no-print" style={{ display: "flex", gap: 6, alignItems: "center" }}>
               {!isEditingComments ? (
-                <button onClick={() => setEditingComments([...allComments])} style={{ fontSize: 14, padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.15)", color: "#fff", cursor: "pointer" }}>編集</button>
+                <button onClick={() => { setCommentError(""); setEditingComments([...allComments]); }} style={{ fontSize: 14, padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.15)", color: "#fff", cursor: "pointer" }}>編集</button>
               ) : (
                 <>
                   <button onClick={saveComments} disabled={commentSaving} style={{ fontSize: 14, padding: "3px 10px", borderRadius: 6, border: "none", background: commentSaving ? "#999" : "#0a8f3c", color: "#fff", cursor: commentSaving ? "wait" : "pointer" }}>{commentSaving ? "保存中..." : "保存"}</button>
-                  <button onClick={() => setEditingComments(null)} style={{ fontSize: 14, padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.15)", color: "#fff", cursor: "pointer" }}>キャンセル</button>
+                  <button onClick={() => { setEditingComments(null); setCommentError(""); }} style={{ fontSize: 14, padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.15)", color: "#fff", cursor: "pointer" }}>キャンセル</button>
                 </>
               )}
               {commentSaved && <span style={{ fontSize: 14, color: "#90ee90" }}>保存しました</span>}
+              {commentError && <span style={{ fontSize: 14, color: "#ff6b6b" }}>{commentError}</span>}
             </div>
           )}
           <span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
