@@ -88,12 +88,12 @@ function emptyMonth(month: string): MonthlyPerformance {
 }
 
 /**
- * GBP Performance API からパフォーマンスメトリクスを取得（過去12ヶ月）
+ * GBP Performance API からパフォーマンスメトリクスを取得（過去13ヶ月）
  * fetchMultiDailyMetricsTimeSeries で日次データを取得し、月別に集計
  */
 export async function fetchPerformanceFromGBP(
   locationPath: string,
-  months: number = 12
+  months: number = 13
 ): Promise<MonthlyPerformance[]> {
   const token = await getPerformanceApiToken();
   if (!token) {
@@ -105,7 +105,7 @@ export async function fetchPerformanceFromGBP(
     ? locationPath.split("/").slice(-2).join("/")
     : locationPath;
 
-  // 日付範囲: 過去12ヶ月の1日〜先月末日
+  // 日付範囲: 過去13ヶ月の1日〜先月末日
   const nowJST = new Date(Date.now() + 9 * 60 * 60 * 1000);
   const endDate = new Date(nowJST.getUTCFullYear(), nowJST.getUTCMonth(), 0); // 先月末日
   const startDate = new Date(endDate.getFullYear(), endDate.getMonth() - months + 1, 1); // 12ヶ月前の1日
@@ -236,7 +236,7 @@ export async function syncShopPerformance(
   shopId: string,
   shopName: string,
   gbpLocationName: string,
-  months: number = 12
+  months: number = 13
 ): Promise<{ success: boolean; totalMonths?: number; error?: string }> {
   const apiData = await fetchPerformanceFromGBP(gbpLocationName, months);
   if (apiData.length === 0) {
