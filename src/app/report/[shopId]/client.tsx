@@ -714,7 +714,7 @@ export default function ReportClient({
           const diff = ps ? ps.avgRank - s.avgRank : 0;
           const dc = diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888";
           const ds = ps ? (diff > 0 ? `↑${diff.toFixed(1)}` : diff < 0 ? `↓${Math.abs(diff).toFixed(1)}` : "→") : "-";
-          const rc = s.avgRank <= 3 ? "#15803d" : s.avgRank <= 10 ? "#1d4ed8" : s.avgRank <= 20 ? "#b45309" : "#999";
+          const rc = s.avgRank <= 3 ? "#1d4ed8" : s.avgRank <= 10 ? "#15803d" : s.avgRank <= 20 ? "#b45309" : "#999";
           return `<tr style="background:${si%2===0?"#fff":"#f8f9fb"}"><td style="padding:8px 12px;font-size:15px;border-bottom:1px solid #eee;">${s.keyword}</td><td style="padding:8px 12px;text-align:center;font-size:15px;font-weight:800;color:${rc};border-bottom:1px solid #eee;">${s.avgRank}</td><td style="padding:8px 12px;text-align:center;font-size:15px;font-weight:700;color:${dc};border-bottom:1px solid #eee;">${ds}</td><td style="padding:8px 12px;text-align:center;font-size:15px;color:#888;border-bottom:1px solid #eee;">${s.gridSize}×${s.gridSize}</td></tr>`;
         }).join("");
         leftCol.innerHTML = `<h3 style="font-size:16px;font-weight:700;color:#0f3460;margin:0 0 8px;">全キーワード比較（${latestMonth.month}）</h3><div style="border-radius:10px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.04);"><table style="width:100%;border-collapse:collapse;background:#fff;"><thead>${th}</thead><tbody>${rows}</tbody></table></div>`;
@@ -730,7 +730,7 @@ export default function ReportClient({
         const valid = data.filter((v): v is number => v !== null);
         const diffStr = valid.length >= 2 ? (() => { const d = valid[valid.length - 2] - valid[valid.length - 1]; return d > 0 ? `<span style="color:#0a8f3c;font-weight:700;">↑${d.toFixed(1)}</span>` : d < 0 ? `<span style="color:#c0392b;font-weight:700;">↓${Math.abs(d).toFixed(1)}</span>` : `<span style="color:#888;">→</span>`; })() : `<span style="color:#888;">→</span>`;
         const thRow = trendMonthLabels.map((l, li) => `<th style="background:${li===trendMonthLabels.length-1?"#e94560":"#0f3460"};color:#fff;padding:5px 4px;text-align:center;font-weight:600;font-size:12px;white-space:nowrap;">${l}</th>`).join("") + `<th style="background:#0f3460;color:#fff;padding:5px 4px;text-align:center;font-weight:600;font-size:12px;">変動</th>`;
-        const tdRow = data.map(v => { const c = v === null ? "#ddd" : v <= 3 ? "#15803d" : v <= 10 ? "#1d4ed8" : v <= 20 ? "#b45309" : "#999"; return `<td style="padding:5px 4px;text-align:center;font-size:12px;font-weight:${v!==null&&v<=5?900:600};color:${c};border-bottom:1px solid #eee;">${v !== null ? v : "-"}</td>`; }).join("") + `<td style="padding:5px 4px;text-align:center;font-size:12px;border-bottom:1px solid #eee;">${diffStr}</td>`;
+        const tdRow = data.map(v => { const c = v === null ? "#ddd" : v <= 3 ? "#1d4ed8" : v <= 10 ? "#15803d" : v <= 20 ? "#b45309" : "#999"; return `<td style="padding:5px 4px;text-align:center;font-size:12px;font-weight:${v!==null&&v<=5?900:600};color:${c};border-bottom:1px solid #eee;">${v !== null ? v : "-"}</td>`; }).join("") + `<td style="padding:5px 4px;text-align:center;font-size:12px;border-bottom:1px solid #eee;">${diffStr}</td>`;
         const block = document.createElement("div");
         block.innerHTML = `<div style="font-size:13px;font-weight:700;color:#0f3460;margin-bottom:6px;">「${kw}」</div><table style="width:100%;border-collapse:collapse;background:#fff;border-radius:6px;overflow:hidden;"><thead><tr>${thRow}</tr></thead><tbody><tr>${tdRow}</tr></tbody></table>`;
         rightCol.appendChild(block);
@@ -1596,7 +1596,7 @@ export default function ReportClient({
                               {trendData.map((v, i) => (
                                 <td key={i} style={{
                                   padding: "12px 6px", textAlign: "center", fontSize: 16, fontWeight: v !== null && v <= 5 ? 900 : 600,
-                                  color: v === null ? "#ddd" : v <= 3 ? "#15803d" : v <= 10 ? "#1d4ed8" : v <= 20 ? "#b45309" : "#999",
+                                  color: v === null ? "#ddd" : v <= 3 ? "#1d4ed8" : v <= 10 ? "#15803d" : v <= 20 ? "#b45309" : "#999",
                                   background: i === activeMonthI ? "#fff8f0" : undefined, borderBottom: "1px solid #eee",
                                 }}>
                                   {v !== null ? v : "-"}
@@ -1638,7 +1638,7 @@ export default function ReportClient({
                                     <tr key={si} style={{ background: s.keyword === loopKw ? "#fff8f0" : si % 2 === 0 ? "#fff" : "#f8f9fb" }}>
                                       <td style={{ padding: "8px 12px", fontWeight: s.keyword === loopKw ? 700 : 500, fontSize: 16, borderBottom: "1px solid #eee" }}>{s.keyword}</td>
                                       <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 16, fontWeight: 800, borderBottom: "1px solid #eee",
-                                        color: s.avgRank <= 3 ? "#15803d" : s.avgRank <= 10 ? "#1d4ed8" : s.avgRank <= 20 ? "#b45309" : "#999" }}>
+                                        color: s.avgRank <= 3 ? "#1d4ed8" : s.avgRank <= 10 ? "#15803d" : s.avgRank <= 20 ? "#b45309" : "#999" }}>
                                         {s.avgRank}
                                       </td>
                                       <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 16, fontWeight: 700, borderBottom: "1px solid #eee",
