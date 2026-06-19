@@ -1969,11 +1969,33 @@ export default function ReportClient({
                 );
               })}
             </div>
-            {/* メモ欄（最終ページのみ、内容がある場合のみ表示） */}
-            {isLast && memo && (
-            <div style={{ marginTop: "auto", borderTop: "1px solid #dde", paddingTop: 12 }}>
-              <span style={{ fontSize: 16, fontWeight: 600, color: "#0f3460", marginBottom: 6, display: "block" }}>メモ（担当者用）</span>
-              <p style={{ fontSize: 16, lineHeight: 1.8, color: "#444", margin: 0, whiteSpace: "pre-wrap" }}>{memo}</p>
+            {/* メモ欄（最終ページのみ、PDF非表示） */}
+            {isLast && (
+            <div className="no-print" style={{ marginTop: "auto", borderTop: "1px solid #dde", paddingTop: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                <span style={{ fontSize: 16, fontWeight: 600, color: "#0f3460" }}>メモ（担当者用）</span>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {!memoEditing ? (
+                    <button onClick={() => setMemoEditing(true)} style={{ fontSize: 16, padding: "3px 10px", borderRadius: 6, border: "1px solid #ccd", background: "#fff", cursor: "pointer", color: "#555" }}>
+                      {memo ? "編集" : "追加"}
+                    </button>
+                  ) : (
+                    <>
+                      <button onClick={saveMemo} disabled={memoLoading} style={{ fontSize: 16, padding: "3px 10px", borderRadius: 6, border: "none", background: memoLoading ? "#999" : "#0f3460", color: "#fff", cursor: memoLoading ? "wait" : "pointer" }}>{memoLoading ? "保存中..." : "保存"}</button>
+                      <button onClick={() => setMemoEditing(false)} style={{ fontSize: 16, padding: "3px 10px", borderRadius: 6, border: "1px solid #ccd", background: "#fff", cursor: "pointer", color: "#555" }}>キャンセル</button>
+                    </>
+                  )}
+                  {memoSaved && <span style={{ fontSize: 16, color: "#0a8f3c" }}>保存しました</span>}
+                </div>
+              </div>
+              {memoEditing ? (
+                <textarea value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="この店舗への所感やメモを記入..."
+                  style={{ width: "100%", minHeight: 60, padding: "8px 10px", fontSize: 16, lineHeight: 1.6, border: "1px solid #ccd", borderRadius: 8, resize: "vertical", fontFamily: "inherit" }} />
+              ) : memo ? (
+                <p style={{ fontSize: 16, lineHeight: 1.8, color: "#444", margin: 0, whiteSpace: "pre-wrap" }}>{memo}</p>
+              ) : (
+                <p style={{ fontSize: 16, color: "#aaa", margin: 0, fontStyle: "italic" }}>メモなし</p>
+              )}
             </div>
             )}
           </div>
