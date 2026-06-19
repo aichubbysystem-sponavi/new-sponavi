@@ -308,25 +308,25 @@ function generateComments(
 ): string[] {
   const comments: string[] = [];
 
-  // 検索数
-  const search = kpis[0];
-  const searchPct = pctText(search.value, search.prevValue);
-  comments.push(
-    `Google検索数は${search.value.toLocaleString()}回（${search.compareLabel || "前月比"}${searchPct}）。${
-      search.value >= search.prevValue
-        ? "検索経由の認知が拡大しています。"
-        : "季節的な変動の可能性もあるため、来月のデータで推移を確認します。"
-    }`
-  );
-
   // マップ表示
-  const map = kpis[1];
+  const map = kpis[0];
   const mapPct = pctText(map.value, map.prevValue);
   comments.push(
     `Googleマップ表示数は${map.value.toLocaleString()}回（${map.compareLabel || "前月比"}${mapPct}）。${
       map.value >= map.prevValue
         ? "マップ経由の集客力が強化されています。"
         : "マップ上での視認性向上のため、GBP情報の最適化を継続します。"
+    }`
+  );
+
+  // 検索数
+  const search = kpis[1];
+  const searchPct = pctText(search.value, search.prevValue);
+  comments.push(
+    `Google検索数は${search.value.toLocaleString()}回（${search.compareLabel || "前月比"}${searchPct}）。${
+      search.value >= search.prevValue
+        ? "検索経由の認知が拡大しています。"
+        : "季節的な変動の可能性もあるため、来月のデータで推移を確認します。"
     }`
   );
 
@@ -618,8 +618,8 @@ export async function buildReportData(
   }
 
   const kpis: KPI[] = [
-    { label: "Google検索 合計", value: cur.searchMobile + cur.searchPC, prevValue: prev ? prev.searchMobile + prev.searchPC : 0, unit: "回", momValue: prev ? prev.searchMobile + prev.searchPC : null, yoyValue: yoy ? yoy.searchMobile + yoy.searchPC : null },
     { label: "Googleマップ 合計", value: cur.mapMobile + cur.mapPC, prevValue: prev ? prev.mapMobile + prev.mapPC : 0, unit: "回", momValue: prev ? prev.mapMobile + prev.mapPC : null, yoyValue: yoy ? yoy.mapMobile + yoy.mapPC : null },
+    { label: "Google検索 合計", value: cur.searchMobile + cur.searchPC, prevValue: prev ? prev.searchMobile + prev.searchPC : 0, unit: "回", momValue: prev ? prev.searchMobile + prev.searchPC : null, yoyValue: yoy ? yoy.searchMobile + yoy.searchPC : null },
     { label: "ウェブサイトクリック", value: cur.websites, prevValue: prev?.websites ?? 0, unit: "件", momValue: prev?.websites ?? null, yoyValue: yoy?.websites ?? null },
     { label: "ルート検索", value: cur.routes, prevValue: prev?.routes ?? 0, unit: "件", momValue: prev?.routes ?? null, yoyValue: yoy?.routes ?? null },
     { label: "通話", value: cur.calls, prevValue: prev?.calls ?? 0, unit: "件", momValue: prev?.calls ?? null, yoyValue: yoy?.calls ?? null },
@@ -643,8 +643,8 @@ export async function buildReportData(
 
   // DB → テンプレートフォールバックで口コミ分析取得
   const { getReviewAnalysis } = await import("./review-analyzer");
-  const search = kpis[0];
-  const map = kpis[1];
+  const map = kpis[0];
+  const search = kpis[1];
   const totalActionsVal = kpis.slice(2, 7).reduce((s, k) => s + k.value, 0);
   const prevTotalActionsVal = kpis.slice(2, 7).reduce((s, k) => s + k.prevValue, 0);
   const filteredDeltas = reviewDelta.filter((d): d is number => d !== null);

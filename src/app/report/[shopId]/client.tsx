@@ -571,7 +571,7 @@ export default function ReportClient({
     gridMarkersRefs.current[kw] = [];
 
     const bounds = new window.google.maps.LatLngBounds();
-    const rankColor = (r: number) => r <= 0 ? "#6B7280" : r <= 3 ? "#16A34A" : r <= 10 ? "#2563EB" : r <= 20 ? "#F59E0B" : "#EF4444";
+    const rankColor = (r: number) => r <= 0 ? "#6B7280" : r <= 3 ? "#2563EB" : r <= 10 ? "#16A34A" : r <= 20 ? "#F59E0B" : "#EF4444";
 
     pts.forEach(pt => {
       const iconObj: any = {
@@ -765,7 +765,7 @@ export default function ReportClient({
           const legend = document.createElement("div");
           legend.style.cssText = `display:flex;gap:10px;font-size:13px;color:#555;margin-top:6px;justify-content:center;`;
           legend.innerHTML = [
-            { c: "#16A34A", t: "1-3位" }, { c: "#2563EB", t: "4-10位" }, { c: "#F59E0B", t: "11-20位" }, { c: "#EF4444", t: "21位~" }, { c: "#6B7280", t: "圏外" },
+            { c: "#2563EB", t: "1-3位" }, { c: "#16A34A", t: "4-10位" }, { c: "#F59E0B", t: "11-20位" }, { c: "#EF4444", t: "21位~" }, { c: "#6B7280", t: "圏外" },
           ].map(x => `<span style="display:flex;align-items:center;gap:3px;"><span style="width:10px;height:10px;border-radius:50%;background:${x.c};display:inline-block;"></span>${x.t}</span>`).join("");
           mapSlot.appendChild(legend);
           // 平均順位
@@ -872,7 +872,7 @@ export default function ReportClient({
     let pages = 0;
     let ci = 0;
     while (ci < ac.length) {
-      const limit = pages === 0 ? 750 : 850;
+      const limit = pages === 0 ? 1200 : 1200;
       let charCount = 0;
       let end = ci;
       while (end < ac.length) {
@@ -897,7 +897,7 @@ export default function ReportClient({
     // 16件以上なら2ページ目も表示
     const sqHist = searchQueries?.history;
     const sqLatestKws = Array.isArray(sqHist) && sqHist.length > 0 ? (sqHist[sqHist.length - 1]?.keywords?.length || 0) : 0;
-    if (sqLatestKws > 15) totalPages++;
+    if (sqLatestKws > 20) totalPages++;
   }
 
   function pn(slideNum: number) {
@@ -1044,8 +1044,8 @@ export default function ReportClient({
               const gridCells = overrideData?.results || [];
               const gridRankColorModal = (rank: number) => {
                 if (rank <= 0) return { bg: "rgba(156,163,175,0.3)", color: "#9ca3af" };
-                if (rank <= 3) return { bg: "rgba(22,163,74,0.3)", color: "#16a34a" };
-                if (rank <= 10) return { bg: "rgba(37,99,235,0.3)", color: "#2563eb" };
+                if (rank <= 3) return { bg: "rgba(37,99,235,0.3)", color: "#2563eb" };
+                if (rank <= 10) return { bg: "rgba(22,163,74,0.3)", color: "#16a34a" };
                 if (rank <= 20) return { bg: "rgba(245,158,11,0.3)", color: "#f59e0b" };
                 return { bg: "rgba(239,68,68,0.3)", color: "#ef4444" };
               };
@@ -1210,7 +1210,7 @@ export default function ReportClient({
                     {isLastKpi ? (
                       <span>累計: {displayTotalReviews.toLocaleString()}件（評価 {shop.rating}）</span>
                     ) : kpi.label === "Google検索 合計" || kpi.label === "Googleマップ 合計" ? (
-                      <><span style={{ marginRight: 6 }}>モバイル: {i === 0 ? charts.searchMobile[charts.searchMobile.length-1]?.toLocaleString() : charts.mapMobile[charts.mapMobile.length-1]?.toLocaleString()}</span><span>PC: {i === 0 ? charts.searchPC[charts.searchPC.length-1]?.toLocaleString() : charts.mapPC[charts.mapPC.length-1]?.toLocaleString()}</span></>
+                      <><span style={{ marginRight: 6 }}>モバイル: {i === 0 ? charts.mapMobile[charts.mapMobile.length-1]?.toLocaleString() : charts.searchMobile[charts.searchMobile.length-1]?.toLocaleString()}</span><span>PC: {i === 0 ? charts.mapPC[charts.mapPC.length-1]?.toLocaleString() : charts.searchPC[charts.searchPC.length-1]?.toLocaleString()}</span></>
                     ) : (
                       <span>&nbsp;</span>
                     )}
@@ -1248,7 +1248,7 @@ export default function ReportClient({
           <div style={{ overflow: "hidden", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", fontSize: 16, flex: 1 }}>
               <thead><tr>
-                {["月","検索モバイル","検索PC","検索合計","マップモバイル","マップPC","マップ合計","Web","ルート","通話",
+                {["月","マップモバイル","マップPC","マップ合計","検索モバイル","検索PC","検索合計","Web","ルート","通話",
                   ...(hasFoodMenus ? ["メニュー"] : []),
                   ...(hasBookings ? ["予約"] : []),
                   "合計"].map((h,i) => (
@@ -1261,12 +1261,12 @@ export default function ReportClient({
                   return (
                     <tr key={i} style={{ background: isLast ? "#cfffE3" : i % 2 === 1 ? "#eef1f6" : "#fff", fontWeight: isLast ? 600 : undefined }}>
                       <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.label}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.searchMobile.toLocaleString()}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.searchPC.toLocaleString()}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.searchTotal.toLocaleString()}</td>
                       <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.mapMobile.toLocaleString()}</td>
                       <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.mapPC.toLocaleString()}</td>
                       <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.mapTotal.toLocaleString()}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.searchMobile.toLocaleString()}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.searchPC.toLocaleString()}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.searchTotal.toLocaleString()}</td>
                       <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.websites.toLocaleString()}</td>
                       <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.routes.toLocaleString()}</td>
                       <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.calls.toLocaleString()}</td>
@@ -1282,8 +1282,37 @@ export default function ReportClient({
         </div>
       </div>
 
-      {/* ════ P3: Google検索数推移 ════ */}
+      {/* ════ P3: Googleマップ表示数推移 ════ */}
       {(() => { pageNum = 3; return null; })()}
+      <div style={slideStyle} className="slide">
+        <div style={slideBarStyle}><span>{shop.name} — Googleマップ表示数推移</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBodyStyle}>
+          <div style={{ width: "95%", margin: "0 auto" }}>
+            <Bar data={{ labels: monthlyLabels, datasets: [
+              { label: "モバイル", data: charts.mapMobile, backgroundColor: "rgba(129,199,132,.75)" },
+              { label: "PC", data: charts.mapPC, backgroundColor: "rgba(56,142,60,.75)" },
+            ]}} options={buildStackedOptions()} />
+          </div>
+          <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 16 }}>
+            <tbody>
+              <tr style={{ background: "#0f3460" }}>
+                <td style={{ padding: "3px 4px", fontWeight: 600, color: "#fff", width: 60, whiteSpace: "nowrap" }}>月</td>
+                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#fff", fontWeight: 600 }}>{l.split("/")[1]}月</td>)}
+              </tr>
+              <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>モバイル</td>
+                {charts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
+              <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>PC</td>
+                {charts.mapPC.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
+              <tr style={{ background: "#0f3460" }}><td style={{ padding: "3px 4px", fontWeight: 700, color: "#fff", whiteSpace: "nowrap" }}>合計</td>
+                {charts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700, color: "#fff" }}>{(v + charts.mapPC[i]).toLocaleString()}</td>)}</tr>
+            </tbody>
+          </table>
+          <div style={{ fontSize: 16, color: "#d32f2f", textAlign: "right", margin: "4px 16px 0", fontWeight: 600 }}>※ 2025年11月以降、Google Business Profile APIの計測仕様変更により数値が大幅に変動する場合があります</div>
+        </div>
+      </div>
+
+      {/* ════ P4: Google検索数推移 ════ */}
+      {(() => { pageNum = 4; return null; })()}
       <div style={slideStyle} className="slide">
         <div style={slideBarStyle}><span>{shop.name} — Google検索数推移</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
@@ -1310,35 +1339,6 @@ export default function ReportClient({
         </div>
       </div>
 
-      {/* ════ P4: Googleマップ表示数推移 ════ */}
-      {(() => { pageNum = 4; return null; })()}
-      <div style={slideStyle} className="slide">
-        <div style={slideBarStyle}><span>{shop.name} — Googleマップ表示数推移</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
-        <div style={slideBodyStyle}>
-          <div style={{ width: "95%", margin: "0 auto" }}>
-            <Bar data={{ labels: monthlyLabels, datasets: [
-              { label: "モバイル", data: charts.mapMobile, backgroundColor: "rgba(129,199,132,.75)" },
-              { label: "PC", data: charts.mapPC, backgroundColor: "rgba(56,142,60,.75)" },
-            ]}} options={buildStackedOptions()} />
-          </div>
-          <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 16 }}>
-            <tbody>
-              <tr style={{ background: "#0f3460" }}>
-                <td style={{ padding: "3px 4px", fontWeight: 600, color: "#fff", width: 60, whiteSpace: "nowrap" }}>月</td>
-                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#fff", fontWeight: 600 }}>{l.split("/")[1]}月</td>)}
-              </tr>
-              <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>モバイル</td>
-                {charts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>PC</td>
-                {charts.mapPC.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr style={{ background: "#0f3460" }}><td style={{ padding: "3px 4px", fontWeight: 700, color: "#fff", whiteSpace: "nowrap" }}>合計</td>
-                {charts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700, color: "#fff" }}>{(v + charts.mapPC[i]).toLocaleString()}</td>)}</tr>
-            </tbody>
-          </table>
-          <div style={{ fontSize: 16, color: "#999", textAlign: "right", margin: "4px 16px 0", fontStyle: "italic" }}>※ 2025年11月以降、Google Business Profile APIの計測仕様変更により数値が大幅に変動する場合があります</div>
-        </div>
-      </div>
-
       {/* ════ P5: ユーザー反応数推移 ════ */}
       {(() => { pageNum = 5; return null; })()}
       <div style={slideStyle} className="slide">
@@ -1348,7 +1348,6 @@ export default function ReportClient({
             <Bar data={{ labels: monthlyLabels, datasets: [
               { label: "ウェブサイト", data: charts.websites, backgroundColor: "rgba(255,183,77,.75)" },
               { label: "ルート", data: charts.routes, backgroundColor: "rgba(186,104,200,.75)" },
-              { label: "通話", data: charts.calls, backgroundColor: "rgba(229,115,115,.75)" },
               { label: "メニュー", data: charts.foodMenus, backgroundColor: "rgba(77,182,172,.75)" },
               { label: "予約", data: charts.bookings, backgroundColor: "rgba(121,134,203,.75)" },
             ]}} options={buildStackedOptions()} />
@@ -1373,6 +1372,11 @@ export default function ReportClient({
                 {charts.websites.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700, color: "#fff" }}>{(v + charts.routes[i] + charts.calls[i] + charts.foodMenus[i] + charts.bookings[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "6px 16px 0", fontSize: 14, color: "#666" }}>
+            <span style={{ fontWeight: 600 }}>通話:</span>
+            {charts.calls.map((v, i) => <span key={i} style={{ minWidth: 32, textAlign: "center" }}>{v.toLocaleString()}</span>)}
+            <span style={{ marginLeft: "auto", color: "#999" }}>※ 件数が少ないためグラフから分離表示</span>
+          </div>
         </div>
       </div>
 
@@ -1532,8 +1536,8 @@ export default function ReportClient({
                         <>
                           <div ref={el => { gridMapRefs.current[loopKw] = el; }} className="grid-map-container" style={{ width: 440, height: 400, borderRadius: 12, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,.15)", background: "#e8edf5" }} />
                           <div className="grid-kw-legend" style={{ display: "flex", gap: 10, fontSize: 16, color: "#555", marginTop: 2 }}>
-                            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#16A34A", display: "inline-block" }} />1-3位</span>
-                            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#2563EB", display: "inline-block" }} />4-10位</span>
+                            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#2563EB", display: "inline-block" }} />1-3位</span>
+                            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#16A34A", display: "inline-block" }} />4-10位</span>
                             <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#F59E0B", display: "inline-block" }} />11-20位</span>
                             <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#EF4444", display: "inline-block" }} />21位~</span>
                             <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#6B7280", display: "inline-block" }} />圏外</span>
@@ -1702,7 +1706,7 @@ export default function ReportClient({
         });
         const hasPrev = sqPrev !== null;
         const hasPrev2 = sqPrev2 !== null;
-        const PER_PAGE = 15;
+        const PER_PAGE = 20;
         const page1 = currentKeywords.slice(0, PER_PAGE);
         const page2 = currentKeywords.slice(PER_PAGE, PER_PAGE * 2);
         const thStyle = (w?: number, groupStart?: boolean): React.CSSProperties => ({ background: "#0f3460", color: "#fff", padding: "6px 4px", textAlign: "center", fontWeight: 600, fontSize: 16, whiteSpace: "nowrap", ...(w ? { width: w } : {}), ...(groupStart ? { borderLeft: "2px solid rgba(255,255,255,0.3)" } : {}) });
@@ -1814,7 +1818,7 @@ export default function ReportClient({
             <div style={{ width: "95%", maxHeight: 600 }}>
               <Line data={{ labels: reviewLabels, datasets: [{
                 label: "口コミ件数", data: reviewCounts,
-                borderColor: "#fbc02d", backgroundColor: "rgba(251,192,45,.15)",
+                borderColor: "#fbc02d", backgroundColor: "rgba(251,192,45,.35)",
                 fill: true, tension: 0.3, pointRadius: 4, pointBackgroundColor: "#fbc02d", borderWidth: 2,
               }]}} options={{ ...lineOptions, scales: { ...lineOptions.scales, y: { ...lineOptions.scales.y, ticks: { ...lineOptions.scales.y.ticks, stepSize: 1, callback: (v: any) => Number.isInteger(Number(v)) ? Number(v).toLocaleString() : "" } } } }} />
             </div>
@@ -1871,7 +1875,13 @@ export default function ReportClient({
                 );
               })()}
             </div>
-            <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 16 }}>
+            <div style={{ display: "flex", justifyContent: "center", gap: 16, margin: "8px 0 4px", fontSize: 14 }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 14, height: 14, borderRadius: 3, background: "rgba(39,174,96,.75)", display: "inline-block" }} />20件以上</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 14, height: 14, borderRadius: 3, background: "rgba(251,192,45,.75)", display: "inline-block" }} />10〜19件</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 14, height: 14, borderRadius: 3, background: "rgba(229,115,115,.75)", display: "inline-block" }} />1〜9件</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 14, height: 14, borderRadius: 3, background: "rgba(200,200,200,.4)", display: "inline-block" }} />0件</span>
+            </div>
+            <table style={{ width: "95%", margin: "4px auto 0", borderCollapse: "collapse", fontSize: 16 }}>
               <tbody>
                 <tr style={{ background: "#f8f9fa" }}>
                   <td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", width: 60, whiteSpace: "nowrap" }}>月</td>
@@ -1914,7 +1924,7 @@ export default function ReportClient({
                   );
                 }) : <span style={{ color: "#bbb", fontSize: 16, fontStyle: "italic" }}>データ準備中</span>;
               })()}</div>
-              <p style={{ fontSize: 16, color: "#aaa", marginTop: 8, margin: "8px 0 0" }}>※ クリックで該当する口コミを表示します</p>
+              <p className="no-print" style={{ fontSize: 16, color: "#aaa", marginTop: 8, margin: "8px 0 0" }}>※ クリックで該当する口コミを表示します</p>
             </div>
             <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", justifyContent: "center" }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, color: "#c0392b", marginBottom: 14 }}>ネガティブワード（推定）</h3>
@@ -1936,7 +1946,7 @@ export default function ReportClient({
                   );
                 }) : <span style={{ color: "#bbb", fontSize: 16, fontStyle: "italic" }}>データ準備中</span>;
               })()}</div>
-              <p style={{ fontSize: 16, color: "#aaa", marginTop: 8, margin: "8px 0 0" }}>※ クリックで該当する口コミを表示します</p>
+              <p className="no-print" style={{ fontSize: 16, color: "#aaa", marginTop: 8, margin: "8px 0 0" }}>※ クリックで該当する口コミを表示します</p>
             </div>
             <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", gridColumn: "1/-1", display: "flex", flexDirection: "column", justifyContent: "center" }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>口コミ総評</h3>
@@ -1976,8 +1986,8 @@ export default function ReportClient({
         // コメントを文字数ベースでページ分割（はみ出し防止）
         const allComments = comments || [];
         const commentPages: { start: number; end: number }[] = [];
-        const CHARS_FIRST_PAGE = 750; // 最初のページ（ヘッダー分少ない）
-        const CHARS_PER_PAGE = 850;   // 2ページ目以降
+        const CHARS_FIRST_PAGE = 1200; // 3コメント構成で1〜2ページに収める
+        const CHARS_PER_PAGE = 1200;
         {
           let ci = 0;
           while (ci < allComments.length) {
@@ -2016,13 +2026,20 @@ export default function ReportClient({
                 if (shop.rating > 0) {
                   fixedComment = fixedComment.replace(/\d\.\d(\s*\/\s*5\.0)/g, `${shop.rating}$1`);
                 }
+                // 【見出し】をstrong+改行に変換
+                fixedComment = fixedComment.replace(/【([^】]+)】/g, '<br><strong style="color:#0f3460;font-size:16px;">$1</strong><br>');
+                // 箇条書き「・」を改行+インデントに
+                fixedComment = fixedComment.replace(/([^<])・/g, '$1<br>・');
+                // a) b) c) を改行に
+                fixedComment = fixedComment.replace(/([^<])\s*([a-d]\))/g, '$1<br>$2');
                 fixedComment = fixedComment.replace(/([^（(])([①②③④⑤⑥⑦⑧⑨⑩])/g, "$1<br>$2");
                 fixedComment = fixedComment.replace(/(.)\s*(\(\d+\))/g, "$1<br>$2");
+                // 先頭の<br>を除去
+                fixedComment = fixedComment.replace(/^(<br>)+/, "");
                 return (
-                <p key={globalIdx} style={{ fontSize: 17, lineHeight: 2, color: "#444", margin: "0 0 16px 0" }}>
-                  <span style={{ fontWeight: 700, color: "#0f3460", marginRight: 8 }}>{"①②③④⑤⑥⑦⑧⑨⑩"[globalIdx] || `${globalIdx + 1}.`}</span>
-                  <span dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(fixedComment, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
-                </p>
+                <div key={globalIdx} style={{ fontSize: 16, lineHeight: 1.9, color: "#444", margin: "0 0 20px 0" }}>
+                  <span dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(fixedComment, { ALLOWED_TAGS: ["strong", "em", "br"], ALLOWED_ATTR: ["style"] }) }} />
+                </div>
                 );
               })}
             </div>
