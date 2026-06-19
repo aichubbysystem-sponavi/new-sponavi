@@ -25,14 +25,13 @@ import {
 import { Bar, Line } from "react-chartjs-2";
 import type { ReportData, NegativeWordSource } from "@/lib/report-data";
 import {
-  SLIDE_W, SLIDE_H, COLORS, CHART_COLORS, AI_COMMENT_HEADINGS,
+  SLIDE_W, SLIDE_H, COLORS, AI_COMMENT_HEADINGS,
   SEARCH_QUERIES_PER_PAGE, AI_CHARS_PER_PAGE,
-  pctChange, monthToNum, rankColor, rankTextColor, rankColorModal,
-  reviewDeltaColor, reorderKpis, formatAIComment, splitCommentPages,
-  diffColor, formatDiff,
+  pctChange, monthToNum, rankColor, rankColorModal,
+  reorderKpis, formatAIComment, splitCommentPages,
 } from "@/lib/report-utils";
 import {
-  slideStyle, slideBarStyle, slideBodyStyle, stitleStyle, footerStyle,
+  slideStyle, slideBarStyle, slideBodyStyle, stitleStyle,
   kpiTopColors, apiNoteStyle, API_NOTE_TEXT,
 } from "./report-styles";
 

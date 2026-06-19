@@ -41,16 +41,6 @@ export const kpiTopColors = [
   "linear-gradient(90deg,#ffd54f,#fbc02d)",
 ];
 
-export const tableHeaderStyle: React.CSSProperties = {
-  background: COLORS.primary, color: "#fff", padding: "3px 4px",
-  fontWeight: 600, width: 60, whiteSpace: "nowrap",
-};
-
-export const tableTotalStyle: React.CSSProperties = {
-  background: COLORS.primary, padding: "3px 4px",
-  fontWeight: 700, color: "#fff", whiteSpace: "nowrap",
-};
-
 export const apiNoteStyle: React.CSSProperties = {
   fontSize: 16, color: COLORS.danger, textAlign: "right",
   margin: "4px 16px 0", fontWeight: 600,
