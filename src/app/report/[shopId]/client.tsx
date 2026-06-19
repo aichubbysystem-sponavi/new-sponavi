@@ -876,14 +876,19 @@ export default function ReportClient({
         gmap.fitBounds(bounds, 40);
 
         // タイル読み込み待ち
-        await new Promise(r => setTimeout(r, 1500));
+        await new Promise(r => setTimeout(r, 2000));
       }
+
+      // 全マップの描画完了を追加で待つ
+      await new Promise(r => setTimeout(r, 1000));
 
       // ── 5. print用スライドを表示したままwindow.print() ──
       // 元のgridスライドを非表示
       document.querySelectorAll<HTMLElement>(".grid-kw-pair").forEach(el => { el.dataset.prevDisplay = el.style.display; el.style.display = "none"; });
 
-      await new Promise(r => setTimeout(r, 300));
+      // スクロールを先頭に戻してから印刷
+      window.scrollTo(0, 0);
+      await new Promise(r => setTimeout(r, 500));
       window.print();
 
       // ── 6. afterprint: DOM復元 ──

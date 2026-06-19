@@ -44,7 +44,7 @@ export default function ReportLayout({
               body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
               .no-print { display: none !important; }
               .slide { margin: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
-              @page { size: landscape; margin: 0; }
+              @page { size: A4 landscape; margin: 0; }
 
               /* print用スライドを表示 */
               .grid-print-slide {
