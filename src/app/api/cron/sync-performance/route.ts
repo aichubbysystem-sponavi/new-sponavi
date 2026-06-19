@@ -38,19 +38,24 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "No shops found" }, { status: 200 });
   }
 
-  // 2. 既に当月同期済みをスキップ
-  const { data: cacheData } = await supabase
-    .from("performance_metrics_cache")
-    .select("shop_id")
-    .eq("month", expectedMonth);
+  // force=true で当月同期済みもスキップせず全店舗再同期
+  const forceAll = request.nextUrl.searchParams.get("force") === "true";
 
-  const syncedShopIds = new Set((cacheData || []).map(c => c.shop_id));
+  // 2. 既に当月同期済みをスキップ（forceでない場合）
+  let syncedShopIds = new Set<string>();
+  if (!forceAll) {
+    const { data: cacheData } = await supabase
+      .from("performance_metrics_cache")
+      .select("shop_id")
+      .eq("month", expectedMonth);
+    syncedShopIds = new Set((cacheData || []).map(c => c.shop_id));
+  }
 
   // 3. 重複排除
   const seenLocations = new Set<string>();
   const targets: typeof shops = [];
   for (const shop of shops) {
-    if (syncedShopIds.has(shop.id)) continue;
+    if (!forceAll && syncedShopIds.has(shop.id)) continue;
     if (seenLocations.has(shop.gbp_location_name)) continue;
     seenLocations.add(shop.gbp_location_name);
     targets.push(shop);
