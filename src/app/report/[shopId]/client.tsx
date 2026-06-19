@@ -276,6 +276,13 @@ export default function ReportClient({
   const [memoSaved, setMemoSaved] = useState(false);
   const [memoEditing, setMemoEditing] = useState(false);
   const [memoLoading, setMemoLoading] = useState(false);
+
+  // AIコメント編集
+  const [editingComments, setEditingComments] = useState<string[] | null>(null);
+  const [commentSaving, setCommentSaving] = useState(false);
+  const [commentSaved, setCommentSaved] = useState(false);
+  const isEditingComments = editingComments !== null;
+  const displayComments = editingComments ?? comments ?? [];
   const [showSettings, setShowSettings] = useState(false);
   const [negativeModal, setNegativeModal] = useState<{ word: string; reviews: { reviewer: string; comment: string; reply?: string | null; date: string; starRating: string }[]; type?: "positive" | "negative"; matched?: boolean } | null>(null);
   const [editingGridCell, setEditingGridCell] = useState<{ row: number; col: number } | null>(null);
@@ -624,6 +631,29 @@ export default function ReportClient({
     setMemoLoading(false);
   };
 
+  const saveComments = async () => {
+    if (!editingComments) return;
+    setCommentSaving(true);
+    try {
+      const authH = await getAuthHeaders();
+      const res = await fetch("/api/report/update-comments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authH },
+        body: JSON.stringify({ shopName: shop.name, comments: editingComments, targetMonth: trimmedData.analysisTargetMonth || curLabel }),
+      });
+      if (res.ok) {
+        // trimmedDataのcommentsを更新（re-renderで反映）
+        if (trimmedData.comments) {
+          trimmedData.comments.splice(0, trimmedData.comments.length, ...editingComments);
+        }
+        setEditingComments(null);
+        setCommentSaved(true);
+        setTimeout(() => setCommentSaved(false), 2000);
+      }
+    } catch {}
+    setCommentSaving(false);
+  };
+
   const handlePdfDownload = async () => {
     setPdfGenerating(true);
     const insertedEls: HTMLElement[] = [];
@@ -795,7 +825,7 @@ export default function ReportClient({
   };
 
   // ── Page count ──
-  const aiCommentPageCount = Math.max(1, splitCommentPages(comments || [], AI_CHARS_PER_PAGE).length);
+  const aiCommentPageCount = Math.max(1, splitCommentPages(displayComments, AI_CHARS_PER_PAGE).length);
   let totalPages = 6 + aiCommentPageCount; // P1,P2(月次),P3-P5(グラフ),口コミ分析 + AIコメント(動的)
   if (hasReviews) totalPages += 2; // 口コミ件数推移, 月間増加数
   if (showKeywords) totalPages++;
@@ -1861,7 +1891,7 @@ export default function ReportClient({
             </div>
           );
         }
-        const allComments = comments || [];
+        const allComments = displayComments;
         const commentPages = splitCommentPages(allComments, AI_CHARS_PER_PAGE);
 
         return commentPages.map((page, pageIdx) => {
@@ -1872,7 +1902,23 @@ export default function ReportClient({
 
           return (
       <div key={`ai-comment-${pageIdx}`} style={slideStyle} className="slide">
-        <div style={slideBarStyle}><span>{shop.name} — AIによるコメント{pageLabel}</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBarStyle}>
+          <span>{shop.name} — AIによるコメント{pageLabel}</span>
+          {isFirst && (
+            <div className="no-print" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              {!isEditingComments ? (
+                <button onClick={() => setEditingComments([...allComments])} style={{ fontSize: 14, padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.15)", color: "#fff", cursor: "pointer" }}>編集</button>
+              ) : (
+                <>
+                  <button onClick={saveComments} disabled={commentSaving} style={{ fontSize: 14, padding: "3px 10px", borderRadius: 6, border: "none", background: commentSaving ? "#999" : "#0a8f3c", color: "#fff", cursor: commentSaving ? "wait" : "pointer" }}>{commentSaving ? "保存中..." : "保存"}</button>
+                  <button onClick={() => setEditingComments(null)} style={{ fontSize: 14, padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.15)", color: "#fff", cursor: "pointer" }}>キャンセル</button>
+                </>
+              )}
+              {commentSaved && <span style={{ fontSize: 14, color: "#90ee90" }}>保存しました</span>}
+            </div>
+          )}
+          <span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
+        </div>
         <div style={slideBodyStyle}>
           <div style={stitleStyle}>{isFirst ? "AIによるコメント" : "AIによるコメント（続き）"}</div>
           <div style={{ background: "linear-gradient(135deg,#f0f4ff,#fff)", border: "2px solid #0f3460", borderRadius: 14, padding: "16px 20px", flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", wordBreak: "break-word" }}>
@@ -1880,12 +1926,23 @@ export default function ReportClient({
             <div style={{ margin: 0 }}>
               {allComments.slice(page.start, page.end).map((c, i) => {
                 const globalIdx = page.start + i;
-                const fixedComment = formatAIComment(c, shop.rating);
                 const heading = AI_COMMENT_HEADINGS[globalIdx] || "";
                 return (
                 <div key={globalIdx} style={{ fontSize: 15, lineHeight: 1.8, color: "#444", margin: "0 0 12px 0" }}>
                   {heading && <div style={{ fontWeight: 700, color: COLORS.primary, fontSize: 15, marginBottom: 2 }}>{heading}</div>}
-                  <span dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(fixedComment, { ALLOWED_TAGS: ["strong", "em", "br"], ALLOWED_ATTR: ["style"] }) }} />
+                  {isEditingComments ? (
+                    <textarea
+                      value={editingComments[globalIdx] || ""}
+                      onChange={(e) => {
+                        const next = [...editingComments];
+                        next[globalIdx] = e.target.value;
+                        setEditingComments(next);
+                      }}
+                      style={{ width: "100%", minHeight: 80, padding: "8px 10px", fontSize: 14, lineHeight: 1.7, border: "1px solid #ccd", borderRadius: 8, resize: "vertical", fontFamily: "inherit", color: "#333" }}
+                    />
+                  ) : (
+                    <span dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(formatAIComment(c, shop.rating), { ALLOWED_TAGS: ["strong", "em", "br"], ALLOWED_ATTR: ["style"] }) }} />
+                  )}
                 </div>
                 );
               })}
