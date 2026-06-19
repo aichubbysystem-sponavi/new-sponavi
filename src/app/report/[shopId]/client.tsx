@@ -700,7 +700,7 @@ export default function ReportClient({
           const mapSlot = document.createElement("div");
           mapSlot.className = "grid-print-map-slot";
           mapSlot.dataset.kw = kwName;
-          mapSlot.style.cssText = `flex:1;display:flex;flex-direction:column;padding:12px;overflow:hidden;`;
+          mapSlot.style.cssText = `flex:1;display:flex;flex-direction:column;justify-content:center;padding:12px;overflow:hidden;`;
           // タイトル
           const title = document.createElement("div");
           title.style.cssText = `font-size:18px;font-weight:700;color:#0f3460;border-left:5px solid #e94560;padding-left:12px;margin-bottom:10px;`;
@@ -802,15 +802,7 @@ export default function ReportClient({
   if (showRankingHistory) totalPages++;
   if (showGridRanking) totalPages += gridRanking!.keywords.length;
   if (langStats.length > 1) totalPages++; // 口コミ言語別分析
-  if (showSearchQueries) {
-    totalPages++;
-    // 選択中の月のキーワード数で2ページ目を判定
-    const sqHist = searchQueries?.history;
-    if (Array.isArray(sqHist) && sqHist.length > 0) {
-      const activeI = sqMonthIdx < 0 || sqMonthIdx >= sqHist.length ? sqHist.length - 1 : sqMonthIdx;
-      if ((sqHist[activeI]?.keywords?.length || 0) > SEARCH_QUERIES_PER_PAGE) totalPages++;
-    }
-  }
+  if (showSearchQueries) totalPages++;
 
   function pn(slideNum: number) {
     return `${slideNum} / ${totalPages}`;
@@ -1610,9 +1602,7 @@ export default function ReportClient({
         const hasPrev = sqPrev !== null;
         const hasPrev2 = sqPrev2 !== null;
         const PER_PAGE = SEARCH_QUERIES_PER_PAGE;
-        const capped = currentKeywords.slice(0, PER_PAGE * 2);
-        const page1 = capped.slice(0, PER_PAGE);
-        const page2 = capped.slice(PER_PAGE);
+        const page1 = currentKeywords.slice(0, PER_PAGE);
         const thStyle = (w?: number, groupStart?: boolean): React.CSSProperties => ({ background: "#0f3460", color: "#fff", padding: "4px 4px", textAlign: "center", fontWeight: 600, fontSize: 14, whiteSpace: "nowrap", ...(w ? { width: w } : {}), ...(groupStart ? { borderLeft: "2px solid rgba(255,255,255,0.3)" } : {}) });
         const renderSqTable = (rows: typeof currentKeywords, startIdx: number) => (
           <div style={{ overflow: "hidden", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
@@ -1696,20 +1686,6 @@ export default function ReportClient({
             {renderSqTable(page1, 0)}
           </div>
         </div>
-        {/* 検索語句 ページ2 */}
-        {page2.length > 0 && (() => { pageNum++; return (
-        <div style={slideStyle} className="slide">
-          <div style={slideBarStyle}>
-            <span>{shop.name} — 検索語句</span>
-            {sqNavBar}
-            <span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
-          </div>
-          <div style={{ ...slideBodyStyle, display: "flex", flexDirection: "column" }}>
-            <div style={stitleStyle}>検索語句ランキング（{sqCurrent?.month || ""}）{PER_PAGE + 1}〜{Math.min(PER_PAGE * 2, currentKeywords.length)}位</div>
-            {renderSqTable(page2, PER_PAGE)}
-          </div>
-        </div>
-        ); })()}
         </>);
       })()}
 
