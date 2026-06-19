@@ -682,124 +682,46 @@ export default function ReportClient({
       const pdfH = 210;
 
       // PDF用の一時的なDOM変更
-      // 1. no-print要素を非表示
       const noPrintEls = document.querySelectorAll<HTMLElement>(".no-print");
       noPrintEls.forEach(el => { el.dataset.prevDisplay = el.style.display; el.style.display = "none"; });
-      // 2. オフスクリーンのgridスライドを表示に戻す
       const hiddenGridSlides = document.querySelectorAll<HTMLElement>(".grid-kw-hidden");
       hiddenGridSlides.forEach(el => { el.style.position = "static"; el.style.left = "auto"; el.style.pointerEvents = "auto"; });
-      // 3. 全KW比較テーブル: 2つ目以降を非表示
       const compSubs = document.querySelectorAll<HTMLElement>(".grid-kw-comparison-sub");
-      compSubs.forEach(el => { el.style.display = "none"; });
+      compSubs.forEach(el => { el.dataset.prevDisplay = el.style.display; el.style.display = "none"; });
+      await new Promise(r => setTimeout(r, 300));
 
-      // グリッドスライドとそれ以外を分別
-      const gridSlides: HTMLElement[] = [];
-      const normalSlides: HTMLElement[] = [];
-      allSlides.forEach(el => {
-        if (el.classList.contains("grid-kw-slide")) {
-          gridSlides.push(el as HTMLElement);
-        } else {
-          normalSlides.push(el as HTMLElement);
-        }
-      });
-
-      // グリッドスライドを2つずつペアにして一時的に縮小表示
-      const gridPairContainers: HTMLElement[] = [];
-      for (let i = 0; i < gridSlides.length; i += 2) {
-        const pair = gridSlides.slice(i, i + 2);
-        // 一時コンテナを作成して2つのスライドを上下に並べる
-        const container = document.createElement("div");
-        container.style.width = `${SLIDE_W}px`;
-        container.style.height = `${SLIDE_H}px`;
-        container.style.background = "#f0f2f5";
-        container.style.overflow = "hidden";
-        container.style.display = "flex";
-        container.style.flexDirection = "column";
-        container.style.position = "absolute";
-        container.style.left = "-99999px";
-        container.style.top = "0";
-        document.body.appendChild(container);
-
-        pair.forEach(slide => {
-          const clone = slide.cloneNode(true) as HTMLElement;
-          clone.style.height = `${Math.floor(SLIDE_H / 2)}px`;
-          clone.style.width = `${SLIDE_W}px`;
-          clone.style.margin = "0";
-          clone.style.overflow = "hidden";
-          clone.style.flex = "none";
-          // ヘッダー縮小
-          const header = clone.querySelector<HTMLElement>(".grid-kw-header");
-          if (header) { header.style.padding = "4px 9px"; header.style.fontSize = "12px"; }
-          // ボディ縮小
-          const body = clone.querySelector<HTMLElement>(".grid-kw-body");
-          if (body) { body.style.padding = "6px 9px"; body.style.gap = "2px"; }
-          // タイトル縮小
-          const title = clone.querySelector<HTMLElement>(".grid-kw-title");
-          if (title) { title.style.fontSize = "13px"; title.style.marginBottom = "2px"; }
-          // マップ縮小
-          const mapCont = clone.querySelector<HTMLElement>(".grid-map-container");
-          if (mapCont) { mapCont.style.width = "290px"; mapCont.style.height = "260px"; }
-          // 凡例縮小
-          const legend = clone.querySelector<HTMLElement>(".grid-kw-legend");
-          if (legend) { legend.style.fontSize = "9px"; legend.style.gap = "4px"; legend.style.marginTop = "0"; }
-          // 平均順位縮小
-          const avg = clone.querySelector<HTMLElement>(".grid-kw-avg");
-          if (avg) { avg.style.fontSize = "11px"; }
-          // テーブル縮小
-          clone.querySelectorAll<HTMLElement>(".grid-kw-tables th, .grid-kw-tables td").forEach(td => {
-            td.style.padding = "3px 3px"; td.style.fontSize = "11px";
-          });
-          clone.querySelectorAll<HTMLElement>(".grid-kw-tables h4").forEach(h => {
-            h.style.fontSize = "11px"; h.style.margin = "0";
-          });
-          container.appendChild(clone);
-        });
-        // 一瞬表示してキャプチャできるようにする
-        container.style.position = "fixed";
-        container.style.left = "0";
-        container.style.top = "0";
-        container.style.zIndex = "-1";
-        gridPairContainers.push(container);
-      }
-
-      // DOM更新を待つ
-      await new Promise(r => setTimeout(r, 200));
-
-      // 全スライドを順番にキャプチャ（gridスライドはペアコンテナで代替）
+      // 全スライドをキャプチャ（gridスライドは個別キャプチャ後にペアで合成）
       let pageIdx = 0;
-      let gridPairIdx = 0;
-      const processedGridSlides = new Set<HTMLElement>();
+      const gridCanvases: HTMLCanvasElement[] = [];
+      let firstGridSeen = false;
 
       for (let i = 0; i < allSlides.length; i++) {
         const slide = allSlides[i] as HTMLElement;
 
         if (slide.classList.contains("grid-kw-slide")) {
-          if (processedGridSlides.has(slide)) continue;
-          // このペアのスライドをすべてマーク
-          const pairContainer = gridPairContainers[gridPairIdx];
-          if (pairContainer) {
-            // ペアコンテナを表示位置に移動
-            pairContainer.style.position = "fixed";
-            pairContainer.style.left = "0";
-            pairContainer.style.top = "0";
-            pairContainer.style.zIndex = "99999";
-            await new Promise(r => setTimeout(r, 100));
-            const canvas = await html2canvas(pairContainer, {
-              scale: 2, useCORS: true, logging: false, backgroundColor: "#f0f2f5",
-              width: SLIDE_W, height: SLIDE_H,
-            });
-            const imgData = canvas.toDataURL("image/jpeg", 0.92);
+          // gridスライドを個別にキャプチャして溜める
+          const canvas = await html2canvas(slide, {
+            scale: 2, useCORS: true, logging: false, backgroundColor: "#f0f2f5",
+          });
+          gridCanvases.push(canvas);
+
+          // 次のスライドもgridか確認
+          const nextSlide = allSlides[i + 1] as HTMLElement | undefined;
+          const nextIsGrid = nextSlide?.classList.contains("grid-kw-slide");
+
+          // ペアが揃った or 最後のgridスライド → PDFページに合成
+          if (gridCanvases.length === 2 || !nextIsGrid) {
             if (pageIdx > 0) pdf.addPage();
-            pdf.addImage(imgData, "JPEG", 0, 0, pdfW, pdfH);
+            // 2つ（or 1つ）の画像を上下に配置
+            const count = gridCanvases.length;
+            const halfH = pdfH / 2;
+            for (let g = 0; g < count; g++) {
+              const imgData = gridCanvases[g].toDataURL("image/jpeg", 0.92);
+              pdf.addImage(imgData, "JPEG", 0, g * halfH, pdfW, halfH);
+            }
             pageIdx++;
-            pairContainer.style.zIndex = "-1";
+            gridCanvases.length = 0;
           }
-          // このペアの全スライドをスキップ対象に
-          const startIdx = gridPairIdx * 2;
-          for (let g = startIdx; g < Math.min(startIdx + 2, gridSlides.length); g++) {
-            processedGridSlides.add(gridSlides[g]);
-          }
-          gridPairIdx++;
         } else {
           const canvas = await html2canvas(slide, {
             scale: 2, useCORS: true, logging: false, backgroundColor: "#f0f2f5",
@@ -811,18 +733,15 @@ export default function ReportClient({
         }
       }
 
-      // 一時コンテナを削除
-      gridPairContainers.forEach(c => c.remove());
-
       // DOM変更を元に戻す
       noPrintEls.forEach(el => { el.style.display = el.dataset.prevDisplay || ""; delete el.dataset.prevDisplay; });
       hiddenGridSlides.forEach(el => { el.style.position = ""; el.style.left = ""; el.style.pointerEvents = ""; });
-      compSubs.forEach(el => { el.style.display = ""; });
+      compSubs.forEach(el => { el.style.display = el.dataset.prevDisplay || ""; delete el.dataset.prevDisplay; });
 
       pdf.save(`${shop.name}_レポート_${curLabel.replace("/", "-")}.pdf`);
     } catch (err) {
       console.error("PDF generation error:", err);
-      window.print(); // フォールバック
+      window.print();
     } finally {
       setPdfGenerating(false);
     }
