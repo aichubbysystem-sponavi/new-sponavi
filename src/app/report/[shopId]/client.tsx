@@ -1220,7 +1220,7 @@ export default function ReportClient({
                     {isLastKpi ? (
                       <span>累計: {displayTotalReviews.toLocaleString()}件（評価 {shop.rating}）</span>
                     ) : kpi.label === "Google検索 合計" || kpi.label === "Googleマップ 合計" ? (
-                      <><span style={{ marginRight: 6 }}>モバイル: {i === 0 ? charts.mapMobile[charts.mapMobile.length-1]?.toLocaleString() : charts.searchMobile[charts.searchMobile.length-1]?.toLocaleString()}</span><span>PC: {i === 0 ? charts.mapPC[charts.mapPC.length-1]?.toLocaleString() : charts.searchPC[charts.searchPC.length-1]?.toLocaleString()}</span></>
+                      <><span style={{ marginRight: 6 }}>モバイル: {kpi.label === "Googleマップ 合計" ? charts.mapMobile[charts.mapMobile.length-1]?.toLocaleString() : charts.searchMobile[charts.searchMobile.length-1]?.toLocaleString()}</span><span>PC: {kpi.label === "Googleマップ 合計" ? charts.mapPC[charts.mapPC.length-1]?.toLocaleString() : charts.searchPC[charts.searchPC.length-1]?.toLocaleString()}</span></>
                     ) : (
                       <span>&nbsp;</span>
                     )}
@@ -1372,8 +1372,6 @@ export default function ReportClient({
                 {charts.websites.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
               <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>ルート</td>
                 {charts.routes.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>通話</td>
-                {charts.calls.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
               <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>メニュー</td>
                 {charts.foodMenus.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
               <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>予約</td>
@@ -1382,11 +1380,13 @@ export default function ReportClient({
                 {charts.websites.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700, color: "#fff" }}>{(v + charts.routes[i] + charts.calls[i] + charts.foodMenus[i] + charts.bookings[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "6px 16px 0", fontSize: 14, color: "#666" }}>
-            <span style={{ fontWeight: 600 }}>通話:</span>
-            {charts.calls.map((v, i) => <span key={i} style={{ minWidth: 32, textAlign: "center" }}>{v.toLocaleString()}</span>)}
-            <span style={{ marginLeft: "auto", color: "#999" }}>※ 件数が少ないためグラフから分離表示</span>
-          </div>
+          <table style={{ width: "95%", margin: "4px auto 0", borderCollapse: "collapse", fontSize: 14 }}>
+            <tbody>
+              <tr style={{ background: "#f8f9fa" }}><td style={{ padding: "2px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap", width: 60 }}>通話</td>
+                {charts.calls.map((v, i) => <td key={i} style={{ padding: "2px 2px", textAlign: "center", color: "#888" }}>{v.toLocaleString()}</td>)}</tr>
+            </tbody>
+          </table>
+          <div style={{ fontSize: 13, color: "#aaa", textAlign: "right", margin: "2px 16px 0" }}>※ 通話は件数が少ないためグラフから分離</div>
         </div>
       </div>
 
@@ -2039,7 +2039,7 @@ export default function ReportClient({
                 // 【見出し】をstrong+改行に変換
                 fixedComment = fixedComment.replace(/【([^】]+)】/g, '<br><strong style="color:#0f3460;font-size:16px;">$1</strong><br>');
                 // 箇条書き「・」を改行+インデントに
-                fixedComment = fixedComment.replace(/([^<])・/g, '$1<br>・');
+                fixedComment = fixedComment.replace(/(^|[^<])・/gm, '$1<br>・');
                 // a) b) c) を改行に
                 fixedComment = fixedComment.replace(/([^<])\s*([a-d]\))/g, '$1<br>$2');
                 fixedComment = fixedComment.replace(/([^（(])([①②③④⑤⑥⑦⑧⑨⑩])/g, "$1<br>$2");
