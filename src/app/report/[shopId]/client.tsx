@@ -882,7 +882,7 @@ export default function ReportClient({
     let pages = 0;
     let ci = 0;
     while (ci < ac.length) {
-      const limit = pages === 0 ? 420 : 420;
+      const limit = pages === 0 ? 800 : 800;
       let charCount = 0;
       let end = ci;
       while (end < ac.length) {
@@ -1993,8 +1993,8 @@ export default function ReportClient({
         // コメントを文字数ベースでページ分割（はみ出し防止）
         const allComments = comments || [];
         const commentPages: { start: number; end: number }[] = [];
-        const CHARS_FIRST_PAGE = 420;  // メモ欄込みで1ページに収まる上限（実測: 17行×約25文字）
-        const CHARS_PER_PAGE = 420;
+        const CHARS_FIRST_PAGE = 800;  // 3コメント全てを1ページに（fontSize15+lineHeight1.8で余裕あり）
+        const CHARS_PER_PAGE = 800;
         {
           let ci = 0;
           while (ci < allComments.length) {
@@ -2033,8 +2033,11 @@ export default function ReportClient({
                 if (shop.rating > 0) {
                   fixedComment = fixedComment.replace(/\d\.\d(\s*\/\s*5\.0)/g, `${shop.rating}$1`);
                 }
-                // 【見出し】をstrong+改行に変換
-                fixedComment = fixedComment.replace(/【([^】]+)】/g, '<br><strong style="color:#0f3460;font-size:16px;">$1</strong><br>');
+                // 既存の【見出し】を除去（client側で統一付与するため）
+                fixedComment = fixedComment.replace(/^【[^】]*】\s*/g, "");
+                // client側で見出しを付与
+                const headings = ["数値分析", "口コミ傾向と強み", "改善策"];
+                const heading = headings[globalIdx] || "";
                 // 箇条書き「・」を改行+インデントに
                 fixedComment = fixedComment.replace(/(^|[^<])・/gm, '$1<br>・');
                 // a) b) c) を改行に
@@ -2044,7 +2047,8 @@ export default function ReportClient({
                 // 先頭の<br>を除去
                 fixedComment = fixedComment.replace(/^(<br>)+/, "");
                 return (
-                <div key={globalIdx} style={{ fontSize: 16, lineHeight: 1.9, color: "#444", margin: "0 0 20px 0" }}>
+                <div key={globalIdx} style={{ fontSize: 15, lineHeight: 1.8, color: "#444", margin: "0 0 12px 0" }}>
+                  {heading && <div style={{ fontWeight: 700, color: "#0f3460", fontSize: 15, marginBottom: 2 }}>{heading}</div>}
                   <span dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(fixedComment, { ALLOWED_TAGS: ["strong", "em", "br"], ALLOWED_ATTR: ["style"] }) }} />
                 </div>
                 );
