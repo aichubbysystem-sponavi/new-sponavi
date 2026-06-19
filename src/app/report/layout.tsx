@@ -33,7 +33,7 @@ export default function ReportLayout({
       <style
         dangerouslySetInnerHTML={{
           __html: `
-            /* 画面: 非アクティブKWスライドをオフスクリーンに配置（Mapsは描画可能） */
+            /* 画面: 非アクティブKWスライドをオフスクリーンに配置 */
             .grid-kw-hidden {
               position: absolute !important;
               left: -99999px !important;
@@ -46,63 +46,10 @@ export default function ReportLayout({
               .slide { margin: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
               @page { size: landscape; margin: 0; }
 
-              /* 多地点順位: PDF時は全KW表示、2KW/ページ */
-              .grid-kw-hidden {
-                position: static !important;
-                left: auto !important;
-                pointer-events: auto !important;
+              /* print用スライドを表示 */
+              .grid-print-slide {
+                display: flex !important;
               }
-              .grid-kw-pair {
-                page-break-after: always !important;
-                page-break-inside: avoid !important;
-              }
-              .grid-kw-slide {
-                height: 397px !important;
-                page-break-after: avoid !important;
-                page-break-inside: avoid !important;
-                overflow: hidden !important;
-              }
-              .grid-kw-header {
-                padding: 6px 9px !important;
-                font-size: 13px !important;
-              }
-              .grid-kw-body {
-                padding: 8px 9px !important;
-                gap: 4px !important;
-              }
-              .grid-kw-title {
-                font-size: 14px !important;
-                margin-bottom: 4px !important;
-              }
-              .grid-kw-content {
-                gap: 10px !important;
-              }
-              .grid-map-container {
-                width: 300px !important;
-                height: 270px !important;
-              }
-              .grid-kw-legend {
-                font-size: 10px !important;
-                gap: 6px !important;
-                margin-top: 1px !important;
-              }
-              .grid-kw-legend span span:first-child {
-                width: 7px !important;
-                height: 7px !important;
-              }
-              .grid-kw-avg {
-                font-size: 12px !important;
-              }
-              .grid-kw-avg span {
-                font-size: 16px !important;
-              }
-              .grid-kw-tables h4 {
-                font-size: 12px !important;
-              }
-              .grid-kw-tables th,
-              .grid-kw-tables td {
-                padding: 4px 4px !important;
-                font-size: 12px !important;
               }
               /* 全KW比較: 2つ目以降は非表示（1ページ目のみ表示） */
               .grid-kw-comparison-sub {
