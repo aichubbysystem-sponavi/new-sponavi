@@ -33,13 +33,25 @@ export default function ReportLayout({
       <style
         dangerouslySetInnerHTML={{
           __html: `
+            /* 画面: 非アクティブKWスライドをオフスクリーンに配置（Mapsは描画可能） */
+            .grid-kw-hidden {
+              position: absolute !important;
+              left: -99999px !important;
+              pointer-events: none !important;
+            }
+
             @media print {
               body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
               .no-print { display: none !important; }
               .slide { margin: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
               @page { size: landscape; margin: 0; }
 
-              /* 多地点順位: PDF時は2KW/ページ */
+              /* 多地点順位: PDF時は全KW表示、2KW/ページ */
+              .grid-kw-hidden {
+                position: static !important;
+                left: auto !important;
+                pointer-events: auto !important;
+              }
               .grid-kw-pair {
                 page-break-after: always !important;
                 page-break-inside: avoid !important;
@@ -92,7 +104,8 @@ export default function ReportLayout({
                 padding: 4px 4px !important;
                 font-size: 12px !important;
               }
-              .grid-kw-comparison {
+              /* 全KW比較: 2つ目以降は非表示（1ページ目のみ表示） */
+              .grid-kw-comparison-sub {
                 display: none !important;
               }
             }

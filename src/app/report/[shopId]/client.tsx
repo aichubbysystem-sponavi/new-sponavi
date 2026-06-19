@@ -1299,7 +1299,7 @@ export default function ReportClient({
         </div>
       ); })()}
 
-      {/* ════ 多地点順位計測（キーワードごとに1ページ、PDF時は2KW/ページ） ════ */}
+      {/* ════ 多地点順位計測（画面:1ページタブ切替 / PDF:全KW展開 2KW/ページ） ════ */}
       {showGridRanking && (() => {
         const gr = gridRanking!;
         const filteredHistory = gr.history.filter(h => monthToNum(h.month) <= monthToNum(curLabel));
@@ -1312,6 +1312,7 @@ export default function ReportClient({
         const activeMonthI = defaultMonthI;
         const monthData = recentHistory[activeMonthI];
         const prevMonthData = activeMonthI > 0 ? recentHistory[activeMonthI - 1] : null;
+        const gridPageBase = pageNum + 1;
 
         // キーワードを2つずつペアにグループ化（PDF時に1ページ2KW表示用）
         const kwPairs: string[][] = [];
@@ -1324,6 +1325,7 @@ export default function ReportClient({
             {pair.map((loopKw, kwInPair) => {
               pageNum++;
               const kwI = pairI * 2 + kwInPair;
+              const isActive = kwI === gridKwIdx;
               const snapshot = monthData?.snapshots.find(s => s.keyword === loopKw);
               const prevSnapshot = prevMonthData?.snapshots.find(s => s.keyword === loopKw);
               const trendLabels = recentHistory.map(h => h.month.replace(/^\d{4}\//, "") + "月");
@@ -1332,12 +1334,24 @@ export default function ReportClient({
                 return s ? s.avgRank : null;
               });
               return (
-              <div key={`grid-${kwI}`} style={slideStyle} className="slide grid-kw-slide">
+              <div key={`grid-${kwI}`} style={slideStyle} className={`slide grid-kw-slide${!isActive ? " grid-kw-hidden" : ""}`}>
                 <div style={slideBarStyle} className="grid-kw-header">
                   <span>{shop.name} — 多地点順位計測</span>
                   <span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
                 </div>
                 <div style={{ ...slideBodyStyle, padding: "20px 9px", gap: 12 }} className="grid-kw-body">
+                  {/* KWタブ（画面のみ、全スライドに配置するが表示は1つだけ） */}
+                  <div className="no-print" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 16, fontWeight: 700, color: "#0f3460" }}>KW:</span>
+                    {gr.keywords.map((kw, i) => (
+                      <button key={kw} onClick={() => setGridKwIdx(i)}
+                        style={{ padding: "5px 14px", borderRadius: 20, fontSize: 16, fontWeight: 600, border: "none", cursor: "pointer",
+                          background: i === gridKwIdx ? "#0f3460" : "#e8edf3",
+                          color: i === gridKwIdx ? "#fff" : "#555" }}>
+                        {kw}
+                      </button>
+                    ))}
+                  </div>
                   <div className="no-print" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                     <span style={{ fontSize: 16, fontWeight: 700, color: "#0f3460" }}>月:</span>
                     {recentHistory.map((h, i) => (
@@ -1438,7 +1452,7 @@ export default function ReportClient({
                         </table>
                       </div>
                       {monthData && monthData.snapshots.length > 1 && (
-                        <div className="grid-kw-comparison">
+                        <div className={`grid-kw-comparison${kwI > 0 ? " grid-kw-comparison-sub" : ""}`}>
                           <h4 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", margin: "8px 0 0" }}>全キーワード比較（{monthData.month}）</h4>
                           <div style={{ overflow: "auto", borderRadius: 10, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
                             <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
