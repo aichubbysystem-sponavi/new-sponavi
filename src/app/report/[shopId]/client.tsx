@@ -462,11 +462,21 @@ export default function ReportClient({
   // 指標の表示判定: 自動（データ0で非表示）+ 手動ON/OFF
   const hasBookings = hasBookingsData && sectionVisibility.metricBookings !== false;
   const hasFoodMenus = hasFoodMenusData && sectionVisibility.metricFoodMenus !== false;
-  const kpis = rawKpis.filter(kpi => {
-    if (kpi.label === "予約" && !hasBookings) return false;
-    if (kpi.label === "フードメニュークリック" && !hasFoodMenus) return false;
-    return true;
-  });
+  const kpis = (() => {
+    const filtered = rawKpis.filter(kpi => {
+      if (kpi.label === "予約" && !hasBookings) return false;
+      if (kpi.label === "フードメニュークリック" && !hasFoodMenus) return false;
+      return true;
+    });
+    // マップを検索より先に表示（キャッシュ互換: 旧データは検索が先）
+    const mapIdx = filtered.findIndex(k => k.label === "Googleマップ 合計");
+    const searchIdx = filtered.findIndex(k => k.label === "Google検索 合計");
+    if (mapIdx > 0 && searchIdx === 0) {
+      const [search] = filtered.splice(searchIdx, 1);
+      filtered.splice(mapIdx, 0, search);
+    }
+    return filtered;
+  })();
 
   // gridRankingの中心点順位をキーワード順位として使用（あればスプレッドシートより優先）
   const gridKeywords = useMemo(() => {
