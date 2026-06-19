@@ -31,49 +31,12 @@ import {
   reviewDeltaColor, reorderKpis, formatAIComment, splitCommentPages,
   diffColor, formatDiff,
 } from "@/lib/report-utils";
+import {
+  slideStyle, slideBarStyle, slideBodyStyle, stitleStyle, footerStyle,
+  kpiTopColors, apiNoteStyle, API_NOTE_TEXT,
+} from "./report-styles";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, Filler);
-
-const slideStyle: React.CSSProperties = {
-  width: SLIDE_W, height: SLIDE_H, margin: "20px auto", background: "#f0f2f5",
-  borderRadius: 8, overflow: "hidden", boxShadow: "0 8px 40px rgba(0,0,0,.4)",
-  display: "flex", flexDirection: "column", position: "relative",
-  pageBreakAfter: "always", pageBreakInside: "avoid",
-};
-
-const slideBarStyle: React.CSSProperties = {
-  background: "linear-gradient(135deg,#1a1a2e,#0f3460)", color: "#fff",
-  padding: "12px 9px", fontSize: 16, fontWeight: 700,
-  display: "flex", justifyContent: "space-between", alignItems: "center",
-  flexShrink: 0, letterSpacing: 0.5,
-};
-
-const slideBodyStyle: React.CSSProperties = {
-  flex: 1, padding: "28px 9px", display: "flex", flexDirection: "column",
-  justifyContent: "center", overflow: "hidden",
-};
-
-const stitleStyle: React.CSSProperties = {
-  fontSize: 17, fontWeight: 700, color: "#0f3460",
-  borderLeft: "4px solid #e94560", paddingLeft: 12, marginBottom: 16,
-};
-
-const footerStyle: React.CSSProperties = {
-  background: "#1a1a2e", color: "rgba(255,255,255,0.3)", textAlign: "center",
-  padding: 8, fontSize: 16, flexShrink: 0,
-};
-
-// KPI top-bar colors
-const kpiTopColors = [
-  "linear-gradient(90deg,#4fc3f7,#0288d1)",
-  "linear-gradient(90deg,#81c784,#388e3c)",
-  "linear-gradient(90deg,#ffb74d,#f57c00)",
-  "linear-gradient(90deg,#ba68c8,#7b1fa2)",
-  "linear-gradient(90deg,#e57373,#d32f2f)",
-  "linear-gradient(90deg,#4db6ac,#00897b)",
-  "linear-gradient(90deg,#7986cb,#3949ab)",
-  "linear-gradient(90deg,#ffd54f,#fbc02d)",
-];
 
 // ── Helpers ──
 
@@ -1269,7 +1232,7 @@ export default function ReportClient({
                 {charts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700, color: "#fff" }}>{(v + charts.mapPC[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
-          <div style={{ fontSize: 16, color: "#d32f2f", textAlign: "right", margin: "4px 16px 0", fontWeight: 600 }}>※ 2025年11月以降、Google Business Profile APIの計測仕様変更により数値が大幅に変動する場合があります</div>
+          <div style={apiNoteStyle}>{API_NOTE_TEXT}</div>
         </div>
       </div>
 
@@ -1298,7 +1261,7 @@ export default function ReportClient({
                 {charts.searchMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700, color: "#fff" }}>{(v + charts.searchPC[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
-          <div style={{ fontSize: 16, color: "#d32f2f", textAlign: "right", margin: "4px 16px 0", fontWeight: 600 }}>※ 2025年11月以降、Google Business Profile APIの計測仕様変更により数値が大幅に変動する場合があります</div>
+          <div style={apiNoteStyle}>{API_NOTE_TEXT}</div>
         </div>
       </div>
 
