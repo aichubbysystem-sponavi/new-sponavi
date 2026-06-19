@@ -845,7 +845,14 @@ export default function ReportClient({
         // マップ領域をキャプチャ → Canvas上にテキストを直接描画
         const mapArea = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden) .grid-kw-map-area");
         if (mapArea) {
+          // キャプチャ前にオーバーレイのテキストを透明化（丸だけキャプチャ）
+          const mapContainer = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden) .grid-map-container");
+          const overlayDivs = mapContainer ? mapContainer.querySelectorAll<HTMLElement>("div[data-rank]") : [];
+          overlayDivs.forEach(ov => { ov.style.color = "transparent"; });
+          await new Promise(r => setTimeout(r, 50));
           const canvas = await html2canvas(mapArea, { scale: 2, useCORS: true, logging: false, backgroundColor: "#f0f2f5" });
+          // テキスト色を元に戻す
+          overlayDivs.forEach(ov => { ov.style.color = "#fff"; });
           const ctx = canvas.getContext("2d");
           if (ctx) {
             // マップコンテナ内のオーバーレイdivの位置を取得してCanvas上にテキスト描画
