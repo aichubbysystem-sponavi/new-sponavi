@@ -1247,6 +1247,7 @@ export default function ReportClient({
             <Bar data={{ labels: monthlyLabels, datasets: [
               { label: "ウェブサイト", data: charts.websites, backgroundColor: "rgba(255,183,77,.75)" },
               { label: "ルート", data: charts.routes, backgroundColor: "rgba(186,104,200,.75)" },
+              { label: "通話", data: charts.calls, backgroundColor: "rgba(239,154,154,.75)" },
               { label: "メニュー", data: charts.foodMenus, backgroundColor: "rgba(77,182,172,.75)" },
               { label: "予約", data: charts.bookings, backgroundColor: "rgba(121,134,203,.75)" },
             ]}} options={buildStackedOptions()} />
@@ -1261,8 +1262,8 @@ export default function ReportClient({
                 {charts.websites.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
               <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>ルート</td>
                 {charts.routes.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#888", whiteSpace: "nowrap", fontStyle: "italic" }}>通話</td>
-                {charts.calls.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#888", fontStyle: "italic" }}>{v.toLocaleString()}</td>)}</tr>
+              <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>通話</td>
+                {charts.calls.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
               <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>メニュー</td>
                 {charts.foodMenus.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
               <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>予約</td>
@@ -1271,7 +1272,6 @@ export default function ReportClient({
                 {charts.websites.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700, color: "#fff" }}>{(v + charts.routes[i] + charts.calls[i] + charts.foodMenus[i] + charts.bookings[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
-          <div style={{ fontSize: 13, color: "#aaa", textAlign: "right", margin: "2px 16px 0" }}>※ 通話は件数が少ないためグラフから分離して表示</div>
         </div>
       </div>
 
