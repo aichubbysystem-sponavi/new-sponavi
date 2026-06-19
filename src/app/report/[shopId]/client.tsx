@@ -1254,7 +1254,7 @@ export default function ReportClient({
       <div style={slideStyle} className="slide">
         <div style={slideBarStyle}><span>{shop.name} — 月次推移データ</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
-          <div style={stitleStyle}>月次推移データ（直近12ヶ月）</div>
+          <div style={stitleStyle}>月次推移データ（直近{monthlyLabels.length}ヶ月）</div>
           <div style={{ overflow: "hidden", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", fontSize: 16, flex: 1 }}>
               <thead><tr>
@@ -2041,7 +2041,7 @@ export default function ReportClient({
                 // 箇条書き「・」を改行+インデントに
                 fixedComment = fixedComment.replace(/(^|[^<])・/gm, '$1<br>・');
                 // a) b) c) を改行に
-                fixedComment = fixedComment.replace(/([^<])\s*([a-d]\))/g, '$1<br>$2');
+                fixedComment = fixedComment.replace(/([^<])\s*([a-z]\))/g, '$1<br>$2');
                 fixedComment = fixedComment.replace(/([^（(])([①②③④⑤⑥⑦⑧⑨⑩])/g, "$1<br>$2");
                 fixedComment = fixedComment.replace(/(.)\s*(\(\d+\))/g, "$1<br>$2");
                 // 先頭の<br>を除去
