@@ -909,7 +909,7 @@ export default function ReportClient({
             onclone: (clonedDoc: Document) => {
               const fix = clonedDoc.createElement("style");
               fix.textContent = `
-                td, th { line-height: 1.1 !important; vertical-align: middle !important; }
+                td, th { line-height: 1.4 !important; vertical-align: middle !important; }
                 span, div, p { line-height: 1.3 !important; }
               `;
               clonedDoc.head.appendChild(fix);
