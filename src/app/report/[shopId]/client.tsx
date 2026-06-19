@@ -24,13 +24,15 @@ import {
 } from "chart.js";
 import { Bar, Line } from "react-chartjs-2";
 import type { ReportData, NegativeWordSource } from "@/lib/report-data";
+import {
+  SLIDE_W, SLIDE_H, COLORS, CHART_COLORS, AI_COMMENT_HEADINGS,
+  SEARCH_QUERIES_PER_PAGE, AI_CHARS_PER_PAGE,
+  pctChange, monthToNum, rankColor, rankTextColor, rankColorModal,
+  reviewDeltaColor, reorderKpis, formatAIComment, splitCommentPages,
+  diffColor, formatDiff,
+} from "@/lib/report-utils";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, Filler);
-
-// ── Constants (HTML テンプレート準拠) ──
-
-const SLIDE_W = 1123;
-const SLIDE_H = 794;
 
 const slideStyle: React.CSSProperties = {
   width: SLIDE_W, height: SLIDE_H, margin: "20px auto", background: "#f0f2f5",
@@ -75,14 +77,6 @@ const kpiTopColors = [
 
 // ── Helpers ──
 
-function pctChange(cur: number, prev: number): { pct: number; text: string; isUp: boolean; isFlat: boolean } {
-  if (prev === 0 && cur === 0) return { pct: 0, text: "±0.0%", isUp: true, isFlat: true };
-  if (prev === 0) return { pct: 999, text: "+∞", isUp: true, isFlat: false };
-  const pct = ((cur - prev) / prev) * 100;
-  const isFlat = Math.abs(pct) < 0.05;
-  return { pct, text: isFlat ? "+0.0%" : `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`, isUp: pct >= 0, isFlat };
-}
-
 function buildStackedOptions() {
   return {
     responsive: true, maintainAspectRatio: true, aspectRatio: 2.2,
@@ -109,11 +103,6 @@ const lineOptions = {
   },
 };
 
-/** "2025/10" → 202510 の数値変換（月ソート・比較用） */
-function monthToNum(m: string): number {
-  const p = m.split("/");
-  return (parseInt(p[0]) || 0) * 100 + (parseInt(p[1]) || 0);
-}
 
 // ── Component ──
 
@@ -462,21 +451,11 @@ export default function ReportClient({
   // 指標の表示判定: 自動（データ0で非表示）+ 手動ON/OFF
   const hasBookings = hasBookingsData && sectionVisibility.metricBookings !== false;
   const hasFoodMenus = hasFoodMenusData && sectionVisibility.metricFoodMenus !== false;
-  const kpis = (() => {
-    const filtered = rawKpis.filter(kpi => {
-      if (kpi.label === "予約" && !hasBookings) return false;
-      if (kpi.label === "フードメニュークリック" && !hasFoodMenus) return false;
-      return true;
-    });
-    // マップを検索より先に表示（キャッシュ互換: 旧データは検索が先）
-    const mapIdx = filtered.findIndex(k => k.label === "Googleマップ 合計");
-    const searchIdx = filtered.findIndex(k => k.label === "Google検索 合計");
-    if (mapIdx > 0 && searchIdx === 0) {
-      const [search] = filtered.splice(searchIdx, 1);
-      filtered.splice(mapIdx, 0, search);
-    }
-    return filtered;
-  })();
+  const kpis = reorderKpis(rawKpis.filter(kpi => {
+    if (kpi.label === "予約" && !hasBookings) return false;
+    if (kpi.label === "フードメニュークリック" && !hasFoodMenus) return false;
+    return true;
+  }));
 
   // gridRankingの中心点順位をキーワード順位として使用（あればスプレッドシートより優先）
   const gridKeywords = useMemo(() => {
@@ -581,7 +560,6 @@ export default function ReportClient({
     gridMarkersRefs.current[kw] = [];
 
     const bounds = new window.google.maps.LatLngBounds();
-    const rankColor = (r: number) => r <= 0 ? "#6B7280" : r <= 3 ? "#2563EB" : r <= 10 ? "#16A34A" : r <= 20 ? "#F59E0B" : "#EF4444";
 
     pts.forEach(pt => {
       const iconObj: any = {
@@ -875,27 +853,7 @@ export default function ReportClient({
   };
 
   // ── Page count ──
-  // AIコメントのページ数を文字数ベースで計算（実際の分割ロジックと同期）
-  const aiCommentPageCount = (() => {
-    const ac = comments || [];
-    if (ac.length === 0) return 1;
-    let pages = 0;
-    let ci = 0;
-    while (ci < ac.length) {
-      const limit = pages === 0 ? 800 : 800;
-      let charCount = 0;
-      let end = ci;
-      while (end < ac.length) {
-        const len = (ac[end] || "").replace(/<[^>]*>/g, "").length;
-        if (end > ci && charCount + len > limit) break;
-        charCount += len;
-        end++;
-      }
-      pages++;
-      ci = end;
-    }
-    return pages;
-  })();
+  const aiCommentPageCount = Math.max(1, splitCommentPages(comments || [], AI_CHARS_PER_PAGE).length);
   let totalPages = 6 + aiCommentPageCount; // P1,P2(月次),P3-P5(グラフ),口コミ分析 + AIコメント(動的)
   if (hasReviews) totalPages += 2; // 口コミ件数推移, 月間増加数
   if (showKeywords) totalPages++;
@@ -907,7 +865,7 @@ export default function ReportClient({
     // 16件以上なら2ページ目も表示
     const sqHist = searchQueries?.history;
     const sqLatestKws = Array.isArray(sqHist) && sqHist.length > 0 ? (sqHist[sqHist.length - 1]?.keywords?.length || 0) : 0;
-    if (sqLatestKws > 20) totalPages++;
+    if (sqLatestKws > SEARCH_QUERIES_PER_PAGE) totalPages++;
   }
 
   function pn(slideNum: number) {
@@ -1052,13 +1010,7 @@ export default function ReportClient({
               // 現在選択中の月+KWのoverridesグリッドを取得
               const overrideData = gridRanking?.history.find(h => h.month === selectedMonth)?.snapshots.find(s => s.keyword === selectedKw);
               const gridCells = overrideData?.results || [];
-              const gridRankColorModal = (rank: number) => {
-                if (rank <= 0) return { bg: "rgba(156,163,175,0.3)", color: "#9ca3af" };
-                if (rank <= 3) return { bg: "rgba(37,99,235,0.3)", color: "#2563eb" };
-                if (rank <= 10) return { bg: "rgba(22,163,74,0.3)", color: "#16a34a" };
-                if (rank <= 20) return { bg: "rgba(245,158,11,0.3)", color: "#f59e0b" };
-                return { bg: "rgba(239,68,68,0.3)", color: "#ef4444" };
-              };
+              const gridRankColorModal = rankColorModal;
               // 選択中月+KWのcenterRank（P7データから）
               const dsData = rankingHistory?.datasets?.find(d => d.word === selectedKw);
               const monthIdx = allMonths.indexOf(selectedMonth);
@@ -1713,7 +1665,7 @@ export default function ReportClient({
         });
         const hasPrev = sqPrev !== null;
         const hasPrev2 = sqPrev2 !== null;
-        const PER_PAGE = 20;
+        const PER_PAGE = SEARCH_QUERIES_PER_PAGE;
         const page1 = currentKeywords.slice(0, PER_PAGE);
         const page2 = currentKeywords.slice(PER_PAGE, PER_PAGE * 2);
         const thStyle = (w?: number, groupStart?: boolean): React.CSSProperties => ({ background: "#0f3460", color: "#fff", padding: "6px 4px", textAlign: "center", fontWeight: 600, fontSize: 16, whiteSpace: "nowrap", ...(w ? { width: w } : {}), ...(groupStart ? { borderLeft: "2px solid rgba(255,255,255,0.3)" } : {}) });
@@ -1990,28 +1942,8 @@ export default function ReportClient({
             </div>
           );
         }
-        // コメントを文字数ベースでページ分割（はみ出し防止）
         const allComments = comments || [];
-        const commentPages: { start: number; end: number }[] = [];
-        const CHARS_FIRST_PAGE = 800;  // 3コメント全てを1ページに（fontSize15+lineHeight1.8で余裕あり）
-        const CHARS_PER_PAGE = 800;
-        {
-          let ci = 0;
-          while (ci < allComments.length) {
-            const limit = commentPages.length === 0 ? CHARS_FIRST_PAGE : CHARS_PER_PAGE;
-            let charCount = 0;
-            let end = ci;
-            while (end < allComments.length) {
-              const len = (allComments[end] || "").replace(/<[^>]*>/g, "").length;
-              if (end > ci && charCount + len > limit) break; // 次のコメントを追加すると超過 → 手前で切る（ただし最低1件は入れる）
-              charCount += len;
-              end++;
-            }
-            commentPages.push({ start: ci, end });
-            ci = end;
-          }
-        }
-        if (commentPages.length === 0) commentPages.push({ start: 0, end: 0 });
+        const commentPages = splitCommentPages(allComments, AI_CHARS_PER_PAGE);
 
         return commentPages.map((page, pageIdx) => {
           pageNum++;
@@ -2029,26 +1961,11 @@ export default function ReportClient({
             <div style={{ margin: 0 }}>
               {allComments.slice(page.start, page.end).map((c, i) => {
                 const globalIdx = page.start + i;
-                let fixedComment = c;
-                if (shop.rating > 0) {
-                  fixedComment = fixedComment.replace(/\d\.\d(\s*\/\s*5\.0)/g, `${shop.rating}$1`);
-                }
-                // 既存の【見出し】を除去（client側で統一付与するため）
-                fixedComment = fixedComment.replace(/^【[^】]*】\s*/g, "");
-                // client側で見出しを付与
-                const headings = ["数値分析", "口コミ傾向と強み", "改善策", "改善点", "施策提案"];
-                const heading = headings[globalIdx] || "";
-                // 箇条書き「・」を改行+インデントに
-                fixedComment = fixedComment.replace(/(^|[^<])・/gm, '$1<br>・');
-                // a) b) c) を改行に
-                fixedComment = fixedComment.replace(/([^<])\s*([a-z]\))/g, '$1<br>$2');
-                fixedComment = fixedComment.replace(/([^（(])([①②③④⑤⑥⑦⑧⑨⑩])/g, "$1<br>$2");
-                fixedComment = fixedComment.replace(/(.)\s*(\(\d+\))/g, "$1<br>$2");
-                // 先頭の<br>を除去
-                fixedComment = fixedComment.replace(/^(<br>)+/, "");
+                const fixedComment = formatAIComment(c, shop.rating);
+                const heading = AI_COMMENT_HEADINGS[globalIdx] || "";
                 return (
                 <div key={globalIdx} style={{ fontSize: 15, lineHeight: 1.8, color: "#444", margin: "0 0 12px 0" }}>
-                  {heading && <div style={{ fontWeight: 700, color: "#0f3460", fontSize: 15, marginBottom: 2 }}>{heading}</div>}
+                  {heading && <div style={{ fontWeight: 700, color: COLORS.primary, fontSize: 15, marginBottom: 2 }}>{heading}</div>}
                   <span dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(fixedComment, { ALLOWED_TAGS: ["strong", "em", "br"], ALLOWED_ATTR: ["style"] }) }} />
                 </div>
                 );
