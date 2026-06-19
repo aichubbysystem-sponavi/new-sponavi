@@ -34,16 +34,16 @@ const INTERVALS = [
 
 function rankColor(rank: number): string {
   if (rank <= 0) return "#6B7280"; // 圏外 = グレー
-  if (rank <= 3) return "#16A34A";  // 1-3位 = 緑
-  if (rank <= 10) return "#2563EB"; // 4-10位 = 青
+  if (rank <= 3) return "#2563EB";  // 1-3位 = 青
+  if (rank <= 10) return "#16A34A"; // 4-10位 = 緑
   if (rank <= 20) return "#F59E0B"; // 11-20位 = 黄
   return "#EF4444";                 // 21位以降 = 赤
 }
 
 function rankBg(rank: number): string {
   if (rank <= 0) return "bg-gray-100 text-gray-500";
-  if (rank <= 3) return "bg-green-100 text-green-700";
-  if (rank <= 10) return "bg-blue-100 text-blue-700";
+  if (rank <= 3) return "bg-blue-100 text-blue-700";
+  if (rank <= 10) return "bg-green-100 text-green-700";
   if (rank <= 20) return "bg-yellow-100 text-yellow-700";
   return "bg-red-100 text-red-700";
 }
@@ -1427,10 +1427,10 @@ export default function GridRankingPage() {
           {/* 凡例 */}
           <div className="p-3 border-t flex flex-wrap gap-3 text-xs">
             <span className="flex items-center gap-1">
-              <span className="w-3 h-3 rounded-full inline-block" style={{ background: "#16A34A" }} /> 1-3位
+              <span className="w-3 h-3 rounded-full inline-block" style={{ background: "#2563EB" }} /> 1-3位
             </span>
             <span className="flex items-center gap-1">
-              <span className="w-3 h-3 rounded-full inline-block" style={{ background: "#2563EB" }} /> 4-10位
+              <span className="w-3 h-3 rounded-full inline-block" style={{ background: "#16A34A" }} /> 4-10位
             </span>
             <span className="flex items-center gap-1">
               <span className="w-3 h-3 rounded-full inline-block" style={{ background: "#F59E0B" }} /> 11-20位
