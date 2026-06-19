@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: `No gbp_location_name: ${shop.name}` });
   }
 
-  const result = await syncShopPerformance(shop.id, shop.name, shop.gbp_location_name, 12);
+  const result = await syncShopPerformance(shop.id, shop.name, shop.gbp_location_name);
 
   if (!result.success) {
     return NextResponse.json({ success: false, error: result.error, shopName: shop.name });
