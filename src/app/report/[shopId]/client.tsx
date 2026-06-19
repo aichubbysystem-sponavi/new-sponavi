@@ -525,7 +525,8 @@ export default function ReportClient({
   const activeGridSnapshot = gridRecentHistory[activeGridMonthI]?.snapshots.find(s => s.keyword === activeGridKw);
 
   // Google Maps JS API読み込み + マーカー描画（キーワード別）
-  const renderGridMapForKw = useCallback((kw: string) => {
+  // labelYOffset: PDFキャプチャ時にラベルを上方補正（html2canvasのSVGテキストズレ対策）
+  const renderGridMapForKw = useCallback((kw: string, labelYOffset: number = 0) => {
     const mapEl = gridMapRefs.current[kw];
     if (!mapEl || !window.google?.maps) return;
     const monthI = gridMonthIdx >= 0 && gridMonthIdx < gridRecentHistory.length ? gridMonthIdx : gridRecentHistory.length - 1;
@@ -573,14 +574,18 @@ export default function ReportClient({
     const rankColor = (r: number) => r <= 0 ? "#6B7280" : r <= 3 ? "#16A34A" : r <= 10 ? "#2563EB" : r <= 20 ? "#F59E0B" : "#EF4444";
 
     pts.forEach(pt => {
+      const iconObj: any = {
+        path: window.google.maps.SymbolPath.CIRCLE,
+        fillColor: rankColor(pt.rank), fillOpacity: 0.9,
+        strokeColor: "#fff", strokeWeight: 2, scale: 18,
+      };
+      if (labelYOffset !== 0) {
+        iconObj.labelOrigin = new window.google.maps.Point(0, labelYOffset);
+      }
       const marker = new window.google.maps.Marker({
         position: { lat: pt.lat, lng: pt.lng },
         map: gmap,
-        icon: {
-          path: window.google.maps.SymbolPath.CIRCLE,
-          fillColor: rankColor(pt.rank), fillOpacity: 0.9,
-          strokeColor: "#fff", strokeWeight: 2, scale: 18,
-        },
+        icon: iconObj,
         label: { text: pt.rank > 0 ? String(pt.rank) : "-", color: "#fff", fontWeight: "bold", fontSize: "14px" },
       });
       gridMarkersRefs.current[kw].push(marker);
@@ -807,8 +812,8 @@ export default function ReportClient({
         const activeSlide = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden)");
         if (activeSlide) activeSlide.scrollIntoView({ block: "center" });
         await new Promise(r => setTimeout(r, 100));
-        // マップ再描画
-        renderGridMapForKw(kw);
+        // マップ再描画（PDF用にラベルを上方補正 -2.5）
+        renderGridMapForKw(kw, -2.5);
         await new Promise(r => setTimeout(r, 2000));
         // マップ領域をキャプチャ
         const mapArea = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden) .grid-kw-map-area");
@@ -825,8 +830,10 @@ export default function ReportClient({
           }
         }
       }
-      // KWを元に戻す
+      // KWを元に戻し、通常表示用にlabelOffset=0で再描画
       setGridKwIdx(origGridKwIdx);
+      await new Promise(r => setTimeout(r, 200));
+      renderGridMapForKw(gr.keywords[origGridKwIdx], 0);
 
       // ── 5. print用スライドを表示、元のgridスライドを非表示 ──
       insertedEls.forEach(el => { el.style.display = "flex"; });
