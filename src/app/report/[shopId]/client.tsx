@@ -747,7 +747,7 @@ export default function ReportClient({
           const ctrlEls = mapContainer.querySelectorAll<HTMLElement>(".gmnoprint, .gm-style-mtc, .gm-bundled-control, .gm-svpc");
           ctrlEls.forEach(el => { el.dataset.origDisplay = el.style.display; el.style.display = "none"; });
           const gmap = gridGoogleMapRefs.current[kw];
-          let origZoom: number | undefined;
+          let origZoom = 13;
           let origCenter: any;
           if (gmap) {
             origZoom = gmap.getZoom() ?? 13;
