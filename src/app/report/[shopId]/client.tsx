@@ -824,7 +824,7 @@ export default function ReportClient({
   if (hasReviews) totalPages += 2; // 口コミ件数推移, 月間増加数
   if (showKeywords) totalPages++;
   if (showRankingHistory) totalPages++;
-  if (showGridRanking) totalPages += 1 + Math.ceil(gridRanking!.keywords.length / 2); // サマリー1ページ + マップ2KW/ページ
+  if (showGridRanking) totalPages += 2; // サマリー1ページ + KW切替1ページ（web表示基準）
   if (langStats.length > 1) totalPages++; // 口コミ言語別分析
   if (showSearchQueries) totalPages++;
 
@@ -1417,7 +1417,9 @@ export default function ReportClient({
                 <span>{shop.name} — 多地点順位計測 サマリー</span>
                 <span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(summaryPageNum)}</span>
               </div>
-              <div style={{ ...slideBodyStyle, padding: "16px 24px", flexDirection: "row", gap: 24 }}>
+              <div style={{ ...slideBodyStyle, padding: "16px 24px", gap: 16 }}>
+                <div style={stitleStyle}>多地点順位 総合レポート（{latestMonth?.month || curLabel}）</div>
+                <div style={{ display: "flex", gap: 24, flex: 1, minHeight: 0 }}>
                 {/* 左: 全KW比較テーブル */}
                 <div style={{ flex: "0 0 480px", display: "flex", flexDirection: "column" }}>
                   {latestMonth && (
@@ -1492,13 +1494,15 @@ export default function ReportClient({
                     );
                   })}
                 </div>
+                </div>
               </div>
             </div>
           </div>
         );
 
+        pageNum++; // KW切替ページ（web表示では全KWで1ページ共有）
+        const gridKwPageNum = pageNum;
         return [summarySlide, ...kwPairs.map((pair, pairI) => {
-          pageNum++; // ペア単位で1ページ（PDF基準）
           return (
           <div key={`grid-pair-${pairI}`} className="grid-kw-pair">
             {pair.map((loopKw, kwInPair) => {
@@ -1515,7 +1519,7 @@ export default function ReportClient({
               <div key={`grid-${kwI}`} style={slideStyle} className={`slide grid-kw-slide${!isActive ? " grid-kw-hidden" : ""}`}>
                 <div style={slideBarStyle} className="grid-kw-header">
                   <span>{shop.name} — 多地点順位計測</span>
-                  <span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
+                  <span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(gridKwPageNum)}</span>
                 </div>
                 <div style={{ ...slideBodyStyle, padding: "20px 9px", gap: 12 }} className="grid-kw-body">
                   {/* KWタブ（画面のみ、全スライドに配置するが表示は1つだけ） */}
