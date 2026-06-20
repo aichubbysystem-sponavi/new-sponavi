@@ -748,97 +748,128 @@ export default function ReportClient({
         const mapContainer = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden) .grid-map-container");
 
         if (mapContainer && gmap && snapForCapture) {
-          const projection = gmap.getProjection();
-          const bounds = gmap.getBounds();
-
-          if (projection && bounds) {
-            // ── マーカーのピクセル座標を計算 ──
-            const ne = bounds.getNorthEast();
-            const sw = bounds.getSouthWest();
-            const topRight = projection.fromLatLngToPoint(ne);
-            const bottomLeft = projection.fromLatLngToPoint(sw);
-            const containerW = mapContainer.offsetWidth;
-            const containerH = mapContainer.offsetHeight;
-
-            let pts = snapForCapture.results;
-            const gs = snapForCapture.gridSize;
-            const hasCoords = pts.some((p: any) => p.lat && p.lng);
-            if (!hasCoords && shop.lat && shop.lng) {
-              const center = Math.floor(gs / 2);
-              pts = pts.map((p: any) => ({
-                ...p,
-                lat: shop.lat + ((p.row - center) * 1000 * -0.000009),
-                lng: shop.lng + ((p.col - center) * 1000 * 0.000011),
-              }));
-            }
-
-            const markerPixels = pts.map((pt: any) => {
-              const point = projection.fromLatLngToPoint(new window.google.maps.LatLng(pt.lat, pt.lng));
-              const worldW = topRight.x - bottomLeft.x;
-              const worldH = bottomLeft.y - topRight.y;
-              return {
-                x: (point.x - bottomLeft.x) / worldW * containerW,
-                y: (point.y - topRight.y) / worldH * containerH,
-                rank: pt.rank as number,
-              };
+          // ── マップがidle状態になるまで待機 ──
+          await new Promise<void>(resolve => {
+            if (gmap.getProjection() && gmap.getBounds()) { resolve(); return; }
+            const listener = gmap.addListener("idle", () => {
+              window.google.maps.event.removeListener(listener);
+              resolve();
             });
+            setTimeout(() => resolve(), 3000); // safety timeout
+          });
 
-            // 中心マーカーの座標
+          // ── 座標データ準備 ──
+          let pts = snapForCapture.results;
+          const gs = snapForCapture.gridSize;
+          const hasCoords = pts.some((p: any) => p.lat && p.lng);
+          if (!hasCoords && shop.lat && shop.lng) {
+            const center = Math.floor(gs / 2);
+            pts = pts.map((p: any) => ({
+              ...p,
+              lat: shop.lat + ((p.row - center) * 1000 * -0.000009),
+              lng: shop.lng + ((p.col - center) * 1000 * 0.000011),
+            }));
+          }
+
+          // ── OverlayView で lat/lng → コンテナピクセル座標を取得（公式API、最も正確） ──
+          const markerPixels = await new Promise<{ x: number; y: number; rank: number }[]>((resolve) => {
+            const overlay = new window.google.maps.OverlayView();
+            let done = false;
+            overlay.onAdd = function () {};
+            overlay.draw = function () {
+              if (done) return;
+              done = true;
+              try {
+                const proj = this.getProjection();
+                const pixels = pts.map((pt: any) => {
+                  const pixel = proj.fromLatLngToContainerPixel(
+                    new window.google.maps.LatLng(pt.lat, pt.lng)
+                  );
+                  return { x: pixel!.x, y: pixel!.y, rank: pt.rank as number };
+                });
+                resolve(pixels);
+              } catch {
+                resolve([]);
+              }
+              setTimeout(() => overlay.setMap(null), 0);
+            };
+            overlay.setMap(gmap);
+            setTimeout(() => { if (!done) { done = true; resolve([]); } }, 3000);
+          });
+
+          // 中心マーカーの座標
+          const centerPixel = await new Promise<{ x: number; y: number } | null>((resolve) => {
             const centerPt = pts.find((p: any) => p.row === Math.floor(gs / 2) && p.col === Math.floor(gs / 2));
             const cLat = centerPt?.lat ?? pts.reduce((s: number, p: any) => s + p.lat, 0) / pts.length;
             const cLng = centerPt?.lng ?? pts.reduce((s: number, p: any) => s + p.lng, 0) / pts.length;
-            const centerPoint = projection.fromLatLngToPoint(new window.google.maps.LatLng(cLat, cLng));
-            const centerPx = {
-              x: (centerPoint.x - bottomLeft.x) / (topRight.x - bottomLeft.x) * containerW,
-              y: (centerPoint.y - topRight.y) / (bottomLeft.y - topRight.y) * containerH,
+            const overlay = new window.google.maps.OverlayView();
+            let done = false;
+            overlay.onAdd = function () {};
+            overlay.draw = function () {
+              if (done) return;
+              done = true;
+              try {
+                const proj = this.getProjection();
+                const pixel = proj.fromLatLngToContainerPixel(
+                  new window.google.maps.LatLng(cLat, cLng)
+                );
+                resolve(pixel ? { x: pixel.x, y: pixel.y } : null);
+              } catch {
+                resolve(null);
+              }
+              setTimeout(() => overlay.setMap(null), 0);
             };
+            overlay.setMap(gmap);
+            setTimeout(() => { if (!done) { done = true; resolve(null); } }, 3000);
+          });
 
-            // ── マーカーを非表示にして地図タイルだけキャプチャ ──
-            const markers = gridMarkersRefs.current[kw] || [];
-            markers.forEach(m => m.setMap(null));
-            const ctrlEls = mapContainer.querySelectorAll<HTMLElement>(".gmnoprint, .gm-style-mtc, .gm-bundled-control, .gm-svpc");
-            ctrlEls.forEach(el => { el.dataset.origDisplay = el.style.display; el.style.display = "none"; });
-            await new Promise(r => setTimeout(r, 100));
+          // ── マーカーを非表示にして地図タイルだけキャプチャ ──
+          const markers = gridMarkersRefs.current[kw] || [];
+          markers.forEach(m => m.setMap(null));
+          const ctrlEls = mapContainer.querySelectorAll<HTMLElement>(".gmnoprint, .gm-style-mtc, .gm-bundled-control, .gm-svpc");
+          ctrlEls.forEach(el => { el.dataset.origDisplay = el.style.display; el.style.display = "none"; });
+          await new Promise(r => setTimeout(r, 100));
 
-            const canvas = await html2canvas(mapContainer, { scale: 2, useCORS: true, logging: false, backgroundColor: "#e8edf5" });
+          const canvas = await html2canvas(mapContainer, { scale: 2, useCORS: true, logging: false, backgroundColor: "#e8edf5" });
 
-            // ── コントロール復元・マーカー復元 ──
-            ctrlEls.forEach(el => { el.style.display = el.dataset.origDisplay || ""; delete el.dataset.origDisplay; });
-            markers.forEach(m => m.setMap(gmap));
+          // ── コントロール復元・マーカー復元 ──
+          ctrlEls.forEach(el => { el.style.display = el.dataset.origDisplay || ""; delete el.dataset.origDisplay; });
+          markers.forEach(m => m.setMap(gmap));
 
-            // ── Canvas 2D でマーカーを直接描画（html2canvas のSVGズレを完全回避） ──
-            const ctx = canvas.getContext("2d");
-            if (ctx) {
-              const sf = 2; // html2canvas scale factor
-              const radius = 18 * sf;
-              const fontSize = 14 * sf;
-              const borderW = 2 * sf;
+          // ── Canvas 2D でマーカーを直接描画（html2canvas のSVGズレを完全回避） ──
+          const ctx = canvas.getContext("2d");
+          if (ctx && markerPixels.length > 0) {
+            const sf = 2; // html2canvas scale factor
+            const radius = 18 * sf;
+            const fontSize = 14 * sf;
+            const borderW = 2 * sf;
 
-              markerPixels.forEach(({ x, y, rank }: { x: number; y: number; rank: number }) => {
-                const cx = x * sf;
-                const cy = y * sf;
-                // 円（塗り）
-                ctx.beginPath();
-                ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-                ctx.fillStyle = rankColor(rank);
-                ctx.globalAlpha = 0.9;
-                ctx.fill();
-                ctx.globalAlpha = 1;
-                // 円（白枠）
-                ctx.strokeStyle = "#fff";
-                ctx.lineWidth = borderW;
-                ctx.stroke();
-                // テキスト
-                ctx.fillStyle = "#fff";
-                ctx.font = `bold ${fontSize}px "Noto Sans JP", sans-serif`;
-                ctx.textAlign = "center";
-                ctx.textBaseline = "middle";
-                ctx.fillText(rank > 0 ? String(rank) : "-", cx, cy);
-              });
+            markerPixels.forEach(({ x, y, rank }) => {
+              const cx = x * sf;
+              const cy = y * sf;
+              // 円（塗り）
+              ctx.beginPath();
+              ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+              ctx.fillStyle = rankColor(rank);
+              ctx.globalAlpha = 0.9;
+              ctx.fill();
+              ctx.globalAlpha = 1;
+              // 円（白枠）
+              ctx.strokeStyle = "#fff";
+              ctx.lineWidth = borderW;
+              ctx.stroke();
+              // テキスト
+              ctx.fillStyle = "#fff";
+              ctx.font = `bold ${fontSize}px sans-serif`;
+              ctx.textAlign = "center";
+              ctx.textBaseline = "middle";
+              ctx.fillText(rank > 0 ? String(rank) : "-", cx, cy);
+            });
 
-              // 中心マーカー（▼）
-              const ccx = centerPx.x * sf;
-              const ccy = centerPx.y * sf;
+            // 中心マーカー（▼）
+            if (centerPixel) {
+              const ccx = centerPixel.x * sf;
+              const ccy = centerPixel.y * sf;
               const arrowSize = 8 * sf;
               ctx.beginPath();
               ctx.moveTo(ccx, ccy + arrowSize);
@@ -851,31 +882,31 @@ export default function ReportClient({
               ctx.lineWidth = borderW;
               ctx.stroke();
             }
+          }
 
-            const imgDataUrl = canvas.toDataURL("image/png");
-            const slot = mapSlots[kwIdx];
-            if (slot) {
-              const mapDiv = slot.querySelector<HTMLElement>(".grid-print-map");
-              if (mapDiv) {
-                mapDiv.style.background = "none";
-                mapDiv.innerHTML = `<img src="${imgDataUrl}" style="width:100%;height:100%;object-fit:contain;border-radius:12px;" />`;
-              }
-              // 平均順位を実データで更新
-              const avgEl = slot.querySelector<HTMLElement>(".grid-print-avg");
-              const snapHist = gr.history.filter(h => monthToNum(h.month) <= monthToNum(curLabel)).slice(-6);
-              const latestSnap = snapHist[snapHist.length - 1]?.snapshots.find(s => s.keyword === kw);
-              const prevSnap = snapHist.length >= 2 ? snapHist[snapHist.length - 2]?.snapshots.find(s => s.keyword === kw) : null;
-              if (avgEl && latestSnap) {
-                let diffHtml = "";
-                if (prevSnap) {
-                  const d = prevSnap.avgRank - latestSnap.avgRank;
-                  if (d !== 0) {
-                    const color = d > 0 ? "#0a8f3c" : "#c0392b";
-                    diffHtml = `<span style="margin-left:8px;font-size:20px;font-weight:700;color:${color};">${d > 0 ? "↑" + d.toFixed(1) : "↓" + Math.abs(d).toFixed(1)}</span>`;
-                  }
+          const imgDataUrl = canvas.toDataURL("image/png");
+          const slot = mapSlots[kwIdx];
+          if (slot) {
+            const mapDiv = slot.querySelector<HTMLElement>(".grid-print-map");
+            if (mapDiv) {
+              mapDiv.style.background = "none";
+              mapDiv.innerHTML = `<img src="${imgDataUrl}" style="width:100%;height:100%;object-fit:contain;border-radius:12px;" />`;
+            }
+            // 平均順位を実データで更新
+            const avgEl = slot.querySelector<HTMLElement>(".grid-print-avg");
+            const snapHist = gr.history.filter(h => monthToNum(h.month) <= monthToNum(curLabel)).slice(-6);
+            const latestSnap = snapHist[snapHist.length - 1]?.snapshots.find(s => s.keyword === kw);
+            const prevSnap = snapHist.length >= 2 ? snapHist[snapHist.length - 2]?.snapshots.find(s => s.keyword === kw) : null;
+            if (avgEl && latestSnap) {
+              let diffHtml = "";
+              if (prevSnap) {
+                const d = prevSnap.avgRank - latestSnap.avgRank;
+                if (d !== 0) {
+                  const color = d > 0 ? "#0a8f3c" : "#c0392b";
+                  diffHtml = `<span style="margin-left:8px;font-size:20px;font-weight:700;color:${color};">${d > 0 ? "↑" + d.toFixed(1) : "↓" + Math.abs(d).toFixed(1)}</span>`;
                 }
-                avgEl.innerHTML = `平均順位: <span style="font-size:28px;font-weight:900;color:#e94560;">${latestSnap.avgRank}</span>位${diffHtml}`;
               }
+              avgEl.innerHTML = `平均順位: <span style="font-size:28px;font-weight:900;color:#e94560;">${latestSnap.avgRank}</span>位${diffHtml}`;
             }
           }
         }
