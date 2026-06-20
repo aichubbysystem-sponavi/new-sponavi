@@ -739,26 +739,11 @@ export default function ReportClient({
         const activeSlide = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden)");
         if (activeSlide) activeSlide.scrollIntoView({ block: "center" });
         await new Promise(r => setTimeout(r, 100));
-        renderGridMapForKw(kw); // webと同じパラメータ
+        renderGridMapForKw(kw, -2.5); // PDF用ラベル補正
         await new Promise(r => setTimeout(r, 2000));
         const mapContainer = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden) .grid-map-container");
         if (mapContainer) {
-          // キャプチャ前: コントロール非表示 + ズームアウト（上端ラベルがコンテナ内に収まるように）
-          const ctrlEls = mapContainer.querySelectorAll<HTMLElement>(".gmnoprint, .gm-style-mtc, .gm-bundled-control, .gm-svpc");
-          ctrlEls.forEach(el => { el.dataset.origDisplay = el.style.display; el.style.display = "none"; });
-          const gmap = gridGoogleMapRefs.current[kw];
-          let origZoom = 13;
-          let origCenter: any;
-          if (gmap) {
-            origZoom = gmap.getZoom() ?? 13;
-            origCenter = gmap.getCenter();
-            gmap.setZoom(origZoom - 1); // 1段階ズームアウトでマーカーを中央寄せ
-          }
-          await new Promise(r => setTimeout(r, 800));
           const canvas = await html2canvas(mapContainer, { scale: 2, useCORS: true, logging: false, backgroundColor: "#e8edf5" });
-          // 復元
-          if (gmap && origZoom !== undefined) { gmap.setZoom(origZoom); gmap.setCenter(origCenter); }
-          ctrlEls.forEach(el => { el.style.display = el.dataset.origDisplay || ""; delete el.dataset.origDisplay; });
           const imgDataUrl = canvas.toDataURL("image/png");
           const slot = mapSlots[kwIdx];
           if (slot) {
