@@ -744,17 +744,22 @@ export default function ReportClient({
         // マップコンテナのみキャプチャ（凡例・平均順位はHTMLで配置済み）
         const mapContainer = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden) .grid-map-container");
         if (mapContainer) {
-          // キャプチャ前にコントロール非表示 + overflow/border-radius解除（ラベルクリップ防止）
+          // キャプチャ前: コントロール非表示 + コンテナ拡大（上端ラベルクリップ防止）
           const ctrlEls = mapContainer.querySelectorAll<HTMLElement>(".gmnoprint, .gm-style-mtc, .gm-bundled-control, .gm-svpc");
           ctrlEls.forEach(el => { el.dataset.origDisplay = el.style.display; el.style.display = "none"; });
-          const origOverflow = mapContainer.style.overflow;
-          const origRadius = mapContainer.style.borderRadius;
-          mapContainer.style.overflow = "visible";
-          mapContainer.style.borderRadius = "0";
-          await new Promise(r => setTimeout(r, 50));
+          const origH = mapContainer.style.height;
+          const origW = mapContainer.style.width;
+          mapContainer.style.height = "500px";
+          mapContainer.style.width = "540px";
+          // コンテナサイズ変更後にGoogleマップをリサイズ
+          const gmap = gridGoogleMapRefs.current[kw];
+          if (gmap) { window.google.maps.event.trigger(gmap, "resize"); }
+          await new Promise(r => setTimeout(r, 300));
           const canvas = await html2canvas(mapContainer, { scale: 2, useCORS: true, logging: false, backgroundColor: "#e8edf5" });
-          mapContainer.style.overflow = origOverflow;
-          mapContainer.style.borderRadius = origRadius;
+          // 復元
+          mapContainer.style.height = origH;
+          mapContainer.style.width = origW;
+          if (gmap) { window.google.maps.event.trigger(gmap, "resize"); }
           ctrlEls.forEach(el => { el.style.display = el.dataset.origDisplay || ""; delete el.dataset.origDisplay; });
           const imgDataUrl = canvas.toDataURL("image/png");
           const slot = mapSlots[kwIdx];
