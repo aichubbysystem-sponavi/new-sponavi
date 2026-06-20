@@ -743,7 +743,12 @@ export default function ReportClient({
         await new Promise(r => setTimeout(r, 2000));
         const mapContainer = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden) .grid-map-container");
         if (mapContainer) {
+          // コントロール非表示（マーカーに被るのを防止）
+          const ctrlEls = mapContainer.querySelectorAll<HTMLElement>(".gmnoprint, .gm-style-mtc, .gm-bundled-control, .gm-svpc");
+          ctrlEls.forEach(el => { el.dataset.origDisplay = el.style.display; el.style.display = "none"; });
+          await new Promise(r => setTimeout(r, 50));
           const canvas = await html2canvas(mapContainer, { scale: 2, useCORS: true, logging: false, backgroundColor: "#e8edf5" });
+          ctrlEls.forEach(el => { el.style.display = el.dataset.origDisplay || ""; delete el.dataset.origDisplay; });
           const imgDataUrl = canvas.toDataURL("image/png");
           const slot = mapSlots[kwIdx];
           if (slot) {
