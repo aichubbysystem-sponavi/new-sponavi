@@ -690,15 +690,30 @@ export default function ReportClient({
           const mapSlot = document.createElement("div");
           mapSlot.className = "grid-print-map-slot";
           mapSlot.dataset.kw = kwName;
-          mapSlot.style.cssText = `flex:1;display:flex;flex-direction:column;justify-content:center;padding:8px 12px;overflow:hidden;`;
+          mapSlot.style.cssText = `flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:8px 12px;overflow:hidden;`;
+          // タイトル
           const title = document.createElement("div");
-          title.style.cssText = `font-size:18px;font-weight:700;color:#0f3460;border-left:5px solid #e94560;padding-left:12px;margin-bottom:8px;`;
+          title.style.cssText = `font-size:18px;font-weight:700;color:#0f3460;border-left:5px solid #e94560;padding-left:12px;margin-bottom:8px;align-self:flex-start;`;
           title.textContent = `多地点順位 —「${kwName}」`;
           mapSlot.appendChild(title);
+          // マップ（html2canvasでここだけキャプチャ）
           const mapDiv = document.createElement("div");
           mapDiv.className = "grid-print-map";
-          mapDiv.style.cssText = `width:100%;height:580px;border-radius:12px;overflow:hidden;background:#e8edf5;`;
+          mapDiv.style.cssText = `width:440px;height:400px;border-radius:12px;overflow:hidden;background:#e8edf5;`;
           mapSlot.appendChild(mapDiv);
+          // 凡例（HTMLで直接配置、html2canvasを通さない）
+          const legend = document.createElement("div");
+          const legendColors = [["#2563EB","1-3位"],["#16A34A","4-10位"],["#F59E0B","11-20位"],["#EF4444","21位~"],["#6B7280","圏外"]];
+          legend.style.cssText = `display:flex;font-size:18px;color:#555;margin-top:4px;width:440px;justify-content:space-between;`;
+          legend.innerHTML = legendColors.map(([c,t]) => `<span><span style="display:inline-block;vertical-align:middle;width:20px;height:20px;border-radius:50%;background:${c};margin-right:6px;"></span><span style="vertical-align:middle;">${t}</span></span>`).join("");
+          mapSlot.appendChild(legend);
+          // 平均順位（HTMLで直接配置）
+          const avgDiv = document.createElement("div");
+          avgDiv.className = "grid-print-avg";
+          avgDiv.dataset.kw = kwName;
+          avgDiv.style.cssText = `font-size:20px;color:#555;text-align:center;width:440px;margin-top:2px;`;
+          avgDiv.innerHTML = `平均順位: <span style="font-size:28px;font-weight:900;color:#e94560;">-</span>位`;
+          mapSlot.appendChild(avgDiv);
           body.appendChild(mapSlot);
         }
         pairSlide.appendChild(body);
@@ -728,9 +743,10 @@ export default function ReportClient({
         await new Promise(r => setTimeout(r, 100));
         renderGridMapForKw(kw, -2.5);
         await new Promise(r => setTimeout(r, 2000));
-        const mapArea = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden) .grid-kw-map-area");
-        if (mapArea) {
-          const canvas = await html2canvas(mapArea, { scale: 2, useCORS: true, logging: false, backgroundColor: "#f0f2f5" });
+        // マップコンテナのみキャプチャ（凡例・平均順位はHTMLで配置済み）
+        const mapContainer = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden) .grid-map-container");
+        if (mapContainer) {
+          const canvas = await html2canvas(mapContainer, { scale: 2, useCORS: true, logging: false, backgroundColor: "#e8edf5" });
           const imgDataUrl = canvas.toDataURL("image/png");
           const slot = mapSlots[kwIdx];
           if (slot) {
@@ -738,6 +754,22 @@ export default function ReportClient({
             if (mapDiv) {
               mapDiv.style.background = "none";
               mapDiv.innerHTML = `<img src="${imgDataUrl}" style="width:100%;height:100%;object-fit:contain;border-radius:12px;" />`;
+            }
+            // 平均順位を実データで更新
+            const avgEl = slot.querySelector<HTMLElement>(".grid-print-avg");
+            const snap = gr.history.filter(h => monthToNum(h.month) <= monthToNum(curLabel)).slice(-6);
+            const latestSnap = snap[snap.length - 1]?.snapshots.find(s => s.keyword === kw);
+            const prevSnap = snap.length >= 2 ? snap[snap.length - 2]?.snapshots.find(s => s.keyword === kw) : null;
+            if (avgEl && latestSnap) {
+              let diffHtml = "";
+              if (prevSnap) {
+                const d = prevSnap.avgRank - latestSnap.avgRank;
+                if (d !== 0) {
+                  const color = d > 0 ? "#0a8f3c" : "#c0392b";
+                  diffHtml = `<span style="margin-left:8px;font-size:20px;font-weight:700;color:${color};">${d > 0 ? "↑" + d.toFixed(1) : "↓" + Math.abs(d).toFixed(1)}</span>`;
+                }
+              }
+              avgEl.innerHTML = `平均順位: <span style="font-size:28px;font-weight:900;color:#e94560;">${latestSnap.avgRank}</span>位${diffHtml}`;
             }
           }
         }
