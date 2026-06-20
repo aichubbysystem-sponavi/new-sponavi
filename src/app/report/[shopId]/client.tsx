@@ -520,9 +520,7 @@ export default function ReportClient({
         fillColor: rankColor(pt.rank), fillOpacity: 0.9,
         strokeColor: "#fff", strokeWeight: 2, scale: 18,
       };
-      if (labelYOffset !== 0) {
-        iconObj.labelOrigin = new window.google.maps.Point(0, labelYOffset);
-      }
+      iconObj.labelOrigin = new window.google.maps.Point(0, labelYOffset);
       const marker = new window.google.maps.Marker({
         position: { lat: pt.lat, lng: pt.lng },
         map: gmap,
@@ -741,7 +739,7 @@ export default function ReportClient({
         const activeSlide = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden)");
         if (activeSlide) activeSlide.scrollIntoView({ block: "center" });
         await new Promise(r => setTimeout(r, 100));
-        renderGridMapForKw(kw, 0);
+        renderGridMapForKw(kw, -2.0);
         await new Promise(r => setTimeout(r, 2000));
         // マップコンテナのみキャプチャ（凡例・平均順位はHTMLで配置済み）
         const mapContainer = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden) .grid-map-container");
