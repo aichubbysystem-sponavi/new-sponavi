@@ -741,33 +741,25 @@ export default function ReportClient({
         await new Promise(r => setTimeout(r, 100));
         renderGridMapForKw(kw); // webと同じパラメータ
         await new Promise(r => setTimeout(r, 2000));
-        // map-area全体をキャプチャ（凡例込み→マップ部分だけ切り抜き）
-        // 全体キャプチャすることで上端ラベルがクリップされない
-        const mapArea = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden) .grid-kw-map-area");
-        const mapContainer = mapArea?.querySelector<HTMLElement>(".grid-map-container");
-        if (mapArea && mapContainer) {
-          // コントロール非表示
-          const ctrlEls = mapArea.querySelectorAll<HTMLElement>(".gmnoprint, .gm-style-mtc, .gm-bundled-control, .gm-svpc");
+        const mapContainer = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden) .grid-map-container");
+        if (mapContainer) {
+          // キャプチャ前: コントロール非表示 + ズームアウト（上端ラベルがコンテナ内に収まるように）
+          const ctrlEls = mapContainer.querySelectorAll<HTMLElement>(".gmnoprint, .gm-style-mtc, .gm-bundled-control, .gm-svpc");
           ctrlEls.forEach(el => { el.dataset.origDisplay = el.style.display; el.style.display = "none"; });
-          await new Promise(r => setTimeout(r, 50));
-          // map-area全体をキャプチャ
-          const fullCanvas = await html2canvas(mapArea, { scale: 2, useCORS: true, logging: false, backgroundColor: "#f0f2f5" });
-          // コントロール復元
+          const gmap = gridGoogleMapRefs.current[kw];
+          let origZoom: number | undefined;
+          let origCenter: any;
+          if (gmap) {
+            origZoom = gmap.getZoom();
+            origCenter = gmap.getCenter();
+            gmap.setZoom(origZoom - 1); // 1段階ズームアウトでマーカーを中央寄せ
+          }
+          await new Promise(r => setTimeout(r, 800));
+          const canvas = await html2canvas(mapContainer, { scale: 2, useCORS: true, logging: false, backgroundColor: "#e8edf5" });
+          // 復元
+          if (gmap && origZoom !== undefined) { gmap.setZoom(origZoom); gmap.setCenter(origCenter); }
           ctrlEls.forEach(el => { el.style.display = el.dataset.origDisplay || ""; delete el.dataset.origDisplay; });
-          // マップ部分だけ切り抜き（凡例・平均順位はHTML版を使うので不要）
-          const mapRect = mapContainer.getBoundingClientRect();
-          const areaRect = mapArea.getBoundingClientRect();
-          const scaleRatio = fullCanvas.width / areaRect.width;
-          const srcX = Math.round((mapRect.left - areaRect.left) * scaleRatio);
-          const srcY = Math.round((mapRect.top - areaRect.top) * scaleRatio);
-          const srcW = Math.round(mapRect.width * scaleRatio);
-          const srcH = Math.round(mapRect.height * scaleRatio);
-          const cropCanvas = document.createElement("canvas");
-          cropCanvas.width = srcW;
-          cropCanvas.height = srcH;
-          const ctx = cropCanvas.getContext("2d");
-          if (ctx) { ctx.drawImage(fullCanvas, srcX, srcY, srcW, srcH, 0, 0, srcW, srcH); }
-          const imgDataUrl = cropCanvas.toDataURL("image/png");
+          const imgDataUrl = canvas.toDataURL("image/png");
           const slot = mapSlots[kwIdx];
           if (slot) {
             const mapDiv = slot.querySelector<HTMLElement>(".grid-print-map");
