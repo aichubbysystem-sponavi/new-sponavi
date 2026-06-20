@@ -684,7 +684,7 @@ export default function ReportClient({
 
         // マップコンテンツ（横並び）
         const body = document.createElement("div");
-        body.style.cssText = `flex:1;display:flex;flex-direction:row;overflow:hidden;`;
+        body.style.cssText = `flex:1;display:flex;flex-direction:row;align-items:stretch;overflow:hidden;`;
 
         for (const kwName of kwNames) {
           const mapSlot = document.createElement("div");
@@ -1530,19 +1530,19 @@ export default function ReportClient({
                       {snapshot ? (
                         <>
                           <div ref={el => { gridMapRefs.current[loopKw] = el; }} className="grid-map-container" style={{ width: 440, height: 400, borderRadius: 12, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,.15)", background: "#e8edf5" }} />
-                          <div className="grid-kw-legend" style={{ display: "flex", fontSize: 16, color: "#555", marginTop: 2, width: 440, justifyContent: "space-between" }}>
+                          <div className="grid-kw-legend" style={{ display: "flex", fontSize: 18, color: "#555", marginTop: 4, width: 440, justifyContent: "space-between" }}>
                             <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 20, height: 20, borderRadius: "50%", background: "#2563EB", display: "inline-block", flexShrink: 0 }} />1-3位</span>
                             <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 20, height: 20, borderRadius: "50%", background: "#16A34A", display: "inline-block", flexShrink: 0 }} />4-10位</span>
                             <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 20, height: 20, borderRadius: "50%", background: "#F59E0B", display: "inline-block", flexShrink: 0 }} />11-20位</span>
                             <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 20, height: 20, borderRadius: "50%", background: "#EF4444", display: "inline-block", flexShrink: 0 }} />21位~</span>
                             <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 20, height: 20, borderRadius: "50%", background: "#6B7280", display: "inline-block", flexShrink: 0 }} />圏外</span>
                           </div>
-                          <div className="grid-kw-avg" style={{ fontSize: 16, color: "#555", textAlign: "center", width: 440 }}>
-                            平均順位: <span style={{ fontSize: 22, fontWeight: 900, color: "#e94560" }}>{snapshot.avgRank}</span>位
+                          <div className="grid-kw-avg" style={{ fontSize: 20, color: "#555", textAlign: "center", width: 440 }}>
+                            平均順位: <span style={{ fontSize: 28, fontWeight: 900, color: "#e94560" }}>{snapshot.avgRank}</span>位
                             {prevSnapshot && (() => {
                               const diff = prevSnapshot.avgRank - snapshot.avgRank;
                               return diff !== 0 ? (
-                                <span style={{ marginLeft: 8, fontSize: 16, fontWeight: 700, color: diff > 0 ? "#0a8f3c" : "#c0392b" }}>
+                                <span style={{ marginLeft: 8, fontSize: 20, fontWeight: 700, color: diff > 0 ? "#0a8f3c" : "#c0392b" }}>
                                   {diff > 0 ? `↑${diff.toFixed(1)}` : `↓${Math.abs(diff).toFixed(1)}`}
                                 </span>
                               ) : null;
