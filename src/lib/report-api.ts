@@ -161,6 +161,15 @@ export async function fetchGridRankingLive(shopIds: string[], shopName?: string)
     }
     sortByMonth(history);
 
+    // デバッグログ: overrides/logsから取得した月とavgRank
+    const overrideCount = monthMap.size;
+    const logCount = logs?.length || 0;
+    console.log(`[report-api] fetchGridRankingLive ${shopName}: overrides=${overrideCount} months, logs=${logCount} rows, result=${history.length} months: [${history.map(h => h.month).join(", ")}]`);
+    const latestMonth = history[history.length - 1];
+    if (latestMonth) {
+      console.log(`[report-api] fetchGridRankingLive LATEST ${latestMonth.month}: ${latestMonth.snapshots.map((s: any) => `${s.keyword}=${s.avgRank}(pts:${s.results?.length})`).join(", ")}`);
+    }
+
     const result: GridRankingReport = { keywords: Array.from(keywordSet), history };
     return result.keywords.length > 0 ? result : undefined;
   } catch (e) {
@@ -281,7 +290,23 @@ export async function getReportData(shopId: string, targetMonth?: string): Promi
       // rankingHistoryから補完（fetchGridRankingLiveが失敗しても実行）
       try {
         if (cached.rankingHistory) {
+          const beforeMonths = gridRanking?.history.map(h => h.month) || [];
           gridRanking = supplementGridFromRanking(gridRanking, cached.rankingHistory);
+          const afterMonths = gridRanking?.history.map(h => h.month) || [];
+          const addedMonths = afterMonths.filter(m => !beforeMonths.includes(m));
+          if (addedMonths.length > 0) {
+            console.log(`[report-api] supplementGrid ADDED months for ${shopName}: ${addedMonths.join(", ")} (before: ${beforeMonths.length}, after: ${afterMonths.length})`);
+          }
+          // ランダム生成された月のavgRankをログ出力
+          if (gridRanking) {
+            for (const m of addedMonths) {
+              const monthData = gridRanking.history.find(h => h.month === m);
+              if (monthData) {
+                const avgs = monthData.snapshots.map(s => `${s.keyword}=${s.avgRank}`).join(", ");
+                console.log(`[report-api] supplementGrid RANDOM data for ${m}: ${avgs}`);
+              }
+            }
+          }
         }
         if (gridRanking) cached.gridRanking = gridRanking;
       } catch (sErr: any) {
