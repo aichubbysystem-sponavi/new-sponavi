@@ -741,7 +741,7 @@ export default function ReportClient({
         const activeSlide = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden)");
         if (activeSlide) activeSlide.scrollIntoView({ block: "center" });
         await new Promise(r => setTimeout(r, 100));
-        renderGridMapForKw(kw, -2.5);
+        renderGridMapForKw(kw, 0);
         await new Promise(r => setTimeout(r, 2000));
         // マップコンテナのみキャプチャ（凡例・平均順位はHTMLで配置済み）
         const mapContainer = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden) .grid-map-container");
