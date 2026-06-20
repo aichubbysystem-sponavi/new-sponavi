@@ -1531,11 +1531,11 @@ export default function ReportClient({
                         <>
                           <div ref={el => { gridMapRefs.current[loopKw] = el; }} className="grid-map-container" style={{ width: 440, height: 400, borderRadius: 12, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,.15)", background: "#e8edf5" }} />
                           <div className="grid-kw-legend" style={{ display: "flex", fontSize: 16, color: "#555", marginTop: 2, width: 440, justifyContent: "space-between" }}>
-                            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#2563EB", display: "inline-block" }} />1-3位</span>
-                            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#16A34A", display: "inline-block" }} />4-10位</span>
-                            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#F59E0B", display: "inline-block" }} />11-20位</span>
-                            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#EF4444", display: "inline-block" }} />21位~</span>
-                            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#6B7280", display: "inline-block" }} />圏外</span>
+                            <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 16, height: 16, borderRadius: "50%", background: "#2563EB", display: "inline-block", flexShrink: 0 }} />1-3位</span>
+                            <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 16, height: 16, borderRadius: "50%", background: "#16A34A", display: "inline-block", flexShrink: 0 }} />4-10位</span>
+                            <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 16, height: 16, borderRadius: "50%", background: "#F59E0B", display: "inline-block", flexShrink: 0 }} />11-20位</span>
+                            <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 16, height: 16, borderRadius: "50%", background: "#EF4444", display: "inline-block", flexShrink: 0 }} />21位~</span>
+                            <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 16, height: 16, borderRadius: "50%", background: "#6B7280", display: "inline-block", flexShrink: 0 }} />圏外</span>
                           </div>
                           <div className="grid-kw-avg" style={{ fontSize: 16, color: "#555", textAlign: "center", width: 440 }}>
                             平均順位: <span style={{ fontSize: 22, fontWeight: 900, color: "#e94560" }}>{snapshot.avgRank}</span>位
