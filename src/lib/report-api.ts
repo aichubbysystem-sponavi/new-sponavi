@@ -193,19 +193,30 @@ export function supplementGridFromRanking(
   const newHistory: GridRankingMonthData[] = [...(gridRanking?.history || [])];
   const allKeywords = new Set(gridRanking?.keywords || []);
 
-  // 簡易グリッド推定（centerRankから7×7を生成）
-  const generateSimpleGrid = (centerRank: number) => {
+  // 簡易グリッド推定（centerRankから7×7を生成、決定論的ハッシュ使用）
+  const generateSimpleGrid = (centerRank: number, keyword: string, month: string) => {
     const GRID_SIZE = 7, CENTER = 3;
     const grid: { lat: number; lng: number; rank: number; row: number; col: number }[] = [];
-    const randInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
+    // 決定論的ハッシュ: 同じ入力なら常に同じ出力（Math.random()を排除）
+    const hash = (seed: string) => {
+      let h = 0;
+      for (let i = 0; i < seed.length; i++) {
+        h = ((h << 5) - h + seed.charCodeAt(i)) | 0;
+      }
+      return Math.abs(h);
+    };
+    const detRandInt = (min: number, max: number, row: number, col: number) => {
+      const h = hash(`${keyword}|${month}|${row}|${col}|${centerRank}`);
+      return min + (h % (max - min + 1));
+    };
     for (let row = 0; row < GRID_SIZE; row++) {
       for (let col = 0; col < GRID_SIZE; col++) {
         const dist = Math.max(Math.abs(row - CENTER), Math.abs(col - CENTER));
         let rank: number;
         if (dist === 0) rank = centerRank;
-        else if (dist === 1) rank = centerRank + randInt(1, 3);
-        else if (dist === 2) rank = centerRank + randInt(3, 7);
-        else rank = centerRank + randInt(7, 15);
+        else if (dist === 1) rank = centerRank + detRandInt(1, 3, row, col);
+        else if (dist === 2) rank = centerRank + detRandInt(3, 7, row, col);
+        else rank = centerRank + detRandInt(7, 15, row, col);
         if (rank > 100 || centerRank <= 0) rank = 0;
         grid.push({ lat: 0, lng: 0, rank, row, col });
       }
@@ -223,7 +234,7 @@ export function supplementGridFromRanking(
       const rank = ds.ranks[i];
       if (rank === null || rank <= 0) continue;
       allKeywords.add(ds.word);
-      const results = generateSimpleGrid(rank);
+      const results = generateSimpleGrid(rank, ds.word, month);
       const ranked = results.filter(r => r.rank > 0);
       const avg = ranked.length > 0 ? ranked.reduce((s, r) => s + r.rank, 0) / ranked.length : 0;
       snapshots.push({
