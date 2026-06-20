@@ -750,7 +750,7 @@ export default function ReportClient({
           let origZoom: number | undefined;
           let origCenter: any;
           if (gmap) {
-            origZoom = gmap.getZoom();
+            origZoom = gmap.getZoom() ?? 13;
             origCenter = gmap.getCenter();
             gmap.setZoom(origZoom - 1); // 1段階ズームアウトでマーカーを中央寄せ
           }
