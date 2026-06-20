@@ -1,15 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase, verifyAuth } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
-let _sb: any = null;
-function getSupabase(): any {
-  return _sb ||= createClient(SUPABASE_URL, SUPABASE_KEY);
-}
 
 /**
  * GET /api/report/display-settings?shopId=xxx
@@ -33,7 +27,6 @@ export async function GET(request: NextRequest) {
  * { shopId, sectionVisibility?, kwVisibility?, rwVisibility? }
  */
 export async function PUT(request: NextRequest) {
-  const { verifyAuth } = await import("@/lib/auth-verify");
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 

@@ -7,19 +7,16 @@
  * 解約店舗IDリストを返す
  */
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase, verifyAuth } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
 export async function GET(request: Request) {
-  const { verifyAuth } = await import("@/lib/auth-verify");
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+  const supabase = getSupabase();
   const { data, error } = await supabase
     .from("shops")
     .select("id, name, cancelled_at")
@@ -31,7 +28,6 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const { verifyAuth } = await import("@/lib/auth-verify");
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
@@ -39,7 +35,7 @@ export async function POST(request: Request) {
   const { shopId, cancel } = body;
   if (!shopId) return NextResponse.json({ error: "shopId is required" }, { status: 400 });
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+  const supabase = getSupabase();
   const { error } = await supabase
     .from("shops")
     .update({ cancelled_at: cancel ? new Date().toISOString() : null })

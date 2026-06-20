@@ -1,24 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase, verifyAuth } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const GCP_API_KEY = process.env.GCP_API_KEY || "";
 
-function getSupabase() {
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
-}
 
 /**
  * POST /api/report/competitors
  * 指定店舗の周辺競合店舗をGoogle Places API (New)で検索
  */
 export async function POST(request: NextRequest) {
-  const { verifyAuth } = await import("@/lib/auth-verify");
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid) {
     return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
@@ -59,7 +52,9 @@ export async function POST(request: NextRequest) {
       const locData = await locRes.json();
       category = locData?.categories?.primaryCategory?.displayName || "";
     }
-  } catch {}
+  } catch (e: unknown) {
+    console.error("[competitors] location fetch error:", e instanceof Error ? e.message : e);
+  }
 
   // 店舗名のキーワード部分 or カテゴリで検索
   const searchQuery = category || shop.name.replace(/[\s　]+/g, " ").split(" ").slice(-1)[0] || "店舗";

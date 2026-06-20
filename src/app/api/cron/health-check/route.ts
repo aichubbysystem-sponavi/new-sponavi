@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase, verifyCron } from "@/lib/supabase";
 import { getValidTokens } from "@/lib/gbp-token";
 
 export const dynamic = "force-dynamic";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
 /**
@@ -13,18 +11,14 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
  * システムヘルスチェック: DB接続・Go API疎通・OAuthトークン有効性を確認
  */
 export async function GET(request: NextRequest) {
-  const authHeader = request.headers.get("authorization");
-  const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const cronErr = verifyCron(request); if (cronErr) return cronErr;
 
   const checks: { name: string; status: "ok" | "error"; detail: string; ms: number }[] = [];
 
   // 1. Supabase DB接続
   const dbStart = Date.now();
   try {
-    const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+    const supabase = getSupabase();
     const { count, error } = await supabase.from("shops").select("id", { count: "exact", head: true });
     checks.push({
       name: "Supabase DB",
@@ -57,7 +51,7 @@ export async function GET(request: NextRequest) {
     const tokens = await getValidTokens();
     if (tokens.length > 0) {
       // リフレッシュ後のDB状態を確認
-      const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+      const supabase = getSupabase();
       const { data } = await supabase.from("system_oauth_tokens")
         .select("expiry, account_id").order("expiry", { ascending: false });
       const details = (data || []).map(t => {

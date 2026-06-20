@@ -37,33 +37,7 @@ import {
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, Filler);
 
-// ── Helpers ──
-
-function buildStackedOptions() {
-  return {
-    responsive: true, maintainAspectRatio: true, aspectRatio: 2.2,
-    plugins: {
-      title: { display: false },
-      legend: { position: "top" as const, labels: { font: { family: "Noto Sans JP", size: 11 } } },
-      tooltip: { mode: "index" as const, intersect: false, callbacks: {
-        afterBody: (items: any[]) => { let t = 0; items.forEach((i: any) => (t += i.parsed.y)); return "合計: " + t.toLocaleString(); },
-      }},
-    },
-    scales: {
-      x: { stacked: true, grid: { display: false } },
-      y: { stacked: true, beginAtZero: true, grid: { color: "#f0f0f0" }, ticks: { callback: (v: any) => Number(v).toLocaleString() } },
-    },
-  };
-}
-
-const lineOptions = {
-  responsive: true, maintainAspectRatio: true,
-  plugins: { legend: { display: false } },
-  scales: {
-    x: { grid: { display: false } },
-    y: { beginAtZero: false, grid: { color: "#f0f0f0" }, ticks: { callback: (v: any) => Number(v).toLocaleString() } },
-  },
-};
+import { buildStackedOptions, lineOptions } from "./chart-options";
 
 
 // ── Component ──
@@ -696,7 +670,9 @@ export default function ReportClient({
 
       const sHeader = document.createElement("div");
       sHeader.style.cssText = `background:linear-gradient(135deg,#1a1a2e,#0f3460);color:#fff;padding:12px 9px;font-size:16px;font-weight:700;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;`;
-      sHeader.innerHTML = `<span>${shop.name} — 多地点順位計測 サマリー</span>`;
+      // サマリーページ番号を計算: P1(サマリー)+P2(月次)+P3-5(グラフ3枚) = 5ページ固定 + オプション
+      const gridSummaryPageNum = 5 + (showKeywords ? 1 : 0) + (showRankingHistory ? 1 : 0) + 1;
+      sHeader.innerHTML = `<span>${shop.name} — 多地点順位計測 サマリー</span><span style="font-size:16px;opacity:0.45;font-weight:400;">${gridSummaryPageNum} / ${totalPages}</span>`;
       summarySlide.appendChild(sHeader);
 
       const sBody = document.createElement("div");
@@ -748,16 +724,16 @@ export default function ReportClient({
           const mapSlot = document.createElement("div");
           mapSlot.className = "grid-print-map-slot";
           mapSlot.dataset.kw = kwName;
-          mapSlot.style.cssText = `flex:1;display:flex;flex-direction:column;justify-content:center;padding:12px;overflow:hidden;`;
+          mapSlot.style.cssText = `flex:1;display:flex;flex-direction:column;justify-content:center;padding:8px 12px;overflow:hidden;`;
           // タイトル
           const title = document.createElement("div");
-          title.style.cssText = `font-size:18px;font-weight:700;color:#0f3460;border-left:5px solid #e94560;padding-left:12px;margin-bottom:10px;`;
+          title.style.cssText = `font-size:18px;font-weight:700;color:#0f3460;border-left:5px solid #e94560;padding-left:12px;margin-bottom:8px;`;
           title.textContent = `多地点順位 —「${kwName}」`;
           mapSlot.appendChild(title);
           // マップコンテナ
           const mapDiv = document.createElement("div");
           mapDiv.className = "grid-print-map";
-          mapDiv.style.cssText = `width:100%;height:500px;border-radius:12px;overflow:hidden;background:#e8edf5;`;
+          mapDiv.style.cssText = `width:100%;height:700px;border-radius:12px;overflow:hidden;background:#e8edf5;`;
           mapSlot.appendChild(mapDiv);
           // 凡例・平均順位はキャプチャ画像内に含まれるため、ここでは追加しない
           pairSlide.appendChild(mapSlot);
@@ -1419,8 +1395,13 @@ export default function ReportClient({
         const activeMonthI = defaultMonthI;
         const monthData = recentHistory[activeMonthI];
         const prevMonthData = activeMonthI > 0 ? recentHistory[activeMonthI - 1] : null;
-        pageNum++; // サマリーページ（PDF用）
-        const gridPageBase = pageNum;
+        pageNum++; // サマリーページ
+        const summaryPageNum = pageNum;
+
+        // サマリーページ用データ
+        const latestMonth = recentHistory[recentHistory.length - 1];
+        const prevMonth = recentHistory.length >= 2 ? recentHistory[recentHistory.length - 2] : null;
+        const trendMonthLabels = recentHistory.map(h => h.month.replace(/^\d{4}\//, "") + "月");
 
         // キーワードを2つずつペアにグループ化（PDF時に1ページ2KW表示用）
         const kwPairs: string[][] = [];
@@ -1428,7 +1409,95 @@ export default function ReportClient({
           kwPairs.push(gr.keywords.slice(i, i + 2));
         }
 
-        return kwPairs.map((pair, pairI) => {
+        // サマリースライド（web表示用、PDF時はgrid-kw-pairとして非表示→動的版に置換）
+        const summarySlide = (
+          <div key="grid-summary" className="grid-kw-pair">
+            <div style={slideStyle} className="slide">
+              <div style={slideBarStyle}>
+                <span>{shop.name} — 多地点順位計測 サマリー</span>
+                <span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(summaryPageNum)}</span>
+              </div>
+              <div style={{ ...slideBodyStyle, padding: "16px 24px", flexDirection: "row", gap: 24 }}>
+                {/* 左: 全KW比較テーブル */}
+                <div style={{ flex: "0 0 480px", display: "flex", flexDirection: "column" }}>
+                  {latestMonth && (
+                    <>
+                      <h3 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", margin: "0 0 8px" }}>全キーワード比較（{latestMonth.month}）</h3>
+                      <div style={{ borderRadius: 10, overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
+                          <thead>
+                            <tr>
+                              {["キーワード", "平均順位", "前月比", "計測地点"].map((t, ti) => (
+                                <th key={t} style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: ti === 0 ? "left" : "center", fontSize: 15 }}>{t}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {latestMonth.snapshots.map((s, si) => {
+                              const ps = prevMonth?.snapshots.find(p => p.keyword === s.keyword);
+                              const diff = ps ? ps.avgRank - s.avgRank : 0;
+                              return (
+                                <tr key={si} style={{ background: si % 2 === 0 ? "#fff" : "#f8f9fb" }}>
+                                  <td style={{ padding: "8px 12px", fontSize: 15, borderBottom: "1px solid #eee" }}>{s.keyword}</td>
+                                  <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 15, fontWeight: 800, borderBottom: "1px solid #eee",
+                                    color: s.avgRank <= 3 ? "#1d4ed8" : s.avgRank <= 10 ? "#15803d" : s.avgRank <= 20 ? "#b45309" : "#999" }}>{s.avgRank}</td>
+                                  <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 15, fontWeight: 700, borderBottom: "1px solid #eee",
+                                    color: diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
+                                    {ps ? (diff > 0 ? `↑${diff.toFixed(1)}` : diff < 0 ? `↓${Math.abs(diff).toFixed(1)}` : "→") : "-"}
+                                  </td>
+                                  <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 15, color: "#888", borderBottom: "1px solid #eee" }}>{s.gridSize}×{s.gridSize}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
+                </div>
+                {/* 右: 各KWの月別平均順位 */}
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10, overflow: "hidden" }}>
+                  {gr.keywords.map(kw => {
+                    const data = recentHistory.map(h => { const s = h.snapshots.find(s => s.keyword === kw); return s ? s.avgRank : null; });
+                    const valid = data.filter((v): v is number => v !== null);
+                    const diff = valid.length >= 2 ? valid[valid.length - 2] - valid[valid.length - 1] : 0;
+                    return (
+                      <div key={kw}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#0f3460", marginBottom: 6 }}>「{kw}」</div>
+                        <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", borderRadius: 6, overflow: "hidden" }}>
+                          <thead>
+                            <tr>
+                              {trendMonthLabels.map((l, li) => (
+                                <th key={li} style={{ background: li === trendMonthLabels.length - 1 ? "#e94560" : "#0f3460", color: "#fff", padding: "5px 4px", textAlign: "center", fontWeight: 600, fontSize: 12, whiteSpace: "nowrap" }}>{l}</th>
+                              ))}
+                              <th style={{ background: "#0f3460", color: "#fff", padding: "5px 4px", textAlign: "center", fontWeight: 600, fontSize: 12 }}>変動</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              {data.map((v, i) => (
+                                <td key={i} style={{ padding: "5px 4px", textAlign: "center", fontSize: 12, fontWeight: v !== null && v <= 5 ? 900 : 600,
+                                  color: v === null ? "#ddd" : v <= 3 ? "#1d4ed8" : v <= 10 ? "#15803d" : v <= 20 ? "#b45309" : "#999", borderBottom: "1px solid #eee" }}>
+                                  {v !== null ? v : "-"}
+                                </td>
+                              ))}
+                              <td style={{ padding: "5px 4px", textAlign: "center", fontSize: 12, fontWeight: 700, borderBottom: "1px solid #eee",
+                                color: diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
+                                {valid.length >= 2 ? (diff > 0 ? `↑${diff.toFixed(1)}` : diff < 0 ? `↓${Math.abs(diff).toFixed(1)}` : "→") : "→"}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+
+        return [summarySlide, ...kwPairs.map((pair, pairI) => {
           pageNum++; // ペア単位で1ページ（PDF基準）
           return (
           <div key={`grid-pair-${pairI}`} className="grid-kw-pair">
@@ -1607,7 +1676,7 @@ export default function ReportClient({
             })}
           </div>
         );
-        });
+        })];
       })()}
 
       {/* ════ 検索語句（月切り替え対応） ════ */}

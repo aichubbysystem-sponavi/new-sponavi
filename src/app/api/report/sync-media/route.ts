@@ -1,19 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase, verifyAuth } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
 const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
 const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
 
-function getSupabase() {
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
-}
 
 async function getOAuthToken(): Promise<string | null> {
   const supabase = getSupabase();
@@ -31,6 +25,7 @@ async function getOAuthToken(): Promise<string | null> {
   // リフレッシュ
   try {
     const res = await fetch("https://oauth2.googleapis.com/token", {
+      cache: "no-store" as const,
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
@@ -43,20 +38,10 @@ async function getOAuthToken(): Promise<string | null> {
     if (!res.ok) return data.access_token;
     const tokenData = await res.json();
 
-    await fetch(`${SUPABASE_URL}/rest/v1/tokens?account_id=not.is.null`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY,
-        Authorization: `Bearer ${SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY}`,
-        "Content-Profile": "system",
-        Prefer: "return=minimal",
-      },
-      body: JSON.stringify({
-        access_token: tokenData.access_token,
-        expiry: new Date(Date.now() + (tokenData.expires_in || 3600) * 1000).toISOString(),
-      }),
-    });
+    await getSupabase().from("system_oauth_tokens").update({
+      access_token: tokenData.access_token,
+      expiry: new Date(Date.now() + (tokenData.expires_in || 3600) * 1000).toISOString(),
+    }).not("account_id", "is", null);
 
     return tokenData.access_token;
   } catch {
@@ -90,6 +75,7 @@ async function fetchMedia(locationName: string, accessToken: string): Promise<Me
     if (nextPageToken) params.set("pageToken", nextPageToken);
 
     const res = await fetch(`${GBP_API_BASE}/${parent}/media?${params}`, {
+      cache: "no-store" as const,
       headers: { Authorization: `Bearer ${accessToken}` },
     });
 
@@ -104,7 +90,6 @@ async function fetchMedia(locationName: string, accessToken: string): Promise<Me
 }
 
 export async function POST(request: NextRequest) {
-  const { verifyAuth } = await import("@/lib/auth-verify");
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid) {
     return NextResponse.json({ error: "認証が必要です" }, { status: 401 });

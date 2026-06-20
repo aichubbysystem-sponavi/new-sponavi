@@ -4,13 +4,11 @@
  * v2: JST固定 / 最新月のみ取得 / 数値月比較
  */
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase, verifyAuth } from "@/lib/supabase";
 import { getExpectedMonthJST, compareMonths } from "@/lib/gbp-search-keywords";
 
 export const dynamic = "force-dynamic";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
 /** Supabaseの1000行制限を回避してページネーションで全件取得 */
 async function fetchAll<T>(
@@ -39,13 +37,12 @@ async function fetchAll<T>(
 
 export async function GET(request: Request) {
   // 認証チェック
-  const { verifyAuth } = await import("@/lib/auth-verify");
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid) {
     return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   }
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+  const supabase = getSupabase();
   const expectedMonth = getExpectedMonthJST();
 
   // 1. Get all active shops (解約店舗を除外, paginated to bypass 1000 row limit)

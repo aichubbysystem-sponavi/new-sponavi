@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase, verifyCron } from "@/lib/supabase";
 import { getOAuthToken } from "@/lib/gbp-token";
 import { resolveLocationName } from "@/lib/gbp-location";
 import { resolveImageUrl, cleanupImage } from "@/lib/image-proxy";
@@ -7,17 +7,11 @@ import { resolveImageUrl, cleanupImage } from "@/lib/image-proxy";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
 const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
 const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
 
-function getSupabase() {
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
-}
 
 /** 全OAuthトークンを取得（system_oauth_tokens + system.tokens両方から） */
 async function getAllOAuthTokens(): Promise<string[]> {
@@ -34,6 +28,7 @@ async function getAllOAuthTokens(): Promise<string[]> {
       } else if (row.refresh_token && GBP_CLIENT_ID && GBP_CLIENT_SECRET) {
         try {
           const res = await fetch("https://oauth2.googleapis.com/token", {
+            cache: "no-store" as const,
             method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
             body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET,
               refresh_token: row.refresh_token, grant_type: "refresh_token" }),
@@ -56,6 +51,7 @@ async function getAllOAuthTokens(): Promise<string[]> {
         if (row.refresh_token && GBP_CLIENT_ID && GBP_CLIENT_SECRET) {
           try {
             const res = await fetch("https://oauth2.googleapis.com/token", {
+              cache: "no-store" as const,
               method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
               body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET,
                 refresh_token: row.refresh_token, grant_type: "refresh_token" }),
@@ -103,6 +99,7 @@ async function postViaGoApi(
 
   try {
     const res = await fetch(`${GO_API_URL}/api/shop/${shopId}/local_post`, {
+      cache: "no-store" as const,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -159,6 +156,7 @@ async function postDirectGbpApi(
 
   try {
     let res = await fetch(`${GBP_API_BASE}/${locationName}/localPosts`, {
+      cache: "no-store" as const,
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
       body: JSON.stringify(postBody),
@@ -169,6 +167,7 @@ async function postDirectGbpApi(
       const retryBody: any = { summary: postBody.summary, topicType: "STANDARD", languageCode: "ja" };
       if (postBody.callToAction) retryBody.callToAction = postBody.callToAction;
       res = await fetch(`${GBP_API_BASE}/${locationName}/localPosts`, {
+        cache: "no-store" as const,
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
         body: JSON.stringify(retryBody),
@@ -199,6 +198,7 @@ async function uploadPhotoViaGoApi(
 
   try {
     const res = await fetch(`${GO_API_URL}/api/shop/${shopId}/media_direct`, {
+      cache: "no-store" as const,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -223,6 +223,7 @@ async function uploadPhotoDirectMediaApi(
 
   try {
     const res = await fetch(`${GBP_API_BASE}/${locationName}/media`, {
+      cache: "no-store" as const,
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
       body: JSON.stringify({ mediaFormat: "PHOTO", sourceUrl: post.photo_url, locationAssociation: { category: "ADDITIONAL" } }),
@@ -245,11 +246,7 @@ async function uploadPhotoDirectMediaApi(
  * 方式: Go API優先 → 失敗時は直接GBP API
  */
 export async function GET(request: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  const authHeader = request.headers.get("authorization");
-  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const cronErr = verifyCron(request); if (cronErr) return cronErr;
 
   const supabase = getSupabase();
   const now = new Date().toISOString();

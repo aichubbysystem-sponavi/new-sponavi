@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { verifyAuth } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -8,7 +9,6 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: Request) {
   // 認証チェック
-  const { verifyAuth } = await import("@/lib/auth-verify");
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid) {
     return NextResponse.json({ error: "認証が必要です" }, { status: 401 });

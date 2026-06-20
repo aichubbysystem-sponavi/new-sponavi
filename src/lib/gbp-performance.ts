@@ -5,18 +5,12 @@
  * トークン: 検索語句と同じ RPAchubby の OAuthトークン（無料API）
  */
 
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase } from "@/lib/supabase";
 import { getExpectedMonthJST, compareMonths } from "./gbp-search-keywords";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
 const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
 
-function getSupabase() {
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
-}
 
 /** 月別パフォーマンスデータ */
 export interface MonthlyPerformance {
@@ -200,7 +194,7 @@ export async function cachePerformanceData(
   shopName: string,
   monthlyData: MonthlyPerformance[]
 ): Promise<void> {
-  if (!SUPABASE_URL || monthlyData.length === 0) return;
+  if (monthlyData.length === 0) return;
   const supabase = getSupabase();
 
   const rows = monthlyData.map((m) => ({
@@ -222,7 +216,7 @@ export async function cachePerformanceData(
 
 /** Supabaseキャッシュから読み込み（shop_id → shop_name フォールバック、重複店舗対応） */
 export async function getCachedPerformance(shopId: string, shopName?: string): Promise<MonthlyPerformance[]> {
-  if (!SUPABASE_URL) return [];
+  
   const supabase = getSupabase();
 
   // まず shop_id で検索

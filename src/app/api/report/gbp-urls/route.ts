@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { verifyAuth } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +37,6 @@ function parseCSV(text: string): string[][] {
  * 写真投稿用シートの全タブからA列=店舗名, B列=GBP URLのマッピングを返す
  */
 export async function GET(request: NextRequest) {
-  const { verifyAuth } = await import("@/lib/auth-verify");
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 

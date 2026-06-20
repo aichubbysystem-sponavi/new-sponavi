@@ -1,19 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase, verifyAuth } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
 const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
 const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
 
-function getSupabase() {
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
-}
 
 async function getOAuthToken(): Promise<string | null> {
   // Go API経由で有効なトークンを取得（複数アカウント対応）
@@ -36,6 +30,7 @@ async function getDropboxAccessToken(): Promise<string | null> {
 
   try {
     const res = await fetch("https://api.dropboxapi.com/oauth2/token", {
+      cache: "no-store" as const,
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
@@ -83,6 +78,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
     // shared_linkではrecursive非対応のため、サブフォルダを個別にlist_folder
     const listSharedFolder = async (relativePath: string): Promise<{ files: any[]; folders: any[] }> => {
       const res = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
+        cache: "no-store" as const,
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
         body: JSON.stringify({ path: relativePath, shared_link: { url: shareUrl }, limit: 2000 }),
@@ -101,6 +97,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
       while (hasMore && cursor) {
         try {
           const contRes = await fetch("https://api.dropboxapi.com/2/files/list_folder/continue", {
+            cache: "no-store" as const,
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
             body: JSON.stringify({ cursor }),
@@ -178,6 +175,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
     let sharedRootPath = "";
     try {
       const metaRes = await fetch("https://api.dropboxapi.com/2/sharing/get_shared_link_metadata", {
+        cache: "no-store" as const,
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
         body: JSON.stringify({ url: shareUrl }),
@@ -196,6 +194,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
       // 方法1: get_temporary_link（パスをそのまま試行）
       try {
         const linkRes = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
+          cache: "no-store" as const,
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
           body: JSON.stringify({ path: file.path }),
@@ -214,6 +213,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
           : `${sharedRootPath}${file.path.startsWith("/") ? "" : "/"}${file.path}`;
         try {
           const linkRes2 = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
+            cache: "no-store" as const,
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
             body: JSON.stringify({ path: absPath }),
@@ -233,6 +233,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
           : file.path;
         try {
           const shareRes = await fetch("https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings", {
+            cache: "no-store" as const,
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
             body: JSON.stringify({ path: tryPath, settings: { requested_visibility: "public", access: "viewer" } }),
@@ -281,6 +282,7 @@ async function getRootSubfolders(dbxToken: string): Promise<{ name: string; url:
   try {
     let allEntries: any[] = [];
     const res = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
+      cache: "no-store" as const,
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
       body: JSON.stringify({ path: "", shared_link: { url: shareUrl }, limit: 2000 }),
@@ -297,6 +299,7 @@ async function getRootSubfolders(dbxToken: string): Promise<{ name: string; url:
     while (hasMore && cursor) {
       try {
         const contRes = await fetch("https://api.dropboxapi.com/2/files/list_folder/continue", {
+          cache: "no-store" as const,
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
           body: JSON.stringify({ cursor }),
@@ -352,6 +355,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
   try {
     let files: { name: string; path: string }[] = [];
     const res = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
+      cache: "no-store" as const,
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
       body: JSON.stringify({ path: relativePath, shared_link: { url: shareUrl }, limit: 2000 }),
@@ -368,6 +372,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
     while (hasMore && cursor) {
       try {
         const contRes = await fetch("https://api.dropboxapi.com/2/files/list_folder/continue", {
+          cache: "no-store" as const,
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
           body: JSON.stringify({ cursor }),
@@ -390,6 +395,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
     for (const sf of folderEntries) {
       try {
         const subRes = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
+          cache: "no-store" as const,
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
           body: JSON.stringify({ path: `${relativePath}/${sf.name}`, shared_link: { url: shareUrl }, limit: 2000 }),
@@ -420,6 +426,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
     let sharedRootPath = "";
     try {
       const metaRes = await fetch("https://api.dropboxapi.com/2/sharing/get_shared_link_metadata", {
+        cache: "no-store" as const,
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
         body: JSON.stringify({ url: shareUrl }),
@@ -441,6 +448,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
       // 方法1: get_temporary_link（path_displayそのまま）
       try {
         const linkRes = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
+          cache: "no-store" as const,
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
           body: JSON.stringify({ path: file.path }),
@@ -457,6 +465,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
         const absPath = file.path.startsWith(sharedRootPath) ? file.path : `${sharedRootPath}${file.path.startsWith("/") ? "" : "/"}${file.path}`;
         try {
           const linkRes2 = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
+            cache: "no-store" as const,
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
             body: JSON.stringify({ path: absPath }),
@@ -474,6 +483,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
         const tryPath = sharedRootPath ? `${sharedRootPath}${file.path.startsWith("/") ? "" : "/"}${file.path}` : file.path;
         try {
           const shareRes = await fetch("https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings", {
+            cache: "no-store" as const,
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
             body: JSON.stringify({ path: tryPath, settings: { requested_visibility: "public", access: "viewer" } }),
@@ -538,7 +548,6 @@ function parseCSV(text: string): string[][] {
  * body: { sheetId, targetDate (YYYY-MM-DD), dryRun? }
  */
 export async function POST(request: NextRequest) {
-  const { verifyAuth } = await import("@/lib/auth-verify");
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
@@ -962,6 +971,7 @@ export async function POST(request: NextRequest) {
         }
 
         const mediaRes = await fetch(`${GBP_API_BASE}/${locationName}/media`, {
+          cache: "no-store" as const,
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
           body: JSON.stringify({ mediaFormat: "PHOTO", sourceUrl: stableUrl, locationAssociation: { category: "ADDITIONAL" } }),
@@ -998,6 +1008,7 @@ export async function POST(request: NextRequest) {
         const directUrl = match.photoUrl.includes("dropboxusercontent.com") || match.photoUrl.includes("dl.dropbox")
           ? match.photoUrl : convertDropboxUrl(match.photoUrl);
         const mediaRes = await fetch(`${GBP_API_BASE}/${locationName}/media`, {
+          cache: "no-store" as const,
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
           body: JSON.stringify({ mediaFormat: "PHOTO", sourceUrl: directUrl, locationAssociation: { category: "ADDITIONAL" } }),
@@ -1039,6 +1050,7 @@ export async function POST(request: NextRequest) {
 
     try {
       let res = await fetch(`${GBP_API_BASE}/${locationName}/localPosts`, {
+        cache: "no-store" as const,
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
         body: JSON.stringify(postBody),
@@ -1050,6 +1062,7 @@ export async function POST(request: NextRequest) {
         const retryBody: any = { summary: trimmedSummary, topicType: "STANDARD", languageCode: "ja" };
         if (match.ctaUrl) retryBody.callToAction = { actionType: "LEARN_MORE", url: match.ctaUrl };
         res = await fetch(`${GBP_API_BASE}/${locationName}/localPosts`, {
+          cache: "no-store" as const,
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
           body: JSON.stringify(retryBody),
@@ -1071,6 +1084,7 @@ export async function POST(request: NextRequest) {
           let verified = false;
           try {
             const verifyRes = await fetch(`${GBP_API_BASE}/${result.name}`, {
+              cache: "no-store" as const,
               headers: { Authorization: `Bearer ${accessToken}` },
               signal: AbortSignal.timeout(10000),
             });

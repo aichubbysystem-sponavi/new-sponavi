@@ -1,24 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase, verifyAuth } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
-function getSupabase() {
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
-}
 
 /**
  * POST /api/report/bulk-generate
  * 複数店舗の投稿文をAIで一括生成 → scheduled_postsに保存
  */
 export async function POST(request: NextRequest) {
-  const { verifyAuth } = await import("@/lib/auth-verify");
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   if (!ANTHROPIC_API_KEY) return NextResponse.json({ error: "ANTHROPIC_API_KEYが設定されていません" }, { status: 500 });
@@ -39,24 +32,26 @@ export async function POST(request: NextRequest) {
   const count = Math.min(postsPerShop || 4, 8);
   const results: { shopName: string; generated: number; error?: string }[] = [];
 
-  for (const shopId of shopIds.slice(0, 50)) {
-    // 店舗情報取得
-    const { data: shop } = await supabase
-      .from("shops")
-      .select("id, name, gbp_shop_name")
-      .eq("id", shopId)
-      .single();
+  const targetIds = shopIds.slice(0, 50);
 
+  // バッチ取得（N+1→2クエリ）
+  const { data: allShops } = await supabase
+    .from("shops")
+    .select("id, name, gbp_shop_name")
+    .in("id", targetIds);
+  const shopMap = new Map((allShops || []).map(s => [s.id, s]));
+
+  const { data: allHearings } = await supabase
+    .from("hearing_sheets")
+    .select("shop_id, data")
+    .in("shop_id", targetIds);
+  const hearingMap = new Map((allHearings || []).map(h => [h.shop_id, h.data]));
+
+  for (const shopId of targetIds) {
+    const shop = shopMap.get(shopId);
     if (!shop) { results.push({ shopName: shopId, generated: 0, error: "店舗不明" }); continue; }
 
-    // ヒアリングシート取得
-    const { data: hearingData } = await supabase
-      .from("hearing_sheets")
-      .select("data")
-      .eq("shop_id", shopId)
-      .maybeSingle();
-
-    const hearing = hearingData?.data || {};
+    const hearing = hearingMap.get(shopId) || {};
     const hearingInfo = Object.entries(hearing)
       .filter(([, v]) => v)
       .map(([k, v]) => `${k}: ${v}`)

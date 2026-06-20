@@ -1,29 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase, verifyCron } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
 const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
 const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
 
-function getSupabase() {
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
-}
 
 const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 const DB_PASSWORD = process.env.SUPABASE_DB_PASSWORD || "";
-const SUPABASE_PROJECT_ID = (SUPABASE_URL.match(/https:\/\/([^.]+)/) || [])[1] || "";
+const SUPABASE_PROJECT_ID = ((process.env.NEXT_PUBLIC_SUPABASE_URL || "").match(/https:\/\/([^.]+)/) || [])[1] || "";
 
 async function refreshOAuthToken(rt: string): Promise<string | null> {
   if (!rt || !GBP_CLIENT_ID || !GBP_CLIENT_SECRET) return null;
   try {
     const res = await fetch("https://oauth2.googleapis.com/token", {
+      cache: "no-store" as const,
       method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET, refresh_token: rt, grant_type: "refresh_token" }),
     });
@@ -93,6 +88,7 @@ async function getLocationMap(token: string): Promise<Map<string, LocMapping>> {
   const map = new Map<string, LocMapping>();
   try {
     const res = await fetch(`${GO_API_URL}/api/gbp/account`, {
+      cache: "no-store" as const,
       headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(20000),
     });
@@ -130,12 +126,7 @@ function starToNum(s: string | null): number {
  * 毎日9:00 JSTに実行
  */
 export async function GET(request: NextRequest) {
-  const authHeader = request.headers.get("authorization");
-  const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
-    console.error("[cron/auto-reply] Unauthorized: CRON_SECRET未設定または不一致");
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const cronErr = verifyCron(request); if (cronErr) return cronErr;
 
   if (!ANTHROPIC_API_KEY) {
     return NextResponse.json({ error: "ANTHROPIC_API_KEY未設定" }, { status: 500 });
@@ -221,6 +212,7 @@ export async function GET(request: NextRequest) {
 - 返信文のみ出力（余計な説明不要）`;
 
       const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
+        cache: "no-store" as const,
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
         body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 300, messages: [{ role: "user", content: prompt }] }),
@@ -236,6 +228,7 @@ export async function GET(request: NextRequest) {
       let replySuccess = false;
       for (const token of allTokens) {
         const gbpRes = await fetch(`${GBP_API_BASE}/${locationName}/reviews/${review.review_id}/reply`, {
+          cache: "no-store" as const,
           method: "PUT",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify({ comment: replyText }),
@@ -248,7 +241,8 @@ export async function GET(request: NextRequest) {
         }
       }
       if (!replySuccess) errors++;
-    } catch {
+    } catch (e: unknown) {
+      console.error(`[cron/auto-reply] reply error:`, e instanceof Error ? e.message : e);
       errors++;
     }
   }

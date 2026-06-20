@@ -8,17 +8,11 @@
  * v2: JST固定 / IDベース / 月ソート修正 / syncShopSearchKeywords統一関数
  */
 
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase } from "@/lib/supabase";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
 const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
 
-function getSupabase() {
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
-}
 
 export interface MonthlyKeywords {
   month: string; // "2026/5"
@@ -192,7 +186,7 @@ export async function cacheSearchKeywords(
   shopName: string,
   monthlyData: MonthlyKeywords[]
 ): Promise<void> {
-  if (!SUPABASE_URL || monthlyData.length === 0) return;
+  if (monthlyData.length === 0) return;
   const supabase = getSupabase();
 
   const rows = monthlyData.map((m) => ({
@@ -219,7 +213,7 @@ export async function cacheSearchKeywords(
 export async function getCachedSearchKeywords(
   shopId: string
 ): Promise<MonthlyKeywords[]> {
-  if (!SUPABASE_URL) return [];
+  
   const supabase = getSupabase();
 
   const { data, error } = await supabase

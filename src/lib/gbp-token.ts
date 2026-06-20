@@ -4,18 +4,11 @@
  * - フォールバック: DBのrefresh_tokenでリフレッシュ
  */
 
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase } from "@/lib/supabase";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
 const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
-
-function getSupabase() {
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
-}
 
 /**
  * Go APIから有効なGBP OAuthトークンを取得
@@ -55,7 +48,9 @@ async function refreshFromDb(): Promise<string | null> {
   try {
     const { data } = await supabase.rpc("get_valid_tokens");
     if (data && data.length > 0) refreshToken = data[0].refresh_token;
-  } catch {}
+  } catch (e: unknown) {
+    console.error("[gbp-token] RPC get_valid_tokens failed:", e instanceof Error ? e.message : e);
+  }
   if (!refreshToken) {
     const { data } = await supabase.from("system_oauth_tokens")
       .select("refresh_token").limit(1).maybeSingle();
@@ -65,6 +60,7 @@ async function refreshFromDb(): Promise<string | null> {
 
   try {
     const res = await fetch("https://oauth2.googleapis.com/token", {
+      cache: "no-store" as const,
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
@@ -76,7 +72,8 @@ async function refreshFromDb(): Promise<string | null> {
     if (!res.ok) return null;
     const data = await res.json();
     return data.access_token || null;
-  } catch {
+  } catch (e: unknown) {
+    console.error("[gbp-token] DB refresh failed:", e instanceof Error ? e.message : e);
     return null;
   }
 }

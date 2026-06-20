@@ -4,12 +4,10 @@
  * 部分一致 → ヒット0件なら全件返却
  */
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase, verifyAuth } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
 function formatReview(r: any) {
   const comment = r.comment || "";
@@ -26,7 +24,6 @@ function formatReview(r: any) {
 }
 
 export async function GET(request: NextRequest) {
-  const { verifyAuth } = await import("@/lib/auth-verify");
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
@@ -45,7 +42,7 @@ export async function GET(request: NextRequest) {
   const positiveRatings = new Set(["FOUR", "FIVE", "FOUR_STARS", "FIVE_STARS"]);
   const ratingFilter = type === "negative" ? negativeRatings : type === "positive" ? positiveRatings : null;
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+  const supabase = getSupabase();
 
   // 店舗検索: 同名の全IDを取得（重複店舗対応）
   const shopIds: string[] = [];

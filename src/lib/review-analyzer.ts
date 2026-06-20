@@ -3,15 +3,10 @@
  * Supabase DBから分析結果を読み取り、なければテンプレート生成
  */
 
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase } from "@/lib/supabase";
 import type { ReviewAnalysis } from "./report-data";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
-function getSupabase() {
-  return createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-}
 
 interface StoredAnalysis {
   shop_name: string;
@@ -34,7 +29,7 @@ export async function getStoredAnalysis(
   shopName: string,
   month?: string
 ): Promise<{ analysis: ReviewAnalysis; comments: string[]; rating?: number; reviewCount?: number; targetMonth?: string | null; source: "db" } | null> {
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return null;
+  
 
   try {
     const supabase = getSupabase();

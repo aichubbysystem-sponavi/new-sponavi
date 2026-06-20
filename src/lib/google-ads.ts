@@ -15,6 +15,7 @@ async function getAccessToken(): Promise<string> {
   }
 
   const res = await fetch(TOKEN_URL, {
+    cache: "no-store" as const,
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -23,7 +24,6 @@ async function getAccessToken(): Promise<string> {
       refresh_token: process.env.GOOGLE_ADS_REFRESH_TOKEN!,
       grant_type: "refresh_token",
     }),
-    cache: "no-store",
   });
 
   const data = await res.json();
@@ -47,6 +47,7 @@ async function executeGaql(customerId: string, query: string): Promise<any[]> {
   const res = await fetch(
     `${ADS_API_URL}/customers/${customerId}/googleAds:search`,
     {
+      cache: "no-store" as const,
       method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -55,7 +56,6 @@ async function executeGaql(customerId: string, query: string): Promise<any[]> {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ query }),
-      cache: "no-store",
     }
   );
 

@@ -1,25 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase, verifyAuth } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const DIFY_BASE_URL = process.env.DIFY_BASE_URL || "";
 const DIFY_DATASET_API_KEY = process.env.DIFY_DATASET_API_KEY || "";
 const DIFY_DATASET_ID = process.env.DIFY_DATASET_ID || "";
 
-function getSupabase() {
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
-}
 
 /**
  * GET /api/report/tasks
  * 全機能から未完了タスクを集約して返す
  */
 export async function GET(request: NextRequest) {
-  const { verifyAuth } = await import("@/lib/auth-verify");
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   const supabase = getSupabase();
@@ -83,7 +76,6 @@ export async function GET(request: NextRequest) {
  * 完了した業務をDifyナレッジベースに記録
  */
 export async function POST(request: Request) {
-  const { verifyAuth } = await import("@/lib/auth-verify");
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 

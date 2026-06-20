@@ -1,18 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase, verifyAuth } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
 const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
 const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
 
-function getSupabase() {
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
-}
 
 async function getOAuthToken(): Promise<string | null> {
   const supabase = getSupabase();
@@ -27,6 +21,7 @@ async function getOAuthToken(): Promise<string | null> {
 
   try {
     const res = await fetch("https://oauth2.googleapis.com/token", {
+      cache: "no-store" as const,
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
@@ -49,7 +44,6 @@ async function getOAuthToken(): Promise<string | null> {
  * GBP投稿を作成（写真対応）
  */
 export async function POST(request: NextRequest) {
-  const { verifyAuth } = await import("@/lib/auth-verify");
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid) {
     return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
@@ -111,6 +105,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const res = await fetch(`${GBP_API_BASE}/${locationName}/localPosts`, {
+      cache: "no-store" as const,
       method: "POST",
       headers: {
         "Content-Type": "application/json",

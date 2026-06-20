@@ -14,7 +14,7 @@ import type {
   ChartData,
   ReviewAnalysis,
 } from "./report-data";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase } from "@/lib/supabase";
 
 // ── スプレッドシート設定 ──
 
@@ -386,11 +386,7 @@ async function fetchGridRankingData(
 ): Promise<import("./report-data").GridRankingReport> {
   const empty: import("./report-data").GridRankingReport = { keywords: [], history: [] };
   try {
-    const { createClient } = await import("@supabase/supabase-js");
-    const sb = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
-    );
+    const sb = getSupabase();
     console.log(`[grid-ranking] fetching for shopId=${shopId}`);
     const { data: logs, error } = await sb
       .from("grid_ranking_logs")
@@ -489,11 +485,7 @@ async function fetchAllExternalData(
     // グリッド順位計測（overrides優先 → 実測データフォールバック）
     (async () => {
       try {
-        const { createClient } = await import("@supabase/supabase-js");
-        const sb = createClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-          process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
-        );
+        const sb = getSupabase();
         const { data: overrides } = await sb
           .from("grid_ranking_overrides")
           .select("keyword, month, grid_size, results, updated_at")
@@ -671,8 +663,8 @@ export async function buildReportData(
   // 店舗座標を取得（多地点グリッドマップ表示用）
   let shopLat = 0, shopLng = 0, shopCategory = "";
   try {
-    const { createClient: cc } = await import("@supabase/supabase-js");
-    const sbc = cc(process.env.NEXT_PUBLIC_SUPABASE_URL || "", process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "");
+    
+    const sbc = getSupabase();
     const { data: coordRows } = await sbc.from("shops").select("gbp_latitude, gbp_longitude, gbp_main_category").eq("name", shopName).not("gbp_latitude", "is", null).gt("gbp_latitude", 0).limit(1);
     if (coordRows && coordRows.length > 0) { shopLat = coordRows[0].gbp_latitude || 0; shopLng = coordRows[0].gbp_longitude || 0; shopCategory = coordRows[0].gbp_main_category || ""; }
   } catch {}
@@ -813,8 +805,7 @@ export async function getShopsFromSpreadsheet(): Promise<ShopListItem[] | null> 
 
   // Supabaseからカテゴリを取得して付与
   try {
-    const { createClient } = await import("@supabase/supabase-js");
-    const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL || "", process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "");
+    const sb = getSupabase();
     const { data: catRows } = await sb.from("shops").select("name, gbp_main_category").not("gbp_main_category", "is", null);
     if (catRows) {
       const catMap = new Map(catRows.map((r: any) => [r.name, r.gbp_main_category]));
@@ -870,10 +861,7 @@ export async function getShopsFromSpreadsheet(): Promise<ShopListItem[] | null> 
       }
 
       // Supabaseからキャッシュ済みマッピングを取得
-      const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-        process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
-      );
+      const supabase = getSupabase();
       const { data: cachedMappings } = await supabase
         .from("sheet_tab_mapping")
         .select("tab_gid, shop_name")
@@ -967,10 +955,7 @@ export async function getReportFromSpreadsheet(
   // Supabaseから店舗ID・GBPロケーション名を取得（検索語句API用）
   let opts: { shopId?: string; locationFullPath?: string } | undefined;
   try {
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
-    );
+    const supabase = getSupabase();
     // 完全一致 → 部分一致の順で検索（スプレッドシート名とDB名の表記揺れ対応）
     let shop: any = null;
     const { data: exact } = await supabase

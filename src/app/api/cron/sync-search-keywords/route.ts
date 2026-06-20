@@ -6,23 +6,17 @@
  * v2: 共有lib使用 / 未同期+古いのみ対象 / バッチ分割（タイムアウト対策）
  */
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase, verifyCron } from "@/lib/supabase";
 import { syncShopSearchKeywords, getExpectedMonthJST, compareMonths } from "@/lib/gbp-search-keywords";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 800;
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
 export async function GET(request: NextRequest) {
-  const authHeader = request.headers.get("authorization");
-  const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const cronErr = verifyCron(request); if (cronErr) return cronErr;
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+  const supabase = getSupabase();
   const expectedMonth = getExpectedMonthJST();
   const startTime = Date.now();
   const TIME_LIMIT = 750_000; // 750秒（maxDuration=800の安全マージン）

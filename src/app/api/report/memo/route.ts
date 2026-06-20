@@ -1,15 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { validateBody, memoSchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
-function getSupabase() {
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
-}
 
 /**
  * GET /api/report/memo?shopName=xxx&month=2026/3
@@ -51,16 +46,12 @@ export async function GET(request: NextRequest) {
  * { shopName, month, memo }
  */
 export async function POST(request: NextRequest) {
-  const { verifyAuth } = await import("@/lib/auth-verify");
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
-  const body = await request.json();
-  const { shopName, month, memo } = body as { shopName: string; month: string; memo: string };
-
-  if (!shopName || !month) {
-    return NextResponse.json({ error: "shopNameとmonthが必要です" }, { status: 400 });
-  }
+  const { data: body, error: valErr } = await validateBody(request, memoSchema);
+  if (valErr) return valErr;
+  const { shopName, month, memo } = body;
 
   const supabase = getSupabase();
 

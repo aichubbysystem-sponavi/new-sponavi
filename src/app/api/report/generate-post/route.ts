@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { verifyAuth } from "@/lib/supabase";
+import { validateBody, generatePostSchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -10,22 +12,14 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
  * 投稿文章をAIで自動生成
  */
 export async function POST(request: NextRequest) {
-  const { verifyAuth } = await import("@/lib/auth-verify");
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   if (!ANTHROPIC_API_KEY) return NextResponse.json({ error: "ANTHROPIC_API_KEYが設定されていません" }, { status: 500 });
 
-  const body = await request.json();
-  const { shopName, category, topicType, keywords, tone, count } = body as {
-    shopName: string;
-    category?: string;
-    topicType: string;
-    keywords?: string;
-    tone?: string;
-    count?: number;
-  };
-
-  if (!shopName) return NextResponse.json({ error: "shopNameが必要です" }, { status: 400 });
+  const { data: body, error: valErr } = await validateBody(request, generatePostSchema);
+  if (valErr) return valErr;
+  const { shopName, topicType, keywords, tone, count } = body;
+  const category = "";
 
   const topicLabel: Record<string, string> = {
     STANDARD: "通常投稿（お店の魅力・日常の発信）",
@@ -51,6 +45,7 @@ ${keywords}
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 15000);
       const res = await fetch("https://api.anthropic.com/v1/messages", {
+        cache: "no-store" as const,
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
         body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 1500, messages: [{ role: "user", content: translatePrompt }] }),
@@ -82,6 +77,7 @@ ${keywords}
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 15000);
       const res = await fetch("https://api.anthropic.com/v1/messages", {
+        cache: "no-store" as const,
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
         body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 1000, messages: [{ role: "user", content: proofPrompt }] }),
@@ -101,7 +97,7 @@ ${keywords}
 
   const prompt = `あなたはMEO対策のプロです。「${shopName}」${category ? `（業種: ${category}）` : ""}のGoogleビジネスプロフィールに投稿する文章を${n}パターン生成してください。
 
-【投稿タイプ】${topicLabel[topicType] || topicType}
+【投稿タイプ】${topicType ? (topicLabel[topicType as keyof typeof topicLabel] || topicType) : "standard"}
 ${keywords ? `【含めたいキーワード】${keywords}` : ""}
 ${tone ? `【トーン】${tone}` : ""}
 
@@ -127,6 +123,7 @@ ${n >= 5 ? "\n5.\n(投稿文)" : ""}`;
     const timeout = setTimeout(() => controller.abort(), 25000);
 
     const res = await fetch("https://api.anthropic.com/v1/messages", {
+      cache: "no-store" as const,
       method: "POST",
       headers: {
         "Content-Type": "application/json",

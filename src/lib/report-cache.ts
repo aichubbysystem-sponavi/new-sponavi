@@ -5,21 +5,17 @@
  * 通常のページ表示はSupabaseから高速読み取り
  */
 
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase } from "@/lib/supabase";
 import type { ShopListItem, ReportData } from "./report-data";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
-/** 読み取り用（anon key） */
+/** 読み取り / 書き込み共用 */
 function readClient() {
-  return createClient(SUPABASE_URL, ANON_KEY || SERVICE_KEY);
+  return getSupabase();
 }
 
-/** 書き込み用（service role key - RLSバイパス） */
 function writeClient() {
-  return createClient(SUPABASE_URL, SERVICE_KEY || ANON_KEY);
+  return getSupabase();
 }
 
 // ── 店舗一覧キャッシュ ──

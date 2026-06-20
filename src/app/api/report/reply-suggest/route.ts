@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { verifyAuth } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +10,6 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
  * 口コミに対するAI返信案を生成
  */
 export async function POST(request: NextRequest) {
-  const { verifyAuth } = await import("@/lib/auth-verify");
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid) {
     return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
@@ -82,6 +82,7 @@ ${reviewerName ? `投稿者: ${reviewerName}` : ""}
     const timeout = setTimeout(() => controller.abort(), 20000);
 
     const res = await fetch("https://api.anthropic.com/v1/messages", {
+      cache: "no-store" as const,
       method: "POST",
       headers: {
         "Content-Type": "application/json",

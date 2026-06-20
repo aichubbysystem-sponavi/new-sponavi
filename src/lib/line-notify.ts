@@ -12,6 +12,7 @@ export async function sendLinePush(to: string, messages: { type: string; text: s
   if (!LINE_CHANNEL_ACCESS_TOKEN) return { ok: false, error: "LINE_CHANNEL_ACCESS_TOKEN未設定" };
 
   const res = await fetch("https://api.line.me/v2/bot/message/push", {
+    cache: "no-store" as const,
     method: "POST",
     headers: {
       "Content-Type": "application/json",

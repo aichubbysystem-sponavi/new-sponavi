@@ -6,7 +6,7 @@
 import type { ReportData, ShopListItem, GridRankingReport, GridRankingMonthData } from "./report-data";
 import { readShopListFromCache, readReportDataFromCache, writeReportDataToCache } from "./report-cache";
 import { getShopsFromSpreadsheet, getReportFromSpreadsheet } from "./spreadsheet";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase } from "@/lib/supabase";
 
 /** "2025/10" → 202510 のように数値化して月ソート */
 function monthToNum(m: string): number {
@@ -30,10 +30,7 @@ export async function getShopList(): Promise<{
     if (cached && cached.length > 0) {
       // カテゴリをshopsテーブルから付与
       try {
-        const sb = createClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-          process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
-        );
+        const sb = getSupabase();
         const { data: catRows } = await sb.from("shops").select("name, gbp_main_category").not("gbp_main_category", "is", null);
         if (catRows) {
           const catMap = new Map(catRows.map((r: any) => [r.name, r.gbp_main_category]));
@@ -61,10 +58,7 @@ export async function getShopList(): Promise<{
  */
 async function getShopDbIds(shopName: string): Promise<string[]> {
   try {
-    const sb = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
-    );
+    const sb = getSupabase();
     // 完全一致で取得（重複時は1件に絞る）
     const { data } = await sb
       .from("shops")
@@ -99,10 +93,7 @@ async function getShopDbIds(shopName: string): Promise<string[]> {
  */
 export async function fetchGridRankingLive(shopIds: string[], shopName?: string): Promise<GridRankingReport | undefined> {
   try {
-    const sb = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
-    );
+    const sb = getSupabase();
 
     const keywordSet = new Set<string>();
     const monthMap = new Map<string, any[]>();
@@ -298,10 +289,7 @@ export async function getReportData(shopId: string, targetMonth?: string): Promi
       }
       // searchQueries + パフォーマンスメトリクスをDBキャッシュからリアルタイム取得
       try {
-        const sb = createClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-          process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
-        );
+        const sb = getSupabase();
         const { data: shopRow } = await sb.from("shops").select("id, gbp_location_name").eq("name", shopName).limit(1).maybeSingle();
         if (shopRow?.id) {
           // 検索語句
@@ -383,10 +371,7 @@ export async function getReportData(shopId: string, targetMonth?: string): Promi
       // カテゴリをshopsテーブルから付与
       if (!cached.shop.category) {
         try {
-          const sb = createClient(
-            process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-            process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
-          );
+          const sb = getSupabase();
           const { data: catRow } = await sb.from("shops").select("gbp_main_category").eq("name", shopName).not("gbp_main_category", "is", null).limit(1).maybeSingle();
           if (catRow?.gbp_main_category) cached.shop.category = catRow.gbp_main_category;
         } catch {}
@@ -425,10 +410,7 @@ export async function getReportData(shopId: string, targetMonth?: string): Promi
 
   // スプレッドシートパスでもパフォーマンス・検索語句のDBキャッシュを上書き
   try {
-    const sb = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
-    );
+    const sb = getSupabase();
     const { data: shopRow } = await sb.from("shops").select("id").eq("name", shopName).limit(1).maybeSingle();
     if (shopRow?.id) {
       // パフォーマンスメトリクス上書き

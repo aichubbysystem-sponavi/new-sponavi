@@ -1,18 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase, verifyCron } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
 const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
 
-function getSupabase() {
-  return createClient(SUPABASE_URL, SUPABASE_KEY);
-}
 
 async function getOAuthToken(): Promise<string | null> {
   const supabase = getSupabase();
@@ -22,6 +17,7 @@ async function getOAuthToken(): Promise<string | null> {
   if (new Date(data.expiry).getTime() - Date.now() > 5 * 60 * 1000) return data.access_token;
   try {
     const res = await fetch("https://oauth2.googleapis.com/token", {
+      cache: "no-store" as const,
       method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET,
         refresh_token: data.refresh_token, grant_type: "refresh_token" }),
@@ -33,7 +29,10 @@ async function getOAuthToken(): Promise<string | null> {
       expiry: new Date(Date.now() + (t.expires_in || 3600) * 1000).toISOString(),
     }).not("account_id", "is", null);
     return t.access_token;
-  } catch { return data.access_token; }
+  } catch (e: unknown) {
+    console.error("[cron/sync-shops] OAuth refresh failed:", e instanceof Error ? e.message : e);
+    return data.access_token;
+  }
 }
 
 async function getDefaultOwnerId(): Promise<string> {
@@ -56,11 +55,7 @@ async function getDefaultOwnerId(): Promise<string> {
  * 毎日新店舗を自動検出: 全GBPアカウントのロケーションをスキャン→未登録店舗を自動追加
  */
 export async function GET(request: NextRequest) {
-  const authHeader = request.headers.get("authorization");
-  const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const cronErr = verifyCron(request); if (cronErr) return cronErr;
 
   const supabase = getSupabase();
   const accessToken = await getOAuthToken();
@@ -84,14 +79,15 @@ export async function GET(request: NextRequest) {
   let accounts: string[] = [];
   try {
     const accRes = await fetch(`${GO_API_URL}/api/gbp/account`, {
+      cache: "no-store" as const,
       headers: { Authorization: `Bearer ${accessToken}` },
       signal: AbortSignal.timeout(10000),
     });
     if (accRes.ok) {
       const accData = await accRes.json();
-      accounts = (accData || []).map((a: any) => a.name || a.account_name).filter(Boolean);
+      accounts = (accData || []).map((a: { name?: string; account_name?: string }) => a.name || a.account_name || "").filter(Boolean);
     }
-  } catch (e: any) { console.error("[cron/sync-shops] GBP account list fetch:", e?.message); }
+  } catch (e: unknown) { console.error("[cron/sync-shops] GBP account list fetch:", e instanceof Error ? e.message : e); }
 
   if (accounts.length === 0) {
     // フォールバック: business_groupsから取得
@@ -152,6 +148,7 @@ export async function GET(request: NextRequest) {
 
           try {
             await fetch(`${GO_API_URL}/api/shop`, {
+              cache: "no-store" as const,
               method: "POST",
               headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
               body: JSON.stringify({
@@ -183,15 +180,16 @@ export async function GET(request: NextRequest) {
   let syncErrors = 0;
   try {
     const goRes = await fetch(`${GO_API_URL}/api/shop`, {
+      cache: "no-store" as const,
       headers: { Authorization: `Bearer ${accessToken}` },
       signal: AbortSignal.timeout(15000),
     });
     if (goRes.ok) {
       const goData = await goRes.json();
-      const goShops: any[] = Array.isArray(goData) ? goData : [];
+      const goShops: import("@/lib/api-types").GoApiShop[] = Array.isArray(goData) ? goData : [];
       // Supabaseの既存店舗を名前で取得（重複チェック用）
       const { data: sbShops } = await supabase.from("shops").select("id, name, gbp_location_name");
-      const sbByName = new Map((sbShops || []).map((s: any) => [s.name, s]));
+      const sbByName = new Map((sbShops || []).map((s: { name: string; id: string; gbp_location_name: string | null }) => [s.name, s]));
 
       for (const gs of goShops) {
         const name = gs.name || gs.Name;
@@ -201,7 +199,7 @@ export async function GET(request: NextRequest) {
         try {
           if (existing) {
             // 既存 → Go APIに値がある場合のみ更新（空文字での上書き防止）
-            const updateRow: Record<string, any> = {
+            const updateRow: Record<string, string> = {
               updated_at: new Date().toISOString(),
             };
             const goState = gs.state || gs.State || "";
@@ -218,7 +216,7 @@ export async function GET(request: NextRequest) {
             const goLocName = gs.gbp_location_name || gs.GbpLocationName || null;
             if (goLocName && !existing.gbp_location_name) {
               updateRow.gbp_location_name = goLocName;
-              updateRow.gbp_shop_name = gs.gbp_shop_name || gs.GbpShopName || null;
+              updateRow.gbp_shop_name = gs.gbp_shop_name || gs.GbpShopName || "";
             }
             await supabase.from("shops").update(updateRow).eq("id", existing.id);
           } else {
@@ -240,7 +238,8 @@ export async function GET(request: NextRequest) {
             await supabase.from("shops").insert(insertRow);
           }
           synced++;
-        } catch {
+        } catch (e: unknown) {
+          console.error(`[cron/sync-shops] shop sync error (${name}):`, e instanceof Error ? e.message : e);
           syncErrors++;
         }
       }

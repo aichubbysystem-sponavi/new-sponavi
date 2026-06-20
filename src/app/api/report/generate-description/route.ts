@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { verifyAuth } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -10,7 +11,6 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
  * GBP説明文/カテゴリ提案をAIで生成
  */
 export async function POST(request: NextRequest) {
-  const { verifyAuth } = await import("@/lib/auth-verify");
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   if (!ANTHROPIC_API_KEY) return NextResponse.json({ error: "ANTHROPIC_API_KEYが設定されていません" }, { status: 500 });
@@ -76,6 +76,7 @@ ${address ? `【所在地】${address}` : ""}
     const timeout = setTimeout(() => controller.abort(), 25000);
 
     const res = await fetch("https://api.anthropic.com/v1/messages", {
+      cache: "no-store" as const,
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({

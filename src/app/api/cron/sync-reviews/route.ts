@@ -1,23 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase, verifyCron } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
 const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
 const DB_PASSWORD = process.env.SUPABASE_DB_PASSWORD || "";
-const SUPABASE_PROJECT_ID = (SUPABASE_URL.match(/https:\/\/([^.]+)/) || [])[1] || "";
+const SUPABASE_PROJECT_ID = ((process.env.NEXT_PUBLIC_SUPABASE_URL || "").match(/https:\/\/([^.]+)/) || [])[1] || "";
 const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
 const BATCH_SIZE = 100; // 1回のCron実行で処理する店舗数
 
-function getSupabase() {
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
-}
 
 // ── トークン取得（全アカウント対応） ──
 
@@ -59,19 +53,20 @@ async function getAllValidTokens(): Promise<string[]> {
     }
   }
 
-  // 全トークンをリフレッシュして返す
-  const validTokens: string[] = [];
-  for (const row of allRows) {
-    if (new Date(row.expiry).getTime() - Date.now() > 60000) {
-      validTokens.push(row.access_token);
-    } else if (row.refresh_token) {
-      const refreshed = await refreshToken(row.refresh_token);
-      validTokens.push(refreshed || row.access_token);
-    } else {
-      validTokens.push(row.access_token);
-    }
-  }
-  return validTokens;
+  // 全トークンを並列リフレッシュ（N+1→Promise.all）
+  const validTokens = await Promise.all(
+    allRows.map(async (row) => {
+      if (new Date(row.expiry).getTime() - Date.now() > 60000) {
+        return row.access_token;
+      }
+      if (row.refresh_token) {
+        const refreshed = await refreshToken(row.refresh_token);
+        return refreshed || row.access_token;
+      }
+      return row.access_token;
+    })
+  );
+  return validTokens.filter(Boolean);
 }
 
 async function getValidToken(): Promise<string | null> {
@@ -83,6 +78,7 @@ async function refreshToken(rt: string): Promise<string | null> {
   if (!rt || !GBP_CLIENT_ID || !GBP_CLIENT_SECRET) return null;
   try {
     const res = await fetch("https://oauth2.googleapis.com/token", {
+      cache: "no-store" as const,
       method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET, refresh_token: rt, grant_type: "refresh_token" }),
     });
@@ -147,6 +143,7 @@ async function fetchReviews(fullPath: string, token: string): Promise<FetchResul
     const params = new URLSearchParams({ orderBy: "updateTime desc", pageSize: "50" });
     if (nextPage) params.set("pageToken", nextPage);
     const res = await fetch(`${GBP_API_BASE}/${fullPath}/reviews?${params}`, {
+      cache: "no-store" as const,
       headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000),
     });
     if (res.status === 429) {
@@ -209,12 +206,7 @@ async function setSyncOffset(offset: number): Promise<void> {
  * 12時間で全555店舗を1周（50店舗/時 × 12時間 = 600店舗）
  */
 export async function GET(request: NextRequest) {
-  const authHeader = request.headers.get("authorization");
-  const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
-    console.error("[cron/sync-reviews] Unauthorized: CRON_SECRET未設定または不一致");
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const cronErr = verifyCron(request); if (cronErr) return cronErr;
 
   console.log("[cron/sync-reviews] Starting batch sync...");
 
@@ -234,6 +226,7 @@ export async function GET(request: NextRequest) {
   let shops: { id: string; name: string; gbp_location_name: string }[] = [];
   try {
     const goRes = await fetch(`${GO_API_URL}/api/shop`, {
+      cache: "no-store" as const,
       headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(15000),
     });

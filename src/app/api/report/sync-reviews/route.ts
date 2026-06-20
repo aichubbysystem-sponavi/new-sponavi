@@ -1,22 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase, verifyAuth } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
 const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
 const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
 const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 const DB_PASSWORD = process.env.SUPABASE_DB_PASSWORD || "";
-const SUPABASE_PROJECT_ID = (SUPABASE_URL.match(/https:\/\/([^.]+)/) || [])[1] || "";
+const SUPABASE_PROJECT_ID = ((process.env.NEXT_PUBLIC_SUPABASE_URL || "").match(/https:\/\/([^.]+)/) || [])[1] || "";
 
-function getSupabase() {
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
-}
 
 // ============================================================
 // トークン管理: Cron版と統一した3段階フォールバック
@@ -247,7 +241,6 @@ async function fetchReviews(
 
 export async function POST(request: NextRequest) {
   try {
-    const { verifyAuth } = await import("@/lib/auth-verify");
     const auth = await verifyAuth(request.headers.get("authorization"));
     if (!auth.valid) {
       return NextResponse.json({ error: "認証が必要です" }, { status: 401 });

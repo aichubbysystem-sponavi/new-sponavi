@@ -1,24 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { validateBody, userCreateSchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
-
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-
-function getAdminSupabase() {
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
-}
 
 /**
  * GET /api/report/users — ユーザー一覧取得
  */
 export async function GET(request: NextRequest) {
-  const { verifyAuth } = await import("@/lib/auth-verify");
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
-  const supabase = getAdminSupabase();
+  const supabase = getSupabase();
   const { data } = await supabase.from("user_profiles").select("*").order("created_at", { ascending: true });
   return NextResponse.json(data || []);
 }
@@ -27,16 +20,14 @@ export async function GET(request: NextRequest) {
  * POST /api/report/users — ユーザー作成
  */
 export async function POST(request: NextRequest) {
-  const { verifyAuth } = await import("@/lib/auth-verify");
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
-  const { name, username, password, role } = await request.json();
-  if (!name || !username || !password) {
-    return NextResponse.json({ error: "名前、ユーザー名、パスワードが必要です" }, { status: 400 });
-  }
+  const { data: body, error: valErr } = await validateBody(request, userCreateSchema);
+  if (valErr) return valErr;
+  const { name, username, password, role } = body;
 
-  const supabase = getAdminSupabase();
+  const supabase = getSupabase();
   const email = `${username.replace(/[^a-zA-Z0-9._-]/g, "_")}@sponavi.internal`;
 
   // Supabase Authにユーザー作成
@@ -77,14 +68,13 @@ export async function POST(request: NextRequest) {
  * DELETE /api/report/users — ユーザー削除
  */
 export async function DELETE(request: NextRequest) {
-  const { verifyAuth } = await import("@/lib/auth-verify");
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
   const { userId } = await request.json();
   if (!userId) return NextResponse.json({ error: "userIdが必要です" }, { status: 400 });
 
-  const supabase = getAdminSupabase();
+  const supabase = getSupabase();
 
   // プロフィール取得（ログ用）
   const { data: profile } = await supabase.from("user_profiles").select("name, username").eq("id", userId).single();

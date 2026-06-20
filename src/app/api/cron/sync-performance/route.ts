@@ -4,24 +4,19 @@
  * Vercel Cron: 毎月5日 6:00 JST (UTC 21:00) — 検索語句の1時間後
  */
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase, verifyCron } from "@/lib/supabase";
 import { syncShopPerformance } from "@/lib/gbp-performance";
 import { getExpectedMonthJST } from "@/lib/gbp-search-keywords";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
 export async function GET(request: NextRequest) {
-  const authHeader = request.headers.get("authorization");
-  const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const cronErr = verifyCron(request);
+  if (cronErr) return cronErr;
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+  const supabase = getSupabase();
   const expectedMonth = getExpectedMonthJST();
   const startTime = Date.now();
   const TIME_LIMIT = 270_000;
