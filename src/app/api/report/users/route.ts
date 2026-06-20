@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, requireRole } from "@/lib/supabase";
 import { validateBody, userCreateSchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/report/users — ユーザー一覧取得
+ * GET /api/report/users — ユーザー一覧取得（社長のみ）
  */
 export async function GET(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  const r = await requireRole(request, ["president"]);
+  if (r.error) return r.error;
 
   const supabase = getSupabase();
   const { data } = await supabase.from("user_profiles").select("*").order("created_at", { ascending: true });
@@ -17,17 +17,22 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * POST /api/report/users — ユーザー作成
+ * POST /api/report/users — ユーザー作成（社長のみ）
  */
 export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  const r = await requireRole(request, ["president"]);
+  if (r.error) return r.error;
 
   const { data: body, error: valErr } = await validateBody(request, userCreateSchema);
   if (valErr) return valErr;
   const { name, username, password, role } = body;
 
   const supabase = getSupabase();
+
+  // 操作者のプロフィールを取得（監査ログ用）
+  const { data: operator } = await supabase.from("user_profiles").select("name").eq("id", r.sub).single();
+  const operatorName = operator?.name || "不明";
+
   const email = `${username.replace(/[^a-zA-Z0-9._-]/g, "_")}@sponavi.internal`;
 
   // Supabase Authにユーザー作成
@@ -39,10 +44,11 @@ export async function POST(request: NextRequest) {
   });
 
   if (authError) {
-    return NextResponse.json({ error: `ユーザー作成失敗: ${authError.message}` }, { status: 500 });
+    console.error("[users] createUser failed:", authError.message);
+    return NextResponse.json({ error: "ユーザー作成に失敗しました" }, { status: 500 });
   }
 
-  // user_profilesテーブルに保存（パスワードも管理者用に保持）
+  // user_profilesテーブルに保存
   await supabase.from("user_profiles").insert({
     id: authUser.user.id,
     auth_uid: authUser.user.id,
@@ -50,13 +56,12 @@ export async function POST(request: NextRequest) {
     username,
     email,
     role: role || "manager",
-    password_display: password,
   });
 
   // 操作ログ
   await supabase.from("audit_logs").insert({
     id: crypto.randomUUID(),
-    user_name: "社長",
+    user_name: operatorName,
     action: "ユーザー作成",
     detail: `${name}（${username}）をロール「${role || "manager"}」で作成`,
   });
@@ -68,15 +73,19 @@ export async function POST(request: NextRequest) {
  * DELETE /api/report/users — ユーザー削除
  */
 export async function DELETE(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  const r = await requireRole(request, ["president"]);
+  if (r.error) return r.error;
 
   const { userId } = await request.json();
   if (!userId) return NextResponse.json({ error: "userIdが必要です" }, { status: 400 });
 
   const supabase = getSupabase();
 
-  // プロフィール取得（ログ用）
+  // 操作者のプロフィールを取得（監査ログ用）
+  const { data: operator } = await supabase.from("user_profiles").select("name").eq("id", r.sub).single();
+  const operatorName = operator?.name || "不明";
+
+  // 削除対象のプロフィール取得（ログ用）
   const { data: profile } = await supabase.from("user_profiles").select("name, username").eq("id", userId).single();
 
   // Supabase Authから削除
@@ -88,7 +97,7 @@ export async function DELETE(request: NextRequest) {
   // 操作ログ
   await supabase.from("audit_logs").insert({
     id: crypto.randomUUID(),
-    user_name: "社長",
+    user_name: operatorName,
     action: "ユーザー削除",
     detail: `${profile?.name || "不明"}（${profile?.username || ""}）を削除`,
   });

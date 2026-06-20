@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
 type Account = {
   customerId: string;
@@ -51,17 +52,27 @@ export default function PmaxTopPage() {
     return opts;
   }, []);
 
+  const getAuthHeaders = useCallback(async (): Promise<Record<string, string>> => {
+    const token = (await supabase.auth.getSession()).data.session?.access_token;
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }, []);
+
   // アカウント一覧取得
   useEffect(() => {
-    fetch("/api/pmax/accounts")
-      .then((res) => res.json())
-      .then((data) => {
+    (async () => {
+      try {
+        const headers = await getAuthHeaders();
+        const res = await fetch("/api/pmax/accounts", { headers });
+        const data = await res.json();
         if (data.error) setError(data.error);
         else setAccounts(data.accounts || []);
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, []);
+      } catch (err: any) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [getAuthHeaders]);
 
   // 各アカウントのサマリー取得
   useEffect(() => {
@@ -76,9 +87,10 @@ export default function PmaxTopPage() {
       for (let i = 0; i < accounts.length; i += BATCH) {
         if (controller.signal.aborted) break;
         const batch = accounts.slice(i, i + BATCH);
+        const headers = await getAuthHeaders();
         const results = await Promise.allSettled(
           batch.map(async (a) => {
-            const res = await fetch(`/api/pmax/summary?customerId=${a.customerId}&startDate=${startDate}&endDate=${endDate}`, { signal: controller.signal });
+            const res = await fetch(`/api/pmax/summary?customerId=${a.customerId}&startDate=${startDate}&endDate=${endDate}`, { signal: controller.signal, headers });
             const data = await res.json();
             if (data.error) return { id: a.customerId, summary: null };
             return { id: a.customerId, summary: data as AccountSummary };

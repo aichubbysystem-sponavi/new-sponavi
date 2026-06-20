@@ -6,13 +6,13 @@
  * GET /api/report/shop-cancel
  * 解約店舗IDリストを返す
  */
-import { NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { NextRequest, NextResponse } from "next/server";
+import { getSupabase, verifyAuth, requireRole } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
@@ -27,9 +27,10 @@ export async function GET(request: Request) {
   return NextResponse.json({ cancelled: data || [] });
 }
 
-export async function POST(request: Request) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+export async function POST(request: NextRequest) {
+  // 店舗解約は社長・マネージャーのみ
+  const r = await requireRole(request, ["president", "manager"]);
+  if (r.error) return r.error;
 
   const body = await request.json();
   const { shopId, cancel } = body;

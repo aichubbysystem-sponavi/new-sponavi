@@ -13,7 +13,7 @@ async function getOAuthToken(): Promise<string | null> {
   const supabase = getSupabase();
   const { data } = await supabase
     .from("system_oauth_tokens")
-    .select("access_token, refresh_token, expiry")
+    .select("account_id, access_token, refresh_token, expiry")
     .limit(1)
     .maybeSingle();
 
@@ -38,10 +38,15 @@ async function getOAuthToken(): Promise<string | null> {
     if (!res.ok) return data.access_token;
     const tokenData = await res.json();
 
-    await getSupabase().from("system_oauth_tokens").update({
+    const updateData = {
       access_token: tokenData.access_token,
       expiry: new Date(Date.now() + (tokenData.expires_in || 3600) * 1000).toISOString(),
-    }).not("account_id", "is", null);
+    };
+    if (data.account_id) {
+      await getSupabase().from("system_oauth_tokens").update(updateData).eq("account_id", data.account_id);
+    } else {
+      await getSupabase().from("system_oauth_tokens").update(updateData).eq("refresh_token", data.refresh_token);
+    }
 
     return tokenData.access_token;
   } catch {

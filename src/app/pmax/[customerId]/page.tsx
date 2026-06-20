@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -243,14 +244,20 @@ export default function PmaxReportPage() {
     const curMonth = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, "0")}`;
     const prevMonth = `${now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear()}/${String(now.getMonth() === 0 ? 12 : now.getMonth()).padStart(2, "0")}`;
 
-    Promise.all([
-      fetch(`/api/pmax/accounts`).then((r) => r.json()),
-      fetch(`/api/pmax/summary?customerId=${customerId}&startDate=${cStart}&endDate=${cEnd}`).then((r) => r.json()),
-      fetch(`/api/pmax/summary?customerId=${customerId}&startDate=${pStart}&endDate=${pEnd}`).then((r) => r.json()),
-      fetch(`/api/pmax/monthly?customerId=${customerId}&startDate=${mStart}&endDate=${mEnd}`).then((r) => r.json()),
-      fetch(`/api/pmax/daily?customerId=${customerId}&startDate=${dStart}&endDate=${dEnd}`).then((r) => r.json()),
-    ])
-      .then(async ([accountsRes, summaryRes, prevSummaryRes, monthlyRes, dailyRes]) => {
+    (async () => {
+      try {
+        const token = (await supabase.auth.getSession()).data.session?.access_token;
+        const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+        const authFetch = (url: string) => fetch(url, { headers }).then(r => r.json());
+
+        const [accountsRes, summaryRes, prevSummaryRes, monthlyRes, dailyRes] = await Promise.all([
+          authFetch(`/api/pmax/accounts`),
+          authFetch(`/api/pmax/summary?customerId=${customerId}&startDate=${cStart}&endDate=${cEnd}`),
+          authFetch(`/api/pmax/summary?customerId=${customerId}&startDate=${pStart}&endDate=${pEnd}`),
+          authFetch(`/api/pmax/monthly?customerId=${customerId}&startDate=${mStart}&endDate=${mEnd}`),
+          authFetch(`/api/pmax/daily?customerId=${customerId}&startDate=${dStart}&endDate=${dEnd}`),
+        ]);
+
         const acct = (accountsRes.accounts || []).find((a: any) => a.customerId === customerId);
         const name = acct?.name || customerId;
         setAccountName(name);
@@ -262,7 +269,7 @@ export default function PmaxReportPage() {
 
         // GBPデータ取得（エラーでも広告データは表示する）
         try {
-          const gbpRes = await fetch(`/api/pmax/gbp?shopName=${encodeURIComponent(name)}`).then(r => r.json());
+          const gbpRes = await authFetch(`/api/pmax/gbp?shopName=${encodeURIComponent(name)}`);
           if (gbpRes.data && gbpRes.data.length > 0) {
             const curRow = gbpRes.data.find((r: GbpRow) => r.month === curMonth);
             const prevRow = gbpRes.data.find((r: GbpRow) => r.month === prevMonth);
@@ -272,9 +279,12 @@ export default function PmaxReportPage() {
         } catch (e) {
           console.warn("GBPデータ取得失敗（広告データは表示）:", e);
         }
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+      } catch (err: any) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [customerId]);
 
   if (loading) {

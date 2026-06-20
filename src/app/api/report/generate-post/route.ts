@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyAuth } from "@/lib/supabase";
+import { requireRole } from "@/lib/supabase";
 import { validateBody, generatePostSchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
@@ -9,11 +9,11 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 
 /**
  * POST /api/report/generate-post
- * 投稿文章をAIで自動生成
+ * 投稿文章をAIで自動生成（社長・マネージャーのみ）
  */
 export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  const r = await requireRole(request, ["president", "manager"]);
+  if (r.error) return r.error;
   if (!ANTHROPIC_API_KEY) return NextResponse.json({ error: "ANTHROPIC_API_KEYが設定されていません" }, { status: 500 });
 
   const { data: body, error: valErr } = await validateBody(request, generatePostSchema);

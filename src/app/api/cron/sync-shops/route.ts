@@ -12,7 +12,7 @@ const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
 async function getOAuthToken(): Promise<string | null> {
   const supabase = getSupabase();
   const { data } = await supabase.from("system_oauth_tokens")
-    .select("access_token, refresh_token, expiry").limit(1).maybeSingle();
+    .select("account_id, access_token, refresh_token, expiry").limit(1).maybeSingle();
   if (!data) return null;
   if (new Date(data.expiry).getTime() - Date.now() > 5 * 60 * 1000) return data.access_token;
   try {
@@ -24,10 +24,15 @@ async function getOAuthToken(): Promise<string | null> {
     });
     if (!res.ok) return data.access_token;
     const t = await res.json();
-    await getSupabase().from("system_oauth_tokens").update({
+    const updateQuery = getSupabase().from("system_oauth_tokens").update({
       access_token: t.access_token,
       expiry: new Date(Date.now() + (t.expires_in || 3600) * 1000).toISOString(),
-    }).not("account_id", "is", null);
+    });
+    if (data.account_id) {
+      await updateQuery.eq("account_id", data.account_id);
+    } else {
+      await updateQuery.eq("refresh_token", data.refresh_token);
+    }
     return t.access_token;
   } catch (e: unknown) {
     console.error("[cron/sync-shops] OAuth refresh failed:", e instanceof Error ? e.message : e);

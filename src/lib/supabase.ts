@@ -64,3 +64,42 @@ export async function requireAuth(request: NextRequest): Promise<{ auth: { valid
   }
   return { auth: { valid: true, sub: auth.sub } };
 }
+
+// ── ロール別アクセス制御 ──
+
+export type AppRole = "president" | "manager" | "part_time";
+
+/**
+ * ユーザーIDからロールを取得（user_profiles.role）
+ * 取得失敗時は null を返す
+ */
+export async function getUserRole(userId: string): Promise<AppRole | null> {
+  const { data } = await getSupabase()
+    .from("user_profiles")
+    .select("role")
+    .eq("id", userId)
+    .single();
+  if (!data?.role) return null;
+  return data.role as AppRole;
+}
+
+/**
+ * 認証 + ロールチェックを一括で行うヘルパー
+ * @param request リクエスト
+ * @param allowedRoles 許可するロールの配列（例: ["president", "manager"]）
+ * @returns 成功時は { sub, role }、失敗時は NextResponse（401 or 403）
+ */
+export async function requireRole(
+  request: NextRequest,
+  allowedRoles: AppRole[],
+): Promise<{ sub: string; role: AppRole; error?: never } | { sub?: never; role?: never; error: NextResponse }> {
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid || !auth.sub) {
+    return { error: NextResponse.json({ error: "認証が必要です" }, { status: 401 }) };
+  }
+  const role = await getUserRole(auth.sub);
+  if (!role || !allowedRoles.includes(role)) {
+    return { error: NextResponse.json({ error: "この操作を行う権限がありません" }, { status: 403 }) };
+  }
+  return { sub: auth.sub, role };
+}

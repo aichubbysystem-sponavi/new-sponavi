@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, requireRole } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +12,7 @@ async function getOAuthToken(): Promise<string | null> {
   const supabase = getSupabase();
   const { data } = await supabase
     .from("system_oauth_tokens")
-    .select("access_token, refresh_token, expiry")
+    .select("account_id, access_token, refresh_token, expiry")
     .limit(1)
     .maybeSingle();
   if (!data) return null;
@@ -31,10 +31,15 @@ async function getOAuthToken(): Promise<string | null> {
     });
     if (!res.ok) return data.access_token;
     const t = await res.json();
-    await getSupabase().from("system_oauth_tokens").update({
+    const updateQuery = getSupabase().from("system_oauth_tokens").update({
       access_token: t.access_token,
       expiry: new Date(Date.now() + (t.expires_in || 3600) * 1000).toISOString(),
-    }).not("account_id", "is", null);
+    });
+    if (data.account_id) {
+      await updateQuery.eq("account_id", data.account_id);
+    } else {
+      await updateQuery.eq("refresh_token", data.refresh_token);
+    }
     return t.access_token;
   } catch { return data.access_token; }
 }
@@ -44,10 +49,9 @@ async function getOAuthToken(): Promise<string | null> {
  * GBP投稿を作成（写真対応）
  */
 export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) {
-    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-  }
+  // 投稿作成は社長・マネージャーのみ
+  const r = await requireRole(request, ["president", "manager"]);
+  if (r.error) return r.error;
 
   const body = await request.json();
   const { shopId, summary, topicType, callToAction, photoUrl } = body as {
@@ -94,6 +98,17 @@ export async function POST(request: NextRequest) {
   }
 
   if (photoUrl) {
+    // URLバリデーション（SSRF防止: httpsのみ、許可ドメインのみ）
+    try {
+      const parsed = new URL(photoUrl);
+      const allowedHosts = ["dropbox.com", "www.dropbox.com", "dl.dropboxusercontent.com", "lh3.googleusercontent.com"];
+      if (parsed.protocol !== "https:" || !allowedHosts.some(h => parsed.hostname === h || parsed.hostname.endsWith(`.${h}`))) {
+        return NextResponse.json({ error: "許可されていないURL形式です" }, { status: 400 });
+      }
+    } catch {
+      return NextResponse.json({ error: "無効なURLです" }, { status: 400 });
+    }
+
     // Dropbox URLを直接ダウンロードURLに変換
     let fixedUrl = photoUrl;
     if (fixedUrl.includes("dropbox.com")) {
@@ -117,7 +132,7 @@ export async function POST(request: NextRequest) {
     if (!res.ok) {
       const errBody = await res.text().catch(() => "");
       console.error(`[create-post] GBP API error: ${res.status}`, errBody);
-      return NextResponse.json({ error: `GBP投稿エラー (${res.status}): ${errBody.slice(0, 200)}` }, { status: 500 });
+      return NextResponse.json({ error: `GBP投稿エラーが発生しました（${res.status}）` }, { status: 500 });
     }
 
     const result = await res.json();
@@ -139,7 +154,7 @@ export async function POST(request: NextRequest) {
     } catch {}
 
     return NextResponse.json({ success: true, post: result });
-  } catch (err: any) {
-    return NextResponse.json({ error: err?.message || "投稿に失敗しました" }, { status: 500 });
+  } catch {
+    return NextResponse.json({ error: "投稿に失敗しました" }, { status: 500 });
   }
 }

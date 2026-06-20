@@ -51,8 +51,7 @@ const ALLOWED_ORIGINS = [
   `https://${REPORT_HOSTNAME}`,
   `https://${PMAX_HOSTNAME}`,
   "https://new-sponavi.vercel.app",
-  "http://localhost:3000",
-  "http://localhost:3001",
+  ...(process.env.NODE_ENV === "development" ? ["http://localhost:3000", "http://localhost:3001"] : []),
 ];
 
 export function middleware(request: NextRequest) {
@@ -82,8 +81,26 @@ export function middleware(request: NextRequest) {
     const isWebhook = pathname.startsWith("/api/webhook/");
     if (!isCron && !isWebhook) {
       const origin = request.headers.get("origin");
-      if (origin && !ALLOWED_ORIGINS.includes(origin)) {
-        return NextResponse.json({ error: "不正なリクエスト元です" }, { status: 403 });
+      if (origin) {
+        // Originヘッダーがある場合、許可リストに含まれるか確認
+        if (!ALLOWED_ORIGINS.includes(origin)) {
+          return NextResponse.json({ error: "不正なリクエスト元です" }, { status: 403 });
+        }
+      } else {
+        // Originなし: Refererで検証（HTMLフォームCSRF防止）
+        const referer = request.headers.get("referer");
+        if (referer) {
+          try {
+            const refOrigin = new URL(referer).origin;
+            if (!ALLOWED_ORIGINS.includes(refOrigin)) {
+              return NextResponse.json({ error: "不正なリクエスト元です" }, { status: 403 });
+            }
+          } catch {
+            return NextResponse.json({ error: "不正なリクエスト元です" }, { status: 403 });
+          }
+        }
+        // Origin・Referer両方なし: APIクライアント（curl等）からの直接呼び出し
+        // → Authorization ヘッダーで認証されるため許可
       }
     }
   }

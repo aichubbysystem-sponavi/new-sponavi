@@ -36,11 +36,23 @@ interface ReviewDetail {
  */
 export async function POST(request: NextRequest) {
   // レポートサブドメインは未ログインで閲覧するため認証スキップ
-  // shopNames/shopIds指定必須なので、データアクセス範囲は限定される
+  // 代わりにRefererチェック + 入力上限で保護
+  const referer = request.headers.get("referer") || "";
+  if (referer) {
+    try {
+      const refHost = new URL(referer).hostname;
+      const allowedHosts = ["new-spotlight-navigator.com", "report.new-spotlight-navigator.com", "localhost"];
+      if (!allowedHosts.some(h => refHost === h || refHost.endsWith(`.${h}`))) {
+        return NextResponse.json({ error: "不正なリクエスト元です" }, { status: 403 });
+      }
+    } catch {
+      return NextResponse.json({ error: "不正なリクエスト元です" }, { status: 403 });
+    }
+  }
 
   const body = await request.json().catch(() => ({}));
-  const shopIds: string[] = body.shopIds || [];
-  const shopNames: string[] = body.shopNames || [];
+  const shopIds: string[] = (body.shopIds || []).slice(0, 20);
+  const shopNames: string[] = (body.shopNames || []).slice(0, 20);
   const targetMonth: string = body.targetMonth || ""; // "2026/5" 形式（空なら全期間）
 
   if (shopIds.length === 0 && shopNames.length === 0) {

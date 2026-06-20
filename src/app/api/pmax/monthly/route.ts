@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCampaignMonthly } from "@/lib/google-ads";
+import { verifyAuth } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+
   const { searchParams } = request.nextUrl;
   const customerId = searchParams.get("customerId");
   const startDate = searchParams.get("startDate");
@@ -28,10 +32,10 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({ campaigns: grouped });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Failed to get monthly data:", error);
     return NextResponse.json(
-      { error: error.message || "月次データの取得に失敗しました" },
+      { error: "月次データの取得に失敗しました" },
       { status: 500 }
     );
   }

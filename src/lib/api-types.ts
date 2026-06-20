@@ -145,7 +145,6 @@ export interface DbUserProfileRow {
   username: string;
   email: string;
   role: string;
-  password_display: string | null;
   created_at: string;
 }
 

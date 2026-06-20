@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, requireRole } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -13,7 +13,7 @@ async function getOAuthToken(): Promise<string | null> {
   const supabase = getSupabase();
   const { data } = await supabase
     .from("system_oauth_tokens")
-    .select("access_token, refresh_token, expiry")
+    .select("account_id, access_token, refresh_token, expiry")
     .limit(1)
     .maybeSingle();
 
@@ -36,13 +36,15 @@ async function getOAuthToken(): Promise<string | null> {
     });
     if (!res.ok) return data.access_token;
     const tokenData = await res.json();
-    await getSupabase()
-      .from("system_oauth_tokens")
-      .update({
-        access_token: tokenData.access_token,
-        expiry: new Date(Date.now() + (tokenData.expires_in || 3600) * 1000).toISOString(),
-      })
-      .not("account_id", "is", null);
+    const updateData = {
+      access_token: tokenData.access_token,
+      expiry: new Date(Date.now() + (tokenData.expires_in || 3600) * 1000).toISOString(),
+    };
+    if (data.account_id) {
+      await getSupabase().from("system_oauth_tokens").update(updateData).eq("account_id", data.account_id);
+    } else {
+      await getSupabase().from("system_oauth_tokens").update(updateData).eq("refresh_token", data.refresh_token);
+    }
     return tokenData.access_token;
   } catch {
     return data.access_token;
@@ -54,10 +56,9 @@ async function getOAuthToken(): Promise<string | null> {
  * GBP口コミに返信を投稿
  */
 export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) {
-    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-  }
+  // 口コミ返信は社長・マネージャーのみ
+  const r = await requireRole(request, ["president", "manager"]);
+  if (r.error) return r.error;
 
   const body = await request.json();
   const { shopId, reviewId, comment } = body as {
@@ -110,7 +111,7 @@ export async function POST(request: NextRequest) {
       const errBody = await res.text().catch(() => "");
       console.error(`[reply-review] GBP API error: ${res.status}`, errBody, "URL:", replyUrl);
       return NextResponse.json(
-        { error: `GBP返信エラー (${res.status}): ${errBody.slice(0, 300)}`, url: replyUrl },
+        { error: `GBP返信エラーが発生しました（${res.status}）` },
         { status: 500 }
       );
     }
