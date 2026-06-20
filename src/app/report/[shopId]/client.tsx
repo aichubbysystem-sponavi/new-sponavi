@@ -538,7 +538,7 @@ export default function ReportClient({
       zIndex: 999,
     });
     gridMarkersRefs.current[kw].push(cm);
-    gmap.fitBounds(bounds, hideControls ? 70 : 40);
+    gmap.fitBounds(bounds, 40);
   }, [gridRecentHistory, gridMonthIdx, shop.lat, shop.lng]);
 
   useEffect(() => {
@@ -739,12 +739,17 @@ export default function ReportClient({
         const activeSlide = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden)");
         if (activeSlide) activeSlide.scrollIntoView({ block: "center" });
         await new Promise(r => setTimeout(r, 100));
-        renderGridMapForKw(kw, -2.0, true);
+        renderGridMapForKw(kw); // webと同じパラメータ（offset=0, controls=true, padding=40）
         await new Promise(r => setTimeout(r, 2000));
-        // マップコンテナのみキャプチャ（凡例・平均順位はHTMLで配置済み、コントロールは非表示で描画済み）
+        // マップコンテナのみキャプチャ（凡例・平均順位はHTMLで配置済み）
         const mapContainer = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden) .grid-map-container");
         if (mapContainer) {
+          // キャプチャ前にコントロールをCSSで非表示（マップ自体は再描画しない）
+          const ctrlEls = mapContainer.querySelectorAll<HTMLElement>(".gmnoprint, .gm-style-mtc, .gm-bundled-control, .gm-svpc");
+          ctrlEls.forEach(el => { el.dataset.origDisplay = el.style.display; el.style.display = "none"; });
+          await new Promise(r => setTimeout(r, 50));
           const canvas = await html2canvas(mapContainer, { scale: 2, useCORS: true, logging: false, backgroundColor: "#e8edf5" });
+          ctrlEls.forEach(el => { el.style.display = el.dataset.origDisplay || ""; delete el.dataset.origDisplay; });
           const imgDataUrl = canvas.toDataURL("image/png");
           const slot = mapSlots[kwIdx];
           if (slot) {
