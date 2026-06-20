@@ -697,7 +697,7 @@ export default function ReportClient({
           mapSlot.appendChild(title);
           const mapDiv = document.createElement("div");
           mapDiv.className = "grid-print-map";
-          mapDiv.style.cssText = `width:100%;height:660px;border-radius:12px;overflow:hidden;background:#e8edf5;`;
+          mapDiv.style.cssText = `width:100%;height:580px;border-radius:12px;overflow:hidden;background:#e8edf5;`;
           mapSlot.appendChild(mapDiv);
           body.appendChild(mapSlot);
         }
