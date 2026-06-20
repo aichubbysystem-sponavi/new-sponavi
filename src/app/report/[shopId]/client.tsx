@@ -755,14 +755,18 @@ export default function ReportClient({
           // コントロール復元
           ctrlEls.forEach(el => { el.style.display = el.dataset.origDisplay || ""; delete el.dataset.origDisplay; });
           // マップ部分だけ切り抜き（凡例・平均順位はHTML版を使うので不要）
-          const mapH = mapContainer.offsetHeight;
-          const mapW = mapContainer.offsetWidth;
-          const scaleRatio = fullCanvas.width / mapArea.offsetWidth;
+          const mapRect = mapContainer.getBoundingClientRect();
+          const areaRect = mapArea.getBoundingClientRect();
+          const scaleRatio = fullCanvas.width / areaRect.width;
+          const srcX = Math.round((mapRect.left - areaRect.left) * scaleRatio);
+          const srcY = Math.round((mapRect.top - areaRect.top) * scaleRatio);
+          const srcW = Math.round(mapRect.width * scaleRatio);
+          const srcH = Math.round(mapRect.height * scaleRatio);
           const cropCanvas = document.createElement("canvas");
-          cropCanvas.width = Math.round(mapW * scaleRatio);
-          cropCanvas.height = Math.round(mapH * scaleRatio);
+          cropCanvas.width = srcW;
+          cropCanvas.height = srcH;
           const ctx = cropCanvas.getContext("2d");
-          if (ctx) { ctx.drawImage(fullCanvas, 0, 0, cropCanvas.width, cropCanvas.height, 0, 0, cropCanvas.width, cropCanvas.height); }
+          if (ctx) { ctx.drawImage(fullCanvas, srcX, srcY, srcW, srcH, 0, 0, srcW, srcH); }
           const imgDataUrl = cropCanvas.toDataURL("image/png");
           const slot = mapSlots[kwIdx];
           if (slot) {
