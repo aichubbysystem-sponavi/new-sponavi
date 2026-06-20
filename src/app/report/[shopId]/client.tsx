@@ -739,29 +739,31 @@ export default function ReportClient({
         const activeSlide = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden)");
         if (activeSlide) activeSlide.scrollIntoView({ block: "center" });
         await new Promise(r => setTimeout(r, 100));
-        renderGridMapForKw(kw); // webと同じパラメータ（offset=0, controls=true, padding=40）
+        renderGridMapForKw(kw); // webと同じパラメータ
         await new Promise(r => setTimeout(r, 2000));
-        // マップコンテナのみキャプチャ（凡例・平均順位はHTMLで配置済み）
-        const mapContainer = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden) .grid-map-container");
-        if (mapContainer) {
-          // キャプチャ前: コントロール非表示 + コンテナ拡大（上端ラベルクリップ防止）
-          const ctrlEls = mapContainer.querySelectorAll<HTMLElement>(".gmnoprint, .gm-style-mtc, .gm-bundled-control, .gm-svpc");
+        // map-area全体をキャプチャ（凡例込み→マップ部分だけ切り抜き）
+        // 全体キャプチャすることで上端ラベルがクリップされない
+        const mapArea = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden) .grid-kw-map-area");
+        const mapContainer = mapArea?.querySelector<HTMLElement>(".grid-map-container");
+        if (mapArea && mapContainer) {
+          // コントロール非表示
+          const ctrlEls = mapArea.querySelectorAll<HTMLElement>(".gmnoprint, .gm-style-mtc, .gm-bundled-control, .gm-svpc");
           ctrlEls.forEach(el => { el.dataset.origDisplay = el.style.display; el.style.display = "none"; });
-          const origH = mapContainer.style.height;
-          const origW = mapContainer.style.width;
-          mapContainer.style.height = "500px";
-          mapContainer.style.width = "540px";
-          // コンテナサイズ変更後にGoogleマップをリサイズ
-          const gmap = gridGoogleMapRefs.current[kw];
-          if (gmap) { window.google.maps.event.trigger(gmap, "resize"); }
-          await new Promise(r => setTimeout(r, 300));
-          const canvas = await html2canvas(mapContainer, { scale: 2, useCORS: true, logging: false, backgroundColor: "#e8edf5" });
-          // 復元
-          mapContainer.style.height = origH;
-          mapContainer.style.width = origW;
-          if (gmap) { window.google.maps.event.trigger(gmap, "resize"); }
+          await new Promise(r => setTimeout(r, 50));
+          // map-area全体をキャプチャ
+          const fullCanvas = await html2canvas(mapArea, { scale: 2, useCORS: true, logging: false, backgroundColor: "#f0f2f5" });
+          // コントロール復元
           ctrlEls.forEach(el => { el.style.display = el.dataset.origDisplay || ""; delete el.dataset.origDisplay; });
-          const imgDataUrl = canvas.toDataURL("image/png");
+          // マップ部分だけ切り抜き（凡例・平均順位はHTML版を使うので不要）
+          const mapH = mapContainer.offsetHeight;
+          const mapW = mapContainer.offsetWidth;
+          const scaleRatio = fullCanvas.width / mapArea.offsetWidth;
+          const cropCanvas = document.createElement("canvas");
+          cropCanvas.width = Math.round(mapW * scaleRatio);
+          cropCanvas.height = Math.round(mapH * scaleRatio);
+          const ctx = cropCanvas.getContext("2d");
+          if (ctx) { ctx.drawImage(fullCanvas, 0, 0, cropCanvas.width, cropCanvas.height, 0, 0, cropCanvas.width, cropCanvas.height); }
+          const imgDataUrl = cropCanvas.toDataURL("image/png");
           const slot = mapSlots[kwIdx];
           if (slot) {
             const mapDiv = slot.querySelector<HTMLElement>(".grid-print-map");
