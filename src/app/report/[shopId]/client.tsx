@@ -746,7 +746,13 @@ export default function ReportClient({
         // マップコンテナのみキャプチャ（凡例・平均順位はHTMLで配置済み）
         const mapContainer = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden) .grid-map-container");
         if (mapContainer) {
+          // キャプチャ前にGoogleMapsコントロール（地図/航空写真等）を非表示化
+          const gmapControls = mapContainer.querySelectorAll<HTMLElement>(".gmnoprint, .gm-style-mtc, .gm-bundled-control, .gm-svpc");
+          gmapControls.forEach(el => { el.dataset.prevDisplay = el.style.display; el.style.display = "none"; });
+          await new Promise(r => setTimeout(r, 100));
           const canvas = await html2canvas(mapContainer, { scale: 2, useCORS: true, logging: false, backgroundColor: "#e8edf5" });
+          // コントロール復元
+          gmapControls.forEach(el => { el.style.display = el.dataset.prevDisplay || ""; delete el.dataset.prevDisplay; });
           const imgDataUrl = canvas.toDataURL("image/png");
           const slot = mapSlots[kwIdx];
           if (slot) {
