@@ -748,80 +748,49 @@ export default function ReportClient({
         const mapContainer = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden) .grid-map-container");
 
         if (mapContainer && gmap && snapForCapture) {
-          // ── マップがidle状態になるまで待機 ──
-          await new Promise<void>(resolve => {
-            if (gmap.getProjection() && gmap.getBounds()) { resolve(); return; }
-            const listener = gmap.addListener("idle", () => {
-              window.google.maps.event.removeListener(listener);
-              resolve();
-            });
-            setTimeout(() => resolve(), 3000); // safety timeout
-          });
-
           // ── 座標データ準備 ──
           let pts = snapForCapture.results;
           const gs = snapForCapture.gridSize;
           const hasCoords = pts.some((p: any) => p.lat && p.lng);
           if (!hasCoords && shop.lat && shop.lng) {
-            const center = Math.floor(gs / 2);
+            const centerIdx = Math.floor(gs / 2);
             pts = pts.map((p: any) => ({
               ...p,
-              lat: shop.lat + ((p.row - center) * 1000 * -0.000009),
-              lng: shop.lng + ((p.col - center) * 1000 * 0.000011),
+              lat: shop.lat + ((p.row - centerIdx) * 1000 * -0.000009),
+              lng: shop.lng + ((p.col - centerIdx) * 1000 * 0.000011),
             }));
           }
 
-          // ── OverlayView で lat/lng → コンテナピクセル座標を取得（公式API、最も正確） ──
-          const markerPixels = await new Promise<{ x: number; y: number; rank: number }[]>((resolve) => {
-            const overlay = new window.google.maps.OverlayView();
-            let done = false;
-            overlay.onAdd = function () {};
-            overlay.draw = function () {
-              if (done) return;
-              done = true;
-              try {
-                const proj = this.getProjection();
-                const pixels = pts.map((pt: any) => {
-                  const pixel = proj.fromLatLngToContainerPixel(
-                    new window.google.maps.LatLng(pt.lat, pt.lng)
-                  );
-                  return { x: pixel!.x, y: pixel!.y, rank: pt.rank as number };
-                });
-                resolve(pixels);
-              } catch {
-                resolve([]);
-              }
-              setTimeout(() => overlay.setMap(null), 0);
-            };
-            overlay.setMap(gmap);
-            setTimeout(() => { if (!done) { done = true; resolve([]); } }, 3000);
-          });
+          // ── Mercator投影で lat/lng → ピクセル座標を計算（Google Maps API不要） ──
+          const mapCenter = gmap.getCenter();
+          const zoom = gmap.getZoom();
+          const containerW = mapContainer.offsetWidth;
+          const containerH = mapContainer.offsetHeight;
+
+          const TILE = 256;
+          const s = Math.pow(2, zoom);
+          const toWX = (lng: number) => TILE * (0.5 + lng / 360);
+          const toWY = (lat: number) => {
+            const sin = Math.sin(lat * Math.PI / 180);
+            return TILE * (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI));
+          };
+          const cWX = toWX(mapCenter.lng()) * s;
+          const cWY = toWY(mapCenter.lat()) * s;
+
+          const markerPixels = pts.map((pt: any) => ({
+            x: toWX(pt.lng) * s - cWX + containerW / 2,
+            y: toWY(pt.lat) * s - cWY + containerH / 2,
+            rank: pt.rank as number,
+          }));
 
           // 中心マーカーの座標
-          const centerPixel = await new Promise<{ x: number; y: number } | null>((resolve) => {
-            const centerPt = pts.find((p: any) => p.row === Math.floor(gs / 2) && p.col === Math.floor(gs / 2));
-            const cLat = centerPt?.lat ?? pts.reduce((s: number, p: any) => s + p.lat, 0) / pts.length;
-            const cLng = centerPt?.lng ?? pts.reduce((s: number, p: any) => s + p.lng, 0) / pts.length;
-            const overlay = new window.google.maps.OverlayView();
-            let done = false;
-            overlay.onAdd = function () {};
-            overlay.draw = function () {
-              if (done) return;
-              done = true;
-              try {
-                const proj = this.getProjection();
-                const pixel = proj.fromLatLngToContainerPixel(
-                  new window.google.maps.LatLng(cLat, cLng)
-                );
-                resolve(pixel ? { x: pixel.x, y: pixel.y } : null);
-              } catch {
-                resolve(null);
-              }
-              setTimeout(() => overlay.setMap(null), 0);
-            };
-            overlay.setMap(gmap);
-            setTimeout(() => { if (!done) { done = true; resolve(null); } }, 3000);
-          });
+          const centerPt = pts.find((p: any) => p.row === Math.floor(gs / 2) && p.col === Math.floor(gs / 2));
+          const cLat = centerPt?.lat ?? pts.reduce((s: number, p: any) => s + p.lat, 0) / pts.length;
+          const cLng = centerPt?.lng ?? pts.reduce((s: number, p: any) => s + p.lng, 0) / pts.length;
+          const centerPixel = {
+            x: toWX(cLng) * s - cWX + containerW / 2,
+            y: toWY(cLat) * s - cWY + containerH / 2,
+          };
 
           // ── マーカーを非表示にして地図タイルだけキャプチャ ──
           const markers = gridMarkersRefs.current[kw] || [];
@@ -838,7 +807,7 @@ export default function ReportClient({
 
           // ── Canvas 2D でマーカーを直接描画（html2canvas のSVGズレを完全回避） ──
           const ctx = canvas.getContext("2d");
-          if (ctx && markerPixels.length > 0) {
+          if (ctx) {
             const sf = 2; // html2canvas scale factor
             const radius = 18 * sf;
             const fontSize = 14 * sf;
@@ -867,21 +836,19 @@ export default function ReportClient({
             });
 
             // 中心マーカー（▼）
-            if (centerPixel) {
-              const ccx = centerPixel.x * sf;
-              const ccy = centerPixel.y * sf;
-              const arrowSize = 8 * sf;
-              ctx.beginPath();
-              ctx.moveTo(ccx, ccy + arrowSize);
-              ctx.lineTo(ccx - arrowSize * 0.7, ccy - arrowSize * 0.5);
-              ctx.lineTo(ccx + arrowSize * 0.7, ccy - arrowSize * 0.5);
-              ctx.closePath();
-              ctx.fillStyle = "#000";
-              ctx.fill();
-              ctx.strokeStyle = "#fff";
-              ctx.lineWidth = borderW;
-              ctx.stroke();
-            }
+            const ccx = centerPixel.x * sf;
+            const ccy = centerPixel.y * sf;
+            const arrowSize = 8 * sf;
+            ctx.beginPath();
+            ctx.moveTo(ccx, ccy + arrowSize);
+            ctx.lineTo(ccx - arrowSize * 0.7, ccy - arrowSize * 0.5);
+            ctx.lineTo(ccx + arrowSize * 0.7, ccy - arrowSize * 0.5);
+            ctx.closePath();
+            ctx.fillStyle = "#000";
+            ctx.fill();
+            ctx.strokeStyle = "#fff";
+            ctx.lineWidth = borderW;
+            ctx.stroke();
           }
 
           const imgDataUrl = canvas.toDataURL("image/png");
