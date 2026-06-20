@@ -783,15 +783,6 @@ export default function ReportClient({
             rank: pt.rank as number,
           }));
 
-          // 中心マーカーの座標
-          const centerPt = pts.find((p: any) => p.row === Math.floor(gs / 2) && p.col === Math.floor(gs / 2));
-          const cLat = centerPt?.lat ?? pts.reduce((s: number, p: any) => s + p.lat, 0) / pts.length;
-          const cLng = centerPt?.lng ?? pts.reduce((s: number, p: any) => s + p.lng, 0) / pts.length;
-          const centerPixel = {
-            x: toWX(cLng) * s - cWX + containerW / 2,
-            y: toWY(cLat) * s - cWY + containerH / 2,
-          };
-
           // ── マーカーを非表示にして地図タイルだけキャプチャ ──
           const markers = gridMarkersRefs.current[kw] || [];
           markers.forEach(m => m.setMap(null));
@@ -841,21 +832,6 @@ export default function ReportClient({
             ctx.textBaseline = "middle";
             ctx.fillText(rank > 0 ? String(rank) : "-", cx, cy);
           });
-
-          // 中心マーカー（▼）
-          const ccx = centerPixel.x * sf;
-          const ccy = centerPixel.y * sf;
-          const arrowSize = 8 * sf;
-          ctx.beginPath();
-          ctx.moveTo(ccx, ccy + arrowSize);
-          ctx.lineTo(ccx - arrowSize * 0.7, ccy - arrowSize * 0.5);
-          ctx.lineTo(ccx + arrowSize * 0.7, ccy - arrowSize * 0.5);
-          ctx.closePath();
-          ctx.fillStyle = "#000";
-          ctx.fill();
-          ctx.strokeStyle = "#fff";
-          ctx.lineWidth = borderW;
-          ctx.stroke();
 
           const canvas = finalCanvas; // 以降の処理で使用
 
