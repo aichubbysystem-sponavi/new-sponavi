@@ -538,7 +538,7 @@ export default function ReportClient({
       zIndex: 999,
     });
     gridMarkersRefs.current[kw].push(cm);
-    gmap.fitBounds(bounds, 40);
+    gmap.fitBounds(bounds, hideControls ? 70 : 40);
   }, [gridRecentHistory, gridMonthIdx, shop.lat, shop.lng]);
 
   useEffect(() => {
