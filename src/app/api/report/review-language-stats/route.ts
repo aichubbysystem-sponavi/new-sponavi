@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase } from "@/lib/supabase";
 import { detectLanguage, starToNum } from "@/lib/detect-language";
 
 export const dynamic = "force-dynamic";
@@ -35,10 +35,8 @@ interface ReviewDetail {
  * 指定店舗の口コミを言語別に集計
  */
 export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) {
-    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-  }
+  // レポートサブドメインは未ログインで閲覧するため認証スキップ
+  // shopNames/shopIds指定必須なので、データアクセス範囲は限定される
 
   const body = await request.json().catch(() => ({}));
   const shopIds: string[] = body.shopIds || [];
