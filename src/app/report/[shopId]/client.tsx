@@ -1530,7 +1530,7 @@ export default function ReportClient({
                       {snapshot ? (
                         <>
                           <div ref={el => { gridMapRefs.current[loopKw] = el; }} className="grid-map-container" style={{ width: 440, height: 400, borderRadius: 12, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,.15)", background: "#e8edf5" }} />
-                          <div className="grid-kw-legend" style={{ display: "flex", fontSize: 18, color: "#555", marginTop: 4, width: 440, justifyContent: "space-between" }}>
+                          <div className="grid-kw-legend" style={{ display: "flex", fontSize: 18, lineHeight: 1, color: "#555", marginTop: 4, width: 440, justifyContent: "space-between" }}>
                             <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 20, height: 20, borderRadius: "50%", background: "#2563EB", display: "inline-block", flexShrink: 0 }} />1-3位</span>
                             <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 20, height: 20, borderRadius: "50%", background: "#16A34A", display: "inline-block", flexShrink: 0 }} />4-10位</span>
                             <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 20, height: 20, borderRadius: "50%", background: "#F59E0B", display: "inline-block", flexShrink: 0 }} />11-20位</span>
