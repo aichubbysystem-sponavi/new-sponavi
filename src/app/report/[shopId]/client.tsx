@@ -658,118 +658,76 @@ export default function ReportClient({
       }
 
       const gr = gridRanking;
-      const filteredHistory = gr.history.filter(h => monthToNum(h.month) <= monthToNum(curLabel));
-      const recentHistory = filteredHistory.slice(-6);
-      const latestMonth = recentHistory[recentHistory.length - 1];
-      const prevMonth = recentHistory.length >= 2 ? recentHistory[recentHistory.length - 2] : null;
+      const pdfMapPairCount = Math.ceil(gr.keywords.length / 2);
+      // PDF基準: サマリー1 + マップceil(KW/2) vs web基準: サマリー1 + KW切替1
+      const pageShift = pdfMapPairCount - 1; // PDF追加ページ数
+      const pdfTotalPages = totalPages + pageShift;
+      // サマリーページ番号（summaryPageNumと同じ値を計算）
+      const pdfSummaryPageNum = 5 + (showKeywords ? 1 : 0) + (showRankingHistory ? 1 : 0) + 1;
 
-      // ── 1. サマリースライドをDOMに挿入 ──
-      const summarySlide = document.createElement("div");
-      summarySlide.className = "slide grid-print-slide";
-      summarySlide.style.cssText = `width:${SLIDE_W}px;height:${SLIDE_H}px;background:#f0f2f5;display:none;flex-direction:column;overflow:hidden;font-family:'Noto Sans JP',sans-serif;page-break-after:always;page-break-inside:avoid;`;
-
-      const sHeader = document.createElement("div");
-      sHeader.style.cssText = `background:linear-gradient(135deg,#1a1a2e,#0f3460);color:#fff;padding:12px 9px;font-size:16px;font-weight:700;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;`;
-      // サマリーページ番号を計算: P1(サマリー)+P2(月次)+P3-5(グラフ3枚) = 5ページ固定 + オプション
-      const gridSummaryPageNum = 5 + (showKeywords ? 1 : 0) + (showRankingHistory ? 1 : 0) + 1;
-      sHeader.innerHTML = `<span>${shop.name} — 多地点順位計測 サマリー</span><span style="font-size:16px;opacity:0.45;font-weight:400;">${gridSummaryPageNum} / ${totalPages}</span>`;
-      summarySlide.appendChild(sHeader);
-
-      const sBody = document.createElement("div");
-      sBody.style.cssText = `flex:1;padding:16px 24px;display:flex;gap:24px;overflow:hidden;`;
-
-      // 左: 全KW比較テーブル
-      const leftCol = document.createElement("div");
-      leftCol.style.cssText = `flex:0 0 480px;display:flex;flex-direction:column;`;
-      if (latestMonth) {
-        const th = `<tr>${["キーワード","平均順位","前月比","計測地点"].map((t,ti) => `<th style="background:#0f3460;color:#fff;padding:8px 12px;text-align:${ti===0?"left":"center"};font-size:15px;">${t}</th>`).join("")}</tr>`;
-        const rows = latestMonth.snapshots.map((s, si) => {
-          const ps = prevMonth?.snapshots.find(p => p.keyword === s.keyword);
-          const diff = ps ? ps.avgRank - s.avgRank : 0;
-          const dc = diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888";
-          const ds = ps ? (diff > 0 ? `↑${diff.toFixed(1)}` : diff < 0 ? `↓${Math.abs(diff).toFixed(1)}` : "→") : "-";
-          const rc = s.avgRank <= 3 ? "#1d4ed8" : s.avgRank <= 10 ? "#15803d" : s.avgRank <= 20 ? "#b45309" : "#999";
-          return `<tr style="background:${si%2===0?"#fff":"#f8f9fb"}"><td style="padding:8px 12px;font-size:15px;border-bottom:1px solid #eee;">${s.keyword}</td><td style="padding:8px 12px;text-align:center;font-size:15px;font-weight:800;color:${rc};border-bottom:1px solid #eee;">${s.avgRank}</td><td style="padding:8px 12px;text-align:center;font-size:15px;font-weight:700;color:${dc};border-bottom:1px solid #eee;">${ds}</td><td style="padding:8px 12px;text-align:center;font-size:15px;color:#888;border-bottom:1px solid #eee;">${s.gridSize}×${s.gridSize}</td></tr>`;
-        }).join("");
-        leftCol.innerHTML = `<h3 style="font-size:16px;font-weight:700;color:#0f3460;margin:0 0 8px;">全キーワード比較（${latestMonth.month}）</h3><div style="border-radius:10px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.04);"><table style="width:100%;border-collapse:collapse;background:#fff;"><thead>${th}</thead><tbody>${rows}</tbody></table></div>`;
-      }
-      sBody.appendChild(leftCol);
-
-      // 右: 各KWの月別平均順位
-      const rightCol = document.createElement("div");
-      rightCol.style.cssText = `flex:1;display:flex;flex-direction:column;gap:10px;overflow:hidden;`;
-      const trendMonthLabels = recentHistory.map(h => h.month.replace(/^\d{4}\//, "") + "月");
-      gr.keywords.forEach(kw => {
-        const data = recentHistory.map(h => { const s = h.snapshots.find(s => s.keyword === kw); return s ? s.avgRank : null; });
-        const valid = data.filter((v): v is number => v !== null);
-        const diffStr = valid.length >= 2 ? (() => { const d = valid[valid.length - 2] - valid[valid.length - 1]; return d > 0 ? `<span style="color:#0a8f3c;font-weight:700;">↑${d.toFixed(1)}</span>` : d < 0 ? `<span style="color:#c0392b;font-weight:700;">↓${Math.abs(d).toFixed(1)}</span>` : `<span style="color:#888;">→</span>`; })() : `<span style="color:#888;">→</span>`;
-        const thRow = trendMonthLabels.map((l, li) => `<th style="background:${li===trendMonthLabels.length-1?"#e94560":"#0f3460"};color:#fff;padding:5px 4px;text-align:center;font-weight:600;font-size:12px;white-space:nowrap;">${l}</th>`).join("") + `<th style="background:#0f3460;color:#fff;padding:5px 4px;text-align:center;font-weight:600;font-size:12px;">変動</th>`;
-        const tdRow = data.map(v => { const c = v === null ? "#ddd" : v <= 3 ? "#1d4ed8" : v <= 10 ? "#15803d" : v <= 20 ? "#b45309" : "#999"; return `<td style="padding:5px 4px;text-align:center;font-size:12px;font-weight:${v!==null&&v<=5?900:600};color:${c};border-bottom:1px solid #eee;">${v !== null ? v : "-"}</td>`; }).join("") + `<td style="padding:5px 4px;text-align:center;font-size:12px;border-bottom:1px solid #eee;">${diffStr}</td>`;
-        const block = document.createElement("div");
-        block.innerHTML = `<div style="font-size:13px;font-weight:700;color:#0f3460;margin-bottom:6px;">「${kw}」</div><table style="width:100%;border-collapse:collapse;background:#fff;border-radius:6px;overflow:hidden;"><thead><tr>${thRow}</tr></thead><tbody><tr>${tdRow}</tr></tbody></table>`;
-        rightCol.appendChild(block);
-      });
-      sBody.appendChild(rightCol);
-      summarySlide.appendChild(sBody);
-
-      // ── 2. マップペアスライドをDOMに挿入 ──
+      // ── 1. マップペアスライドをDOMに生成（ヘッダーバー付き） ──
       const mapPairSlides: HTMLElement[] = [];
       for (let m = 0; m < gr.keywords.length; m += 2) {
+        const pairIdx = m / 2;
+        const pairPageNum = pdfSummaryPageNum + 1 + pairIdx;
+        const kwNames = gr.keywords.slice(m, m + 2);
+
         const pairSlide = document.createElement("div");
         pairSlide.className = "slide grid-print-slide";
-        pairSlide.style.cssText = `width:${SLIDE_W}px;height:${SLIDE_H}px;background:#f0f2f5;display:none;flex-direction:row;overflow:hidden;font-family:'Noto Sans JP',sans-serif;page-break-after:always;page-break-inside:avoid;`;
+        pairSlide.style.cssText = `width:${SLIDE_W}px;height:${SLIDE_H}px;background:#f0f2f5;display:none;flex-direction:column;overflow:hidden;font-family:'Noto Sans JP',sans-serif;page-break-after:always;page-break-inside:avoid;`;
 
-        for (let k = m; k < Math.min(m + 2, gr.keywords.length); k++) {
-          const kwName = gr.keywords[k];
+        // ヘッダーバー（他スライドと統一）
+        const header = document.createElement("div");
+        header.style.cssText = `background:linear-gradient(135deg,#1a1a2e,#0f3460);color:#fff;padding:12px 9px;font-size:16px;font-weight:700;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;letter-spacing:0.5px;`;
+        header.innerHTML = `<span>${shop.name} — 多地点順位計測</span><span style="font-size:16px;opacity:0.45;font-weight:400;">${pairPageNum} / ${pdfTotalPages}</span>`;
+        pairSlide.appendChild(header);
+
+        // マップコンテンツ（横並び）
+        const body = document.createElement("div");
+        body.style.cssText = `flex:1;display:flex;flex-direction:row;overflow:hidden;`;
+
+        for (const kwName of kwNames) {
           const mapSlot = document.createElement("div");
           mapSlot.className = "grid-print-map-slot";
           mapSlot.dataset.kw = kwName;
           mapSlot.style.cssText = `flex:1;display:flex;flex-direction:column;justify-content:center;padding:8px 12px;overflow:hidden;`;
-          // タイトル
           const title = document.createElement("div");
           title.style.cssText = `font-size:18px;font-weight:700;color:#0f3460;border-left:5px solid #e94560;padding-left:12px;margin-bottom:8px;`;
           title.textContent = `多地点順位 —「${kwName}」`;
           mapSlot.appendChild(title);
-          // マップコンテナ
           const mapDiv = document.createElement("div");
           mapDiv.className = "grid-print-map";
-          mapDiv.style.cssText = `width:100%;height:700px;border-radius:12px;overflow:hidden;background:#e8edf5;`;
+          mapDiv.style.cssText = `width:100%;height:660px;border-radius:12px;overflow:hidden;background:#e8edf5;`;
           mapSlot.appendChild(mapDiv);
-          // 凡例・平均順位はキャプチャ画像内に含まれるため、ここでは追加しない
-          pairSlide.appendChild(mapSlot);
+          body.appendChild(mapSlot);
         }
+        pairSlide.appendChild(body);
         mapPairSlides.push(pairSlide);
       }
 
-      // ── 3. DOMに挿入（最初のgrid-kw-pairの前に配置） ──
+      // ── 2. DOMに挿入（最初のgrid-kw-pairの前に配置） ──
       const firstGridPair = document.querySelector(".grid-kw-pair");
       if (firstGridPair) {
-        firstGridPair.parentElement?.insertBefore(summarySlide, firstGridPair);
-        insertedEls.push(summarySlide);
         mapPairSlides.forEach(ps => {
           firstGridPair.parentElement?.insertBefore(ps, firstGridPair);
           insertedEls.push(ps);
         });
       }
 
-      // ── 4. 既存のアクティブスライドでKW切替→マップキャプチャ→画像埋め込み ──
+      // ── 3. マップキャプチャ ──
       const html2canvas = (await import("html2canvas")).default;
       const mapSlots = document.querySelectorAll<HTMLElement>(".grid-print-map-slot");
       const origGridKwIdx = gridKwIdx;
 
       for (let kwIdx = 0; kwIdx < gr.keywords.length; kwIdx++) {
         const kw = gr.keywords[kwIdx];
-        // 既存のアクティブスライドでKW切替
         setGridKwIdx(kwIdx);
         await new Promise(r => setTimeout(r, 300));
-        // スライドをビューポートに表示
         const activeSlide = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden)");
         if (activeSlide) activeSlide.scrollIntoView({ block: "center" });
         await new Promise(r => setTimeout(r, 100));
-        // マップ再描画（PDF用にラベルを上方補正 -2.5）
         renderGridMapForKw(kw, -2.5);
         await new Promise(r => setTimeout(r, 2000));
-        // マップ領域をキャプチャ
         const mapArea = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden) .grid-kw-map-area");
         if (mapArea) {
           const canvas = await html2canvas(mapArea, { scale: 2, useCORS: true, logging: false, backgroundColor: "#f0f2f5" });
@@ -784,35 +742,56 @@ export default function ReportClient({
           }
         }
       }
-      // KWを元に戻し、通常表示用にlabelOffset=0で再描画
       setGridKwIdx(origGridKwIdx);
       await new Promise(r => setTimeout(r, 200));
       renderGridMapForKw(gr.keywords[origGridKwIdx], 0);
 
-      // ── 5. print用スライドを表示、元のgridスライドを非表示 ──
+      // ── 4. ページ番号をPDF基準に書き換え ──
+      document.querySelectorAll<HTMLElement>(".pn-label").forEach(el => {
+        const text = el.textContent || "";
+        const match = text.match(/^(\d+)\s*\/\s*(\d+)$/);
+        if (!match) return;
+        const webNum = parseInt(match[1]);
+        el.dataset.origPn = text; // 復元用に保存
+        let pdfNum = webNum;
+        // サマリーより後のページはシフト（サマリー自体はそのまま）
+        // web: summary=N, kwPage=N+1, nextSection=N+2
+        // pdf: summary=N, mapPair1=N+1...N+pairCount, nextSection=N+pairCount+1
+        if (webNum > pdfSummaryPageNum) {
+          pdfNum = webNum + pageShift;
+        }
+        el.textContent = `${pdfNum} / ${pdfTotalPages}`;
+      });
+
+      // ── 5. print用スライドを表示、元のKWスライドを非表示 ──
       insertedEls.forEach(el => { el.style.display = "flex"; });
       document.querySelectorAll<HTMLElement>(".grid-kw-pair").forEach(el => { el.dataset.prevDisplay = el.style.display; el.style.display = "none"; });
 
-      // スクロールを先頭に戻してから印刷
       window.scrollTo(0, 0);
       await new Promise(r => setTimeout(r, 500));
       window.print();
 
-      // ── 6. afterprint: DOM復元 ──
+      // ── 6. afterprint: DOM復元 + ページ番号復元 ──
       const cleanup = () => {
         insertedEls.forEach(el => el.remove());
         insertedEls.length = 0;
         document.querySelectorAll<HTMLElement>(".grid-kw-pair").forEach(el => { el.style.display = el.dataset.prevDisplay || ""; delete el.dataset.prevDisplay; });
+        // ページ番号をweb基準に復元
+        document.querySelectorAll<HTMLElement>(".pn-label").forEach(el => {
+          if (el.dataset.origPn) { el.textContent = el.dataset.origPn; delete el.dataset.origPn; }
+        });
         setPdfGenerating(false);
       };
       window.addEventListener("afterprint", cleanup, { once: true });
-      // フォールバック: 5秒後に自動cleanup（afterprintが発火しないブラウザ対策）
       setTimeout(() => { if (insertedEls.length > 0) cleanup(); }, 5000);
 
     } catch (err) {
       console.error("PDF generation error:", err);
       insertedEls.forEach(el => el.remove());
       document.querySelectorAll<HTMLElement>(".grid-kw-pair").forEach(el => { el.style.display = el.dataset.prevDisplay || ""; delete el.dataset.prevDisplay; });
+      document.querySelectorAll<HTMLElement>(".pn-label").forEach(el => {
+        if (el.dataset.origPn) { el.textContent = el.dataset.origPn; delete el.dataset.origPn; }
+      });
       window.print();
       setPdfGenerating(false);
     }
@@ -1164,7 +1143,7 @@ export default function ReportClient({
       {/* ════ P2: 月次テーブル ════ */}
       {(() => { pageNum = 2; return null; })()}
       <div style={slideStyle} className="slide">
-        <div style={slideBarStyle}><span>{shop.name} — 月次推移データ</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBarStyle}><span>{shop.name} — 月次推移データ</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={stitleStyle}>月次推移データ（直近{monthlyLabels.length}ヶ月）</div>
           <div style={{ overflow: "hidden", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
@@ -1207,7 +1186,7 @@ export default function ReportClient({
       {/* ════ P3: Googleマップ表示数推移 ════ */}
       {(() => { pageNum = 3; return null; })()}
       <div style={slideStyle} className="slide">
-        <div style={slideBarStyle}><span>{shop.name} — Googleマップ表示数推移</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBarStyle}><span>{shop.name} — Googleマップ表示数推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={{ width: "95%", margin: "0 auto" }}>
             <Bar data={{ labels: monthlyLabels, datasets: [
@@ -1235,7 +1214,7 @@ export default function ReportClient({
       {/* ════ P4: Google検索数推移 ════ */}
       {(() => { pageNum = 4; return null; })()}
       <div style={slideStyle} className="slide">
-        <div style={slideBarStyle}><span>{shop.name} — Google検索数推移</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBarStyle}><span>{shop.name} — Google検索数推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={{ width: "95%", margin: "0 auto" }}>
             <Bar data={{ labels: monthlyLabels, datasets: [
@@ -1263,7 +1242,7 @@ export default function ReportClient({
       {/* ════ P5: ユーザー反応数推移 ════ */}
       {(() => { pageNum = 5; return null; })()}
       <div style={slideStyle} className="slide">
-        <div style={slideBarStyle}><span>{shop.name} — ユーザー反応数推移</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBarStyle}><span>{shop.name} — ユーザー反応数推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={{ width: "95%", margin: "0 auto" }}>
             <Bar data={{ labels: monthlyLabels, datasets: [
@@ -1300,7 +1279,7 @@ export default function ReportClient({
       {/* ════ P7: キーワード順位 (データある場合のみ) ════ */}
       {showKeywords && (() => { pageNum = 6; return (
         <div style={slideStyle} className="slide">
-          <div style={slideBarStyle}><span>{shop.name} — キーワード順位変動</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+          <div style={slideBarStyle}><span>{shop.name} — キーワード順位変動</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={slideBodyStyle}>
             <div style={stitleStyle}>キーワード順位変動（{curLabel}）</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16, flex: 1 }}>
@@ -1328,7 +1307,7 @@ export default function ReportClient({
       {/* ════ P7.5: キーワード順位推移テーブル ════ */}
       {showRankingHistory && (() => { pageNum++; return (
         <div style={slideStyle} className="slide">
-          <div style={slideBarStyle}><span>{shop.name} — キーワード順位推移</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+          <div style={slideBarStyle}><span>{shop.name} — キーワード順位推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={{ ...slideBodyStyle, display: "flex", flexDirection: "column", justifyContent: "center" }}>
             <div style={stitleStyle}>キーワード順位推移（直近{rankingHistory.labels.length}ヶ月）</div>
             <div style={{ overflowX: "auto", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
@@ -1411,11 +1390,11 @@ export default function ReportClient({
 
         // サマリースライド（web表示用、PDF時はgrid-kw-pairとして非表示→動的版に置換）
         const summarySlide = (
-          <div key="grid-summary" className="grid-kw-pair">
+          <div key="grid-summary" className="grid-summary-slide">
             <div style={slideStyle} className="slide">
               <div style={slideBarStyle}>
                 <span>{shop.name} — 多地点順位計測 サマリー</span>
-                <span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(summaryPageNum)}</span>
+                <span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(summaryPageNum)}</span>
               </div>
               <div style={{ ...slideBodyStyle, padding: "16px 24px", gap: 16 }}>
                 <div style={stitleStyle}>多地点順位 総合レポート（{latestMonth?.month || curLabel}）</div>
@@ -1519,7 +1498,7 @@ export default function ReportClient({
               <div key={`grid-${kwI}`} style={slideStyle} className={`slide grid-kw-slide${!isActive ? " grid-kw-hidden" : ""}`}>
                 <div style={slideBarStyle} className="grid-kw-header">
                   <span>{shop.name} — 多地点順位計測</span>
-                  <span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(gridKwPageNum)}</span>
+                  <span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(gridKwPageNum)}</span>
                 </div>
                 <div style={{ ...slideBodyStyle, padding: "20px 9px", gap: 12 }} className="grid-kw-body">
                   {/* KWタブ（画面のみ、全スライドに配置するが表示は1つだけ） */}
@@ -1800,7 +1779,7 @@ export default function ReportClient({
           <div style={slideBarStyle}>
             <span>{shop.name} — 検索語句</span>
             {sqNavBar}
-            <span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
+            <span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
           </div>
           <div style={{ ...slideBodyStyle, padding: "10px 9px", display: "flex", flexDirection: "column" }}>
             <div style={stitleStyle}>検索語句ランキング（{sqCurrent?.month || ""}）1〜{Math.min(PER_PAGE, currentKeywords.length)}位</div>
@@ -1815,7 +1794,7 @@ export default function ReportClient({
       {(() => { pageNum++; return null; })()}
       {hasReviews && (
         <div style={slideStyle} className="slide">
-          <div style={slideBarStyle}><span>{shop.name} — 口コミ件数推移</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+          <div style={slideBarStyle}><span>{shop.name} — 口コミ件数推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={{ ...slideBodyStyle, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <div style={{ width: "95%", maxHeight: 600 }}>
               <Line data={{ labels: reviewLabels, datasets: [{
@@ -1844,7 +1823,7 @@ export default function ReportClient({
       {(() => { pageNum++; return null; })()}
       {hasReviews && (
         <div style={slideStyle} className="slide">
-          <div style={slideBarStyle}><span>{shop.name} — 月間口コミ増加数</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+          <div style={slideBarStyle}><span>{shop.name} — 月間口コミ増加数</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={{ ...slideBodyStyle, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <div style={{ width: "95%", maxHeight: 600 }}>
               {(() => {
@@ -1902,7 +1881,7 @@ export default function ReportClient({
       {/* ════ P10: 口コミ分析 ════ */}
       {(() => { pageNum++; return null; })()}
       <div style={slideStyle} className="slide">
-        <div style={slideBarStyle}><span>{shop.name} — AIによる口コミ分析</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBarStyle}><span>{shop.name} — AIによる口コミ分析</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={stitleStyle}>口コミ分析（直近1年）</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "auto 1fr", gap: 16, flex: 1 }}>
@@ -1974,7 +1953,7 @@ export default function ReportClient({
           pageNum++;
           return (
             <div style={slideStyle} className="slide">
-              <div style={slideBarStyle}><span>{shop.name} — AIによるコメント</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+              <div style={slideBarStyle}><span>{shop.name} — AIによるコメント</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
               <div style={slideBodyStyle}>
                 <div style={stitleStyle}>AIによるコメント</div>
                 <div style={{ background: "#f8f9fa", border: "1px solid #dee2e6", borderRadius: 12, padding: "40px 32px", textAlign: "center" }}>
@@ -2012,7 +1991,7 @@ export default function ReportClient({
               {commentError && <span style={{ fontSize: 14, color: "#ff6b6b" }}>{commentError}</span>}
             </div>
           )}
-          <span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
+          <span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
         </div>
         <div style={slideBodyStyle}>
           <div style={stitleStyle}>{isFirst ? "AIによるコメント" : "AIによるコメント（続き）"}</div>
@@ -2081,7 +2060,7 @@ export default function ReportClient({
       {/* ════ 口コミ言語別分析 ════ */}
       {langStats.length > 1 && (() => { pageNum++; return (
         <div style={slideStyle} className="slide">
-          <div style={slideBarStyle}><span>{shop.name} — 口コミ言語別分析</span><span style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+          <div style={slideBarStyle}><span>{shop.name} — 口コミ言語別分析</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={slideBodyStyle}>
             <div style={stitleStyle}>口コミ言語別集計 <span style={{ fontSize: 16, fontWeight: 400, color: "#999" }}>※コメント付き口コミのみ対象（{shop.totalReviews}件中{langStats.reduce((s, st) => s + st.total, 0)}件）</span></div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 20 }}>
