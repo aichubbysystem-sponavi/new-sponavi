@@ -799,57 +799,65 @@ export default function ReportClient({
           ctrlEls.forEach(el => { el.dataset.origDisplay = el.style.display; el.style.display = "none"; });
           await new Promise(r => setTimeout(r, 100));
 
-          const canvas = await html2canvas(mapContainer, { scale: 2, useCORS: true, logging: false, backgroundColor: "#e8edf5" });
+          const h2cCanvas = await html2canvas(mapContainer, { scale: 2, useCORS: true, logging: false, backgroundColor: "#e8edf5" });
 
           // ── コントロール復元・マーカー復元 ──
           ctrlEls.forEach(el => { el.style.display = el.dataset.origDisplay || ""; delete el.dataset.origDisplay; });
           markers.forEach(m => m.setMap(gmap));
 
-          // ── Canvas 2D でマーカーを直接描画（html2canvas のSVGズレを完全回避） ──
-          const ctx = canvas.getContext("2d");
-          if (ctx) {
-            const sf = 2; // html2canvas scale factor
-            const radius = 18 * sf;
-            const fontSize = 14 * sf;
-            const borderW = 2 * sf;
+          // ── 新しいCanvasに地図＋マーカーを合成（html2canvasの内部状態を回避） ──
+          const finalCanvas = document.createElement("canvas");
+          finalCanvas.width = h2cCanvas.width;
+          finalCanvas.height = h2cCanvas.height;
+          const ctx = finalCanvas.getContext("2d")!;
 
-            markerPixels.forEach(({ x, y, rank }) => {
-              const cx = x * sf;
-              const cy = y * sf;
-              // 円（塗り）
-              ctx.beginPath();
-              ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-              ctx.fillStyle = rankColor(rank);
-              ctx.globalAlpha = 0.9;
-              ctx.fill();
-              ctx.globalAlpha = 1;
-              // 円（白枠）
-              ctx.strokeStyle = "#fff";
-              ctx.lineWidth = borderW;
-              ctx.stroke();
-              // テキスト
-              ctx.fillStyle = "#fff";
-              ctx.font = `bold ${fontSize}px sans-serif`;
-              ctx.textAlign = "center";
-              ctx.textBaseline = "middle";
-              ctx.fillText(rank > 0 ? String(rank) : "-", cx, cy);
-            });
+          // 地図タイルを転写
+          ctx.drawImage(h2cCanvas, 0, 0);
 
-            // 中心マーカー（▼）
-            const ccx = centerPixel.x * sf;
-            const ccy = centerPixel.y * sf;
-            const arrowSize = 8 * sf;
+          // マーカーを描画
+          const sf = 2; // html2canvas scale factor
+          const radius = 18 * sf;
+          const fontSize = 14 * sf;
+          const borderW = 2 * sf;
+
+          markerPixels.forEach(({ x, y, rank }) => {
+            const cx = x * sf;
+            const cy = y * sf;
+            // 円（塗り）
             ctx.beginPath();
-            ctx.moveTo(ccx, ccy + arrowSize);
-            ctx.lineTo(ccx - arrowSize * 0.7, ccy - arrowSize * 0.5);
-            ctx.lineTo(ccx + arrowSize * 0.7, ccy - arrowSize * 0.5);
-            ctx.closePath();
-            ctx.fillStyle = "#000";
+            ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+            ctx.fillStyle = rankColor(rank);
+            ctx.globalAlpha = 0.9;
             ctx.fill();
+            ctx.globalAlpha = 1;
+            // 円（白枠）
             ctx.strokeStyle = "#fff";
             ctx.lineWidth = borderW;
             ctx.stroke();
-          }
+            // テキスト
+            ctx.fillStyle = "#fff";
+            ctx.font = `bold ${fontSize}px sans-serif`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(rank > 0 ? String(rank) : "-", cx, cy);
+          });
+
+          // 中心マーカー（▼）
+          const ccx = centerPixel.x * sf;
+          const ccy = centerPixel.y * sf;
+          const arrowSize = 8 * sf;
+          ctx.beginPath();
+          ctx.moveTo(ccx, ccy + arrowSize);
+          ctx.lineTo(ccx - arrowSize * 0.7, ccy - arrowSize * 0.5);
+          ctx.lineTo(ccx + arrowSize * 0.7, ccy - arrowSize * 0.5);
+          ctx.closePath();
+          ctx.fillStyle = "#000";
+          ctx.fill();
+          ctx.strokeStyle = "#fff";
+          ctx.lineWidth = borderW;
+          ctx.stroke();
+
+          const canvas = finalCanvas; // 以降の処理で使用
 
           const imgDataUrl = canvas.toDataURL("image/png");
           const slot = mapSlots[kwIdx];
