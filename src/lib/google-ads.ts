@@ -140,6 +140,191 @@ export async function getAccountSummary(
   };
 }
 
+// ── キャンペーン名パーサー ──
+
+const KNOWN_LANGUAGES = ["Japanese", "Chinese", "English", "Korean", "Thai", "Vietnamese", "French", "Spanish", "Portuguese", "German", "Italian", "Russian", "Arabic", "Hindi"];
+
+/**
+ * キャンペーン名から店舗名と言語を抽出
+ *
+ * 対応パターン:
+ * - "P-MAX ACE COLOR 那覇小禄イオン店 Japanese" → { shopName: "ACE COLOR 那覇小禄イオン店", language: "Japanese" }
+ * - "来店CV用 とりとん 大久保店" → { shopName: "とりとん 大久保店", language: "Japanese" }
+ * - "来店CV用７ 海老元" → { shopName: "海老元", language: "Japanese" }
+ * - パターン不一致 → campaignName をそのまま shopName に、language は "Unknown"
+ */
+export function parseCampaignName(campaignName: string): { shopName: string; language: string } {
+  let name = campaignName;
+
+  // "P-MAX " プレフィックスを除去
+  if (name.startsWith("P-MAX ")) {
+    name = name.slice(6);
+  }
+
+  // "来店CV用" 系プレフィックスを除去（来店CV用、来店CV用１〜９等）
+  // これらは言語サフィックスがなく、日本語キャンペーン
+  const raitenMatch = name.match(/^来店CV用[０-９0-9]?\s+/);
+  if (raitenMatch) {
+    const shopName = name.slice(raitenMatch[0].length).trim();
+    return { shopName: shopName || name.trim(), language: "Japanese" };
+  }
+
+  // 末尾の単語が言語かチェック
+  const lastSpace = name.lastIndexOf(" ");
+  if (lastSpace > 0) {
+    const lastWord = name.slice(lastSpace + 1);
+    if (KNOWN_LANGUAGES.includes(lastWord)) {
+      return { shopName: name.slice(0, lastSpace).trim(), language: lastWord };
+    }
+  }
+
+  // パターンに合わない場合
+  return { shopName: name.trim(), language: "Unknown" };
+}
+
+export interface StoreSummary {
+  shopName: string;
+  languages: string[];
+  impressions: number;
+  clicks: number;
+  costMicros: number;
+  /** このストアのキャンペーンが属するアカウントID群 */
+  accountIds: string[];
+}
+
+/**
+ * 全アカウント横断で店舗別サマリーを取得
+ * 各アカウントのキャンペーン月次データを取得→店舗名でグループ化
+ */
+export async function getStoreSummaries(
+  startDate: string,
+  endDate: string
+): Promise<StoreSummary[]> {
+  const accounts = await listAccounts();
+
+  // 5並列でキャンペーンデータ取得
+  const BATCH = 5;
+  const allCampaigns: { accountId: string; campaignName: string; impressions: number; clicks: number; costMicros: number }[] = [];
+
+  for (let i = 0; i < accounts.length; i += BATCH) {
+    const batch = accounts.slice(i, i + BATCH);
+    const results = await Promise.allSettled(
+      batch.map(async (a) => {
+        try {
+          const data = await getCampaignMonthly(a.customerId, startDate, endDate);
+          return data.map((d) => ({ accountId: a.customerId, ...d }));
+        } catch {
+          return [];
+        }
+      })
+    );
+    for (const r of results) {
+      if (r.status === "fulfilled") {
+        allCampaigns.push(...r.value.map((c) => ({
+          accountId: c.accountId,
+          campaignName: c.campaignName,
+          impressions: c.impressions,
+          clicks: c.clicks,
+          costMicros: c.costMicros,
+        })));
+      }
+    }
+  }
+
+  // 店舗名でグループ化
+  const storeMap = new Map<string, { languages: Set<string>; impressions: number; clicks: number; costMicros: number; accountIds: Set<string> }>();
+
+  for (const c of allCampaigns) {
+    const { shopName, language } = parseCampaignName(c.campaignName);
+    const existing = storeMap.get(shopName);
+    if (existing) {
+      existing.languages.add(language);
+      existing.impressions += c.impressions;
+      existing.clicks += c.clicks;
+      existing.costMicros += c.costMicros;
+      existing.accountIds.add(c.accountId);
+    } else {
+      storeMap.set(shopName, {
+        languages: new Set([language]),
+        impressions: c.impressions,
+        clicks: c.clicks,
+        costMicros: c.costMicros,
+        accountIds: new Set([c.accountId]),
+      });
+    }
+  }
+
+  return Array.from(storeMap.entries())
+    .map(([shopName, v]) => ({
+      shopName,
+      languages: Array.from(v.languages).sort(),
+      impressions: v.impressions,
+      clicks: v.clicks,
+      costMicros: v.costMicros,
+      accountIds: Array.from(v.accountIds),
+    }))
+    .sort((a, b) => b.impressions - a.impressions);
+}
+
+export interface StoreDetailCampaign {
+  language: string;
+  campaignName: string;
+  campaignId: string;
+  month?: string;
+  date?: string;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  averageCpc: number;
+  costMicros: number;
+}
+
+/**
+ * 特定店舗のキャンペーン（言語別）月次・日次データを取得
+ */
+export async function getStoreDetail(
+  shopName: string,
+  startDate: string,
+  endDate: string
+): Promise<{ monthly: StoreDetailCampaign[]; daily: StoreDetailCampaign[] }> {
+  const accounts = await listAccounts();
+
+  const monthly: StoreDetailCampaign[] = [];
+  const daily: StoreDetailCampaign[] = [];
+
+  // 5並列で全アカウントから取得
+  const BATCH = 5;
+  for (let i = 0; i < accounts.length; i += BATCH) {
+    const batch = accounts.slice(i, i + BATCH);
+    const results = await Promise.allSettled(
+      batch.map(async (a) => {
+        const [m, d] = await Promise.all([
+          getCampaignMonthly(a.customerId, startDate, endDate).catch(() => []),
+          getCampaignDaily(a.customerId, startDate, endDate).catch(() => []),
+        ]);
+        return { monthly: m, daily: d };
+      })
+    );
+    for (const r of results) {
+      if (r.status !== "fulfilled") continue;
+      for (const c of r.value.monthly) {
+        const parsed = parseCampaignName(c.campaignName);
+        if (parsed.shopName === shopName) {
+          monthly.push({ language: parsed.language, ...c });
+        }
+      }
+      for (const c of r.value.daily) {
+        const parsed = parseCampaignName(c.campaignName);
+        if (parsed.shopName === shopName) {
+          daily.push({ language: parsed.language, ...c });
+        }
+      }
+    }
+  }
+
+  return { monthly, daily };
+}
+
 /** キャンペーン別の月次データ（12ヶ月分） */
 export async function getCampaignMonthly(
   customerId: string,

@@ -4,18 +4,12 @@ import { useEffect, useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-type Account = {
-  customerId: string;
-  name: string;
-  status: string;
-};
-
-type AccountSummary = {
+type StoreSummary = {
+  shopName: string;
+  languages: string[];
   impressions: number;
   clicks: number;
   costMicros: number;
-  conversions: number;
-  interactionRate: number;
 };
 
 function getMonthRange(year: number, month: number) {
@@ -29,20 +23,26 @@ function formatCost(micros: number) {
   return `¥${Math.round(micros / 1_000_000).toLocaleString()}`;
 }
 
+const LANG_COLORS: Record<string, string> = {
+  Japanese: "bg-blue-100 text-blue-700",
+  Chinese: "bg-red-100 text-red-700",
+  English: "bg-emerald-100 text-emerald-700",
+  Korean: "bg-purple-100 text-purple-700",
+  Thai: "bg-amber-100 text-amber-700",
+  Unknown: "bg-slate-100 text-slate-600",
+};
+
 export default function PmaxTopPage() {
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [summaries, setSummaries] = useState<Record<string, AccountSummary>>({});
+  const [stores, setStores] = useState<StoreSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const router = useRouter();
 
-  // 月選択
   const now = new Date();
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth());
 
-  // 月の選択肢（過去12ヶ月）
   const monthOptions = useMemo(() => {
     const opts = [];
     for (let i = 0; i < 12; i++) {
@@ -50,6 +50,7 @@ export default function PmaxTopPage() {
       opts.push({ year: d.getFullYear(), month: d.getMonth(), label: `${d.getFullYear()}年${d.getMonth() + 1}月` });
     }
     return opts;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const getAuthHeaders = useCallback(async (): Promise<Record<string, string>> => {
@@ -57,73 +58,36 @@ export default function PmaxTopPage() {
     return token ? { Authorization: `Bearer ${token}` } : {};
   }, []);
 
-  // アカウント一覧取得
   useEffect(() => {
     (async () => {
+      setLoading(true);
+      setError("");
       try {
         const headers = await getAuthHeaders();
-        const res = await fetch("/api/pmax/accounts", { headers });
+        const { startDate, endDate } = getMonthRange(selectedYear, selectedMonth);
+        const res = await fetch(`/api/pmax/store-summary?startDate=${startDate}&endDate=${endDate}`, { headers });
         const data = await res.json();
-        if (data.error) setError(data.error);
-        else setAccounts(data.accounts || []);
-      } catch (err: any) {
-        setError(err.message);
+        if (data.error) {
+          setError(data.error);
+        } else {
+          setStores(data.stores || []);
+        }
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "取得に失敗しました");
       } finally {
         setLoading(false);
       }
     })();
-  }, [getAuthHeaders]);
+  }, [selectedYear, selectedMonth, getAuthHeaders]);
 
-  // 各アカウントのサマリー取得
-  useEffect(() => {
-    if (accounts.length === 0) return;
-    const { startDate, endDate } = getMonthRange(selectedYear, selectedMonth);
-    setSummaries({});
-
-    const controller = new AbortController();
-    // 並列で全アカウント取得（5並列制限）
-    const fetchAll = async () => {
-      const BATCH = 5;
-      for (let i = 0; i < accounts.length; i += BATCH) {
-        if (controller.signal.aborted) break;
-        const batch = accounts.slice(i, i + BATCH);
-        const headers = await getAuthHeaders();
-        const results = await Promise.allSettled(
-          batch.map(async (a) => {
-            const res = await fetch(`/api/pmax/summary?customerId=${a.customerId}&startDate=${startDate}&endDate=${endDate}`, { signal: controller.signal, headers });
-            const data = await res.json();
-            if (data.error) return { id: a.customerId, summary: null };
-            return { id: a.customerId, summary: data as AccountSummary };
-          })
-        );
-        if (controller.signal.aborted) break;
-        setSummaries((prev) => {
-          const next = { ...prev };
-          for (const r of results) {
-            if (r.status === "fulfilled" && r.value.summary) {
-              next[r.value.id] = r.value.summary;
-            }
-          }
-          return next;
-        });
-      }
-    };
-    fetchAll();
-    return () => controller.abort();
-  }, [accounts, selectedYear, selectedMonth]);
-
-  const filtered = accounts.filter(
-    (a) =>
-      a.name.toLowerCase().includes(search.toLowerCase()) ||
-      a.customerId.includes(search)
+  const filtered = stores.filter(
+    (s) => s.shopName.toLowerCase().includes(search.toLowerCase())
   );
 
-  // 集計KPI
-  const totalAccounts = accounts.length;
-  const totalImpressions = Object.values(summaries).reduce((s, v) => s + v.impressions, 0);
-  const totalClicks = Object.values(summaries).reduce((s, v) => s + v.clicks, 0);
-  const totalCost = Object.values(summaries).reduce((s, v) => s + v.costMicros, 0);
-  const loadedCount = Object.keys(summaries).length;
+  const totalStores = stores.length;
+  const totalImpressions = stores.reduce((s, v) => s + v.impressions, 0);
+  const totalClicks = stores.reduce((s, v) => s + v.clicks, 0);
+  const totalCost = stores.reduce((s, v) => s + v.costMicros, 0);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
@@ -138,7 +102,7 @@ export default function PmaxTopPage() {
             </div>
             <div>
               <h1 className="text-xl font-bold text-slate-800">P-MAX 広告レポート</h1>
-              <p className="text-xs text-slate-500">株式会社Chubby</p>
+              <p className="text-xs text-slate-500">店舗別パフォーマンス一覧</p>
             </div>
           </div>
           <span className="px-3 py-1 bg-[#003D6B] text-white text-xs font-semibold rounded-full">P-MAX広告レポート</span>
@@ -149,13 +113,12 @@ export default function PmaxTopPage() {
       <div className="bg-white border-b border-slate-100">
         <div className="max-w-7xl mx-auto px-6 py-4 grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="bg-slate-50 rounded-lg p-4">
-            <p className="text-[11px] text-slate-500 font-medium">管理アカウント数</p>
-            <p className="text-2xl font-bold text-[#003D6B]">{totalAccounts}<span className="text-sm font-normal text-slate-400 ml-1">件</span></p>
+            <p className="text-[11px] text-slate-500 font-medium">店舗数</p>
+            <p className="text-2xl font-bold text-[#003D6B]">{totalStores}<span className="text-sm font-normal text-slate-400 ml-1">店舗</span></p>
           </div>
           <div className="bg-slate-50 rounded-lg p-4">
             <p className="text-[11px] text-slate-500 font-medium">総表示回数</p>
             <p className="text-2xl font-bold text-blue-600">{totalImpressions.toLocaleString()}<span className="text-sm font-normal text-slate-400 ml-1">回</span></p>
-            {loadedCount < totalAccounts && <p className="text-[10px] text-slate-400">{loadedCount}/{totalAccounts} 読込中...</p>}
           </div>
           <div className="bg-slate-50 rounded-lg p-4">
             <p className="text-[11px] text-slate-500 font-medium">総クリック数</p>
@@ -170,11 +133,10 @@ export default function PmaxTopPage() {
 
       {/* メインコンテンツ */}
       <main className="max-w-7xl mx-auto px-6 py-6">
-        {/* フィルターバー */}
         <div className="flex flex-wrap items-center gap-3 mb-5">
           <input
             type="text"
-            placeholder="アカウント名・IDで検索..."
+            placeholder="店舗名で検索..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="flex-1 min-w-[200px] max-w-sm px-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20 focus:border-[#003D6B]"
@@ -194,75 +156,66 @@ export default function PmaxTopPage() {
               </option>
             ))}
           </select>
-          <span className="text-xs text-slate-400">{filtered.length} / {accounts.length} アカウント</span>
+          <span className="text-xs text-slate-400">{filtered.length} / {stores.length} 店舗</span>
         </div>
 
-        {/* ローディング */}
         {loading && (
           <div className="flex items-center justify-center py-20">
             <div className="animate-spin w-8 h-8 border-2 border-[#003D6B] border-t-transparent rounded-full" />
-            <span className="ml-3 text-sm text-slate-500">アカウント一覧を取得中...</span>
+            <span className="ml-3 text-sm text-slate-500">全アカウントから店舗データを取得中...</span>
           </div>
         )}
 
-        {/* エラー */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
             {error}
           </div>
         )}
 
-        {/* アカウントカード一覧 */}
         {!loading && !error && (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {filtered.length === 0 ? (
               <p className="text-sm text-slate-500 py-8 text-center col-span-full">
-                {search ? "該当するアカウントが見つかりません" : "アカウントがありません"}
+                {search ? "該当する店舗が見つかりません" : "店舗データがありません"}
               </p>
             ) : (
-              filtered.map((account) => {
-                const s = summaries[account.customerId];
-                return (
-                  <button
-                    key={account.customerId}
-                    onClick={() => router.push(`/pmax/${account.customerId}`)}
-                    className="bg-white rounded-xl border border-slate-200 p-5 hover:border-[#003D6B]/30 hover:shadow-lg transition-all text-left group"
-                  >
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-slate-800 group-hover:text-[#003D6B] truncate">{account.name}</p>
-                        <p className="text-[11px] text-slate-400 mt-0.5">
-                          ID: {account.customerId.replace(/(\d{3})(\d{3})(\d{4})/, "$1-$2-$3")}
-                        </p>
+              filtered.map((store) => (
+                <button
+                  key={store.shopName}
+                  onClick={() => router.push(`/pmax/store?name=${encodeURIComponent(store.shopName)}`)}
+                  className="bg-white rounded-xl border border-slate-200 p-5 hover:border-[#003D6B]/30 hover:shadow-lg transition-all text-left group"
+                >
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-slate-800 group-hover:text-[#003D6B] truncate">{store.shopName}</p>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {store.languages.map((lang) => (
+                          <span key={lang} className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${LANG_COLORS[lang] || LANG_COLORS.Unknown}`}>
+                            {lang}
+                          </span>
+                        ))}
                       </div>
-                      <svg className="w-5 h-5 text-slate-300 group-hover:text-[#003D6B] transition-colors flex-shrink-0 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                      </svg>
                     </div>
-                    {s ? (
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="bg-blue-50 rounded-lg p-2 text-center">
-                          <p className="text-[10px] text-blue-500">表示</p>
-                          <p className="text-sm font-bold text-blue-700">{s.impressions.toLocaleString()}</p>
-                        </div>
-                        <div className="bg-emerald-50 rounded-lg p-2 text-center">
-                          <p className="text-[10px] text-emerald-500">クリック</p>
-                          <p className="text-sm font-bold text-emerald-700">{s.clicks.toLocaleString()}</p>
-                        </div>
-                        <div className="bg-orange-50 rounded-lg p-2 text-center">
-                          <p className="text-[10px] text-orange-500">広告費</p>
-                          <p className="text-sm font-bold text-orange-700">{formatCost(s.costMicros)}</p>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2 text-xs text-slate-400">
-                        <div className="animate-spin w-3 h-3 border border-slate-300 border-t-transparent rounded-full" />
-                        読込中...
-                      </div>
-                    )}
-                  </button>
-                );
-              })
+                    <svg className="w-5 h-5 text-slate-300 group-hover:text-[#003D6B] transition-colors flex-shrink-0 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="bg-blue-50 rounded-lg p-2 text-center">
+                      <p className="text-[10px] text-blue-500">表示</p>
+                      <p className="text-sm font-bold text-blue-700">{store.impressions.toLocaleString()}</p>
+                    </div>
+                    <div className="bg-emerald-50 rounded-lg p-2 text-center">
+                      <p className="text-[10px] text-emerald-500">クリック</p>
+                      <p className="text-sm font-bold text-emerald-700">{store.clicks.toLocaleString()}</p>
+                    </div>
+                    <div className="bg-orange-50 rounded-lg p-2 text-center">
+                      <p className="text-[10px] text-orange-500">広告費</p>
+                      <p className="text-sm font-bold text-orange-700">{formatCost(store.costMicros)}</p>
+                    </div>
+                  </div>
+                </button>
+              ))
             )}
           </div>
         )}
