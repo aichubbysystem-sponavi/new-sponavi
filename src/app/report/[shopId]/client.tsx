@@ -1369,8 +1369,8 @@ export default function ReportClient({
               { label: "ウェブサイト", data: charts.websites, backgroundColor: "rgba(255,183,77,.75)" },
               { label: "ルート", data: charts.routes, backgroundColor: "rgba(186,104,200,.75)" },
               { label: "通話", data: charts.calls, backgroundColor: "rgba(239,154,154,.75)" },
-              { label: "メニュー", data: charts.foodMenus, backgroundColor: "rgba(77,182,172,.75)" },
-              { label: "予約", data: charts.bookings, backgroundColor: "rgba(121,134,203,.75)" },
+              ...(hasFoodMenus ? [{ label: "メニュー", data: charts.foodMenus, backgroundColor: "rgba(77,182,172,.75)" }] : []),
+              ...(hasBookings ? [{ label: "予約", data: charts.bookings, backgroundColor: "rgba(121,134,203,.75)" }] : []),
             ]}} options={buildStackedOptions()} />
           </div>
           <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 16 }}>
@@ -1385,12 +1385,17 @@ export default function ReportClient({
                 {charts.routes.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
               <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>通話</td>
                 {charts.calls.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>メニュー</td>
-                {charts.foodMenus.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
-              <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>予約</td>
-                {charts.bookings.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
+              {hasFoodMenus && <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>メニュー</td>
+                {charts.foodMenus.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>}
+              {hasBookings && <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>予約</td>
+                {charts.bookings.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>}
               <tr style={{ background: "#0f3460" }}><td style={{ padding: "3px 4px", fontWeight: 700, color: "#fff", whiteSpace: "nowrap" }}>合計</td>
-                {charts.websites.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700, color: "#fff" }}>{(v + charts.routes[i] + charts.calls[i] + charts.foodMenus[i] + charts.bookings[i]).toLocaleString()}</td>)}</tr>
+                {charts.websites.map((v, i) => {
+                  let total = v + charts.routes[i] + charts.calls[i];
+                  if (hasFoodMenus) total += charts.foodMenus[i];
+                  if (hasBookings) total += charts.bookings[i];
+                  return <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700, color: "#fff" }}>{total.toLocaleString()}</td>;
+                })}</tr>
             </tbody>
           </table>
         </div>
