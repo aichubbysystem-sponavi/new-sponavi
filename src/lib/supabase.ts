@@ -77,7 +77,7 @@ export type AppRole = "president" | "manager" | "part_time";
 export async function getUserRole(userId: string): Promise<AppRole | null> {
   const sb = getSupabase();
 
-  // 1. user_profiles から取得
+  // 1. user_profiles.id で検索
   const { data } = await sb
     .from("user_profiles")
     .select("role")
@@ -85,17 +85,26 @@ export async function getUserRole(userId: string): Promise<AppRole | null> {
     .maybeSingle();
   if (data?.role) return data.role as AppRole;
 
-  // 2. フォールバック: Supabase Auth の user_metadata.role
+  // 2. user_profiles.auth_uid で検索（idとauth_uidが異なるケース）
+  const { data: data2 } = await sb
+    .from("user_profiles")
+    .select("role")
+    .eq("auth_uid", userId)
+    .maybeSingle();
+  if (data2?.role) return data2.role as AppRole;
+
+  // 3. フォールバック: Supabase Auth の user_metadata.role
   try {
     const { data: authData } = await sb.auth.admin.getUserById(userId);
     const metaRole = authData?.user?.user_metadata?.role as string | undefined;
     if (metaRole && ["president", "manager", "part_time"].includes(metaRole)) {
       return metaRole as AppRole;
     }
-  } catch {
-    // admin API失敗時は無視
+  } catch (e) {
+    console.warn("[getUserRole] admin.getUserById failed (Service Role Key missing?):", e instanceof Error ? e.message : e);
   }
 
+  console.warn(`[getUserRole] Role not found for userId: ${userId}`);
   return null;
 }
 
