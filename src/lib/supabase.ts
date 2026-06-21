@@ -70,17 +70,33 @@ export async function requireAuth(request: NextRequest): Promise<{ auth: { valid
 export type AppRole = "president" | "manager" | "part_time";
 
 /**
- * ユーザーIDからロールを取得（user_profiles.role）
- * 取得失敗時は null を返す
+ * ユーザーIDからロールを取得
+ * 1. user_profiles.role を検索
+ * 2. 見つからなければ Supabase Auth の user_metadata.role にフォールバック
  */
 export async function getUserRole(userId: string): Promise<AppRole | null> {
-  const { data } = await getSupabase()
+  const sb = getSupabase();
+
+  // 1. user_profiles から取得
+  const { data } = await sb
     .from("user_profiles")
     .select("role")
     .eq("id", userId)
-    .single();
-  if (!data?.role) return null;
-  return data.role as AppRole;
+    .maybeSingle();
+  if (data?.role) return data.role as AppRole;
+
+  // 2. フォールバック: Supabase Auth の user_metadata.role
+  try {
+    const { data: authData } = await sb.auth.admin.getUserById(userId);
+    const metaRole = authData?.user?.user_metadata?.role as string | undefined;
+    if (metaRole && ["president", "manager", "part_time"].includes(metaRole)) {
+      return metaRole as AppRole;
+    }
+  } catch {
+    // admin API失敗時は無視
+  }
+
+  return null;
 }
 
 /**
