@@ -18,6 +18,7 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 export interface PmaxGbpRow {
   month: string;       // "2025/04"
   shopName: string;
+  totalImpressions: number; // 総表示回数 (D列)
   totalVisits: number; // 合計来店数 (O列)
   phone: number;       // 電話 (H列)
   directions: number;  // 経路案内 (I列)
@@ -66,6 +67,7 @@ async function fetchAllRows(): Promise<PmaxGbpRow[]> {
     rows.push({
       month,
       shopName,
+      totalImpressions: parseNum(cols[3]), // D列 = index 3
       totalVisits: parseNum(cols[14]),  // O列 = index 14
       phone: parseNum(cols[7]),         // H列 = index 7
       directions: parseNum(cols[8]),    // I列 = index 8
