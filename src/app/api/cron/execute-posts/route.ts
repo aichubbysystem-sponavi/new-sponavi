@@ -380,6 +380,10 @@ export async function GET(request: NextRequest) {
   }
 
   const elapsed = Math.round((Date.now() - startTime) / 1000);
-  console.log(`[cron/execute-posts] posted: ${posted}, errors: ${errors}, elapsed: ${elapsed}s`);
-  return NextResponse.json({ success: true, posted, errors, total: posts.length, elapsed });
+  const allFailed = posted === 0 && errors > 0;
+  console.log(`[cron/execute-posts] posted: ${posted}, errors: ${errors}, elapsed: ${elapsed}s${allFailed ? " [ALL FAILED]" : ""}`);
+  return NextResponse.json(
+    { success: !allFailed, posted, errors, total: posts.length, elapsed },
+    { status: allFailed ? 500 : 200 }
+  );
 }

@@ -67,7 +67,8 @@ async function fetchReviews(shopId: string): Promise<ReviewListResponse | null> 
       averageRating: avgRating,
       totalReviewCount: count || reviews.length,
     };
-  } catch {
+  } catch (err) {
+    console.error(`[analyze] fetchReviews error for shopId=${shopId}:`, err instanceof Error ? err.message : err);
     return null;
   }
 }
@@ -339,7 +340,94 @@ export async function POST(request: NextRequest) {
     .gte("analyzed_at", thisMonthStart.toISOString());
   const analyzedNames = new Set((existingAnalysis || []).map((a: any) => a.shop_name));
 
-  // 各店舗を逐次処理
+  // ── バッチ取得（N+1クエリ対策）──
+  const allNames = shopIds.map(s => s.name).filter(Boolean);
+  const allIds = shopIds.map(s => s.id).filter(Boolean);
+
+  // 1. report_data_cache を一括取得
+  const cacheMap = new Map<string, any>();
+  if (allNames.length > 0) {
+    const { data: allCaches } = await supabase
+      .from("report_data_cache")
+      .select("shop_name, report_json")
+      .in("shop_name", allNames);
+    for (const c of (allCaches || [])) cacheMap.set(c.shop_name, c.report_json);
+  }
+
+  // 2. shops テーブルを一括取得（名前で検索 — Go API IDはSupabaseに存在しない可能性があるため名前を優先）
+  const shopInfoByName = new Map<string, any>();
+  const shopInfoById = new Map<string, any>();
+  if (allNames.length > 0) {
+    const { data: allShopsByName } = await supabase
+      .from("shops")
+      .select("id, name, rating, review_count, business_group_id, gbp_main_category")
+      .in("name", allNames);
+    for (const s of (allShopsByName || [])) {
+      shopInfoByName.set(s.name, s);
+      shopInfoById.set(s.id, s);  // Supabase IDでも引けるようにする
+    }
+  }
+
+  // 3. 全グループのキャッシュを一括取得
+  const groupIds = new Set<string>();
+  const categories = new Set<string>();
+  shopInfoByName.forEach(s => {
+    if (s.business_group_id) groupIds.add(s.business_group_id);
+    if (s.gbp_main_category) categories.add(s.gbp_main_category);
+  });
+
+  // グループ内店舗の名前とキャッシュ
+  const groupShopNamesMap = new Map<string, string[]>();
+  if (groupIds.size > 0) {
+    const { data: groupShops } = await supabase
+      .from("shops")
+      .select("name, business_group_id")
+      .in("business_group_id", Array.from(groupIds))
+      .limit(500);
+    for (const gs of (groupShops || [])) {
+      const list = groupShopNamesMap.get(gs.business_group_id) || [];
+      list.push(gs.name);
+      groupShopNamesMap.set(gs.business_group_id, list);
+    }
+  }
+
+  // カテゴリ内店舗の名前とキャッシュ
+  const catShopNamesMap = new Map<string, string[]>();
+  if (categories.size > 0) {
+    const { data: catShops } = await supabase
+      .from("shops")
+      .select("name, gbp_main_category")
+      .in("gbp_main_category", Array.from(categories))
+      .limit(1000);
+    for (const cs of (catShops || [])) {
+      const list = catShopNamesMap.get(cs.gbp_main_category) || [];
+      list.push(cs.name);
+      catShopNamesMap.set(cs.gbp_main_category, list);
+    }
+  }
+
+  // グループ・カテゴリ全店舗のキャッシュも一括取得
+  const allRelatedNames = new Set<string>();
+  Array.from(groupShopNamesMap.values()).forEach(names => names.forEach(n => allRelatedNames.add(n)));
+  Array.from(catShopNamesMap.values()).forEach(names => names.forEach(n => allRelatedNames.add(n)));
+  const relatedNamesArr = Array.from(allRelatedNames).filter(n => !cacheMap.has(n));
+  let relatedCacheMap = new Map<string, any>();
+  if (relatedNamesArr.length > 0) {
+    // 50件ずつ取得（Supabase .in() の制限対策）
+    for (let i = 0; i < relatedNamesArr.length; i += 50) {
+      const { data: chunk } = await supabase
+        .from("report_data_cache")
+        .select("shop_name, report_json")
+        .in("shop_name", relatedNamesArr.slice(i, i + 50));
+      for (const c of (chunk || [])) relatedCacheMap.set(c.shop_name, c.report_json);
+    }
+  }
+  // cacheMap にマージ
+  relatedCacheMap.forEach((v, k) => {
+    if (!cacheMap.has(k)) cacheMap.set(k, v);
+  });
+
+  // 各店舗を逐次処理（Claude API呼び出しのみ逐次、DBクエリはバッチ済み）
   for (const shop of shopIds) {
     // 分析済みならスキップ（forceの場合は再分析）
     if (!forceReanalyze && analyzedNames.has(shop.name)) {
@@ -358,25 +446,19 @@ export async function POST(request: NextRequest) {
       let officialRating = reviewData.averageRating;
       let officialCount = reviewData.totalReviewCount;
 
-      // 1. report_data_cacheから取得（スプレッドシート由来、最も正確）
-      try {
-        const { data: cache } = await supabase.from("report_data_cache").select("report_json").eq("shop_name", shop.name).limit(1).maybeSingle();
-        if (cache?.report_json) {
-          const shopInfo = (cache.report_json as any).shop;
-          if (shopInfo?.rating && shopInfo.rating > 0) {
-            officialRating = shopInfo.rating;
-            if (shopInfo.totalReviews) officialCount = shopInfo.totalReviews;
-          }
+      // 1. report_data_cacheから取得（スプレッドシート由来、最も正確）— バッチ済み
+      const cachedReport = cacheMap.get(shop.name);
+      if (cachedReport) {
+        const shopInfoCached = (cachedReport as any).shop;
+        if (shopInfoCached?.rating && shopInfoCached.rating > 0) {
+          officialRating = shopInfoCached.rating;
+          if (shopInfoCached.totalReviews) officialCount = shopInfoCached.totalReviews;
         }
-      } catch {}
+      }
 
-      // 2. shopsテーブルから取得（フォールバック）
+      // 2. shopsテーブルから取得（フォールバック）— バッチ済み
       if (officialRating === reviewData.averageRating) {
-        let shopRow = (await supabase.from("shops").select("rating, review_count").eq("id", shop.id).maybeSingle()).data;
-        if (!shopRow?.rating) {
-          const { data: nameRow } = await supabase.from("shops").select("rating, review_count").eq("name", shop.name).not("rating", "is", null).limit(1).maybeSingle();
-          if (nameRow?.rating) shopRow = nameRow;
-        }
+        const shopRow = shopInfoById.get(shop.id) || shopInfoByName.get(shop.name);
         if (shopRow?.rating) {
           officialRating = shopRow.rating;
           if (shopRow.review_count) officialCount = shopRow.review_count;
@@ -390,10 +472,10 @@ export async function POST(request: NextRequest) {
       let hasKpiData = false;
       let curMonth = overrideTargetMonth; // フロント指定があればそれを使う
       try {
-        // キャッシュからKPIデータ取得
-        const { data: cache } = await supabase.from("report_data_cache").select("report_json").eq("shop_name", shop.name).limit(1).maybeSingle();
-        if (cache?.report_json) {
-          const report = cache.report_json as any;
+        // キャッシュからKPIデータ取得（バッチ済み）
+        const cacheJson = cacheMap.get(shop.name);
+        if (cacheJson) {
+          const report = cacheJson as any;
           const kpis = report.kpis || [];
           const labels = report.monthlyLabels || [];
           if (!curMonth) curMonth = labels[labels.length - 1] || "";
@@ -403,7 +485,7 @@ export async function POST(request: NextRequest) {
           let perfLabels = labels;
           try {
             const { getCachedPerformance } = await import("@/lib/gbp-performance");
-            const { data: shopRow } = await supabase.from("shops").select("id").eq("name", shop.name).limit(1).maybeSingle();
+            const shopRow = shopInfoByName.get(shop.name) || shopInfoById.get(shop.id);
             if (shopRow?.id) {
               const perfData = await getCachedPerformance(shopRow.id, shop.name);
               if (perfData.length > 0) {
@@ -549,8 +631,9 @@ export async function POST(request: NextRequest) {
             // フロントと同じ2段階でgridRankingを構築: DB取得 → rankingHistoryで補完
             let gridRanking = report.gridRanking;
             try {
-              const { data: shopRow } = await supabase.from("shops").select("id").eq("name", shop.name).limit(1).maybeSingle();
-              if (shopRow?.id) {
+              const shopRowGrid = shopInfoByName.get(shop.name) || shopInfoById.get(shop.id);
+              if (shopRowGrid?.id) {
+                const shopRow = shopRowGrid;
                 const { fetchGridRankingLive, supplementGridFromRanking } = await import("@/lib/report-api");
                 const liveGrid = await fetchGridRankingLive([shopRow.id], shop.name);
                 if (liveGrid && liveGrid.history.length > 0) gridRanking = liveGrid;
@@ -640,14 +723,13 @@ export async function POST(request: NextRequest) {
           console.warn(`[analyze] ${shop.name}: report_data_cacheにデータなし`);
         }
 
-        // 同グループ店舗の平均を取得（キャッシュ有無に関わらず実行）
-        const { data: shopInfo } = await supabase.from("shops").select("business_group_id").eq("name", shop.name).limit(1).maybeSingle();
-        if (shopInfo?.business_group_id) {
-          const { data: groupShops } = await supabase.from("shops").select("name").eq("business_group_id", shopInfo.business_group_id).neq("name", shop.name).limit(100);
-          if (groupShops && groupShops.length > 0) {
-            const groupNames = groupShops.map((s: any) => s.name);
-            const { data: groupCaches } = await supabase.from("report_data_cache").select("report_json").in("shop_name", groupNames.slice(0, 50));
-            if (groupCaches && groupCaches.length > 0) {
+        // 同グループ店舗の平均を取得（バッチ済み）
+        const shopInfoForGroup = shopInfoByName.get(shop.name) || shopInfoById.get(shop.id);
+        if (shopInfoForGroup?.business_group_id) {
+          const groupNames = (groupShopNamesMap.get(shopInfoForGroup.business_group_id) || []).filter((n: string) => n !== shop.name);
+          if (groupNames.length > 0) {
+            const groupCaches = groupNames.slice(0, 50).map((n: string) => ({ report_json: cacheMap.get(n) })).filter((c: any) => c.report_json);
+            if (groupCaches.length > 0) {
               let totalSearch = 0, totalMap = 0, totalAction = 0, gReviews = 0, gRating = 0, count = 0;
               for (const gc of groupCaches) {
                 const gk = gc.report_json?.kpis || [];
@@ -667,15 +749,14 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // 同業種（カテゴリ）店舗の平均を取得
-        const { data: catInfo } = await supabase.from("shops").select("gbp_main_category").eq("name", shop.name).not("gbp_main_category", "is", null).limit(1).maybeSingle();
-        if (catInfo?.gbp_main_category) {
-          const category = catInfo.gbp_main_category;
-          const { data: catShops } = await supabase.from("shops").select("name").eq("gbp_main_category", category).neq("name", shop.name).limit(200);
-          if (catShops && catShops.length > 0) {
-            const catNames = catShops.map((s: any) => s.name);
-            const { data: catCaches } = await supabase.from("report_data_cache").select("report_json").in("shop_name", catNames.slice(0, 50));
-            if (catCaches && catCaches.length > 0) {
+        // 同業種（カテゴリ）店舗の平均を取得（バッチ済み）
+        const catInfoRow = shopInfoByName.get(shop.name) || shopInfoById.get(shop.id);
+        if (catInfoRow?.gbp_main_category) {
+          const category = catInfoRow.gbp_main_category;
+          const catNames = (catShopNamesMap.get(category) || []).filter((n: string) => n !== shop.name);
+          if (catNames.length > 0) {
+            const catCaches = catNames.slice(0, 50).map((n: string) => ({ report_json: cacheMap.get(n) })).filter((c: any) => c.report_json);
+            if (catCaches.length > 0) {
               let tSearch = 0, tMap = 0, tAction = 0, tReviews = 0, tRating = 0, cnt = 0;
               for (const cc of catCaches) {
                 const ck = cc.report_json?.kpis || [];

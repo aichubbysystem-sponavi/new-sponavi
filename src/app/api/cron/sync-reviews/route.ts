@@ -290,6 +290,11 @@ export async function GET(request: NextRequest) {
   let errors = 0;
   let consecutiveAuthErrors = 0;
 
+  // Supabase shop_idマップを構築（Go API IDではなくSupabase IDを使うため）
+  const batchNames = batch.map(s => s.name);
+  const { data: sbShops } = await supabase.from("shops").select("id, name").in("name", batchNames);
+  const sbShopIdMap = new Map((sbShops || []).map(s => [s.name, s.id]));
+
   for (let i = 0; i < batch.length; i++) {
     const shop = batch[i];
 
@@ -321,7 +326,7 @@ export async function GET(request: NextRequest) {
       consecutiveAuthErrors = 0; // 成功したらリセット
 
       const rows = reviews.map((r) => ({
-        shop_id: shop.id, shop_name: shop.name, review_id: r.reviewId,
+        shop_id: sbShopIdMap.get(shop.name) || shop.id, shop_name: shop.name, review_id: r.reviewId,
         reviewer_name: r.reviewer?.displayName || "匿名",
         reviewer_photo_url: r.reviewer?.profilePhotoUrl || null,
         star_rating: r.starRating, comment: r.comment || null,

@@ -11,7 +11,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.100.0",
+    "@supabase/supabase-js": "^2.108.2",
     "@types/dompurify": "^3.0.5",
     "axios": "^1.13.6",
     "chart.js": "^4.5.1",

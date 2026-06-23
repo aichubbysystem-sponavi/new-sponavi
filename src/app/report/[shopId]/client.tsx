@@ -677,7 +677,13 @@ export default function ReportClient({
         // ヘッダーバー（他スライドと統一）
         const header = document.createElement("div");
         header.style.cssText = `background:linear-gradient(135deg,#1a1a2e,#0f3460);color:#fff;padding:12px 9px;font-size:16px;font-weight:700;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;letter-spacing:0.5px;`;
-        header.innerHTML = `<span>${shop.name} — 多地点順位計測</span><span style="font-size:16px;opacity:0.45;font-weight:400;">${pairPageNum} / ${pdfTotalPages}</span>`;
+        const headerLeft = document.createElement("span");
+        headerLeft.textContent = `${shop.name} — 多地点順位計測`;
+        const headerRight = document.createElement("span");
+        headerRight.style.cssText = "font-size:16px;opacity:0.45;font-weight:400;";
+        headerRight.textContent = `${pairPageNum} / ${pdfTotalPages}`;
+        header.appendChild(headerLeft);
+        header.appendChild(headerRight);
         pairSlide.appendChild(header);
 
         // マップコンテンツ（横並び）

@@ -10,6 +10,9 @@ export const dynamic = "force-dynamic";
  * GET /api/report/memo?shopName=xxx&month=2026/3
  */
 export async function GET(request: NextRequest) {
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+
   const shopName = request.nextUrl.searchParams.get("shopName");
   const month = request.nextUrl.searchParams.get("month");
   if (!shopName) return NextResponse.json({ error: "shopNameが必要です" }, { status: 400 });

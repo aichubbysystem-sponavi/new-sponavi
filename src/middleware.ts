@@ -189,7 +189,10 @@ function addHeaders(response: NextResponse, request: NextRequest, isReport: bool
 
   response.headers.set("Content-Security-Policy", csp);
 
-  // サーバー情報の隠蔽
+  // セキュリティヘッダー
+  response.headers.set("X-Content-Type-Options", "nosniff");
+  response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  response.headers.set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
   response.headers.set("X-Powered-By", "");
   response.headers.delete("X-Powered-By");
 

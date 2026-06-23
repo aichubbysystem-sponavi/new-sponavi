@@ -282,9 +282,47 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "店舗の取得に失敗しました" }, { status: 500 });
     }
 
+    // Go APIにgbp_location_nameがない店舗はSupabaseから補完
+    const supabaseMain = getSupabase();
+    const shopsNeedingGbp = shops.filter(s => !s.gbp_location_name);
+    if (shopsNeedingGbp.length > 0) {
+      // Supabaseの全GBP紐付け済み店舗を取得（名前の正規化マッチのため全件取得）
+      const { data: sbShopsGbp } = await supabaseMain
+        .from("shops")
+        .select("name, gbp_location_name")
+        .not("gbp_location_name", "is", null);
+      if (sbShopsGbp && sbShopsGbp.length > 0) {
+        // 正規化関数（全角半角・スペースの揺れを吸収）
+        const normName = (s: string) => s.normalize("NFKC").replace(/[\s\u3000]+/g, "").toLowerCase();
+        // 正規化名 → gbp_location_name のマップ
+        const sbGbpByExact = new Map(sbShopsGbp.map(s => [s.name, s.gbp_location_name]));
+        const sbGbpByNorm = new Map(sbShopsGbp.map(s => [normName(s.name), s.gbp_location_name]));
+        let supplemented = 0;
+        for (const shop of shops) {
+          if (shop.gbp_location_name) continue;
+          // 完全一致 → 正規化マッチの順で試行
+          const exact = sbGbpByExact.get(shop.name);
+          const norm = !exact ? sbGbpByNorm.get(normName(shop.name)) : undefined;
+          if (exact || norm) {
+            shop.gbp_location_name = (exact || norm)!;
+            supplemented++;
+          }
+        }
+        if (supplemented > 0) {
+          console.log(`[sync-reviews] Supplemented gbp_location_name from Supabase for ${supplemented}/${shopsNeedingGbp.length} shops`);
+        }
+      }
+    }
+
     if (shopIds.length > 0) {
       const idSet = new Set(shopIds);
-      shops = shops.filter(s => idSet.has(s.id));
+      // Go API ID または Supabase ID でマッチ
+      const { data: sbIdMap } = await supabaseMain
+        .from("shops")
+        .select("id, name")
+        .in("id", shopIds);
+      const sbNameSet = new Set((sbIdMap || []).map(s => s.name));
+      shops = shops.filter(s => idSet.has(s.id) || sbNameSet.has(s.name));
     }
 
     if (shops.length === 0) {

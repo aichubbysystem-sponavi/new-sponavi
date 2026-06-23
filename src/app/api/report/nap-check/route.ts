@@ -154,7 +154,10 @@ export async function POST(request: NextRequest) {
 /**
  * GET /api/report/nap-check
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+
   const supabase = getSupabase();
   const { data } = await supabase
     .from("nap_check_results")
