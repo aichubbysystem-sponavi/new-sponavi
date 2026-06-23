@@ -5,6 +5,8 @@ const nextConfig = {
   reactStrictMode: true,
   // 本番ではソースマップを無効化（セキュリティ）
   productionBrowserSourceMaps: false,
+  // X-Powered-By ヘッダーを削除（サーバー情報の隠蔽）
+  poweredByHeader: false,
   // ESM onlyパッケージをCJS互換にトランスパイル（ERR_REQUIRE_ESM対策）
   transpilePackages: [
     "@supabase/supabase-js",
