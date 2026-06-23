@@ -102,17 +102,20 @@ export async function GET(request: NextRequest) {
           const locName = loc.name || "";
           if (!locName) { skipped++; continue; }
 
-          // 既存店舗のカテゴリを更新（カテゴリ未保存の場合のみ）
-          if (existingNames.has(locName) && loc.categories?.primaryCategory?.displayName) {
+          // 既存店舗: カテゴリ + GBPフルパスを永続保存
+          if (existingNames.has(locName)) {
             try {
+              const updateData: Record<string, any> = {
+                gbp_full_path: `${accName}/${locName}`,
+              };
+              if (loc.categories?.primaryCategory?.displayName) {
+                updateData.gbp_main_category = loc.categories.primaryCategory.displayName;
+                updateData.gbp_main_category_id = loc.categories.primaryCategory.name || null;
+              }
               await supabase.from("shops")
-                .update({
-                  gbp_main_category: loc.categories.primaryCategory.displayName,
-                  gbp_main_category_id: loc.categories.primaryCategory.name || null,
-                })
-                .eq("gbp_location_name", locName)
-                .is("gbp_main_category", null);
-            } catch (e: any) { console.error("[cron/sync-shops] category update:", e?.message); }
+                .update(updateData)
+                .eq("gbp_location_name", locName);
+            } catch (e: any) { console.error("[cron/sync-shops] update:", e?.message); }
             skipped++;
             continue;
           }

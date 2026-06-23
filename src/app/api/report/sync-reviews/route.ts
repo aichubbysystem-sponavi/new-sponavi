@@ -26,29 +26,82 @@ interface LocationMapping {
 
 let locationMapCache: { map: Map<string, LocationMapping>; ts: number } | null = null;
 
+/** 正規化関数（全角半角・スペースの揺れを吸収） */
+function normName(s: string): string {
+  return s.normalize("NFKC").replace(/[\s\u3000]+/g, "").toLowerCase();
+}
+
 async function getLocationMap(): Promise<Map<string, LocationMapping>> {
   if (locationMapCache && Date.now() - locationMapCache.ts < 600000) return locationMapCache.map;
 
   const map = new Map<string, LocationMapping>();
+
+  // 1. Go API（GBP API経由）からロケーション取得
+  let goApiEntries = 0;
   try {
     const res = await fetch(`${GO_API_URL}/api/gbp/account`, { signal: AbortSignal.timeout(20000) });
     if (res.ok) {
       const accounts = await res.json();
       for (const acc of (Array.isArray(accounts) ? accounts : [])) {
-        const accName = acc.name || ""; // "accounts/XXX"
+        const accName = acc.name || "";
         for (const loc of (acc.locations || [])) {
-          const locName = loc.name || ""; // "locations/YYY"
+          const locName = loc.name || "";
           const fullPath = `${accName}/${locName}`;
           const mapping: LocationMapping = { locationName: locName, accountName: accName, fullPath, title: loc.title || "" };
           map.set(locName, mapping);
           map.set(fullPath, mapping);
-          if (loc.title) map.set(loc.title, mapping);
+          if (loc.title) {
+            map.set(loc.title, mapping);
+            map.set(normName(loc.title), mapping);
+          }
+          goApiEntries++;
         }
       }
     }
-  } catch {}
+  } catch (e: any) {
+    console.error("[sync-reviews] Go API /gbp/account error:", e?.message);
+  }
 
-  console.log("[sync-reviews] Location map built:", map.size, "entries");
+  // 2. Supabaseから既知のgbp_location_name/gbp_full_pathを補完（OAuthが切れても使える永続データ）
+  let sbEntries = 0;
+  try {
+    const supabase = getSupabase();
+    const { data: sbShops } = await supabase
+      .from("shops")
+      .select("name, gbp_location_name, gbp_full_path")
+      .not("gbp_location_name", "is", null);
+    for (const s of (sbShops || [])) {
+      const locName = s.gbp_location_name;
+      const fullPath = s.gbp_full_path || "";
+      if (fullPath && !map.has(locName)) {
+        // Go APIにないがSupabaseにある → 補完
+        const accName = fullPath.split("/locations/")[0] || "";
+        const mapping: LocationMapping = { locationName: locName, accountName: accName, fullPath, title: s.name };
+        map.set(locName, mapping);
+        map.set(fullPath, mapping);
+        map.set(s.name, mapping);
+        map.set(normName(s.name), mapping);
+        sbEntries++;
+      } else if (!fullPath && locName && !map.has(locName)) {
+        // fullPathなしでもlocNameだけある場合（locMap内の他エントリから解決試行）
+        const existing = map.get(locName);
+        if (existing) {
+          map.set(s.name, existing);
+          map.set(normName(s.name), existing);
+        }
+      }
+      // 店舗名→既存マッピングの紐付け（Go APIで取れた場合）
+      if (locName && map.has(locName) && !map.has(s.name)) {
+        const existing = map.get(locName)!;
+        map.set(s.name, existing);
+        map.set(normName(s.name), existing);
+      }
+    }
+  } catch (e: any) {
+    console.error("[sync-reviews] Supabase location supplement error:", e?.message);
+  }
+
+  console.log(`[sync-reviews] Location map: ${goApiEntries} from Go API, ${sbEntries} supplemented from Supabase, ${map.size} total entries`);
   locationMapCache = { map, ts: Date.now() };
   return map;
 }
@@ -238,9 +291,9 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // gbp_location_nameが空の場合、店舗名でマッチ
+      // gbp_location_nameが空の場合、店舗名でマッチ（完全一致→正規化マッチ）
       if (!fullPath && shop.name) {
-        const mapping = locMap.get(shop.name);
+        const mapping = locMap.get(shop.name) || locMap.get(normName(shop.name));
         if (mapping) {
           fullPath = mapping.fullPath;
         }
@@ -328,12 +381,21 @@ export async function POST(request: NextRequest) {
           ).then(({ error }) => { if (error) console.error("[sync-reviews] Alert error:", error.message); });
         }
 
-        // Google公式評価をshopsテーブルに保存（店舗名で検索 — Go API IDとSupabase IDは異なる）
-        if (googleAvgRating > 0 || googleTotalCount > 0) {
+        // Google公式評価 + GBPフルパスをshopsテーブルに永続保存
+        {
           const updateData: any = {};
           if (googleAvgRating > 0) updateData.rating = googleAvgRating;
           if (googleTotalCount > 0) updateData.review_count = googleTotalCount;
-          await supabase.from("shops").update(updateData).eq("name", shop.name);
+          // fullPathを永続保存（OAuthが切れても二度と失われない）
+          if (fullPath) {
+            updateData.gbp_full_path = fullPath;
+            // gbp_location_nameも保存（locationsパート）
+            const locPart = fullPath.match(/(locations\/[^/]+)/)?.[1] || "";
+            if (locPart) updateData.gbp_location_name = locPart;
+          }
+          if (Object.keys(updateData).length > 0) {
+            await supabase.from("shops").update(updateData).eq("name", shop.name);
+          }
         }
 
         totalSynced += reviews.length;
