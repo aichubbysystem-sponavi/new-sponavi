@@ -1,44 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, verifyCron } from "@/lib/supabase";
+import { getOAuthToken } from "@/lib/gbp-token";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
 const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
-const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
-const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
-
-
-async function getOAuthToken(): Promise<string | null> {
-  const supabase = getSupabase();
-  const { data } = await supabase.from("system_oauth_tokens")
-    .select("account_id, access_token, refresh_token, expiry").limit(1).maybeSingle();
-  if (!data) return null;
-  if (new Date(data.expiry).getTime() - Date.now() > 5 * 60 * 1000) return data.access_token;
-  try {
-    const res = await fetch("https://oauth2.googleapis.com/token", {
-      cache: "no-store" as const,
-      method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET,
-        refresh_token: data.refresh_token, grant_type: "refresh_token" }),
-    });
-    if (!res.ok) return data.access_token;
-    const t = await res.json();
-    const updateQuery = getSupabase().from("system_oauth_tokens").update({
-      access_token: t.access_token,
-      expiry: new Date(Date.now() + (t.expires_in || 3600) * 1000).toISOString(),
-    });
-    if (data.account_id) {
-      await updateQuery.eq("account_id", data.account_id);
-    } else {
-      await updateQuery.eq("refresh_token", data.refresh_token);
-    }
-    return t.access_token;
-  } catch (e: unknown) {
-    console.error("[cron/sync-shops] OAuth refresh failed:", e instanceof Error ? e.message : e);
-    return data.access_token;
-  }
-}
 
 async function getDefaultOwnerId(): Promise<string> {
   const supabase = getSupabase();

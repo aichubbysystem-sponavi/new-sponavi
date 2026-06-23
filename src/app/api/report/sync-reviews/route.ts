@@ -1,132 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getOAuthToken } from "@/lib/gbp-token";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
-const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
-const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
 const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
-const DB_PASSWORD = process.env.SUPABASE_DB_PASSWORD || "";
-const SUPABASE_PROJECT_ID = ((process.env.NEXT_PUBLIC_SUPABASE_URL || "").match(/https:\/\/([^.]+)/) || [])[1] || "";
 
 
 // ============================================================
 // トークン管理: Cron版と統一した3段階フォールバック
 // ============================================================
-
-/**
- * トークンをリフレッシュ
- */
-async function refreshToken(rt: string): Promise<string | null> {
-  if (!rt || !GBP_CLIENT_ID || !GBP_CLIENT_SECRET) return null;
-  try {
-    const res = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: GBP_CLIENT_ID,
-        client_secret: GBP_CLIENT_SECRET,
-        refresh_token: rt,
-        grant_type: "refresh_token",
-      }),
-    });
-    if (res.ok) {
-      const d = await res.json();
-      return d.access_token || null;
-    } else {
-      console.log("[sync-reviews] Token refresh failed:", res.status);
-    }
-  } catch (e: any) {
-    console.log("[sync-reviews] Token refresh error:", e?.message);
-  }
-  return null;
-}
-
-/**
- * 全アカウントの有効なトークンを取得（期限切れはリフレッシュ）
- */
-async function getAllValidTokens(): Promise<string[]> {
-  // Go APIにGBP APIを叩かせてトークンリフレッシュ発火
-  try {
-    await fetch(`${GO_API_URL}/api/gbp/account`, { signal: AbortSignal.timeout(15000) });
-  } catch {}
-
-  interface TokenRow { access_token: string; refresh_token: string; expiry: string; }
-  let allRows: TokenRow[] = [];
-
-  // 1. Supabase client (system_oauth_tokens view) — 全トークン取得
-  try {
-    const supabase = getSupabase();
-    const { data } = await supabase.from("system_oauth_tokens")
-      .select("access_token, refresh_token, expiry")
-      .order("expiry", { ascending: false });
-    if (data && data.length > 0) {
-      allRows = data as TokenRow[];
-      console.log(`[sync-reviews] Got ${allRows.length} tokens from system_oauth_tokens`);
-    }
-  } catch (e: any) {
-    console.log("[sync-reviews] system_oauth_tokens error:", e?.message);
-  }
-
-  // 2. フォールバック: PostgreSQL直接接続
-  if (allRows.length === 0) {
-    try {
-      if (DB_PASSWORD && SUPABASE_PROJECT_ID) {
-        const { Client } = await import("pg");
-        const client = new Client({
-          host: `db.${SUPABASE_PROJECT_ID}.supabase.co`, port: 5432,
-          database: "postgres", user: "postgres", password: DB_PASSWORD,
-          ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 10000,
-        });
-        await client.connect();
-        const result = await client.query("SELECT access_token, refresh_token, expiry FROM system.tokens ORDER BY expiry DESC");
-        await client.end();
-        if (result.rows.length > 0) {
-          allRows = result.rows;
-          console.log(`[sync-reviews] Got ${allRows.length} tokens from PostgreSQL`);
-        }
-      }
-    } catch (e: any) {
-      console.log("[sync-reviews] PostgreSQL error:", e?.message);
-    }
-  }
-
-  if (allRows.length === 0) {
-    console.log("[sync-reviews] No tokens found in DB");
-    return [];
-  }
-
-  // 全トークンをリフレッシュして有効なものを返す
-  const validTokens: string[] = [];
-  for (const row of allRows) {
-    if (new Date(row.expiry).getTime() - Date.now() > 60000) {
-      // まだ有効
-      validTokens.push(row.access_token);
-    } else if (row.refresh_token) {
-      // 期限切れ → リフレッシュ
-      const refreshed = await refreshToken(row.refresh_token);
-      if (refreshed) {
-        validTokens.push(refreshed);
-      } else {
-        // リフレッシュ失敗でも古いトークンを試す
-        validTokens.push(row.access_token);
-      }
-    } else {
-      validTokens.push(row.access_token);
-    }
-  }
-
-  console.log(`[sync-reviews] ${validTokens.length} valid tokens ready`);
-  return validTokens;
-}
-
-/** 後方互換: 1つだけ返す */
-async function getValidToken(): Promise<string | null> {
-  const tokens = await getAllValidTokens();
-  return tokens[0] || null;
-}
 
 // ============================================================
 // GBPアカウント→ロケーションマッピング
@@ -250,8 +135,8 @@ export async function POST(request: NextRequest) {
     const shopIds: string[] = body.shopIds || [];
 
     // 1. 全アカウントのOAuthトークン取得
-    const allTokens = await getAllValidTokens();
-    const accessToken = allTokens[0] || null;
+    const accessToken = await getOAuthToken();
+    const allTokens = accessToken ? [accessToken] : [];
     if (!accessToken) {
       return NextResponse.json({
         error: "OAuthトークンが取得できません。GBPアカウント管理からGoogleアカウントを再認証してください。",

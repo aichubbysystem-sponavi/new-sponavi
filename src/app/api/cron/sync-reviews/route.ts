@@ -1,91 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, verifyCron } from "@/lib/supabase";
+import { getOAuthToken } from "@/lib/gbp-token";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
-const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
-const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
-const DB_PASSWORD = process.env.SUPABASE_DB_PASSWORD || "";
-const SUPABASE_PROJECT_ID = ((process.env.NEXT_PUBLIC_SUPABASE_URL || "").match(/https:\/\/([^.]+)/) || [])[1] || "";
 const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
 const BATCH_SIZE = 100; // 1回のCron実行で処理する店舗数
-
-
-// ── トークン取得（全アカウント対応） ──
-
-async function getAllValidTokens(): Promise<string[]> {
-  // Go APIにGBP APIを叩かせてトークンリフレッシュ発火
-  try {
-    await fetch(`${GO_API_URL}/api/gbp/account`, { signal: AbortSignal.timeout(15000) });
-  } catch (e: any) { console.error("[cron/sync-reviews] Go API token refresh trigger:", e?.message); }
-
-  interface TokenRow { access_token: string; refresh_token: string; expiry: string; }
-  let allRows: TokenRow[] = [];
-
-  // 1. Supabase client (system_oauth_tokens) — 全トークン取得
-  try {
-    const supabase = getSupabase();
-    const { data } = await supabase.from("system_oauth_tokens")
-      .select("access_token, refresh_token, expiry")
-      .order("expiry", { ascending: false });
-    if (data && data.length > 0) allRows = data as TokenRow[];
-  } catch (e: any) { console.error("[cron/sync-reviews] Supabase token fetch:", e?.message); }
-
-  // 2. フォールバック: PostgreSQL直接接続
-  if (allRows.length === 0) {
-    try {
-      if (DB_PASSWORD && SUPABASE_PROJECT_ID) {
-        const { Client } = await import("pg");
-        const client = new Client({
-          host: `db.${SUPABASE_PROJECT_ID}.supabase.co`, port: 5432,
-          database: "postgres", user: "postgres", password: DB_PASSWORD,
-          ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 10000,
-        });
-        await client.connect();
-        const result = await client.query("SELECT access_token, refresh_token, expiry FROM system.tokens ORDER BY expiry DESC");
-        await client.end();
-        if (result.rows.length > 0) allRows = result.rows;
-      }
-    } catch (e: any) {
-      console.log("[cron/sync-reviews] PostgreSQL error:", e?.message);
-    }
-  }
-
-  // 全トークンを並列リフレッシュ（N+1→Promise.all）
-  const validTokens = await Promise.all(
-    allRows.map(async (row) => {
-      if (new Date(row.expiry).getTime() - Date.now() > 60000) {
-        return row.access_token;
-      }
-      if (row.refresh_token) {
-        const refreshed = await refreshToken(row.refresh_token);
-        return refreshed || row.access_token;
-      }
-      return row.access_token;
-    })
-  );
-  return validTokens.filter(Boolean);
-}
-
-async function getValidToken(): Promise<string | null> {
-  const tokens = await getAllValidTokens();
-  return tokens[0] || null;
-}
-
-async function refreshToken(rt: string): Promise<string | null> {
-  if (!rt || !GBP_CLIENT_ID || !GBP_CLIENT_SECRET) return null;
-  try {
-    const res = await fetch("https://oauth2.googleapis.com/token", {
-      cache: "no-store" as const,
-      method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET, refresh_token: rt, grant_type: "refresh_token" }),
-    });
-    if (res.ok) { const d = await res.json(); return d.access_token || null; }
-  } catch (e: any) { console.error("[cron/sync-reviews] token refresh:", e?.message); }
-  return null;
-}
 
 // ── ロケーションマッピング ──
 
@@ -210,14 +132,14 @@ export async function GET(request: NextRequest) {
 
   console.log("[cron/sync-reviews] Starting batch sync...");
 
-  // 1. 全アカウントのトークン取得
-  const allTokens = await getAllValidTokens();
-  const token = allTokens[0] || null;
+  // 1. OAuthトークン取得（gbp-token.ts統一経路）
+  const token = await getOAuthToken();
   if (!token) {
     console.error("[cron/sync-reviews] No valid token");
     return NextResponse.json({ error: "OAuthトークン取得失敗" }, { status: 500 });
   }
-  console.log(`[cron/sync-reviews] ${allTokens.length} tokens available`);
+  const allTokens = [token];
+  console.log(`[cron/sync-reviews] Token ready via gbp-token.ts`);
 
   // 2. ロケーションマッピング
   const locMap = await getLocationMap();
