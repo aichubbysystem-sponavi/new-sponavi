@@ -292,7 +292,7 @@ export default function ReportListClient({
           let existingMemo = "";
           const authH = await getAuthHeaders();
           try {
-            const getRes = await fetch(`/api/report/memo?shopName=${encodeURIComponent(shopName)}&month=${encodeURIComponent(month)}`);
+            const getRes = await fetch(`/api/report/memo?shopName=${encodeURIComponent(shopName)}&month=${encodeURIComponent(month)}`, { headers: authH });
             if (getRes.ok) {
               const data = await getRes.json();
               existingMemo = data.memo || "";

@@ -328,7 +328,8 @@ export default function ReportClient({
   useEffect(() => {
     setMounted(true);
     // DBから読み込み → localStorageフォールバック
-    fetch(`/api/report/display-settings?shopId=${encodeURIComponent(shopId)}`)
+    getAuthHeaders().then(authH =>
+    fetch(`/api/report/display-settings?shopId=${encodeURIComponent(shopId)}`, { headers: authH })
       .then(r => r.json())
       .then(data => {
         if (data.section_visibility && Object.keys(data.section_visibility).length > 0) {
@@ -357,7 +358,8 @@ export default function ReportClient({
           const rwSaved = localStorage.getItem(rwVisKey);
           if (rwSaved) setRwVisibility(JSON.parse(rwSaved));
         } catch {}
-      });
+      })
+    );
   }, [shopId, visKey, kwVisKey, rwVisKey]);
 
   const toggleSection = (key: string) => {
@@ -607,7 +609,8 @@ export default function ReportClient({
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`/api/report/memo?shopName=${encodeURIComponent(shop.name)}&month=${encodeURIComponent(curLabel)}`);
+        const authH = await getAuthHeaders();
+        const res = await fetch(`/api/report/memo?shopName=${encodeURIComponent(shop.name)}&month=${encodeURIComponent(curLabel)}`, { headers: authH });
         if (res.ok) {
           const data = await res.json();
           if (data.memo) setMemo(data.memo);
