@@ -122,11 +122,20 @@ export async function POST(request: NextRequest) {
  */
 export async function DELETE(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
   const { id } = await request.json();
   if (!id) return NextResponse.json({ error: "idが必要です" }, { status: 400 });
+
   const supabase = getSupabase();
+  // 認可: 投稿のshop_nameから店舗アクセス権を検証
+  const { data: post } = await supabase.from("scheduled_posts").select("shop_name").eq("id", id).maybeSingle();
+  if (post?.shop_name) {
+    const { verifyShopAccess } = await import("@/lib/supabase");
+    const hasAccess = await verifyShopAccess(auth.sub, post.shop_name);
+    if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+  }
+
   await supabase.from("scheduled_posts").delete().eq("id", id);
   return NextResponse.json({ success: true });
 }
@@ -137,13 +146,21 @@ export async function DELETE(request: NextRequest) {
  */
 export async function PATCH(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
   const body = await request.json();
   const { id, summary, scheduledAt, status } = body;
   if (!id) return NextResponse.json({ error: "idが必要です" }, { status: 400 });
 
   const supabase = getSupabase();
+
+  // 認可: 投稿のshop_nameから店舗アクセス権を検証
+  const { data: post } = await supabase.from("scheduled_posts").select("shop_name").eq("id", id).maybeSingle();
+  if (post?.shop_name) {
+    const { verifyShopAccess } = await import("@/lib/supabase");
+    const hasAccess = await verifyShopAccess(auth.sub, post.shop_name);
+    if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+  }
   const update: Record<string, any> = {};
   if (summary !== undefined) update.summary = summary;
   if (scheduledAt !== undefined) update.scheduled_at = scheduledAt;

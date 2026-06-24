@@ -186,8 +186,14 @@ export async function POST(request: NextRequest) {
  * 指定店舗の全overridesを返す
  */
 export async function GET(request: NextRequest) {
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+
   const shopName = request.nextUrl.searchParams.get("shopName");
   if (!shopName) return NextResponse.json({ error: "shopName が必要です" }, { status: 400 });
+
+  const hasAccess = await verifyShopAccess(auth.sub, shopName);
+  if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
 
   const supabase = getSupabase();
   const { data, error } = await supabase
@@ -205,11 +211,17 @@ export async function GET(request: NextRequest) {
  * 単一セルの順位を更新: { shopName, keyword, month, row, col, newRank }
  */
 export async function PUT(request: NextRequest) {
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+
   const body = await request.json();
   const { shopName, keyword, month, row, col, newRank } = body;
   if (!shopName || !keyword || !month || row == null || col == null || newRank == null) {
     return NextResponse.json({ error: "shopName, keyword, month, row, col, newRank が必要です" }, { status: 400 });
   }
+
+  const hasAccess = await verifyShopAccess(auth.sub, shopName);
+  if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
 
   const supabase = getSupabase();
   const { data: existing, error: fetchErr } = await (supabase
@@ -235,9 +247,15 @@ export async function PUT(request: NextRequest) {
  * { shopName, keyword, month } or { shopName } (全削除)
  */
 export async function DELETE(request: NextRequest) {
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+
   const body = await request.json();
   const { shopName, keyword, month } = body;
   if (!shopName) return NextResponse.json({ error: "shopName が必要です" }, { status: 400 });
+
+  const hasAccess = await verifyShopAccess(auth.sub, shopName);
+  if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
 
   const supabase = getSupabase();
   let query = supabase.from("grid_ranking_overrides").delete().eq("shop_name", shopName);

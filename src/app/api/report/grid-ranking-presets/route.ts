@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, verifyAuth, verifyShopAccess } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -99,13 +99,19 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
   const body = await request.json();
   const { shops } = body as { shops: { shopId: string; shopName: string; keyword?: string; gridSize?: number }[] };
 
   if (!shops || shops.length === 0) {
     return NextResponse.json({ error: "店舗が指定されていません" }, { status: 400 });
+  }
+
+  // 認可: 全店舗のアクセス権を検証
+  for (const s of shops) {
+    const hasAccess = await verifyShopAccess(auth.sub, s.shopName);
+    if (!hasAccess) return NextResponse.json({ error: `${s.shopName}へのアクセス権がありません` }, { status: 403 });
   }
 
   const supabase = getSupabase();
@@ -130,7 +136,7 @@ export async function POST(request: NextRequest) {
  */
 export async function DELETE(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
   const body = await request.json();
   const { shopIds } = body as { shopIds: string[] };
@@ -139,7 +145,13 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "shopIdsが必要です" }, { status: 400 });
   }
 
+  // 認可: shopIdからshop_nameを取得して検証
   const supabase = getSupabase();
+  const { data: shopData } = await supabase.from("shops").select("id, name").in("id", shopIds);
+  for (const s of (shopData || [])) {
+    const hasAccess = await verifyShopAccess(auth.sub, s.name);
+    if (!hasAccess) return NextResponse.json({ error: `${s.name}へのアクセス権がありません` }, { status: 403 });
+  }
   const { error } = await supabase
     .from("grid_ranking_presets")
     .delete()

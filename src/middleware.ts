@@ -172,7 +172,7 @@ function addHeaders(response: NextResponse, request: NextRequest, isReport: bool
   const fontSrc = "font-src 'self' data: https://fonts.gstatic.com";
   const styleSrc = "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com";
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://kxxwspavskhhjtiixcep.supabase.co";
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
   const supabaseWs = supabaseUrl.replace("https://", "wss://");
 
   const csp = [

@@ -263,7 +263,9 @@ export async function GET(request: NextRequest) {
   const now = new Date().toISOString();
 
   // 5分以上processingのまま残っているレコードをpendingに戻す（クラッシュリカバリ）
-  const staleThreshold = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  // 注意: scheduled_at（予約時刻）ではなく、processing開始から5分経過したものを対象にする
+  // processing_started_atカラムがない場合のフォールバック: scheduled_atが10分以上前のprocessing
+  const staleThreshold = new Date(Date.now() - 10 * 60 * 1000).toISOString();
   await supabase
     .from("scheduled_posts")
     .update({ status: "pending" })

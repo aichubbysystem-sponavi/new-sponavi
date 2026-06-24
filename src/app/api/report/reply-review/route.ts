@@ -69,6 +69,7 @@ export async function POST(request: NextRequest) {
         Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({ comment }),
+      signal: AbortSignal.timeout(30000),
     });
 
     if (!res.ok) {

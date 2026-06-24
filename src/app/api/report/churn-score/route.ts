@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, requireRole } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -10,8 +10,9 @@ export const maxDuration = 60;
  * 解約予兆スコア: 全店舗の解約リスクをスコアリング
  */
 export async function GET(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  // 全店舗の解約リスクスコアは経営情報 → 社長・マネージャーのみ
+  const r = await requireRole(request, ["president", "manager"]);
+  if (r.error) return r.error;
 
   const supabase = getSupabase();
 

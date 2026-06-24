@@ -49,9 +49,14 @@ export async function POST(request: NextRequest) {
   const supabase = getSupabase();
 
   if (action === "delete") {
-    // 削除時は認証のみ（id指定のため）
     const auth = await verifyAuth(request.headers.get("authorization"));
-    if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+    if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+    // 認可: スケジュールのshop_idから店舗アクセス権を検証
+    const { data: sched } = await supabase.from("post_schedule").select("shop_id").eq("id", id).maybeSingle();
+    if (sched?.shop_id) {
+      const access = await requireShopAccessById(request, sched.shop_id);
+      if (access.error) return access.error;
+    }
     const { error } = await supabase.from("post_schedule").delete().eq("id", id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ success: true });

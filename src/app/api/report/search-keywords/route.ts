@@ -66,6 +66,9 @@ export async function POST(request: NextRequest) {
  * 保存済み検索語句の履歴を取得
  */
 export async function GET(request: NextRequest) {
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+
   const shopId = request.nextUrl.searchParams.get("shopId");
   if (!shopId) {
     return NextResponse.json({ error: "shopIdが必要です" }, { status: 400 });
