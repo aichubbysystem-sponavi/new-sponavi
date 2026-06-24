@@ -79,11 +79,24 @@ SPOTLIGHT NAVIGATOR 超重要ナレッジ
 - [x] DB外部キー制約: 5テーブルに追加済み
 - [x] DB重複店舗データ: 492件削除+UNIQUE制約追加済み
 - [ ] GBP未連携8店舗のロケーション紐付け
-- [ ] レポートサブドメインのIDOR認可（クライアント公開前に対応必要）
+- [x] レポートサブドメインのIDOR認可 → user_shop_access テーブル + verifyShopAccess で解決（2026-06-24）
 - [ ] Google client secretローテーション（保留中）
-- [ ] パスワード平文保存 (api/report/users/route.ts) → password_display廃止
-- [ ] P-MAX全エンドポイント認証なし → セッション認証追加
-- [ ] Supabase新APIキー形式(sb_publishable_*)による/auth/v1/token 400エラー
+- [x] パスワード平文保存 → コード修正済み(6/20) + 本番DB NULL更新済み(6/24)
+- [x] P-MAX全エンドポイント認証 → 全7つに verifyAuth 実装済み（記載が古かっただけ）
+- [x] Supabase /auth/v1/token 400エラー → キー形式は無関係（Vercelはlegacy eyJ...キー使用中）。セッションリフレッシュ期限切れが原因、再ログインで解消
+
+## supplementGridFromRankingはランダム生成（2026-06-20修正済み）
+- 実測データ（grid_ranking_logs）がない月はrankingHistory（スプレッドシート）の中心順位からグリッドを推定生成
+- 元はMath.random()で生成→ページロードのたびにavgRankが変動→WEB/PDF不一致の原因だった
+- 修正: keyword+month+row+colのハッシュ値で決定論的に生成（同じ入力→同じ出力）
+- 5月等の最新月でも実測データがなければこの推定が走る → grid_ranking_logsにデータを入れれば正確な値になる
+
+## html2canvasのCanvas状態汚染（2026-06-20発見）
+- html2canvasが返すcanvasにgetContext("2d")で追加描画しても反映されない
+- 原因: html2canvas内部のclip/transform/compositeOperation状態が残っている
+- 対策: 新しいcanvasを作成→drawImage()で転写→追加描画→toDataURL()
+- Google Maps SVGマーカーもhtml2canvasでは位置がずれる → Canvas 2Dで直接描画する
+- Mercator投影計算でlat/lng→ピクセル変換可能（getCenter()+getZoom()のみ使用）
 
 ## Next.js fetchキャッシュの罠（2026-06-16発見）
 - Next.js 14のサーバーサイドfetch()はデフォルトでレスポンスをキャッシュする

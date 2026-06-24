@@ -211,6 +211,7 @@ export async function GET(request: NextRequest) {
   let synced = 0;
   let errors = 0;
   let consecutiveAuthErrors = 0;
+  let lastProcessedIndex = 0; // 最後に処理した店舗のインデックス（offset計算用）
 
   // Supabase shop_idマップを構築（Go API IDではなくSupabase IDを使うため）
   const batchNames = batch.map(s => s.name);
@@ -233,7 +234,10 @@ export async function GET(request: NextRequest) {
       const m = locMap.get(shop.name);
       if (m) fullPath = m.fullPath;
     }
-    if (!fullPath) continue;
+    if (!fullPath) {
+      lastProcessedIndex = i + 1; // フルパス未解決でもスキップとしてカウント
+      continue;
+    }
 
     try {
       // 全トークンを試す（アカウントごとにアクセス権が異なるため）
@@ -243,7 +247,10 @@ export async function GET(request: NextRequest) {
         if (result.reviews.length > 0) break;
       }
       const reviews = result.reviews;
-      if (reviews.length === 0) continue;
+      if (reviews.length === 0) {
+        lastProcessedIndex = i + 1; // 口コミ0件でもスキップとしてカウント
+        continue;
+      }
 
       consecutiveAuthErrors = 0; // 成功したらリセット
 
@@ -278,6 +285,7 @@ export async function GET(request: NextRequest) {
       }
 
       synced += reviews.length;
+      lastProcessedIndex = i + 1;
 
       // レート制限対策: 2秒待機
       if (i < batch.length - 1) await new Promise(r => setTimeout(r, 2000));
@@ -285,6 +293,7 @@ export async function GET(request: NextRequest) {
       console.error(`[cron/sync-reviews] Error for ${shop.name}:`, e?.message);
       errors++;
       consecutiveAuthErrors++;
+      lastProcessedIndex = i + 1;
 
       // 連続5回失敗 → バッチ中断
       if (consecutiveAuthErrors >= 5) {
@@ -294,8 +303,8 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // 6. オフセット更新
-  const nextOffset = offset + BATCH_SIZE;
+  // 6. オフセット更新（実際に処理した分だけ進める — エラーで中断した場合はそこから再開）
+  const nextOffset = offset + lastProcessedIndex;
   await setSyncOffset(nextOffset >= shops.length ? 0 : nextOffset);
 
   const result = {

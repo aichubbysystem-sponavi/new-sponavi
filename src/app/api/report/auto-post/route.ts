@@ -117,7 +117,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
             hasMore = contData.has_more;
             cursor = contData.cursor;
           } else { break; }
-        } catch { break; }
+        } catch (e: any) { console.error("[auto-post] Dropbox pagination error:", e?.message); break; }
       }
       return {
         files: allEntries.filter((e: any) => e[".tag"] === "file"),
@@ -150,7 +150,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
               depth: sf.depth + 1,
             });
           }
-        } catch {}
+        } catch (e: any) { console.error("[auto-post] subfolder expand error:", e?.message); }
       }
       debugSteps.push(`${files.length}件のファイル発見(フォルダ${root.folders.length}個+サブ展開)`);
     } catch (e: any) {
@@ -194,7 +194,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
         sharedRootPath = meta.path_lower || "";
         dlDebug.push(`共有ルート: ${sharedRootPath}`);
       }
-    } catch {}
+    } catch (e: any) { console.error("[auto-post] shared link metadata error:", e?.message); }
 
     for (const file of dateMatches.slice(0, 10)) {
       let got = false;
@@ -212,7 +212,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
           const linkData = await linkRes.json();
           if (linkData.link) { urls.push(linkData.link); got = true; }
         }
-      } catch {}
+      } catch (e: any) { console.error("[auto-post] temp_link method1 error:", file.name, e?.message); }
 
       // 方法2: 共有ルートパス + 相対パスで再試行
       if (!got && sharedRootPath) {
@@ -231,7 +231,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
             const linkData2 = await linkRes2.json();
             if (linkData2.link) { urls.push(linkData2.link); got = true; }
           }
-        } catch {}
+        } catch (e: any) { console.error("[auto-post] temp_link method2 error:", file.name, e?.message); }
       }
 
       // 方法3: ファイル単体の共有リンクを新規作成
@@ -253,7 +253,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
             urls.push(fileShareUrl.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace(/\?dl=0/, "?dl=1"));
             got = true;
           }
-        } catch {}
+        } catch (e: any) { console.error("[auto-post] share_link method3 error:", file.name, e?.message); }
       }
 
       if (!got) dlDebug.push(`取得失敗: ${file.name}`);
@@ -319,7 +319,7 @@ async function getRootSubfolders(dbxToken: string): Promise<{ name: string; url:
           hasMore = contData.has_more;
           cursor = contData.cursor;
         } else break;
-      } catch { break; }
+      } catch (e: any) { console.error("[auto-post] root folder pagination error:", e?.message); break; }
     }
 
     // フォルダのみ抽出し、共有リンクURLを生成
@@ -409,7 +409,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
           const subData = await subRes.json();
           files.push(...(subData.entries || []).filter((e: any) => e[".tag"] === "file").map((e: any) => ({ name: e.name || "", path: e.path_display || e.path_lower || "" })));
         }
-      } catch {}
+      } catch (e: any) { console.error("[auto-post] subfolder list error:", e?.message); }
     }
 
     // 日付マッチする画像ファイルをフィルタ
@@ -440,7 +440,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
         const meta = await metaRes.json();
         sharedRootPath = meta.path_lower || "";
       }
-    } catch {}
+    } catch (e: any) { console.error("[auto-post] shop shared link metadata error:", e?.message); }
 
     // DLリンク取得（方法1-3を既存ロジックと同様に）
     const urls: string[] = [];
@@ -462,7 +462,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
           const d = await linkRes.json();
           if (d.link) { urls.push(d.link); got = true; }
         }
-      } catch {}
+      } catch (e: any) { console.error("[auto-post] shop temp_link method1 error:", file.name, e?.message); }
 
       // 方法2: ルートパス + 相対パスで再試行
       if (!got && sharedRootPath) {
@@ -479,7 +479,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
             const d2 = await linkRes2.json();
             if (d2.link) { urls.push(d2.link); got = true; }
           }
-        } catch {}
+        } catch (e: any) { console.error("[auto-post] shop temp_link method2 error:", file.name, e?.message); }
       }
 
       // 方法3: 共有リンク作成
@@ -499,7 +499,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
             urls.push(fileShareUrl.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace(/\?dl=0/, "?dl=1"));
             got = true;
           }
-        } catch {}
+        } catch (e: any) { console.error("[auto-post] shop share_link method3 error:", file.name, e?.message); }
       }
 
       if (!got) dlDebug.push(`取得失敗: ${file.name}`);

@@ -66,7 +66,11 @@ async function getAllOAuthTokens(): Promise<string[]> {
             });
             if (res.ok) {
               const t = await res.json();
-              if (t.access_token) tokenSet.add(t.access_token);
+              if (t.access_token) {
+                tokenSet.add(t.access_token);
+                // 注意: system.tokens（systemスキーマ）はanon keyで直接更新不可
+                // Go APIが自身のリフレッシュサイクルでsystem.tokensを更新するため、ここでは書き戻さない
+              }
             }
           } catch (e: any) { console.error("[cron/execute-posts] system token refresh:", e?.message); }
         } else if (row.access_token) {
