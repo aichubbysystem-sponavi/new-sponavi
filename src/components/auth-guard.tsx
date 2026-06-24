@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter, usePathname } from "next/navigation";
 
@@ -12,39 +12,34 @@ export default function AuthGuard({ children, skipAuth }: { children: React.Reac
   const [authenticated, setAuthenticated] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  const handleLogout = useCallback(async () => {
-    await supabase.auth.signOut();
-    router.push("/login");
-  }, [router]);
-
   // セッションタイムアウト: 操作がなければ自動ログアウト
-  const resetTimeout = useCallback(() => {
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
-    timeoutRef.current = setTimeout(() => {
-      handleLogout();
-    }, SESSION_TIMEOUT_MS);
-  }, [handleLogout]);
+  // routerをrefで保持して依存配列の再生成チェーンを断ち切る
+  const routerRef = useRef(router);
+  routerRef.current = router;
 
   useEffect(() => {
     if (!authenticated || pathname === "/login") return;
 
-    const events = ["mousedown", "keydown", "scroll", "touchstart"];
-    const handler = () => resetTimeout();
+    const logout = async () => {
+      await supabase.auth.signOut();
+      routerRef.current.push("/login");
+    };
 
-    events.forEach((event) => window.addEventListener(event, handler));
-    resetTimeout(); // 初期タイマーセット
+    let timer: NodeJS.Timeout | null = null;
+    const resetTimer = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(logout, SESSION_TIMEOUT_MS);
+    };
+
+    const events = ["mousedown", "keydown", "scroll", "touchstart"];
+    events.forEach((event) => window.addEventListener(event, resetTimer));
+    resetTimer();
 
     return () => {
-      events.forEach((event) => window.removeEventListener(event, handler));
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
+      events.forEach((event) => window.removeEventListener(event, resetTimer));
+      if (timer) clearTimeout(timer);
     };
-  }, [authenticated, pathname, resetTimeout]);
+  }, [authenticated, pathname]);
 
   useEffect(() => {
     if (skipAuth) return;

@@ -2195,7 +2195,7 @@ export default function ReportClient({
                       style={{ width: "100%", minHeight: 80, padding: "8px 10px", fontSize: 14, lineHeight: 1.7, border: "1px solid #ccd", borderRadius: 8, resize: "vertical", fontFamily: "inherit", color: "#333" }}
                     />
                   ) : (
-                    <span dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(formatAIComment(c, shop.rating), { ALLOWED_TAGS: ["strong", "em", "br"], ALLOWED_ATTR: ["style"] }) }} />
+                    <span dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(formatAIComment(c, shop.rating), { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
                   )}
                 </div>
                 );

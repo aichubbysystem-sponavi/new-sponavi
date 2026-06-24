@@ -893,6 +893,15 @@ export async function POST(request: NextRequest) {
       const postStatus = warnings.length > 0 ? "on_hold" : "pending";
 
       try {
+        // 重複チェック: 同一店舗・同一予約時刻の投稿が既に存在する場合はスキップ
+        const { data: existing } = await supabase.from("scheduled_posts")
+          .select("id").eq("shop_id", shop.id).eq("scheduled_at", scheduledTime)
+          .in("status", ["pending", "on_hold", "processing"]).limit(1);
+        if (existing && existing.length > 0) {
+          schedResults.push({ shopName: match.shopName, status: "重複スキップ（同一時刻の予約が既存）" });
+          continue;
+        }
+
         const { error: insertErr } = await supabase.from("scheduled_posts").insert({
           id: crypto.randomUUID(),
           shop_id: shop.id,

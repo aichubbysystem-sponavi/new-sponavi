@@ -36,7 +36,14 @@ async function getAllOAuthTokens(): Promise<string[]> {
           });
           if (res.ok) {
             const t = await res.json();
-            if (t.access_token) tokenSet.add(t.access_token);
+            if (t.access_token) {
+              tokenSet.add(t.access_token);
+              // リフレッシュしたトークンをDBに永続化
+              await supabase.from("system_oauth_tokens").update({
+                access_token: t.access_token,
+                expiry: new Date(Date.now() + (t.expires_in || 3600) * 1000).toISOString(),
+              }).eq("refresh_token", row.refresh_token);
+            }
           }
         } catch (e: any) { console.error("[cron/execute-posts] oauth token refresh:", e?.message); }
       }
