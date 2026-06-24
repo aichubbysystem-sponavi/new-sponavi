@@ -128,3 +128,51 @@ export async function requireRole(
   }
   return { sub: auth.sub, role };
 }
+
+// ── 店舗アクセス制御 ──
+
+/**
+ * ユーザーがアクセス可能な店舗名一覧を取得
+ * - president: "all"（全店舗）
+ * - その他: user_shop_access テーブルに登録された店舗名のみ
+ */
+export async function getUserAllowedShops(authUid: string): Promise<string[] | "all"> {
+  const role = await getUserRole(authUid);
+  if (role === "president") return "all";
+
+  const sb = getSupabase();
+  const { data } = await sb
+    .from("user_shop_access")
+    .select("shop_name")
+    .eq("auth_uid", authUid);
+  return (data || []).map((r: { shop_name: string }) => r.shop_name);
+}
+
+/**
+ * ユーザーが特定店舗にアクセスできるか検証
+ */
+export async function verifyShopAccess(authUid: string, shopName: string): Promise<boolean> {
+  const allowed = await getUserAllowedShops(authUid);
+  if (allowed === "all") return true;
+  // 正規化して比較（全角/半角・大小文字の揺れ対応）
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, "");
+  return allowed.some((name) => norm(name) === norm(shopName));
+}
+
+/**
+ * APIルート用: 認証 + 店舗アクセスチェックを一括で行うヘルパー
+ */
+export async function requireShopAccess(
+  request: NextRequest,
+  shopName: string,
+): Promise<{ sub: string; error?: never } | { sub?: never; error: NextResponse }> {
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid || !auth.sub) {
+    return { error: NextResponse.json({ error: "認証が必要です" }, { status: 401 }) };
+  }
+  const hasAccess = await verifyShopAccess(auth.sub, shopName);
+  if (!hasAccess) {
+    return { error: NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 }) };
+  }
+  return { sub: auth.sub };
+}

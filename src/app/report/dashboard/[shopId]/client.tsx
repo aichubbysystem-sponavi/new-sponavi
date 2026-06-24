@@ -1,6 +1,8 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
+import { supabase } from "@/lib/supabase";
 
 interface Props {
   shop: any;
@@ -16,6 +18,39 @@ interface Props {
 export default function DashboardClient({
   shop, totalReviews, unrepliedCount, avgRating, recentReviews, monthlyStats, rankingData, analysis,
 }: Props) {
+  const [accessDenied, setAccessDenied] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        const token = data.session?.access_token;
+        if (!token) { setAccessDenied(true); return; }
+        const res = await fetch("/api/report/my-shops", { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) { setAccessDenied(true); return; }
+        const result = await res.json();
+        if (result.shops === "all") return;
+        const norm = (s: string) => s.toLowerCase().replace(/\s+/g, "");
+        const hasAccess = (result.shops as string[]).some((n: string) => norm(n) === norm(shop.name));
+        if (!hasAccess) setAccessDenied(true);
+      } catch {
+        setAccessDenied(true);
+      }
+    })();
+  }, [shop.name]);
+
+  if (accessDenied) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="bg-white rounded-2xl p-12 shadow-lg text-center max-w-md">
+          <div className="text-5xl mb-4">🔒</div>
+          <h1 className="text-xl font-bold text-[#003D6B] mb-3">アクセス権がありません</h1>
+          <p className="text-slate-500 text-sm mb-6">このダッシュボードを閲覧する権限がありません。</p>
+          <a href="/report" className="inline-block px-6 py-2 bg-[#003D6B] text-white rounded-lg text-sm font-semibold hover:bg-[#002a4a] transition">← 戻る</a>
+        </div>
+      </div>
+    );
+  }
 
   const ratingMap: Record<string, number> = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5, ONE_STAR: 1, TWO_STARS: 2, THREE_STARS: 3, FOUR_STARS: 4, FIVE_STARS: 5 };
   const starToNum = (s: string) => ratingMap[(s || "").toUpperCase().replace(/_STARS?/, "")] || 0;

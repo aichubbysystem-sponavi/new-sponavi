@@ -12,6 +12,19 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+/** ユーザーがアクセス可能な店舗名を取得 */
+async function fetchAllowedShops(): Promise<string[] | "all"> {
+  try {
+    const headers = await getAuthHeaders();
+    const res = await fetch("/api/report/my-shops", { headers });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.shops ?? [];
+  } catch {
+    return [];
+  }
+}
+
 type SortKey = "name" | "rating" | "totalReviews" | "period";
 type SortDir = "asc" | "desc";
 type ViewMode = "card" | "list";
@@ -85,6 +98,7 @@ export default function ReportListClient({
   const [sourceFilter, setSourceFilter] = useState<"all" | "both" | "sheet_only">("all");
   const [accountFilter, setAccountFilter] = useState<string>("all");
   const [reportMonth, setReportMonth] = useState("");
+  const [allowedShops, setAllowedShops] = useState<string[] | "all" | null>(null); // null=loading
 
   // GBPアカウント情報（サーバーから渡されなかった場合、クライアントでフォールバック取得）
   const [clientAccountNames, setClientAccountNames] = useState<string[]>([]);
@@ -113,6 +127,11 @@ export default function ReportListClient({
   }, [gbpAccountNames.length]);
 
   const effectiveAccountNames = gbpAccountNames.length > 0 ? gbpAccountNames : clientAccountNames;
+
+  // アクセス権のある店舗を取得
+  useEffect(() => {
+    fetchAllowedShops().then(setAllowedShops);
+  }, []);
 
   // お気に入り・対象月をlocalStorageから読み込み
   useEffect(() => {
@@ -151,9 +170,16 @@ export default function ReportListClient({
 
   // フィルタ＆ソート
   const filtered = useMemo(() => {
+    // アクセス権フィルタ（president以外は許可された店舗のみ表示）
+    let accessFiltered = shops;
+    if (allowedShops !== "all" && allowedShops !== null) {
+      const normSet = new Set(allowedShops.map((n) => n.toLowerCase().replace(/\s+/g, "")));
+      accessFiltered = shops.filter((s) => normSet.has(s.name.toLowerCase().replace(/\s+/g, "")));
+    }
+
     // 重複除去: 同名店舗（大文字小文字違い）はデータが多い方を残す
     const seen = new Map<string, ShopListItem>();
-    for (const s of shops) {
+    for (const s of accessFiltered) {
       const key = s.name.toLowerCase();
       const existing = seen.get(key);
       if (!existing) {
@@ -220,7 +246,7 @@ export default function ReportListClient({
       return sortDir === "asc" ? cmp : -cmp;
     });
     return result;
-  }, [shops, search, sortKey, sortDir, ratingFilter, areaFilter, favorites, showOnlyFavorites, showOnlyAlert, sourceFilter, accountFilter, clientLocToAccount]);
+  }, [shops, search, sortKey, sortDir, ratingFilter, areaFilter, favorites, showOnlyFavorites, showOnlyAlert, sourceFilter, accountFilter, clientLocToAccount, allowedShops]);
 
   const totalPages = Math.ceil(filtered.length / perPage);
   const paged = filtered.slice((page - 1) * perPage, page * perPage);
@@ -387,6 +413,18 @@ export default function ReportListClient({
     });
     return d;
   }, [shops]);
+
+  // アクセス権ロード中
+  if (allowedShops === null) {
+    return (
+      <div className="min-h-screen bg-[#f1f5f9] flex items-center justify-center">
+        <div className="text-center">
+          <div className="inline-block w-8 h-8 border-4 border-slate-200 border-t-[#003D6B] rounded-full animate-spin mb-3" />
+          <p className="text-sm text-slate-500">アクセス権を確認中...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#f1f5f9]" style={{ fontFamily: "'Segoe UI', 'Hiragino Sans', 'Meiryo', sans-serif" }}>

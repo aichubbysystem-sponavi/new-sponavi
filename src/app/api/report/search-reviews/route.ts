@@ -4,7 +4,7 @@
  * 部分一致 → ヒット0件なら全件返却
  */
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, verifyAuth, verifyShopAccess } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +25,7 @@ function formatReview(r: any) {
 
 export async function GET(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
   const shopName = request.nextUrl.searchParams.get("shop") || "";
   const keyword = request.nextUrl.searchParams.get("keyword") || "";
@@ -35,6 +35,11 @@ export async function GET(request: NextRequest) {
 
   if (!shopName || !keyword) {
     return NextResponse.json({ reviews: [], matched: false });
+  }
+
+  // 店舗アクセス権チェック
+  if (!(await verifyShopAccess(auth.sub, shopName))) {
+    return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
   }
 
   // 星評価フィルタ: ネガティブ→★1-3、ポジティブ→★4-5

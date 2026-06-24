@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, verifyAuth, verifyShopAccess } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -13,7 +13,7 @@ const GCP_API_KEY = process.env.GCP_API_KEY || "";
  */
 export async function POST(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) {
+  if (!auth.valid || !auth.sub) {
     return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   }
 
@@ -22,6 +22,13 @@ export async function POST(request: NextRequest) {
 
   if (!shopId) {
     return NextResponse.json({ error: "shopIdが必要です" }, { status: 400 });
+  }
+
+  // shopIdからshop名を取得してアクセスチェック
+  const sb = getSupabase();
+  const { data: shopCheck } = await sb.from("shops").select("name").eq("id", shopId).maybeSingle();
+  if (shopCheck && !(await verifyShopAccess(auth.sub, shopCheck.name))) {
+    return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
   }
   if (!GCP_API_KEY) {
     return NextResponse.json({ error: "GCP_API_KEYが設定されていません" }, { status: 500 });

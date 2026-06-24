@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, verifyAuth, verifyShopAccess } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -9,8 +9,16 @@ export const dynamic = "force-dynamic";
  * GET /api/report/display-settings?shopId=xxx
  */
 export async function GET(request: NextRequest) {
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+
   const shopId = request.nextUrl.searchParams.get("shopId");
   if (!shopId) return NextResponse.json({ error: "shopId必須" }, { status: 400 });
+
+  // shopIdは店舗名（ShopListItem.id = shopName）
+  if (!(await verifyShopAccess(auth.sub, decodeURIComponent(shopId)))) {
+    return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+  }
 
   const supabase = getSupabase();
   const { data } = await supabase
@@ -28,11 +36,15 @@ export async function GET(request: NextRequest) {
  */
 export async function PUT(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
   const body = await request.json();
   const { shopId, sectionVisibility, kwVisibility, rwVisibility } = body;
   if (!shopId) return NextResponse.json({ error: "shopId必須" }, { status: 400 });
+
+  if (!(await verifyShopAccess(auth.sub, decodeURIComponent(shopId)))) {
+    return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+  }
 
   const supabase = getSupabase();
 

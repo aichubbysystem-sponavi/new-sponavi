@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, verifyAuth, verifyShopAccess } from "@/lib/supabase";
 import { validateBody, memoSchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
@@ -11,11 +11,15 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
   const shopName = request.nextUrl.searchParams.get("shopName");
   const month = request.nextUrl.searchParams.get("month");
   if (!shopName) return NextResponse.json({ error: "shopNameが必要です" }, { status: 400 });
+
+  if (!(await verifyShopAccess(auth.sub, shopName))) {
+    return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+  }
 
   const supabase = getSupabase();
 
@@ -50,11 +54,15 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
   const { data: body, error: valErr } = await validateBody(request, memoSchema);
   if (valErr) return valErr;
   const { shopName, month, memo } = body;
+
+  if (!(await verifyShopAccess(auth.sub, shopName))) {
+    return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+  }
 
   const supabase = getSupabase();
 

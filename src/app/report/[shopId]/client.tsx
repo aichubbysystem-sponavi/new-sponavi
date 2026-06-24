@@ -47,6 +47,27 @@ export default function ReportClient({
 }: {
   data: ReportData; shopId: string; dataSource?: "cache" | "spreadsheet" | "mock"; googleReviewUrl?: string | null; targetMonth?: string;
 }) {
+  const [accessDenied, setAccessDenied] = useState(false);
+
+  // アクセス権チェック
+  useEffect(() => {
+    (async () => {
+      try {
+        const headers = await getAuthHeaders();
+        const res = await fetch("/api/report/my-shops", { headers });
+        if (!res.ok) { setAccessDenied(true); return; }
+        const { shops } = await res.json();
+        if (shops === "all") return; // president
+        const shopName = decodeURIComponent(shopId);
+        const norm = (s: string) => s.toLowerCase().replace(/\s+/g, "");
+        const hasAccess = (shops as string[]).some((n: string) => norm(n) === norm(shopName));
+        if (!hasAccess) setAccessDenied(true);
+      } catch {
+        setAccessDenied(true);
+      }
+    })();
+  }, [shopId]);
+
   // サーバーから渡されたtargetMonthを優先、フォールバックでURLから取得
   const [targetMonth, setTargetMonth] = useState(targetMonthProp || "");
   useEffect(() => {
@@ -951,6 +972,19 @@ export default function ReportClient({
 
   // ── Page numbering tracker ──
   let pageNum = 1;
+
+  if (accessDenied) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-[#0a1628] to-[#1a2a44] flex items-center justify-center">
+        <div className="bg-white rounded-2xl shadow-xl p-12 max-w-md text-center">
+          <div className="text-5xl mb-4">🔒</div>
+          <h1 className="text-xl font-bold text-[#003D6B] mb-3">アクセス権がありません</h1>
+          <p className="text-slate-500 text-sm mb-6">この店舗のレポートを閲覧する権限がありません。<br />管理者にお問い合わせください。</p>
+          <a href="/report" className="inline-block px-6 py-2 bg-[#003D6B] text-white rounded-lg text-sm font-semibold hover:bg-[#002a4a] transition">← レポート一覧に戻る</a>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ fontFamily: "'Noto Sans JP', sans-serif", background: "#1a1a2e" }}>
