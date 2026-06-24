@@ -512,6 +512,19 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
   }
 }
 
+/** 許可ドメインリスト（SSRF防止） */
+const ALLOWED_PHOTO_HOSTS = ["dropbox.com", "www.dropbox.com", "dl.dropboxusercontent.com", "dl.dropbox.com", "lh3.googleusercontent.com"];
+
+function isAllowedPhotoUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") return false;
+    return ALLOWED_PHOTO_HOSTS.some(h => parsed.hostname === h || parsed.hostname.endsWith(`.${h}`));
+  } catch {
+    return false;
+  }
+}
+
 function convertDropboxUrl(url: string): string {
   if (!url || !url.includes("dropbox.com")) return url;
   let direct = url.replace("www.dropbox.com", "dl.dropboxusercontent.com");
@@ -689,9 +702,9 @@ export async function POST(request: NextRequest) {
         photoUrls = result.urls;
         photoDebug = result.debug;
       }
-      // F列にURL形式の文字列がある場合: 正規表現で抽出
+      // F列にURL形式の文字列がある場合: 正規表現で抽出（SSRF防止: 許可ドメインのみ）
       if (photoUrls.length === 0 && p.photoCell) {
-        const urls = p.photoCell.match(/https?:\/\/[^\s,"]+/g) || [];
+        const urls = (p.photoCell.match(/https?:\/\/[^\s,"]+/g) || []).filter(isAllowedPhotoUrl);
         const dated = urls.filter((u: string) => u.includes(fileNameDate));
         photoUrls = dated.length > 0 ? dated.map(convertDropboxUrl) : [];
       }
@@ -812,7 +825,9 @@ export async function POST(request: NextRequest) {
         }
       }
     }
-  } catch {}
+  } catch (e: any) {
+    console.error("[auto-post] fixed_messages取得失敗:", e?.message);
+  }
 
   // shop_idまたはshop_nameで差し込み文字列を取得するヘルパー
   const getFixedMsg = (shopId: string, shopName: string): string => {
@@ -990,7 +1005,9 @@ export async function POST(request: NextRequest) {
               summary: "", topic_type: "PHOTO",
               media_url: mediaBody.googleUrl || stableUrl, gbp_post_name: mediaBody.name,
             });
-          } catch {}
+          } catch (e: any) {
+            console.error(`[auto-post] post_logs記録失敗(写真): ${shop.name}`, e?.message);
+          }
           cleanupImage(postId).catch(() => {});
         } else {
           const errDetail = mediaBody?.error?.message || JSON.stringify(mediaBody).slice(0, 200);
@@ -1091,7 +1108,9 @@ export async function POST(request: NextRequest) {
               signal: AbortSignal.timeout(10000),
             });
             verified = verifyRes.ok;
-          } catch {}
+          } catch (e: any) {
+            console.warn(`[auto-post] 投稿確認GET失敗: ${result.name}`, e?.message);
+          }
           results.push({ shopName: match.shopName, status: verified ? "投稿成功（確認済み）" : "投稿成功（未確認）", summary: match.summary.slice(0, 30), gbpPostName: result.name, searchUrl: result.searchUrl, verified });
           posted++;
         } else {

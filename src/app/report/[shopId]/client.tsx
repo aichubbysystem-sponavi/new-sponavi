@@ -51,21 +51,25 @@ export default function ReportClient({
 
   // アクセス権チェック
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
         const headers = await getAuthHeaders();
         const res = await fetch("/api/report/my-shops", { headers });
+        if (cancelled) return;
         if (!res.ok) { setAccessDenied(true); return; }
         const { shops } = await res.json();
+        if (cancelled) return;
         if (shops === "all") return; // president
         const shopName = decodeURIComponent(shopId);
         const norm = (s: string) => s.toLowerCase().replace(/\s+/g, "");
         const hasAccess = (shops as string[]).some((n: string) => norm(n) === norm(shopName));
         if (!hasAccess) setAccessDenied(true);
       } catch {
-        setAccessDenied(true);
+        if (!cancelled) setAccessDenied(true);
       }
     })();
+    return () => { cancelled = true; };
   }, [shopId]);
 
   // サーバーから渡されたtargetMonthを優先、フォールバックでURLから取得
@@ -401,6 +405,7 @@ export default function ReportClient({
   const [langLoading, setLangLoading] = useState(false);
   useEffect(() => {
     if (!shopId) return;
+    let cancelled = false;
     (async () => {
       setLangLoading(true);
       try {
@@ -411,17 +416,19 @@ export default function ReportClient({
           headers: { "Content-Type": "application/json", ...authH },
           body: JSON.stringify({ shopNames: [shopName] }),
         });
+        if (cancelled) return;
         if (res.ok) {
           const d = await res.json();
-          setLangStats(d.stats || []);
+          if (!cancelled) setLangStats(d.stats || []);
         } else {
           console.error("[lang-stats] API error:", res.status, await res.text().catch(() => ""));
         }
       } catch (e) {
         console.error("[lang-stats] fetch error:", e);
       }
-      setLangLoading(false);
+      if (!cancelled) setLangLoading(false);
     })();
+    return () => { cancelled = true; };
   }, [shopId]);
 
   // 指標の表示判定: 自動（データ0で非表示）+ 手動ON/OFF
@@ -607,16 +614,21 @@ export default function ReportClient({
 
   // メモをSupabaseから読み込み
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
         const authH = await getAuthHeaders();
         const res = await fetch(`/api/report/memo?shopName=${encodeURIComponent(shop.name)}&month=${encodeURIComponent(curLabel)}`, { headers: authH });
+        if (cancelled) return;
         if (res.ok) {
           const data = await res.json();
-          if (data.memo) setMemo(data.memo);
+          if (!cancelled && data.memo) setMemo(data.memo);
         }
-      } catch {}
+      } catch (e) {
+        console.error("[memo] fetch error:", e);
+      }
     })();
+    return () => { cancelled = true; };
   }, [shop.name, curLabel]);
 
   const saveMemo = async () => {

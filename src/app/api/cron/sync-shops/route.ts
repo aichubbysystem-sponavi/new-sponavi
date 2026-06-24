@@ -3,7 +3,7 @@ import { getSupabase, verifyCron } from "@/lib/supabase";
 import { getOAuthToken } from "@/lib/gbp-token";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 

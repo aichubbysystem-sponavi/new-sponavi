@@ -724,7 +724,18 @@ export function clearSpreadsheetCache() {
  */
 export async function getShopsFromSpreadsheet(): Promise<ShopListItem[] | null> {
   const data = await loadData();
-  if (!data) return null;
+  if (!data) {
+    // スプレッドシート取得失敗時: Supabaseキャッシュにフォールバック
+    console.warn("[spreadsheet] loadData失敗 — Supabaseキャッシュにフォールバック");
+    try {
+      const { readShopListFromCache } = await import("./report-cache");
+      const cached = await readShopListFromCache();
+      if (cached && cached.length > 0) return cached;
+    } catch (e) {
+      console.error("[spreadsheet] キャッシュフォールバック失敗:", e);
+    }
+    return null;
+  }
 
   // 契約中の店舗のみに絞り込み（顧客管理スプレッドシート連携）
   let contractedShops: Map<string, { service: string }> | null = null;
