@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, requireShopAccessById } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -12,9 +12,6 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
  * アンケート回答からAI口コミ文を生成
  */
 export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-
   const body = await request.json();
   const { shopId, shopName, rating, answers } = body as {
     shopId: string;
@@ -26,6 +23,9 @@ export async function POST(request: NextRequest) {
   if (!shopId || !rating || !answers) {
     return NextResponse.json({ error: "必須項目が不足しています" }, { status: 400 });
   }
+
+  const access = await requireShopAccessById(request, shopId);
+  if (access.error) return access.error;
 
   // AI口コミ文生成
   let reviewText = "";

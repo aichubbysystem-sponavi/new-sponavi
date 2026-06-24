@@ -4,7 +4,7 @@
  * v2: shopIdベース + 共有lib使用 + 認証必須
  */
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, verifyAuth, requireShopAccessById } from "@/lib/supabase";
 import { syncShopSearchKeywords } from "@/lib/gbp-search-keywords";
 
 export const dynamic = "force-dynamic";
@@ -53,25 +53,23 @@ async function handleSync(shopId: string) {
 
 // POST: 認証付き（検索語句管理ページから呼び出し）
 export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) {
-    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-  }
-
   const body = await request.json().catch(() => ({}));
   const shopId = body.shopId || "";
+
+  if (!shopId) return NextResponse.json({ error: "shopId required" }, { status: 400 });
+
+  const access = await requireShopAccessById(request, shopId);
+  if (access.error) return access.error;
+
   return handleSync(shopId);
 }
 
 // GET: 後方互換（shopId or name）— 認証付き
 export async function GET(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) {
-    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-  }
-
   const shopId = request.nextUrl.searchParams.get("shopId") || "";
   if (shopId) {
+    const access = await requireShopAccessById(request, shopId);
+    if (access.error) return access.error;
     return handleSync(shopId);
   }
 

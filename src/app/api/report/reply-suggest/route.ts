@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyAuth } from "@/lib/supabase";
+import { verifyAuth, verifyShopAccess } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +11,7 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
  */
 export async function POST(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) {
+  if (!auth.valid || !auth.sub) {
     return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   }
 
@@ -26,6 +26,12 @@ export async function POST(request: NextRequest) {
     shopName: string;
     reviewerName?: string;
   };
+
+  // 認可チェック
+  if (shopName) {
+    const hasAccess = await verifyShopAccess(auth.sub, shopName);
+    if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+  }
 
   if (!comment && starRating === 0) {
     return NextResponse.json({ error: "口コミ内容が必要です" }, { status: 400 });

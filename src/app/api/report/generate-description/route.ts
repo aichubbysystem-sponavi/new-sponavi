@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyAuth } from "@/lib/supabase";
+import { verifyAuth, verifyShopAccess } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -12,11 +12,17 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
  */
 export async function POST(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   if (!ANTHROPIC_API_KEY) return NextResponse.json({ error: "ANTHROPIC_API_KEYが設定されていません" }, { status: 500 });
 
   const body = await request.json();
   const { mode, shopName, category, keywords, currentDescription, address, hearing } = body;
+
+  // 認可チェック
+  if (shopName) {
+    const hasAccess = await verifyShopAccess(auth.sub, shopName);
+    if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+  }
 
   let prompt = "";
 

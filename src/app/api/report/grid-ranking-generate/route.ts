@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, verifyAuth, verifyShopAccess } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -84,7 +84,7 @@ function generateGridFrom3x3(centerPoints: { row: number; col: number; rank: num
  */
 export async function POST(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
   const body = await request.json();
   const supabase = getSupabase();
@@ -95,6 +95,9 @@ export async function POST(request: NextRequest) {
     if (!shopName || !keyword || !month) {
       return NextResponse.json({ error: "shopName, keyword, month が必要です" }, { status: 400 });
     }
+    // 認可チェック
+    const hasAccess = await verifyShopAccess(auth.sub, shopName);
+    if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
     const results = generateGridFrom3x3(centerPoints);
     // overridesにも保存
     await supabase.from("grid_ranking_overrides")

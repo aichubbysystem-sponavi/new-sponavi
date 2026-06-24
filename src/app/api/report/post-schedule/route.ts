@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, verifyAuth, requireShopAccessById } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -10,13 +10,17 @@ export const dynamic = "force-dynamic";
  * 月間投稿計画の取得
  */
 export async function GET(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) {
-    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-  }
-
   const { searchParams } = new URL(request.url);
   const shopId = searchParams.get("shopId");
+
+  // 認可チェック
+  if (shopId) {
+    const access = await requireShopAccessById(request, shopId);
+    if (access.error) return access.error;
+  } else {
+    const auth = await verifyAuth(request.headers.get("authorization"));
+    if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  }
   const month = searchParams.get("month"); // "2026-04"
 
   const supabase = getSupabase();
@@ -40,16 +44,14 @@ export async function GET(request: NextRequest) {
  * 投稿計画の保存（upsert）
  */
 export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) {
-    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-  }
-
   const body = await request.json();
   const { action, shopId, date, postType, note, id } = body;
   const supabase = getSupabase();
 
   if (action === "delete") {
+    // 削除時は認証のみ（id指定のため）
+    const auth = await verifyAuth(request.headers.get("authorization"));
+    if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
     const { error } = await supabase.from("post_schedule").delete().eq("id", id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ success: true });
@@ -58,6 +60,9 @@ export async function POST(request: NextRequest) {
   if (!shopId || !date || !postType) {
     return NextResponse.json({ error: "shopId, date, postTypeが必要です" }, { status: 400 });
   }
+
+  const access = await requireShopAccessById(request, shopId);
+  if (access.error) return access.error;
 
   const { data, error } = await supabase
     .from("post_schedule")

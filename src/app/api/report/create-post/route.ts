@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, requireRole } from "@/lib/supabase";
+import { getSupabase, requireRole, verifyShopAccess } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -64,6 +64,14 @@ export async function POST(request: NextRequest) {
 
   if (!shopId || !summary) {
     return NextResponse.json({ error: "shopIdとsummaryが必要です" }, { status: 400 });
+  }
+
+  // 認可チェック: shopIdからshop_nameを取得して店舗アクセス権を検証
+  const sbAccess = getSupabase();
+  const { data: shopAccess } = await sbAccess.from("shops").select("name").eq("id", shopId).maybeSingle();
+  if (shopAccess?.name) {
+    const hasAccess = await verifyShopAccess(r.sub, shopAccess.name);
+    if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
   }
 
   const accessToken = await getOAuthToken();

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, verifyAuth, requireShopAccessById } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +14,9 @@ export async function GET(request: NextRequest) {
   if (!shopId) {
     return NextResponse.json({ error: "shopIdが必要です" }, { status: 400 });
   }
+
+  const access = await requireShopAccessById(request, shopId);
+  if (access.error) return access.error;
 
   const supabase = getSupabase();
   const { data } = await supabase
@@ -30,11 +33,6 @@ export async function GET(request: NextRequest) {
  * キーワードを保存（upsert）
  */
 export async function PUT(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) {
-    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-  }
-
   const body = await request.json();
   const { shopId, keywords, source } = body as {
     shopId: string;
@@ -45,6 +43,9 @@ export async function PUT(request: NextRequest) {
   if (!shopId || !keywords) {
     return NextResponse.json({ error: "shopIdとkeywordsが必要です" }, { status: 400 });
   }
+
+  const access = await requireShopAccessById(request, shopId);
+  if (access.error) return access.error;
 
   const supabase = getSupabase();
 

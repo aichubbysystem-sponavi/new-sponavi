@@ -12,10 +12,6 @@
       "schedule": "*/5 * * * *"
     },
     {
-      "path": "/api/cron/auto-reply",
-      "schedule": "0 0 * * *"
-    },
-    {
       "path": "/api/cron/monthly-analysis",
       "schedule": "0 1 1-10 * *"
     },

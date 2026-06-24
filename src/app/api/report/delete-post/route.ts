@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, verifyAuth, verifyShopAccess } from "@/lib/supabase";
 import { getOAuthToken } from "@/lib/gbp-token";
 
 export const dynamic = "force-dynamic";
@@ -15,12 +15,27 @@ const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
  */
 export async function POST(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
   const { postName, logId } = await request.json();
   if (!postName) return NextResponse.json({ error: "postNameが必要です" }, { status: 400 });
 
   const supabase = getSupabase();
+
+  // 認可チェック: post_logsからshop_nameを取得して店舗アクセス権を検証
+  let shopName: string | null = null;
+  if (logId) {
+    const { data: log } = await supabase.from("post_logs").select("shop_name").eq("id", logId).maybeSingle();
+    shopName = log?.shop_name || null;
+  }
+  if (!shopName && postName) {
+    const { data: log } = await supabase.from("post_logs").select("shop_name").eq("gbp_post_name", postName).maybeSingle();
+    shopName = log?.shop_name || null;
+  }
+  if (shopName) {
+    const hasAccess = await verifyShopAccess(auth.sub, shopName);
+    if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+  }
 
   // Go APIからトークン取得
   const accessToken = await getOAuthToken();

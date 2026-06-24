@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, verifyAuth, requireShopAccessById } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -10,11 +10,11 @@ export const dynamic = "force-dynamic";
  * ヒアリングシート取得
  */
 export async function GET(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-
   const shopId = new URL(request.url).searchParams.get("shopId");
   if (!shopId) return NextResponse.json({ error: "shopIdが必要です" }, { status: 400 });
+
+  const access = await requireShopAccessById(request, shopId);
+  if (access.error) return access.error;
 
   const supabase = getSupabase();
   const { data } = await supabase
@@ -31,15 +31,15 @@ export async function GET(request: NextRequest) {
  * ヒアリングシート保存（upsert）
  */
 export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-
   const body = await request.json();
   const { shopId, data: hearingData } = body;
 
   if (!shopId || !hearingData) {
     return NextResponse.json({ error: "shopIdとdataが必要です" }, { status: 400 });
   }
+
+  const access = await requireShopAccessById(request, shopId);
+  if (access.error) return access.error;
 
   const supabase = getSupabase();
 

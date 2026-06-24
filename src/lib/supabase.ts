@@ -176,3 +176,27 @@ export async function requireShopAccess(
   }
   return { sub: auth.sub };
 }
+
+/**
+ * APIルート用: 認証 + shopId→店舗名解決 + 店舗アクセスチェック
+ * shopIdベースのAPIで使用
+ */
+export async function requireShopAccessById(
+  request: NextRequest,
+  shopId: string,
+): Promise<{ sub: string; shopName: string; error?: never } | { sub?: never; shopName?: never; error: NextResponse }> {
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid || !auth.sub) {
+    return { error: NextResponse.json({ error: "認証が必要です" }, { status: 401 }) };
+  }
+  const sb = getSupabase();
+  const { data: shop } = await sb.from("shops").select("name").eq("id", shopId).maybeSingle();
+  if (!shop?.name) {
+    return { error: NextResponse.json({ error: "店舗が見つかりません" }, { status: 404 }) };
+  }
+  const hasAccess = await verifyShopAccess(auth.sub, shop.name);
+  if (!hasAccess) {
+    return { error: NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 }) };
+  }
+  return { sub: auth.sub, shopName: shop.name };
+}

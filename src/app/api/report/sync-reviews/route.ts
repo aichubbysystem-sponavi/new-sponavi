@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, verifyAuth, verifyShopAccess } from "@/lib/supabase";
 import { getOAuthToken } from "@/lib/gbp-token";
 
 export const dynamic = "force-dynamic";
@@ -180,12 +180,22 @@ async function fetchReviews(
 export async function POST(request: NextRequest) {
   try {
     const auth = await verifyAuth(request.headers.get("authorization"));
-    if (!auth.valid) {
+    if (!auth.valid || !auth.sub) {
       return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
     }
 
     const body = await request.json().catch(() => ({}));
     const shopIds: string[] = body.shopIds || [];
+
+    // 認可チェック: 指定店舗へのアクセス権を検証
+    if (shopIds.length > 0) {
+      const sbAccess = getSupabase();
+      const { data: shops } = await sbAccess.from("shops").select("name").in("id", shopIds);
+      for (const shop of shops || []) {
+        const hasAccess = await verifyShopAccess(auth.sub, shop.name);
+        if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+      }
+    }
 
     // 1. 全アカウントのOAuthトークン取得
     const accessToken = await getOAuthToken();

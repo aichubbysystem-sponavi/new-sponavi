@@ -3,7 +3,7 @@
  * 指定店舗のパフォーマンスメトリクスをGBP APIから取得してキャッシュに保存
  */
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, requireShopAccessById } from "@/lib/supabase";
 import { syncShopPerformance } from "@/lib/gbp-performance";
 
 export const dynamic = "force-dynamic";
@@ -12,17 +12,15 @@ export const maxDuration = 300;
 
 
 export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) {
-    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-  }
-
   const body = await request.json().catch(() => ({}));
   const shopId = body.shopId || "";
 
   if (!shopId) {
     return NextResponse.json({ error: "shopId required" }, { status: 400 });
   }
+
+  const access = await requireShopAccessById(request, shopId);
+  if (access.error) return access.error;
 
   const supabase = getSupabase();
   const { data: shop } = await supabase

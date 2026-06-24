@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, verifyAuth, requireShopAccessById, verifyShopAccess } from "@/lib/supabase";
 import { getOAuthToken } from "@/lib/gbp-token";
 import { getLocationMap, resolveLocationName } from "@/lib/gbp-location";
 
@@ -66,13 +66,22 @@ function matchShopToLocation(
  */
 export async function POST(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) {
+  if (!auth.valid || !auth.sub) {
     return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   }
 
   const body = await request.json().catch(() => ({}));
   const targetShopId = body?.shopId;
   const targetShopName = body?.shopName;
+
+  // 認可チェック: 特定店舗指定時のみ
+  if (targetShopId) {
+    const access = await requireShopAccessById(request, targetShopId);
+    if (access.error) return access.error;
+  } else if (targetShopName) {
+    const hasAccess = await verifyShopAccess(auth.sub, targetShopName);
+    if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+  }
 
   const supabase = getSupabase();
 

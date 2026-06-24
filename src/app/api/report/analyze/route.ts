@@ -327,6 +327,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "店舗が指定されていません" }, { status: 400 });
   }
 
+  // 認可チェック: 指定店舗へのアクセス権を検証
+  const { verifyShopAccess } = await import("@/lib/supabase");
+  for (const shop of shopIds) {
+    if (shop.name) {
+      const hasAccess = await verifyShopAccess(r.sub, shop.name);
+      if (!hasAccess) return NextResponse.json({ error: `${shop.name}へのアクセス権がありません` }, { status: 403 });
+    }
+  }
+
   const supabase = getSupabase();
   const results: { shopId: string; shopName: string; status: string; reason?: string }[] = [];
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, verifyAuth, requireShopAccessById } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -65,8 +65,15 @@ async function getAllOAuthTokens(): Promise<string[]> {
  */
 export async function GET(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   const shopId = request.nextUrl.searchParams.get("shopId");
+
+  // 認可チェック
+  if (shopId) {
+    const access = await requireShopAccessById(request, shopId);
+    if (access.error) return access.error;
+  }
+
   const supabase = getSupabase();
   let query = supabase.from("scheduled_posts").select("*").order("scheduled_at", { ascending: true });
   if (shopId) query = query.eq("shop_id", shopId);
@@ -79,15 +86,15 @@ export async function GET(request: NextRequest) {
  * 予約投稿を登録
  */
 export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-
   const body = await request.json();
   const { shopId, summary, topicType, photoUrl, actionType, actionUrl, scheduledAt } = body;
 
   if (!shopId || !summary || !scheduledAt) {
     return NextResponse.json({ error: "shopId, summary, scheduledAtが必要です" }, { status: 400 });
   }
+
+  const access = await requireShopAccessById(request, shopId);
+  if (access.error) return access.error;
 
   const supabase = getSupabase();
   const { data: shop } = await supabase.from("shops").select("name").eq("id", shopId).single();

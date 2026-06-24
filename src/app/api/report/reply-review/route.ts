@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, requireRole } from "@/lib/supabase";
+import { getSupabase, requireRole, verifyShopAccess } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -69,6 +69,14 @@ export async function POST(request: NextRequest) {
 
   if (!shopId || !reviewId || !comment) {
     return NextResponse.json({ error: "shopId, reviewId, commentが必要です" }, { status: 400 });
+  }
+
+  // 認可チェック: shopIdからshop_nameを取得して店舗アクセス権を検証
+  const supabaseForAccess = getSupabase();
+  const { data: shopForAccess } = await supabaseForAccess.from("shops").select("name").eq("id", shopId).maybeSingle();
+  if (shopForAccess?.name) {
+    const hasAccess = await verifyShopAccess(r.sub, shopForAccess.name);
+    if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
   }
 
   // OAuthトークン取得

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireRole } from "@/lib/supabase";
+import { requireRole, verifyShopAccess } from "@/lib/supabase";
 import { validateBody, generatePostSchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +19,12 @@ export async function POST(request: NextRequest) {
   const { data: body, error: valErr } = await validateBody(request, generatePostSchema);
   if (valErr) return valErr;
   const { shopName, topicType, keywords, tone, count } = body;
+
+  // 認可チェック
+  if (shopName) {
+    const hasAccess = await verifyShopAccess(r.sub, shopName);
+    if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+  }
   const category = "";
 
   const topicLabel: Record<string, string> = {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, requireShopAccessById } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -9,10 +9,11 @@ export const dynamic = "force-dynamic";
  * 順位変動アラート: 前回比で急落/急上昇したキーワードを検出
  */
 export async function GET(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   const shopId = request.nextUrl.searchParams.get("shopId");
   if (!shopId) return NextResponse.json({ error: "shopIdが必要です" }, { status: 400 });
+
+  const access = await requireShopAccessById(request, shopId);
+  if (access.error) return access.error;
 
   const supabase = getSupabase();
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, verifyAuth, verifyShopAccess } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -96,12 +96,22 @@ async function fetchMedia(locationName: string, accessToken: string): Promise<Me
 
 export async function POST(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) {
+  if (!auth.valid || !auth.sub) {
     return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   }
 
   const body = await request.json().catch(() => ({}));
   const shopIds: string[] = body.shopIds || [];
+
+  // 認可チェック: 指定店舗へのアクセス権を検証
+  if (shopIds.length > 0) {
+    const sb = getSupabase();
+    const { data: shops } = await sb.from("shops").select("name").in("id", shopIds);
+    for (const shop of shops || []) {
+      const hasAccess = await verifyShopAccess(auth.sub, shop.name);
+      if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+    }
+  }
 
   const accessToken = await getOAuthToken();
   if (!accessToken) {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, verifyAuth, requireShopAccessById, verifyShopAccess } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -12,11 +12,6 @@ const GCP_API_KEY = process.env.GCP_API_KEY || "";
  * 1地点×1キーワードの順位計測（最大100位まで5ページ検索）
  */
 export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) {
-    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-  }
-
   const body = await request.json();
   const { shopId, keyword, lat, lng } = body as {
     shopId: string;
@@ -28,6 +23,9 @@ export async function POST(request: NextRequest) {
   if (!shopId || !keyword || !lat || !lng) {
     return NextResponse.json({ error: "shopId, keyword, lat, lngが必要です" }, { status: 400 });
   }
+
+  const access = await requireShopAccessById(request, shopId);
+  if (access.error) return access.error;
 
   if (!GCP_API_KEY) {
     return NextResponse.json({ error: "GCP_API_KEYが設定されていません" }, { status: 500 });
@@ -112,11 +110,6 @@ export async function POST(request: NextRequest) {
  * グリッド計測結果を一括保存
  */
 export async function PUT(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) {
-    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-  }
-
   const body = await request.json();
   const { shopId, keyword, gridResults, gridSize, interval } = body as {
     shopId: string;
@@ -125,6 +118,10 @@ export async function PUT(request: NextRequest) {
     gridSize: number;
     interval: number;
   };
+
+  if (!shopId) return NextResponse.json({ error: "shopIdが必要です" }, { status: 400 });
+  const accessPut = await requireShopAccessById(request, shopId);
+  if (accessPut.error) return accessPut.error;
 
   const supabase = getSupabase();
   const { error: insertErr } = await supabase.from("grid_ranking_logs").insert({
@@ -151,7 +148,7 @@ export async function PUT(request: NextRequest) {
  */
 export async function GET(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) {
+  if (!auth.valid || !auth.sub) {
     return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   }
 
@@ -170,6 +167,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "shopIdまたはshopNameが必要です" }, { status: 400 });
   }
 
+  // 認可チェック
+  const accessGet = await requireShopAccessById(request, shopId);
+  if (accessGet.error) return accessGet.error;
+
   const { data } = await supabase
     .from("grid_ranking_logs")
     .select("*")
@@ -186,7 +187,7 @@ export async function GET(request: NextRequest) {
  */
 export async function DELETE(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) {
+  if (!auth.valid || !auth.sub) {
     return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   }
 
@@ -196,12 +197,20 @@ export async function DELETE(request: NextRequest) {
   const supabase = getSupabase();
 
   if (id) {
+    // idで削除する場合、ログからshop_idを取得して認可チェック
+    const { data: log } = await supabase.from("grid_ranking_logs").select("shop_id").eq("id", id).maybeSingle();
+    if (log?.shop_id) {
+      const accessDel = await requireShopAccessById(request, log.shop_id);
+      if (accessDel.error) return accessDel.error;
+    }
     const { error } = await supabase.from("grid_ranking_logs").delete().eq("id", id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ success: true });
   }
 
   if (shopId && keyword) {
+    const accessDel2 = await requireShopAccessById(request, shopId);
+    if (accessDel2.error) return accessDel2.error;
     const { error, count } = await supabase.from("grid_ranking_logs").delete().eq("shop_id", shopId).eq("keyword", keyword);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ success: true, deleted: count });
