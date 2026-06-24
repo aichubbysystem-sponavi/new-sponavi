@@ -8,13 +8,17 @@ const LINE_CHANNEL_SECRET = process.env.LINE_CHANNEL_SECRET || "";
 const LINE_CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN || "";
 
 
-// LINE署名検証
+// LINE署名検証（定数時間比較でタイミング攻撃を防止）
 function verifySignature(body: string, signature: string): boolean {
   if (!LINE_CHANNEL_SECRET) return false;
   const hmac = crypto.createHmac("SHA256", LINE_CHANNEL_SECRET);
   hmac.update(body);
   const digest = hmac.digest("base64");
-  return digest === signature;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(signature));
+  } catch {
+    return false;
+  }
 }
 
 // LINE返信API
@@ -45,9 +49,12 @@ export async function POST(request: NextRequest) {
   const bodyText = await request.text();
   const signature = request.headers.get("x-line-signature") || "";
 
-  // 署名検証
-  if (LINE_CHANNEL_SECRET && !verifySignature(bodyText, signature)) {
-    return NextResponse.json({ error: "Invalid signature" }, { status: 403 });
+  // 署名検証（SECRET未設定時はwebhook無効化）
+  if (!LINE_CHANNEL_SECRET) {
+    return NextResponse.json({ error: "Webhook not configured" }, { status: 503 });
+  }
+  if (!verifySignature(bodyText, signature)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
 
   let body: any;

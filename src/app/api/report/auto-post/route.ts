@@ -5,6 +5,14 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
+
+/** 店舗名の正規化比較（全角半角・スペースの揺れを吸収、部分一致は排除） */
+function normName(s: string): string {
+  return s.normalize("NFKC").replace(/[\s\u3000]+/g, "").toLowerCase();
+}
+function matchShopName(a: string, b: string): boolean {
+  return normName(a) === normName(b);
+}
 const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
 const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
 
@@ -338,12 +346,8 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
   const subfolders = await getRootSubfolders(dbxToken);
   if (subfolders.length === 0) return { urls: [], debug: "おおもとフォルダのサブフォルダ0件" };
 
-  // 店舗名でフォルダを検索（部分一致・両方向）
-  const matched = subfolders.find(f =>
-    f.name === shopName ||
-    f.name.includes(shopName) ||
-    shopName.includes(f.name)
-  );
+  // 店舗名でフォルダを検索（正規化完全一致のみ）
+  const matched = subfolders.find(f => matchShopName(f.name, shopName));
   if (!matched) {
     return { urls: [], debug: `おおもとフォルダ${subfolders.length}件中「${shopName}」一致なし` };
   }
@@ -642,9 +646,9 @@ export async function POST(request: NextRequest) {
 
         // 店舗フィルタ（特定店舗が指定されている場合、その店舗のみ対象）
         if (filterShopNames && filterShopNames.length > 0) {
-          const match = filterShopNames.some(fn => shopName === fn || shopName.includes(fn) || fn.includes(shopName));
+          const match = filterShopNames.some(fn => matchShopName(shopName, fn));
           if (!match) continue;
-        } else if (filterShopName && shopName !== filterShopName && !shopName.includes(filterShopName) && !filterShopName.includes(shopName)) continue;
+        } else if (filterShopName && !matchShopName(shopName, filterShopName)) continue;
 
         // 写真投稿: 同じ店舗が複数行にある場合は最初の1行のみ使用
         if (isPhotoOnly && allMatches.some(m => m.shopName === shopName)) continue;
@@ -834,8 +838,7 @@ export async function POST(request: NextRequest) {
         continue;
       }
       const shop = (shops || []).find((s) =>
-        s.name === match.shopName || s.gbp_shop_name === match.shopName
-        || s.name.includes(match.shopName) || match.shopName.includes(s.name)
+        matchShopName(s.name, match.shopName) || matchShopName(s.gbp_shop_name || "", match.shopName)
       );
       if (!shop) {
         schedResults.push({ shopName: match.shopName, status: "店舗未登録（スキップ）" });
@@ -927,8 +930,7 @@ export async function POST(request: NextRequest) {
    try {
     // 店舗名でマッチ
     const shop = (shops || []).find((s) =>
-      s.name === match.shopName || s.gbp_shop_name === match.shopName
-      || s.name.includes(match.shopName) || match.shopName.includes(s.name)
+      matchShopName(s.name, match.shopName) || matchShopName(s.gbp_shop_name || "", match.shopName)
     );
 
     if (!shop) {

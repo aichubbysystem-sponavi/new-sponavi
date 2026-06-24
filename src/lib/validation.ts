@@ -66,7 +66,7 @@ export const userCreateSchema = z.object({
   name: z.string().min(1, "名前が必要です").max(100),
   username: z.string().min(1, "ユーザー名が必要です").max(50),
   password: z.string().min(8, "パスワードは8文字以上").max(100),
-  role: z.enum(["admin", "manager", "viewer"]).optional(),
+  role: z.enum(["president", "manager", "part_time"]).optional(),
 });
 
 export const displaySettingsSchema = z.object({

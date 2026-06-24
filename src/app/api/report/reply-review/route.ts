@@ -25,6 +25,7 @@ async function getOAuthToken(): Promise<string | null> {
   // リフレッシュ
   try {
     const res = await fetch("https://oauth2.googleapis.com/token", {
+      cache: "no-store" as const,
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
