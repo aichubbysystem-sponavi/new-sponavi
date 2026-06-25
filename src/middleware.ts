@@ -1,47 +1,41 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { Ratelimit } from "@upstash/ratelimit";
+import { Redis } from "@upstash/redis";
 
 // レポートサブドメインのホスト名パターン
 const REPORT_HOSTNAME = "report.new-spotlight-navigator.com";
 const PMAX_HOSTNAME = "p-max.new-spotlight-navigator.com";
 const MAIN_HOSTNAME = "new-spotlight-navigator.com";
 
-// === 壁10: APIレート制限 ===
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-const RATE_LIMIT = 500; // 1分あたり500リクエスト
-const RATE_WINDOW = 60 * 1000; // 1分
+// === レート制限（Upstash Redis） ===
+const REDIS_URL = process.env.UPSTASH_REDIS_REST_KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || "";
+const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || "";
+const redis = REDIS_URL
+  ? new Redis({ url: REDIS_URL, token: REDIS_TOKEN })
+  : null;
 
-function checkRateLimit(ip: string): boolean {
+// API全体: 1分あたり500リクエスト
+const apiRateLimit = redis
+  ? new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(500, "1 m"), prefix: "rl:api" })
+  : null;
+
+// ログイン: 5分間で10回まで
+const loginRateLimit = redis
+  ? new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(10, "5 m"), prefix: "rl:login" })
+  : null;
+
+// インメモリフォールバック（Redis未設定時の開発環境用）
+const fallbackMap = new Map<string, { count: number; resetAt: number }>();
+function checkFallbackLimit(key: string, limit: number, windowMs: number): boolean {
   const now = Date.now();
-  const entry = rateLimitMap.get(ip);
+  const entry = fallbackMap.get(key);
   if (!entry || now > entry.resetAt) {
-    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_WINDOW });
+    fallbackMap.set(key, { count: 1, resetAt: now + windowMs });
     return true;
   }
   entry.count++;
-  return entry.count <= RATE_LIMIT;
-}
-
-// === 壁11: ログインブルートフォース防止 ===
-const loginAttemptMap = new Map<string, { count: number; blockedUntil: number }>();
-const MAX_LOGIN_ATTEMPTS = 10; // 10回まで
-const LOGIN_BLOCK_DURATION = 5 * 60 * 1000; // 5分ブロック
-
-function checkLoginAttempt(ip: string): boolean {
-  const now = Date.now();
-  const entry = loginAttemptMap.get(ip);
-  if (!entry) {
-    loginAttemptMap.set(ip, { count: 1, blockedUntil: 0 });
-    return true;
-  }
-  if (now < entry.blockedUntil) return false;
-  if (entry.count >= MAX_LOGIN_ATTEMPTS) {
-    entry.blockedUntil = now + LOGIN_BLOCK_DURATION;
-    entry.count = 0;
-    return false;
-  }
-  entry.count++;
-  return true;
+  return entry.count <= limit;
 }
 
 // 許可されたオリジン
@@ -54,26 +48,40 @@ const ALLOWED_ORIGINS = [
   ...(process.env.NODE_ENV === "development" ? ["http://localhost:3000", "http://localhost:3001"] : []),
 ];
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const hostname = request.headers.get("host") || "";
   const { pathname } = request.nextUrl;
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "unknown";
 
-  // === 壁10: APIレート制限（/api/* パス） ===
+  // === APIレート制限（/api/* パス） ===
   if (pathname.startsWith("/api/")) {
-    if (!checkRateLimit(ip)) {
-      return NextResponse.json({ error: "リクエストが多すぎます。しばらく待ってからお試しください。" }, { status: 429 });
+    if (apiRateLimit) {
+      const { success } = await apiRateLimit.limit(ip);
+      if (!success) {
+        return NextResponse.json({ error: "リクエストが多すぎます。しばらく待ってからお試しください。" }, { status: 429 });
+      }
+    } else {
+      if (!checkFallbackLimit(`api:${ip}`, 500, 60_000)) {
+        return NextResponse.json({ error: "リクエストが多すぎます。しばらく待ってからお試しください。" }, { status: 429 });
+      }
     }
   }
 
-  // === 壁11: ログインブルートフォース防止 ===
+  // === ログインブルートフォース防止 ===
   if (pathname === "/login" && request.method === "POST") {
-    if (!checkLoginAttempt(ip)) {
-      return NextResponse.json({ error: "ログイン試行回数が上限に達しました。5分後にお試しください。" }, { status: 429 });
+    if (loginRateLimit) {
+      const { success } = await loginRateLimit.limit(ip);
+      if (!success) {
+        return NextResponse.json({ error: "ログイン試行回数が上限に達しました。5分後にお試しください。" }, { status: 429 });
+      }
+    } else {
+      if (!checkFallbackLimit(`login:${ip}`, 10, 5 * 60_000)) {
+        return NextResponse.json({ error: "ログイン試行回数が上限に達しました。5分後にお試しください。" }, { status: 429 });
+      }
     }
   }
 
-  // === 壁13: CSRF対策（状態変更リクエストのOriginチェック） ===
+  // === CSRF対策（状態変更リクエストのOriginチェック） ===
   const method = request.method;
   if (pathname.startsWith("/api/") && ["POST", "PUT", "DELETE", "PATCH"].includes(method)) {
     // Cron/Webhook は Origin なしで呼ばれるため除外
@@ -99,8 +107,11 @@ export function middleware(request: NextRequest) {
             return NextResponse.json({ error: "不正なリクエスト元です" }, { status: 403 });
           }
         }
-        // Origin・Referer両方なし: APIクライアント（curl等）からの直接呼び出し
-        // → Authorization ヘッダーで認証されるため許可
+        // Origin・Referer両方なし: CSRF攻撃防止のためAuthorizationヘッダー必須
+        const hasAuth = request.headers.has("authorization");
+        if (!hasAuth) {
+          return NextResponse.json({ error: "不正なリクエスト元です" }, { status: 403 });
+        }
       }
     }
   }
@@ -196,7 +207,7 @@ function addHeaders(response: NextResponse, request: NextRequest, isReport: bool
   response.headers.set("X-Powered-By", "");
   response.headers.delete("X-Powered-By");
 
-  // === 壁12: CORS制限 ===
+  // === CORS制限 ===
   const origin = request.headers.get("origin");
   if (origin && ALLOWED_ORIGINS.includes(origin)) {
     response.headers.set("Access-Control-Allow-Origin", origin);

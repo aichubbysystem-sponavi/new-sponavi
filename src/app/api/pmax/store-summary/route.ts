@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStoreSummaries } from "@/lib/google-ads";
-import { verifyAuth } from "@/lib/supabase";
+import { requireRole } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -10,8 +10,8 @@ export const maxDuration = 120;
  * 全アカウント横断で店舗別サマリーを返す
  */
 export async function GET(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  const r = await requireRole(request, ["president", "manager"]);
+  if (r.error) return r.error;
 
   const { searchParams } = request.nextUrl;
   const startDate = searchParams.get("startDate");

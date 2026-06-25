@@ -10,7 +10,7 @@ import { getSupabase, verifyCron } from "@/lib/supabase";
 import { syncShopSearchKeywords, getExpectedMonthJST, compareMonths } from "@/lib/gbp-search-keywords";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 800;
+export const maxDuration = 300;
 
 
 export async function GET(request: NextRequest) {
@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
   const supabase = getSupabase();
   const expectedMonth = getExpectedMonthJST();
   const startTime = Date.now();
-  const TIME_LIMIT = 750_000; // 750秒（maxDuration=800の安全マージン）
+  const TIME_LIMIT = 270_000; // 270秒（maxDuration=300の安全マージン）
 
   // 1. GBP設定済みの全店舗を取得（解約店舗を除外）
   const { data: shops, error } = await supabase
