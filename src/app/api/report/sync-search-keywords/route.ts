@@ -4,7 +4,7 @@
  * v2: shopIdベース + 共有lib使用 + 認証必須
  */
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth, requireShopAccessById } from "@/lib/supabase";
+import { getSupabase, verifyAuth, requireShopAccessById, verifyShopAccess } from "@/lib/supabase";
 import { syncShopSearchKeywords } from "@/lib/gbp-search-keywords";
 
 export const dynamic = "force-dynamic";
@@ -78,6 +78,17 @@ export async function GET(request: NextRequest) {
   if (!shopName) {
     return NextResponse.json({ error: "shopId or name required" }, { status: 400 });
   }
+
+  // 認可チェック
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid || !auth.sub) {
+    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  }
+  const hasAccess = await verifyShopAccess(auth.sub, shopName);
+  if (!hasAccess) {
+    return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+  }
+
   const supabase = getSupabase();
   const { data: shop } = await supabase
     .from("shops")
@@ -86,7 +97,7 @@ export async function GET(request: NextRequest) {
     .limit(1)
     .maybeSingle();
   if (!shop) {
-    return NextResponse.json({ error: `Shop not found: ${shopName}` }, { status: 404 });
+    return NextResponse.json({ error: "店舗が見つかりません" }, { status: 404 });
   }
   return handleSync(shop.id);
 }

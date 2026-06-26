@@ -1,54 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, requireRole } from "@/lib/supabase";
+import { getOAuthToken } from "@/lib/gbp-token";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
-const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
-const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
-
-
-async function getOAuthToken(): Promise<string | null> {
-  const supabase = getSupabase();
-  const { data } = await supabase.from("system_oauth_tokens")
-    .select("access_token, refresh_token, expiry").limit(1).maybeSingle();
-  if (!data) return null;
-
-  // トークン期限切れならリフレッシュ
-  if (data.expiry && new Date(data.expiry) < new Date()) {
-    if (!data.refresh_token || !GBP_CLIENT_ID || !GBP_CLIENT_SECRET) return null;
-    try {
-      const res = await fetch("https://oauth2.googleapis.com/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          client_id: GBP_CLIENT_ID,
-          client_secret: GBP_CLIENT_SECRET,
-          refresh_token: data.refresh_token,
-          grant_type: "refresh_token",
-        }),
-      });
-      if (!res.ok) return null;
-      const token = await res.json();
-      const newExpiry = new Date(Date.now() + (token.expires_in || 3600) * 1000).toISOString();
-      await supabase.from("system_oauth_tokens").update({
-        access_token: token.access_token,
-        expiry: newExpiry,
-      }).eq("refresh_token", data.refresh_token);
-      return token.access_token;
-    } catch { return null; }
-  }
-  return data.access_token;
-}
 
 /**
  * POST /api/report/sync-categories
  * 全店舗のGBPカテゴリを一括取得・保存
  */
 export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  const r = await requireRole(request, ["president", "manager"]);
+  if (r.error) return r.error;
 
   const supabase = getSupabase();
   const accessToken = await getOAuthToken();

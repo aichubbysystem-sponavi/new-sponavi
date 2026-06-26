@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth, requireShopAccessById, verifyShopAccess } from "@/lib/supabase";
+import { getSupabase, verifyAuth, requireRole, requireShopAccessById, verifyShopAccess } from "@/lib/supabase";
 import { getOAuthToken } from "@/lib/gbp-token";
 import { getLocationMap, resolveLocationName } from "@/lib/gbp-location";
 
@@ -74,13 +74,17 @@ export async function POST(request: NextRequest) {
   const targetShopId = body?.shopId;
   const targetShopName = body?.shopName;
 
-  // 認可チェック: 特定店舗指定時のみ
+  // 認可チェック
   if (targetShopId) {
     const access = await requireShopAccessById(request, targetShopId);
     if (access.error) return access.error;
   } else if (targetShopName) {
     const hasAccess = await verifyShopAccess(auth.sub, targetShopName);
     if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+  } else {
+    // 全店舗対象 → president/manager のみ
+    const roleCheck = await requireRole(request, ["president", "manager"]);
+    if (roleCheck.error) return roleCheck.error;
   }
 
   const supabase = getSupabase();

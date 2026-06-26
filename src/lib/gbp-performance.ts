@@ -6,10 +6,8 @@
  */
 
 import { getSupabase } from "@/lib/supabase";
+import { getOAuthToken } from "@/lib/gbp-token";
 import { getExpectedMonthJST, compareMonths } from "./gbp-search-keywords";
-
-const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
-const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
 
 
 /** 月別パフォーマンスデータ */
@@ -57,49 +55,7 @@ const METRIC_MAP: Record<string, keyof MonthlyPerformance> = {
   BUSINESS_FOOD_MENU_CLICKS: "foodMenus",
 };
 
-async function getPerformanceApiToken(): Promise<string | null> {
-  if (!GBP_CLIENT_ID || !GBP_CLIENT_SECRET) {
-    console.error("[gbp-perf] GBP_CLIENT_ID or GBP_CLIENT_SECRET not set");
-    return null;
-  }
-  const supabase = getSupabase();
-  const { data, error: dbErr } = await supabase.from("system_oauth_tokens").select("refresh_token").limit(1).maybeSingle();
-  if (dbErr) {
-    console.error("[gbp-perf] DB error fetching refresh_token:", dbErr.message);
-    return null;
-  }
-  if (!data?.refresh_token) {
-    console.error("[gbp-perf] No refresh_token in system_oauth_tokens");
-    return null;
-  }
-
-  try {
-    const res = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET,
-        refresh_token: data.refresh_token, grant_type: "refresh_token",
-      }),
-      cache: "no-store",
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!res.ok) {
-      const errBody = await res.text().catch(() => "");
-      console.error(`[gbp-perf] Token refresh failed: ${res.status} ${errBody.slice(0, 500)}`);
-      return null;
-    }
-    const tokenData = await res.json();
-    if (!tokenData.access_token) {
-      console.error("[gbp-perf] Token response has no access_token:", JSON.stringify(tokenData).slice(0, 300));
-      return null;
-    }
-    return tokenData.access_token;
-  } catch (e: any) {
-    console.error("[gbp-perf] Token refresh exception:", e?.message);
-    return null;
-  }
-}
+// トークン取得は gbp-token.ts に統一（getOAuthToken）
 
 function emptyMonth(month: string): MonthlyPerformance {
   return { month, searchMobile: 0, searchPC: 0, mapMobile: 0, mapPC: 0, calls: 0, messages: 0, bookings: 0, routes: 0, websites: 0, foodOrders: 0, foodMenus: 0 };
@@ -113,7 +69,7 @@ export async function fetchPerformanceFromGBP(
   locationPath: string,
   months: number = 13
 ): Promise<MonthlyPerformance[]> {
-  const token = await getPerformanceApiToken();
+  const token = await getOAuthToken();
   if (!token) {
     console.error("[gbp-perf] Failed to get OAuth token");
     return [];

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, requireRole } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -565,8 +565,8 @@ function parseCSV(text: string): string[][] {
  * body: { sheetId, targetDate (YYYY-MM-DD), dryRun? }
  */
 export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  const r = await requireRole(request, ["president", "manager"]);
+  if (r.error) return r.error;
 
   const body = await request.json();
   const { sheetId, targetDate, dryRun, topicType, batchOffset, batchSize, filterShopName, filterShopNames, scheduleMode, scheduleAt } = body as {

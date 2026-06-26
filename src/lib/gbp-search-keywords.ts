@@ -9,9 +9,7 @@
  */
 
 import { getSupabase } from "@/lib/supabase";
-
-const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
-const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
+import { getOAuthToken } from "@/lib/gbp-token";
 
 
 export interface MonthlyKeywords {
@@ -33,63 +31,7 @@ export function getExpectedMonthJST(): string {
   return `${d.getFullYear()}/${d.getMonth() + 1}`;
 }
 
-/**
- * RPAchubbyプロジェクトのOAuthクライアントでトークン取得（Performance API用）
- */
-async function getPerformanceApiToken(): Promise<string | null> {
-  if (!GBP_CLIENT_ID || !GBP_CLIENT_SECRET) {
-    console.log("[gbp-keywords] GBP_CLIENT_ID or GBP_CLIENT_SECRET not set");
-    return null;
-  }
-
-  const supabase = getSupabase();
-  let refreshToken = "";
-
-  try {
-    const { data } = await supabase
-      .from("system_oauth_tokens")
-      .select("refresh_token")
-      .limit(1)
-      .maybeSingle();
-    if (data) refreshToken = data.refresh_token;
-  } catch (e) {
-    console.error("[gbp-keywords] Failed to get refresh token from DB:", e);
-  }
-
-  if (!refreshToken) {
-    console.log("[gbp-keywords] No refresh_token in system_oauth_tokens");
-    return null;
-  }
-
-  try {
-    const res = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: GBP_CLIENT_ID,
-        client_secret: GBP_CLIENT_SECRET,
-        refresh_token: refreshToken,
-        grant_type: "refresh_token",
-      }),
-      cache: "no-store",
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!res.ok) {
-      console.error("[gbp-keywords] Token refresh failed:", res.status);
-      return null;
-    }
-    const data = await res.json();
-    if (data.access_token) {
-      console.log("[gbp-keywords] Performance API token obtained (RPAchubby DB)");
-      return data.access_token;
-    }
-    console.error("[gbp-keywords] Token refresh response has no access_token");
-    return null;
-  } catch (e) {
-    console.error("[gbp-keywords] Token refresh error:", e);
-    return null;
-  }
-}
+// トークン取得は gbp-token.ts に統一（getOAuthToken）
 
 /**
  * Performance APIから検索語句を取得（1ロケーション・1ヶ月分）
@@ -146,7 +88,7 @@ export async function fetchSearchKeywordsFromGBP(
   locationPath: string,
   months: number = 13
 ): Promise<MonthlyKeywords[]> {
-  const token = await getPerformanceApiToken();
+  const token = await getOAuthToken();
   if (!token) return [];
 
   // locations/XXX 形式に正規化
