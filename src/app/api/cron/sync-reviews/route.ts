@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, verifyCron } from "@/lib/supabase";
 import { getOAuthToken } from "@/lib/gbp-token";
+import { getLocationMap } from "@/lib/gbp-location";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -8,32 +9,6 @@ export const maxDuration = 300;
 const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
 const BATCH_SIZE = 100; // 1回のCron実行で処理する店舗数
-
-// ── ロケーションマッピング ──
-
-interface LocMapping { fullPath: string; title: string; }
-
-async function getLocationMap(): Promise<Map<string, LocMapping>> {
-  const map = new Map<string, LocMapping>();
-  try {
-    const res = await fetch(`${GO_API_URL}/api/gbp/account`, { signal: AbortSignal.timeout(20000) });
-    if (res.ok) {
-      const accounts = await res.json();
-      for (const acc of (Array.isArray(accounts) ? accounts : [])) {
-        const accName = acc.name || "";
-        for (const loc of (acc.locations || [])) {
-          const locName = loc.name || "";
-          const fullPath = `${accName}/${locName}`;
-          const m: LocMapping = { fullPath, title: loc.title || "" };
-          map.set(locName, m);
-          map.set(fullPath, m);
-          if (loc.title) map.set(loc.title, m);
-        }
-      }
-    }
-  } catch (e: any) { console.error("[cron/sync-reviews] location map fetch:", e?.message); }
-  return map;
-}
 
 // ── GBP Reviews取得 ──
 

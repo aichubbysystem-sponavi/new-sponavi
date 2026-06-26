@@ -1,110 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, verifyAuth, verifyShopAccess } from "@/lib/supabase";
 import { getOAuthToken } from "@/lib/gbp-token";
+import { getLocationMap, normName } from "@/lib/gbp-location";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
 const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
-
-
-// ============================================================
-// トークン管理: Cron版と統一した3段階フォールバック
-// ============================================================
-
-// ============================================================
-// GBPアカウント→ロケーションマッピング
-// ============================================================
-
-interface LocationMapping {
-  locationName: string;      // "locations/XXX"
-  accountName: string;       // "accounts/YYY"
-  fullPath: string;          // "accounts/YYY/locations/XXX"
-  title: string;             // 店舗名
-}
-
-let locationMapCache: { map: Map<string, LocationMapping>; ts: number } | null = null;
-
-/** 正規化関数（全角半角・スペースの揺れを吸収） */
-function normName(s: string): string {
-  return s.normalize("NFKC").replace(/[\s\u3000]+/g, "").toLowerCase();
-}
-
-async function getLocationMap(): Promise<Map<string, LocationMapping>> {
-  if (locationMapCache && Date.now() - locationMapCache.ts < 600000) return locationMapCache.map;
-
-  const map = new Map<string, LocationMapping>();
-
-  // 1. Go API（GBP API経由）からロケーション取得
-  let goApiEntries = 0;
-  try {
-    const res = await fetch(`${GO_API_URL}/api/gbp/account`, { signal: AbortSignal.timeout(20000) });
-    if (res.ok) {
-      const accounts = await res.json();
-      for (const acc of (Array.isArray(accounts) ? accounts : [])) {
-        const accName = acc.name || "";
-        for (const loc of (acc.locations || [])) {
-          const locName = loc.name || "";
-          const fullPath = `${accName}/${locName}`;
-          const mapping: LocationMapping = { locationName: locName, accountName: accName, fullPath, title: loc.title || "" };
-          map.set(locName, mapping);
-          map.set(fullPath, mapping);
-          if (loc.title) {
-            map.set(loc.title, mapping);
-            map.set(normName(loc.title), mapping);
-          }
-          goApiEntries++;
-        }
-      }
-    }
-  } catch (e: any) {
-    console.error("[sync-reviews] Go API /gbp/account error:", e?.message);
-  }
-
-  // 2. Supabaseから既知のgbp_location_name/gbp_full_pathを補完（OAuthが切れても使える永続データ）
-  let sbEntries = 0;
-  try {
-    const supabase = getSupabase();
-    const { data: sbShops } = await supabase
-      .from("shops")
-      .select("name, gbp_location_name, gbp_full_path")
-      .not("gbp_location_name", "is", null);
-    for (const s of (sbShops || [])) {
-      const locName = s.gbp_location_name;
-      const fullPath = s.gbp_full_path || "";
-      if (fullPath && !map.has(locName)) {
-        // Go APIにないがSupabaseにある → 補完
-        const accName = fullPath.split("/locations/")[0] || "";
-        const mapping: LocationMapping = { locationName: locName, accountName: accName, fullPath, title: s.name };
-        map.set(locName, mapping);
-        map.set(fullPath, mapping);
-        map.set(s.name, mapping);
-        map.set(normName(s.name), mapping);
-        sbEntries++;
-      } else if (!fullPath && locName && !map.has(locName)) {
-        // fullPathなしでもlocNameだけある場合（locMap内の他エントリから解決試行）
-        const existing = map.get(locName);
-        if (existing) {
-          map.set(s.name, existing);
-          map.set(normName(s.name), existing);
-        }
-      }
-      // 店舗名→既存マッピングの紐付け（Go APIで取れた場合）
-      if (locName && map.has(locName) && !map.has(s.name)) {
-        const existing = map.get(locName)!;
-        map.set(s.name, existing);
-        map.set(normName(s.name), existing);
-      }
-    }
-  } catch (e: any) {
-    console.error("[sync-reviews] Supabase location supplement error:", e?.message);
-  }
-
-  console.log(`[sync-reviews] Location map: ${goApiEntries} from Go API, ${sbEntries} supplemented from Supabase, ${map.size} total entries`);
-  locationMapCache = { map, ts: Date.now() };
-  return map;
-}
 
 // ============================================================
 // GBP Reviews API
@@ -240,8 +143,6 @@ export async function POST(request: NextRequest) {
         .select("name, gbp_location_name")
         .not("gbp_location_name", "is", null);
       if (sbShopsGbp && sbShopsGbp.length > 0) {
-        // 正規化関数（全角半角・スペースの揺れを吸収）
-        const normName = (s: string) => s.normalize("NFKC").replace(/[\s\u3000]+/g, "").toLowerCase();
         // 正規化名 → gbp_location_name のマップ
         const sbGbpByExact = new Map(sbShopsGbp.map(s => [s.name, s.gbp_location_name]));
         const sbGbpByNorm = new Map(sbShopsGbp.map(s => [normName(s.name), s.gbp_location_name]));

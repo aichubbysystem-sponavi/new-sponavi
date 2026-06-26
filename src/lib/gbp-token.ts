@@ -102,6 +102,80 @@ export async function getValidTokens(): Promise<string[]> {
 }
 
 /**
+ * 全ソースから有効なOAuthトークンを収集（複数トークンが必要な場合用）
+ * system_oauth_tokens + system.tokens(RPC) の両方から取得し、期限切れはリフレッシュ
+ */
+export async function getAllOAuthTokens(): Promise<string[]> {
+  const supabase = getSupabase();
+  const tokenSet = new Set<string>();
+
+  // Go APIトークンも追加
+  const goToken = await getTokenFromGoApi();
+  if (goToken) tokenSet.add(goToken);
+
+  // system_oauth_tokens から取得
+  const { data: oauthTokens } = await supabase.from("system_oauth_tokens")
+    .select("access_token, refresh_token, expiry");
+  if (oauthTokens) {
+    for (const row of oauthTokens) {
+      if (new Date(row.expiry).getTime() - Date.now() > 5 * 60 * 1000) {
+        tokenSet.add(row.access_token);
+      } else if (row.refresh_token && GBP_CLIENT_ID && GBP_CLIENT_SECRET) {
+        try {
+          const res = await fetch("https://oauth2.googleapis.com/token", {
+            cache: "no-store" as const,
+            method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET,
+              refresh_token: row.refresh_token, grant_type: "refresh_token" }),
+            signal: AbortSignal.timeout(10000),
+          });
+          if (res.ok) {
+            const t = await res.json();
+            if (t.access_token) {
+              tokenSet.add(t.access_token);
+              await supabase.from("system_oauth_tokens").update({
+                access_token: t.access_token,
+                expiry: new Date(Date.now() + (t.expires_in || 3600) * 1000).toISOString(),
+              }).eq("refresh_token", row.refresh_token);
+            }
+          }
+        } catch (e: any) { console.error("[gbp-token] oauth refresh:", e?.message); }
+      }
+    }
+  }
+
+  // system.tokens（Go API用、RPC経由）
+  try {
+    const { data: sysTokens } = await supabase.rpc("get_valid_tokens");
+    if (sysTokens) {
+      for (const row of sysTokens) {
+        if (row.refresh_token && GBP_CLIENT_ID && GBP_CLIENT_SECRET) {
+          try {
+            const res = await fetch("https://oauth2.googleapis.com/token", {
+              cache: "no-store" as const,
+              method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET,
+                refresh_token: row.refresh_token, grant_type: "refresh_token" }),
+              signal: AbortSignal.timeout(10000),
+            });
+            if (res.ok) {
+              const t = await res.json();
+              if (t.access_token) tokenSet.add(t.access_token);
+            }
+          } catch (e: any) { console.error("[gbp-token] system token refresh:", e?.message); }
+        } else if (row.access_token) {
+          tokenSet.add(row.access_token);
+        }
+      }
+    }
+  } catch (e: any) {
+    console.log(`[gbp-token] get_valid_tokens RPC失敗: ${e?.message}`);
+  }
+
+  return Array.from(tokenSet);
+}
+
+/**
  * GBP APIを呼び出す（401時にリトライ）
  */
 export async function callGbpApi(

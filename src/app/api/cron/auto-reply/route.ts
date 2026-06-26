@@ -1,44 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, verifyCron } from "@/lib/supabase";
 import { getValidTokens } from "@/lib/gbp-token";
+import { getLocationMap } from "@/lib/gbp-location";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
-
-const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
-
-// ── ロケーションマッピング ──
-
-interface LocMapping { fullPath: string; title: string; }
-
-async function getLocationMap(token: string): Promise<Map<string, LocMapping>> {
-  const map = new Map<string, LocMapping>();
-  try {
-    const res = await fetch(`${GO_API_URL}/api/gbp/account`, {
-      cache: "no-store" as const,
-      headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(20000),
-    });
-    if (res.ok) {
-      const accounts = await res.json();
-      for (const acc of (Array.isArray(accounts) ? accounts : [])) {
-        const accName = acc.name || "";
-        for (const loc of (acc.locations || [])) {
-          const locName = loc.name || "";
-          const fullPath = `${accName}/${locName}`;
-          const m: LocMapping = { fullPath, title: loc.title || "" };
-          map.set(locName, m);
-          map.set(fullPath, m);
-          if (loc.title) map.set(loc.title, m);
-        }
-      }
-    }
-  } catch (e: any) { console.error("[cron/auto-reply] location map fetch:", e?.message); }
-  return map;
-}
 
 const RATING_MAP: Record<string, number> = {
   ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5,
@@ -96,8 +65,8 @@ export async function GET(request: NextRequest) {
   }
   const accessToken = allTokens[0];
 
-  // ロケーションマッピング（アカウントIDハードコード排除）
-  const locMap = await getLocationMap(accessToken);
+  // ロケーションマッピング（共通モジュール使用）
+  const locMap = await getLocationMap();
 
   const shopMap = new Map(shops.map(s => [s.id, s]));
   let replied = 0;

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, verifyCron } from "@/lib/supabase";
-import { getOAuthToken } from "@/lib/gbp-token";
+import { getOAuthToken, getAllOAuthTokens } from "@/lib/gbp-token";
 import { resolveLocationName } from "@/lib/gbp-location";
 import { resolveImageUrl, cleanupImage } from "@/lib/image-proxy";
 
@@ -9,82 +9,6 @@ export const maxDuration = 300;
 
 const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
-const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
-const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
-
-
-/** 全OAuthトークンを取得（system_oauth_tokens + system.tokens両方から） */
-async function getAllOAuthTokens(): Promise<string[]> {
-  const supabase = getSupabase();
-  const tokenSet = new Set<string>();
-
-  // ソース1: system_oauth_tokens（Next.js用テーブル）
-  const { data: oauthTokens } = await supabase.from("system_oauth_tokens")
-    .select("access_token, refresh_token, expiry");
-  if (oauthTokens) {
-    for (const row of oauthTokens) {
-      if (new Date(row.expiry).getTime() - Date.now() > 5 * 60 * 1000) {
-        tokenSet.add(row.access_token);
-      } else if (row.refresh_token && GBP_CLIENT_ID && GBP_CLIENT_SECRET) {
-        try {
-          const res = await fetch("https://oauth2.googleapis.com/token", {
-            cache: "no-store" as const,
-            method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET,
-              refresh_token: row.refresh_token, grant_type: "refresh_token" }),
-            signal: AbortSignal.timeout(10000),
-          });
-          if (res.ok) {
-            const t = await res.json();
-            if (t.access_token) {
-              tokenSet.add(t.access_token);
-              // リフレッシュしたトークンをDBに永続化
-              await supabase.from("system_oauth_tokens").update({
-                access_token: t.access_token,
-                expiry: new Date(Date.now() + (t.expires_in || 3600) * 1000).toISOString(),
-              }).eq("refresh_token", row.refresh_token);
-            }
-          }
-        } catch (e: any) { console.error("[cron/execute-posts] oauth token refresh:", e?.message); }
-      }
-    }
-  }
-
-  // ソース2: system.tokens（Go API用テーブル — PERSONALアカウント含む）
-  try {
-    const { data: sysTokens } = await supabase.rpc("get_valid_tokens");
-    if (sysTokens) {
-      for (const row of sysTokens) {
-        if (row.refresh_token && GBP_CLIENT_ID && GBP_CLIENT_SECRET) {
-          try {
-            const res = await fetch("https://oauth2.googleapis.com/token", {
-              cache: "no-store" as const,
-              method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-              body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET,
-                refresh_token: row.refresh_token, grant_type: "refresh_token" }),
-              signal: AbortSignal.timeout(10000),
-            });
-            if (res.ok) {
-              const t = await res.json();
-              if (t.access_token) {
-                tokenSet.add(t.access_token);
-                // 注意: system.tokens（systemスキーマ）はanon keyで直接更新不可
-                // Go APIが自身のリフレッシュサイクルでsystem.tokensを更新するため、ここでは書き戻さない
-              }
-            }
-          } catch (e: any) { console.error("[cron/execute-posts] system token refresh:", e?.message); }
-        } else if (row.access_token) {
-          tokenSet.add(row.access_token);
-        }
-      }
-    }
-  } catch (e: any) {
-    console.log(`[cron] get_valid_tokens RPC失敗: ${e?.message}`);
-  }
-
-  console.log(`[cron] 取得トークン数: ${tokenSet.size}`);
-  return Array.from(tokenSet);
-}
 
 /** Go API経由でGBP投稿を作成（通常投稿） */
 async function postViaGoApi(
