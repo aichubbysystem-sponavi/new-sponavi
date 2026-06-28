@@ -1,3 +1,5 @@
+import { withSentryConfig } from "@sentry/nextjs";
+
 /** @type {import('next').NextConfig} */
 const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5555";
 
@@ -69,4 +71,12 @@ const nextConfig = {
   },
 };
 
-export default nextConfig;
+export default withSentryConfig(nextConfig, {
+  org: "chubby-4x",
+  project: "javascript-nextjs",
+  silent: true,
+  // ソースマップはSentryにのみアップロード（公開しない）
+  hideSourceMaps: true,
+  // ビルド時のテレメトリ無効化
+  telemetry: false,
+});
