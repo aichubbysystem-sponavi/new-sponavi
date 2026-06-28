@@ -13,7 +13,13 @@ const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
  * POST /api/report/delete-post
  * GBP投稿を削除 + post_logsからも削除
  */
-export async function POST(request: NextRequest) {
+export async function POST(_request: NextRequest) {
+  // 一時無効化: 構造改善完了まで外部GBP操作を停止
+  return NextResponse.json({ error: "投稿削除機能は一時停止中です" }, { status: 503 });
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function _POST_disabled(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 

@@ -8,10 +8,6 @@
       "schedule": "0 * * * *"
     },
     {
-      "path": "/api/cron/execute-posts",
-      "schedule": "*/5 * * * *"
-    },
-    {
       "path": "/api/cron/monthly-analysis",
       "schedule": "0 1 1-10 * *"
     },

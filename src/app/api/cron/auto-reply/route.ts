@@ -24,7 +24,13 @@ function starToNum(s: string | null): number {
  * 口コミ自動返信: 未返信口コミにAI生成の返信を自動投稿
  * 毎日9:00 JSTに実行
  */
-export async function GET(request: NextRequest) {
+export async function GET(_request: NextRequest) {
+  // 一時無効化: 構造改善完了まで外部GBP操作を停止
+  return NextResponse.json({ success: true, message: "auto-reply は一時無効化中です", replied: 0 });
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function _GET_disabled(request: NextRequest) {
   const cronErr = verifyCron(request); if (cronErr) return cronErr;
 
   if (!ANTHROPIC_API_KEY) {
