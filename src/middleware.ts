@@ -192,7 +192,7 @@ function addHeaders(response: NextResponse, request: NextRequest, isReport: bool
     styleSrc,
     "img-src 'self' data: blob: https:",
     fontSrc,
-    `connect-src 'self' ${supabaseUrl} ${supabaseWs} https://api.anthropic.com ${apiUrl} https://maps.googleapis.com https://maps.gstatic.com`,
+    `connect-src 'self' ${supabaseUrl} ${supabaseWs} https://api.anthropic.com ${apiUrl} https://maps.googleapis.com https://maps.gstatic.com https://*.ingest.us.sentry.io`,
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",
