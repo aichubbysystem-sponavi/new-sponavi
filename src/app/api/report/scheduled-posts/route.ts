@@ -1,63 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, verifyAuth, requireShopAccessById } from "@/lib/supabase";
+import { getAllOAuthTokens } from "@/lib/gbp-token";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
-const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
-const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
-
-
-/** 全OAuthトークンを取得 */
-async function getAllOAuthTokens(): Promise<string[]> {
-  const supabase = getSupabase();
-  const tokens: string[] = [];
-  // system_oauth_tokens
-  const { data: oauthTokens } = await supabase.from("system_oauth_tokens")
-    .select("access_token, refresh_token, expiry");
-  if (oauthTokens) {
-    for (const row of oauthTokens) {
-      if (new Date(row.expiry).getTime() - Date.now() > 5 * 60 * 1000) {
-        tokens.push(row.access_token);
-      } else if (row.refresh_token && GBP_CLIENT_ID) {
-        try {
-          const res = await fetch("https://oauth2.googleapis.com/token", {
-            method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET,
-              refresh_token: row.refresh_token, grant_type: "refresh_token" }),
-            signal: AbortSignal.timeout(10000),
-          });
-          if (res.ok) { const t = await res.json(); if (t.access_token) tokens.push(t.access_token); }
-        } catch {}
-      }
-    }
-  }
-  // system.tokens (PERSONALアカウント含む)
-  try {
-    const { data: sysTokens } = await supabase.rpc("get_valid_tokens");
-    if (sysTokens) {
-      for (const row of sysTokens) {
-        if (row.refresh_token && GBP_CLIENT_ID) {
-          try {
-            const res = await fetch("https://oauth2.googleapis.com/token", {
-              method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-              body: new URLSearchParams({ client_id: GBP_CLIENT_ID, client_secret: GBP_CLIENT_SECRET,
-                refresh_token: row.refresh_token, grant_type: "refresh_token" }),
-              signal: AbortSignal.timeout(10000),
-            });
-            if (res.ok) { const t = await res.json(); if (t.access_token) tokens.push(t.access_token); }
-          } catch {}
-        } else if (row.access_token) {
-          tokens.push(row.access_token);
-        }
-      }
-    }
-  } catch {}
-  // 重複排除
-  return tokens.filter((v, i, a) => a.indexOf(v) === i);
-}
 
 /**
  * GET /api/report/scheduled-posts?shopId=xxx

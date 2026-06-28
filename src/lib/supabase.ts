@@ -93,17 +93,8 @@ export async function getUserRole(userId: string): Promise<AppRole | null> {
     .maybeSingle();
   if (data2?.role) return data2.role as AppRole;
 
-  // 3. フォールバック: Supabase Auth の user_metadata.role
-  try {
-    const { data: authData } = await sb.auth.admin.getUserById(userId);
-    const metaRole = authData?.user?.user_metadata?.role as string | undefined;
-    if (metaRole && ["president", "manager", "part_time"].includes(metaRole)) {
-      return metaRole as AppRole;
-    }
-  } catch (e) {
-    console.warn("[getUserRole] admin.getUserById failed (Service Role Key missing?):", e instanceof Error ? e.message : e);
-  }
-
+  // user_metadata.role はクライアント側で設定可能なため信頼しない
+  // user_profiles に登録がなければロールなし（アクセス拒否）
   console.warn(`[getUserRole] Role not found for userId: ${userId}`);
   return null;
 }
