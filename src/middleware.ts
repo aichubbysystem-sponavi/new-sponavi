@@ -157,22 +157,8 @@ export async function middleware(request: NextRequest) {
     return addHeaders(NextResponse.next(), request, true);
   }
 
-  // メインドメインで /pmax にアクセス → サブドメインへリダイレクト（本番のみ）
-  if ((pathname === "/pmax" || pathname.startsWith("/pmax/")) && (hostname === MAIN_HOSTNAME || hostname === `www.${MAIN_HOSTNAME}`)) {
-    const pmaxPath = pathname.replace(/^\/pmax/, "") || "/";
-    const url = new URL(`https://${PMAX_HOSTNAME}${pmaxPath}`);
-    url.search = request.nextUrl.search;
-    return NextResponse.redirect(url, 301);
-  }
-
-  // メインドメインで /report にアクセス → サブドメインへリダイレクト（本番のみ）
-  // 注意: /reports 等の別ページはリダイレクトしない
-  if ((pathname === "/report" || pathname.startsWith("/report/")) && (hostname === MAIN_HOSTNAME || hostname === `www.${MAIN_HOSTNAME}`)) {
-    const reportPath = pathname.replace(/^\/report/, "") || "/";
-    const url = new URL(`https://${REPORT_HOSTNAME}${reportPath}`);
-    url.search = request.nextUrl.search;
-    return NextResponse.redirect(url, 301);
-  }
+  // メインドメインで /pmax, /report にアクセス → そのまま表示（セッション共有のため）
+  // サブドメイン（report.*, p-max.*）からの直接アクセスはリライトで処理済み
 
   // === 通常リクエスト ===
   return addHeaders(NextResponse.next(), request, false);
