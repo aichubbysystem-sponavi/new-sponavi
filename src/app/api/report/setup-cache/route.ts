@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, requireRole } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -9,8 +9,8 @@ export const dynamic = "force-dynamic";
  * キャッシュ用テーブルを作成（一度だけ実行）
  */
 export async function GET(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  const r = await requireRole(request, ["president"]);
+  if (r.error) return r.error;
 
   const sb = getSupabase();
   const results: string[] = [];

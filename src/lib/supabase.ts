@@ -21,7 +21,10 @@ export const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON
 let _adminClient: SupabaseClient | null = null;
 export function getSupabase(): SupabaseClient {
   if (!_adminClient) {
-    _adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
+    if (!SUPABASE_SERVICE_KEY) {
+      throw new Error("SUPABASE_SERVICE_ROLE_KEY が未設定です。Vercel環境変数を確認してください。");
+    }
+    _adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
   }
   return _adminClient;
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth, requireShopAccessById } from "@/lib/supabase";
+import { getSupabase, requireShopAccessById } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -13,19 +13,18 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const shopId = searchParams.get("shopId");
 
-  // 認可チェック
-  if (shopId) {
-    const access = await requireShopAccessById(request, shopId);
-    if (access.error) return access.error;
-  } else {
-    const auth = await verifyAuth(request.headers.get("authorization"));
-    if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  if (!shopId) {
+    return NextResponse.json({ error: "shopIdが必要です" }, { status: 400 });
   }
+
+  const access = await requireShopAccessById(request, shopId);
+  if (access.error) return access.error;
+
   const month = searchParams.get("month"); // "2026-04"
 
   const supabase = getSupabase();
   let query = supabase.from("post_schedule").select("*").order("date", { ascending: true });
-  if (shopId) query = query.eq("shop_id", shopId);
+  query = query.eq("shop_id", shopId);
   if (month) {
     query = query.gte("date", `${month}-01`).lte("date", `${month}-31`);
   }
@@ -49,14 +48,12 @@ export async function POST(request: NextRequest) {
   const supabase = getSupabase();
 
   if (action === "delete") {
-    const auth = await verifyAuth(request.headers.get("authorization"));
-    if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+    if (!id) return NextResponse.json({ error: "idが必要です" }, { status: 400 });
     // 認可: スケジュールのshop_idから店舗アクセス権を検証
     const { data: sched } = await supabase.from("post_schedule").select("shop_id").eq("id", id).maybeSingle();
-    if (sched?.shop_id) {
-      const access = await requireShopAccessById(request, sched.shop_id);
-      if (access.error) return access.error;
-    }
+    if (!sched?.shop_id) return NextResponse.json({ error: "スケジュールが見つかりません" }, { status: 404 });
+    const access = await requireShopAccessById(request, sched.shop_id);
+    if (access.error) return access.error;
     const { error } = await supabase.from("post_schedule").delete().eq("id", id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ success: true });

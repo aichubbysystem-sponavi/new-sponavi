@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, verifyAuth, requireRole } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -43,20 +43,29 @@ export async function POST(request: NextRequest) {
   const supabase = getSupabase();
 
   if (action === "increment") {
-    // 使用回数カウントアップ（SQL直接実行）
-    const { data: current } = await supabase
-      .from("reply_templates")
-      .select("use_count")
-      .eq("id", id)
-      .single();
-    await supabase
-      .from("reply_templates")
-      .update({ use_count: (current?.use_count || 0) + 1, updated_at: new Date().toISOString() })
-      .eq("id", id);
+    if (!id) return NextResponse.json({ error: "idが必要です" }, { status: 400 });
+    // 原子的にカウントアップ（TOCTOU回避）
+    const { error } = await supabase.rpc("increment_use_count", { template_id: id });
+    if (error) {
+      // RPCが未定義の場合はフォールバック
+      const { data: current } = await supabase
+        .from("reply_templates")
+        .select("use_count")
+        .eq("id", id)
+        .single();
+      await supabase
+        .from("reply_templates")
+        .update({ use_count: (current?.use_count || 0) + 1, updated_at: new Date().toISOString() })
+        .eq("id", id);
+    }
     return NextResponse.json({ success: true });
   }
 
   if (action === "delete") {
+    if (!id) return NextResponse.json({ error: "idが必要です" }, { status: 400 });
+    // 削除は管理者（president, manager）のみ許可
+    const r = await requireRole(request, ["president", "manager"]);
+    if (r.error) return r.error;
     const { error } = await supabase.from("reply_templates").delete().eq("id", id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ success: true });

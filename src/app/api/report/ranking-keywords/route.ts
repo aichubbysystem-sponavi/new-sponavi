@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyAuth } from "@/lib/supabase";
+import { verifyAuth, verifyShopAccess } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -18,11 +18,15 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
  */
 export async function GET(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
   const shopName = request.nextUrl.searchParams.get("shopName");
   if (!shopName) {
     return NextResponse.json({ error: "shopNameが必要です" }, { status: 400 });
+  }
+
+  if (!(await verifyShopAccess(auth.sub, shopName))) {
+    return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
   }
 
   const month = request.nextUrl.searchParams.get("month") || "";
