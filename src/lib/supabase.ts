@@ -84,34 +84,15 @@ export type AppRole = "president" | "manager" | "part_time";
 export async function getUserRole(userId: string): Promise<AppRole | null> {
   const sb = getSupabase();
 
-  // デバッグ: 使用中のキー情報
-  const svcKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-  console.error(`[getUserRole] userId=${userId}, keyPrefix=${svcKey.slice(0, 15)}, keyLen=${svcKey.length}`);
+  // user_profiles を全件取得してJSで検索（.eq()フィルターがPostgRESTで不安定なため）
+  const { data: profiles } = await sb.from("user_profiles").select("id, auth_uid, role");
+  if (profiles && profiles.length > 0) {
+    const match = profiles.find(
+      (p: { id: string; auth_uid: string }) => p.id === userId || p.auth_uid === userId
+    );
+    if (match?.role) return match.role as AppRole;
+  }
 
-  // 全件取得でテーブルアクセスを確認
-  const { data: allProfiles, error: allErr } = await sb.from("user_profiles").select("id, auth_uid, role");
-  console.error(`[getUserRole] allProfiles=${JSON.stringify(allProfiles)}, allErr=${JSON.stringify(allErr)}`);
-
-  // 1. user_profiles.id で検索
-  const { data, error: err1 } = await sb
-    .from("user_profiles")
-    .select("role")
-    .eq("id", userId)
-    .maybeSingle();
-  console.error(`[getUserRole] query1: data=${JSON.stringify(data)}, error=${JSON.stringify(err1)}`);
-  if (data?.role) return data.role as AppRole;
-
-  // 2. user_profiles.auth_uid で検索（idとauth_uidが異なるケース）
-  const { data: data2, error: err2 } = await sb
-    .from("user_profiles")
-    .select("role")
-    .eq("auth_uid", userId)
-    .maybeSingle();
-  console.error(`[getUserRole] query2: data=${JSON.stringify(data2)}, error=${JSON.stringify(err2)}`);
-  if (data2?.role) return data2.role as AppRole;
-
-  // user_metadata.role はクライアント側で設定可能なため信頼しない
-  // user_profiles に登録がなければロールなし（アクセス拒否）
   console.warn(`[getUserRole] Role not found for userId: ${userId}`);
   return null;
 }
