@@ -21,10 +21,14 @@ export const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON
 let _adminClient: SupabaseClient | null = null;
 export function getSupabase(): SupabaseClient {
   if (!_adminClient) {
-    if (!SUPABASE_SERVICE_KEY) {
+    // モジュールレベル定数ではなく、実行時に環境変数を直接読む
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+    if (!serviceKey) {
       throw new Error("SUPABASE_SERVICE_ROLE_KEY が未設定です。Vercel環境変数を確認してください。");
     }
-    _adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+    const isServiceKey = serviceKey.startsWith("eyJ") && serviceKey.length > 200;
+    console.error(`[getSupabase] key prefix=${serviceKey.slice(0, 20)}..., len=${serviceKey.length}, isServiceKey=${isServiceKey}`);
+    _adminClient = createClient(SUPABASE_URL, serviceKey);
   }
   return _adminClient;
 }
