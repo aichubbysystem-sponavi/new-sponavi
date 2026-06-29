@@ -211,33 +211,42 @@ export default function Sidebar() {
           return (
             <div key={idx}>
               {section.items!.map((item) => {
-                const isActive =
-                  item.href === "/"
+                const isExternal = item.href.startsWith("http");
+                const isActive = isExternal
+                  ? false
+                  : item.href === "/"
                     ? pathname === "/" || pathname === ""
                     : pathname.startsWith(item.href);
-                return (
-                  <Link key={item.href} href={item.href} {...(item.href.startsWith("http") ? { target: "_blank", rel: "noopener noreferrer" } : {})}>
+                const linkContent = (
+                  <div
+                    className={cn(
+                      "flex items-center px-4 py-3 text-sm transition-all",
+                      isActive
+                        ? "bg-white text-[#003D6B] font-bold"
+                        : "text-white hover:bg-white/10"
+                    )}
+                  >
                     <div
                       className={cn(
-                        "flex items-center px-4 py-3 text-sm transition-all",
-                        isActive
-                          ? "bg-white text-[#003D6B] font-bold"
-                          : "text-white hover:bg-white/10"
+                        "rounded-full h-3.5 w-3.5 mr-3 flex-shrink-0",
+                        isActive ? "bg-[#003D6B]" : "bg-white/80"
                       )}
-                    >
-                      <div
-                        className={cn(
-                          "rounded-full h-3.5 w-3.5 mr-3 flex-shrink-0",
-                          isActive ? "bg-[#003D6B]" : "bg-white/80"
-                        )}
-                      />
-                      <span>{item.label}</span>
-                      {(item as any).badge && (
-                        <span className="ml-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
-                          {(item as any).badge > 999 ? "999+" : (item as any).badge}
-                        </span>
-                      )}
-                    </div>
+                    />
+                    <span>{item.label}</span>
+                    {(item as any).badge && (
+                      <span className="ml-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                        {(item as any).badge > 999 ? "999+" : (item as any).badge}
+                      </span>
+                    )}
+                  </div>
+                );
+                return isExternal ? (
+                  <a key={item.href} href={item.href} target="_blank" rel="noopener noreferrer">
+                    {linkContent}
+                  </a>
+                ) : (
+                  <Link key={item.href} href={item.href}>
+                    {linkContent}
                   </Link>
                 );
               })}
