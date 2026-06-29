@@ -81,19 +81,21 @@ export async function getUserRole(userId: string): Promise<AppRole | null> {
   const sb = getSupabase();
 
   // 1. user_profiles.id で検索
-  const { data } = await sb
+  const { data, error: err1 } = await sb
     .from("user_profiles")
     .select("role")
     .eq("id", userId)
     .maybeSingle();
+  console.error(`[getUserRole] userId=${userId}, query1: data=${JSON.stringify(data)}, error=${JSON.stringify(err1)}`);
   if (data?.role) return data.role as AppRole;
 
   // 2. user_profiles.auth_uid で検索（idとauth_uidが異なるケース）
-  const { data: data2 } = await sb
+  const { data: data2, error: err2 } = await sb
     .from("user_profiles")
     .select("role")
     .eq("auth_uid", userId)
     .maybeSingle();
+  console.error(`[getUserRole] query2: data=${JSON.stringify(data2)}, error=${JSON.stringify(err2)}`);
   if (data2?.role) return data2.role as AppRole;
 
   // user_metadata.role はクライアント側で設定可能なため信頼しない
