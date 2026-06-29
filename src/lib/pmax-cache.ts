@@ -4,22 +4,24 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6時間
 
 /**
  * P-MAXキャッシュ取得（TTL以内なら返す）
+ * PostgREST .eq() の不安定動作を回避するため全件取得+JSフィルター
  */
 export async function getPmaxCache<T>(key: string): Promise<T | null> {
   try {
     const sb = getSupabase();
-    const { data } = await sb
+    const { data: rows } = await sb
       .from("pmax_cache")
-      .select("data, updated_at")
-      .eq("cache_key", key)
-      .maybeSingle();
+      .select("cache_key, data, updated_at");
 
-    if (!data) return null;
+    if (!rows || rows.length === 0) return null;
 
-    const age = Date.now() - new Date(data.updated_at).getTime();
+    const match = rows.find((r: { cache_key: string }) => r.cache_key === key);
+    if (!match) return null;
+
+    const age = Date.now() - new Date(match.updated_at).getTime();
     if (age > CACHE_TTL_MS) return null;
 
-    return data.data as T;
+    return match.data as T;
   } catch {
     return null;
   }

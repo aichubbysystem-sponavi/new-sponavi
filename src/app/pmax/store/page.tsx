@@ -159,12 +159,18 @@ function StoreDetailContent() {
           fetch(`/api/pmax/store-detail?shopName=${encodeURIComponent(shopName)}&startDate=${startDate}&endDate=${endDate}`, { headers }),
           fetch(`/api/pmax/gbp?shopName=${encodeURIComponent(shopName)}`, { headers }),
         ]);
+        if (!adsRes.ok) {
+          const text = await adsRes.text().catch(() => "");
+          throw new Error(`広告データ取得失敗 (${adsRes.status})${text ? ": " + text.slice(0, 100) : ""}`);
+        }
         const adsData = await adsRes.json();
         if (adsData.error) throw new Error(adsData.error);
         setMonthly(adsData.monthly || []);
         setDaily(adsData.daily || []);
-        const gbpData = await gbpRes.json();
-        setGbpRows(gbpData.data || []);
+        if (gbpRes.ok) {
+          const gbpData = await gbpRes.json();
+          setGbpRows(gbpData.data || []);
+        }
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : "取得に失敗しました");
       } finally { setLoading(false); }
