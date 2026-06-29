@@ -84,13 +84,21 @@ export type AppRole = "president" | "manager" | "part_time";
 export async function getUserRole(userId: string): Promise<AppRole | null> {
   const sb = getSupabase();
 
+  // デバッグ: 使用中のキー情報
+  const svcKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  console.error(`[getUserRole] userId=${userId}, keyPrefix=${svcKey.slice(0, 15)}, keyLen=${svcKey.length}`);
+
+  // 全件取得でテーブルアクセスを確認
+  const { data: allProfiles, error: allErr } = await sb.from("user_profiles").select("id, auth_uid, role");
+  console.error(`[getUserRole] allProfiles=${JSON.stringify(allProfiles)}, allErr=${JSON.stringify(allErr)}`);
+
   // 1. user_profiles.id で検索
   const { data, error: err1 } = await sb
     .from("user_profiles")
     .select("role")
     .eq("id", userId)
     .maybeSingle();
-  console.error(`[getUserRole] userId=${userId}, query1: data=${JSON.stringify(data)}, error=${JSON.stringify(err1)}`);
+  console.error(`[getUserRole] query1: data=${JSON.stringify(data)}, error=${JSON.stringify(err1)}`);
   if (data?.role) return data.role as AppRole;
 
   // 2. user_profiles.auth_uid で検索（idとauth_uidが異なるケース）
