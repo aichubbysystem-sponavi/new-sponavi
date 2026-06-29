@@ -353,37 +353,28 @@ function StoreDetailContent() {
         </div>
         <div style={{ ...slideBodyStyle, justifyContent: "flex-start", paddingTop: 36 }}>
           <div style={stitleStyle}>広告指標 月次比較</div>
-          <table style={{ width: "85%", margin: "0 auto", borderCollapse: "collapse", fontSize: 14 }}>
+          <table style={{ width: "80%", margin: "0 auto", borderCollapse: "collapse", fontSize: 14 }}>
             <thead>
               <tr>
                 <th style={{ background: "#0f3460", color: "#fff", padding: "12px 16px", fontWeight: 600, textAlign: "left" }}>指標</th>
                 <th style={{ background: "#0f3460", color: "#fff", padding: "12px 16px", fontWeight: 600, textAlign: "center" }}>前月（{prevMonthLabel}）</th>
                 <th style={{ background: "#e94560", color: "#fff", padding: "12px 16px", fontWeight: 600, textAlign: "center" }}>今月（{currentMonthLabel}）</th>
-                <th style={{ background: "#0f3460", color: "#fff", padding: "12px 16px", fontWeight: 600, textAlign: "center" }}>前月比</th>
               </tr>
             </thead>
             <tbody>
               {[
                 { label: "表示回数", cur: adsCurrent.impressions, prev: adsPrev.impressions, fmt: formatNum },
                 { label: "総クリック", cur: adsCurrent.clicks, prev: adsPrev.clicks, fmt: formatNum },
-                { label: "クリック率", cur: adsCurrent.ctr, prev: adsPrev.ctr, fmt: formatCtr, noPct: true },
-                { label: "平均クリック単価", cur: adsCurrent.averageCpc, prev: adsPrev.averageCpc, fmt: formatCpc, noPct: true },
+                { label: "クリック率", cur: adsCurrent.ctr, prev: adsPrev.ctr, fmt: formatCtr },
+                { label: "平均クリック単価", cur: adsCurrent.averageCpc, prev: adsPrev.averageCpc, fmt: formatCpc },
                 { label: "総広告費", cur: adsCurrent.costMicros, prev: adsPrev.costMicros, fmt: formatCost, bold: true },
-              ].map((row, i) => {
-                const pct = row.prev === 0 ? (row.cur > 0 ? 100 : 0) : ((row.cur - row.prev) / row.prev) * 100;
-                const pctColor = Math.abs(pct) < 0.5 ? "#888" : pct > 0 ? "#0a8f3c" : "#c0392b";
-                const arrow = Math.abs(pct) < 0.5 ? "→" : pct > 0 ? "▲" : "▼";
-                return (
-                  <tr key={row.label} style={{ background: i % 2 === 0 ? "#fff" : "#f8f9fb" }}>
-                    <td style={{ padding: "10px 16px", fontWeight: 600, color: "#555" }}>{row.label}</td>
-                    <td style={{ textAlign: "center", padding: "10px 16px", fontSize: 16 }}>{row.fmt(row.prev)}</td>
-                    <td style={{ textAlign: "center", padding: "10px 16px", fontSize: 18, fontWeight: row.bold ? 900 : 700, background: "#fff8f0" }}>{row.fmt(row.cur)}</td>
-                    <td style={{ textAlign: "center", padding: "10px 16px", fontSize: 14, fontWeight: 700, color: pctColor }}>
-                      {row.noPct ? "—" : `${arrow} ${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`}
-                    </td>
-                  </tr>
-                );
-              })}
+              ].map((row, i) => (
+                <tr key={row.label} style={{ background: i % 2 === 0 ? "#fff" : "#f8f9fb" }}>
+                  <td style={{ padding: "10px 16px", fontWeight: 600, color: "#555" }}>{row.label}</td>
+                  <td style={{ textAlign: "center", padding: "10px 16px", fontSize: 16 }}>{row.fmt(row.prev)}</td>
+                  <td style={{ textAlign: "center", padding: "10px 16px", fontSize: 18, fontWeight: row.bold ? 900 : 700, background: "#fff8f0" }}>{row.fmt(row.cur)}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
