@@ -118,6 +118,22 @@ export async function middleware(request: NextRequest) {
   const isReportSubdomain = hostname === REPORT_HOSTNAME || hostname.startsWith("report.localhost");
   const isPmaxSubdomain = hostname === PMAX_HOSTNAME || hostname.startsWith("p-max.localhost");
 
+  // === サブドメイン認証チェック ===
+  // report / p-max サブドメインはログイン必須（静的リソース・API・loginページは除外）
+  if (isReportSubdomain || isPmaxSubdomain) {
+    const isStaticOrApi = pathname.startsWith("/_next") || pathname.startsWith("/api") || pathname === "/favicon.ico" || pathname === "/login";
+    if (!isStaticOrApi) {
+      // Supabase Auth のセッションクッキーを確認
+      const supabaseProjectId = (process.env.NEXT_PUBLIC_SUPABASE_URL || "").match(/\/\/([^.]+)/)?.[1] || "";
+      const authCookie = request.cookies.get(`sb-${supabaseProjectId}-auth-token`)
+        || request.cookies.get(`sb-${supabaseProjectId}-auth-token.0`);
+      if (!authCookie?.value) {
+        // 未ログイン → メインドメインのログインページにリダイレクト
+        return NextResponse.redirect(new URL(`https://${MAIN_HOSTNAME}/login`, request.url));
+      }
+    }
+  }
+
   // === サブドメインルーティング ===
 
   // p-max.* サブドメイン → /pmax/* にリライト
