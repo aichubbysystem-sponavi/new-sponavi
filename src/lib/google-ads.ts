@@ -285,22 +285,28 @@ export interface StoreDetailCampaign {
 export async function getStoreDetail(
   shopName: string,
   startDate: string,
-  endDate: string
+  endDate: string,
+  knownAccountIds?: string[],
 ): Promise<{ monthly: StoreDetailCampaign[]; daily: StoreDetailCampaign[] }> {
-  const accounts = await listAccounts();
+  // knownAccountIdsがあればそのアカウントのみ検索（高速化）
+  let targetIds = knownAccountIds;
+  if (!targetIds || targetIds.length === 0) {
+    const accounts = await listAccounts();
+    targetIds = accounts.map(a => a.customerId);
+  }
 
   const monthly: StoreDetailCampaign[] = [];
   const daily: StoreDetailCampaign[] = [];
 
-  // 5並列で全アカウントから取得
-  const BATCH = 5;
-  for (let i = 0; i < accounts.length; i += BATCH) {
-    const batch = accounts.slice(i, i + BATCH);
+  // 10並列でアカウントから取得
+  const BATCH = 10;
+  for (let i = 0; i < targetIds.length; i += BATCH) {
+    const batch = targetIds.slice(i, i + BATCH);
     const results = await Promise.allSettled(
-      batch.map(async (a) => {
+      batch.map(async (customerId) => {
         const [m, d] = await Promise.all([
-          getCampaignMonthly(a.customerId, startDate, endDate).catch(() => []),
-          getCampaignDaily(a.customerId, startDate, endDate).catch(() => []),
+          getCampaignMonthly(customerId, startDate, endDate).catch(() => []),
+          getCampaignDaily(customerId, startDate, endDate).catch(() => []),
         ]);
         return { monthly: m, daily: d };
       })
