@@ -202,8 +202,8 @@ export async function getStoreSummaries(
 ): Promise<StoreSummary[]> {
   const accounts = await listAccounts();
 
-  // 5並列でキャンペーンデータ取得
-  const BATCH = 5;
+  // 10並列でキャンペーンデータ取得
+  const BATCH = 10;
   const allCampaigns: { accountId: string; campaignName: string; impressions: number; clicks: number; costMicros: number }[] = [];
 
   for (let i = 0; i < accounts.length; i += BATCH) {
