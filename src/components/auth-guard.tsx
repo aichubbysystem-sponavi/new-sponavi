@@ -49,7 +49,13 @@ export default function AuthGuard({ children, skipAuth }: { children: React.Reac
       if (data.session) {
         setAuthenticated(true);
       } else if (pathname !== "/login") {
-        router.push("/login");
+        // サブドメインの場合はメインドメインのログインページにリダイレクト
+        const host = window.location.hostname;
+        if (host.startsWith("report.") || host.startsWith("p-max.")) {
+          window.location.href = `https://new-spotlight-navigator.com/login`;
+        } else {
+          router.push("/login");
+        }
       }
       setLoading(false);
     };
@@ -62,7 +68,12 @@ export default function AuthGuard({ children, skipAuth }: { children: React.Reac
       } else {
         setAuthenticated(false);
         if (pathname !== "/login") {
-          router.push("/login");
+          const host = window.location.hostname;
+          if (host.startsWith("report.") || host.startsWith("p-max.")) {
+            window.location.href = `https://new-spotlight-navigator.com/login`;
+          } else {
+            router.push("/login");
+          }
         }
       }
     });
