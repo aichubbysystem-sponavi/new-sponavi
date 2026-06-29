@@ -23,6 +23,7 @@ const navSections = [
       { href: "/review-analysis", label: "口コミ分析(AI)" },
       { href: "/review-language", label: "口コミ国別分析" },
       { href: "https://report.new-spotlight-navigator.com", label: "レポートページ ↗" },
+      { href: "https://p-max.new-spotlight-navigator.com", label: "P-MAX広告 ↗" },
       { href: "/posts", label: "投稿管理・分析" },
       { href: "/aio", label: "AIO対策" },
     ],
@@ -215,7 +216,7 @@ export default function Sidebar() {
                     ? pathname === "/" || pathname === ""
                     : pathname.startsWith(item.href);
                 return (
-                  <Link key={item.href} href={item.href}>
+                  <Link key={item.href} href={item.href} {...(item.href.startsWith("http") ? { target: "_blank", rel: "noopener noreferrer" } : {})}>
                     <div
                       className={cn(
                         "flex items-center px-4 py-3 text-sm transition-all",
