@@ -15,7 +15,6 @@ export async function POST(_request: NextRequest) {
   return NextResponse.json({ error: "投稿作成機能は一時停止中です" }, { status: 503 });
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function _POST_disabled(request: NextRequest) {
   // 投稿作成は社長・マネージャーのみ
   const r = await requireRole(request, ["president", "manager"]);

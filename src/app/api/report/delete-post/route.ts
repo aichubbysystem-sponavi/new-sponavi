@@ -18,7 +18,6 @@ export async function POST(_request: NextRequest) {
   return NextResponse.json({ error: "投稿削除機能は一時停止中です" }, { status: 503 });
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function _POST_disabled(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });

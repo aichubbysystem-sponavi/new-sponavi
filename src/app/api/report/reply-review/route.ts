@@ -16,7 +16,6 @@ export async function POST(_request: NextRequest) {
   return NextResponse.json({ error: "口コミ返信機能は一時停止中です" }, { status: 503 });
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function _POST_disabled(request: NextRequest) {
   // 口コミ返信は社長・マネージャーのみ
   const r = await requireRole(request, ["president", "manager"]);

@@ -569,7 +569,6 @@ export async function POST(_request: NextRequest) {
   return NextResponse.json({ error: "自動投稿機能は一時停止中です" }, { status: 503 });
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function _POST_disabled(request: NextRequest) {
   const r = await requireRole(request, ["president", "manager"]);
   if (r.error) return r.error;

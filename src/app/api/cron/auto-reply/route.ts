@@ -29,7 +29,6 @@ export async function GET(_request: NextRequest) {
   return NextResponse.json({ success: true, message: "auto-reply は一時無効化中です", replied: 0 });
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function _GET_disabled(request: NextRequest) {
   const cronErr = verifyCron(request); if (cronErr) return cronErr;
 
