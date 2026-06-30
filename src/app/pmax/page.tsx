@@ -182,7 +182,7 @@ export default function PmaxTopPage() {
               filtered.map((store) => (
                 <button
                   key={store.shopName}
-                  onClick={() => router.push(`/pmax/store?name=${encodeURIComponent(store.shopName)}`)}
+                  onClick={() => router.push(`/pmax/store?name=${encodeURIComponent(store.shopName)}&year=${selectedYear}&month=${selectedMonth + 1}`)}
                   className="bg-white rounded-xl border border-slate-200 p-5 hover:border-[#003D6B]/30 hover:shadow-lg transition-all text-left group"
                 >
                   <div className="flex items-start justify-between mb-3">

@@ -140,6 +140,8 @@ export default function PmaxStoreDetailPage() {
 function StoreDetailContent() {
   const searchParams = useSearchParams();
   const shopName = searchParams.get("name") || "";
+  const paramYear = searchParams.get("year");
+  const paramMonth = searchParams.get("month");
   const router = useRouter();
 
   const [monthly, setMonthly] = useState<CampaignRow[]>([]);
@@ -150,8 +152,10 @@ function StoreDetailContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // 日付をstate化してレンダー全体で同一の値を使う（M1修正）
+  // URLパラメータの年月を優先、なければ現在月
   const [now] = useState(() => new Date());
+  const targetYear = paramYear ? Number(paramYear) : now.getFullYear();
+  const targetMonthNum = paramMonth ? Number(paramMonth) : now.getMonth() + 1;
 
   useEffect(() => {
     if (!shopName) { setLoading(false); setError("店舗名が指定されていません"); return; }
@@ -193,10 +197,8 @@ function StoreDetailContent() {
         const headers: Record<string, string> = { "Content-Type": "application/json" };
         if (token) headers.Authorization = `Bearer ${token}`;
 
-        const yr = now.getFullYear();
-        const mo = now.getMonth() + 1;
-        const curKey = `${yr}-${String(mo).padStart(2, "0")}`;
-        const prevD = new Date(yr, mo - 2, 1);
+        const curKey = `${targetYear}-${String(targetMonthNum).padStart(2, "0")}`;
+        const prevD = new Date(targetYear, targetMonthNum - 2, 1);
         const prevKey = `${prevD.getFullYear()}-${String(prevD.getMonth() + 1).padStart(2, "0")}`;
 
         const sumMonth = (key: string) => {
@@ -209,13 +211,13 @@ function StoreDetailContent() {
         const cur = sumMonth(curKey);
         const prev = sumMonth(prevKey);
 
-        const gbpCurKey = `${yr}/${String(mo).padStart(2, "0")}`;
+        const gbpCurKey = `${targetYear}/${String(targetMonthNum).padStart(2, "0")}`;
         const gbpPrevKey = `${prevD.getFullYear()}/${String(prevD.getMonth() + 1).padStart(2, "0")}`;
         const gbpCur = gbpRows.find(r => r.month === gbpCurKey);
         const gbpPrv = gbpRows.find(r => r.month === gbpPrevKey);
 
         const body = {
-          currentMonth: `${yr}年${mo}月`,
+          currentMonth: `${targetYear}年${targetMonthNum}月`,
           impressions: { current: cur.imp, prev: prev.imp },
           clicks: { current: cur.clk, prev: prev.clk },
           cost: { current: cur.cost, prev: prev.cost },
@@ -237,7 +239,7 @@ function StoreDetailContent() {
         // 文章生成失敗は無視（レポート表示には影響しない）
       }
     })();
-  }, [monthly, gbpRows, summaryRequested, now]);
+  }, [monthly, gbpRows, summaryRequested, targetYear, targetMonthNum]);
 
   if (loading) {
     return (
@@ -263,17 +265,15 @@ function StoreDetailContent() {
     );
   }
 
-  // ── データ集計 ──
-  const currentYear = now.getFullYear();
-  const currentMonthNum = now.getMonth() + 1;
-  const currentMonthKey = `${currentYear}-${String(currentMonthNum).padStart(2, "0")}`;
-  const prevMonthDate = new Date(currentYear, currentMonthNum - 2, 1);
+  // ── データ集計（URLパラメータの年月を使用） ──
+  const currentMonthKey = `${targetYear}-${String(targetMonthNum).padStart(2, "0")}`;
+  const prevMonthDate = new Date(targetYear, targetMonthNum - 2, 1);
   const prevMonthKey = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, "0")}`;
-  const lastYearMonthKey = `${currentYear - 1}-${String(currentMonthNum).padStart(2, "0")}`;
+  const lastYearMonthKey = `${targetYear - 1}-${String(targetMonthNum).padStart(2, "0")}`;
 
-  const currentMonth = `${currentYear}/${currentMonthNum}`;
-  const periodStart = `${currentYear}/${String(currentMonthNum).padStart(2, "0")}/01`;
-  const periodEnd = `${currentYear}/${String(currentMonthNum).padStart(2, "0")}/${new Date(currentYear, currentMonthNum, 0).getDate()}`;
+  const currentMonth = `${targetYear}/${targetMonthNum}`;
+  const periodStart = `${targetYear}/${String(targetMonthNum).padStart(2, "0")}/01`;
+  const periodEnd = `${targetYear}/${String(targetMonthNum).padStart(2, "0")}/${new Date(targetYear, targetMonthNum, 0).getDate()}`;
 
   // 言語でグループ化（monthly+daily両方から抽出）
   const languages = Array.from(new Set([...monthly.map(r => r.language), ...daily.map(r => r.language)])).sort();
@@ -281,10 +281,10 @@ function StoreDetailContent() {
   const dailyByLang: Record<string, CampaignRow[]> = {};
   for (const lang of languages) {
     monthlyByLang[lang] = monthly.filter(r => r.language === lang).sort((a, b) => (a.month || "").localeCompare(b.month || ""));
-    // 日次: 直近月のデータを表示（今月があれば今月、なければ最新月）
-    const langDaily = daily.filter(r => r.language === lang).sort((a, b) => (a.date || "").localeCompare(b.date || ""));
-    const currentMonthDaily = langDaily.filter(r => (r.date || "").startsWith(currentMonthKey));
-    dailyByLang[lang] = currentMonthDaily.length > 0 ? currentMonthDaily : langDaily;
+    // 日次: 対象月のデータのみ表示
+    dailyByLang[lang] = daily
+      .filter(r => r.language === lang && (r.date || "").startsWith(currentMonthKey))
+      .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
   }
 
   // 広告データ: 月別合計（全言語）
@@ -307,16 +307,16 @@ function StoreDetailContent() {
   const hasYearData = adsLastYear.impressions > 0 || adsLastYear.clicks > 0 || adsLastYear.costMicros > 0;
 
   // GBPデータ
-  const gbpCurrentKey = `${currentYear}/${String(currentMonthNum).padStart(2, "0")}`;
+  const gbpCurrentKey = `${targetYear}/${String(targetMonthNum).padStart(2, "0")}`;
   const gbpPrevKey = `${prevMonthDate.getFullYear()}/${String(prevMonthDate.getMonth() + 1).padStart(2, "0")}`;
-  const gbpLastYearKey = `${currentYear - 1}/${String(currentMonthNum).padStart(2, "0")}`;
+  const gbpLastYearKey = `${targetYear - 1}/${String(targetMonthNum).padStart(2, "0")}`;
   const gbpCurrent = gbpRows.find(r => r.month === gbpCurrentKey);
   const gbpPrev = gbpRows.find(r => r.month === gbpPrevKey);
   const gbpLastYear = gbpRows.find(r => r.month === gbpLastYearKey);
   const hasGbpYearData = !!gbpLastYear;
 
   const prevMonthLabel = `${prevMonthDate.getMonth() + 1}月`;
-  const currentMonthLabel = `${currentMonthNum}月`;
+  const currentMonthLabel = `${targetMonthNum}月`;
 
   // ページ数計算: P1(KPI) + 言語別(月次+日次) + 最終ページ(まとめ、表示時のみ)
   const hasSummary = summaryText.length > 0;

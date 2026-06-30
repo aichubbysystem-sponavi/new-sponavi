@@ -122,7 +122,7 @@ function buildUserPrompt(data: KpiData): string {
 }
 
 export async function POST(request: NextRequest) {
-  const r = await requireRole(request, ["president", "manager"]);
+  const r = await requireRole(request, ["president", "manager", "part_time"]);
   if (r.error) return r.error;
 
   if (!ANTHROPIC_API_KEY) {
