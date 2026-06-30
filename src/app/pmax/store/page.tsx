@@ -281,10 +281,10 @@ function StoreDetailContent() {
   const dailyByLang: Record<string, CampaignRow[]> = {};
   for (const lang of languages) {
     monthlyByLang[lang] = monthly.filter(r => r.language === lang).sort((a, b) => (a.month || "").localeCompare(b.month || ""));
-    // 日次: 今月分のみ
-    dailyByLang[lang] = daily
-      .filter(r => r.language === lang && (r.date || "").startsWith(currentMonthKey))
-      .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    // 日次: 直近月のデータを表示（今月があれば今月、なければ最新月）
+    const langDaily = daily.filter(r => r.language === lang).sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    const currentMonthDaily = langDaily.filter(r => (r.date || "").startsWith(currentMonthKey));
+    dailyByLang[lang] = currentMonthDaily.length > 0 ? currentMonthDaily : langDaily;
   }
 
   // 広告データ: 月別合計（全言語）
@@ -437,7 +437,7 @@ function StoreDetailContent() {
               {/* 日次セクション（スクロール可能） */}
               {dRows.length > 0 && (
                 <>
-                  <div style={{ ...stitleStyle, marginTop: 24, marginBottom: 10 }}>日次データ（{currentMonthLabel}）</div>
+                  <div style={{ ...stitleStyle, marginTop: 24, marginBottom: 10 }}>日次データ{dRows[0]?.date ? `（${new Date(dRows[0].date).getMonth() + 1}月）` : ""}</div>
                   <div style={{ overflowY: "auto", maxHeight: 280, border: "1px solid #e0e0e0", borderRadius: 8 }}>
                     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                       <thead>
