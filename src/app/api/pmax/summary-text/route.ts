@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireRole } from "@/lib/supabase";
+import { verifyAuth } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -122,8 +122,10 @@ function buildUserPrompt(data: KpiData): string {
 }
 
 export async function POST(request: NextRequest) {
-  const r = await requireRole(request, ["president", "manager", "part_time"]);
-  if (r.error) return r.error;
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   if (!ANTHROPIC_API_KEY) {
     return NextResponse.json({ error: "ANTHROPIC_API_KEY not configured" }, { status: 500 });
