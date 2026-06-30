@@ -144,6 +144,7 @@ function StoreDetailContent() {
   const [monthly, setMonthly] = useState<CampaignRow[]>([]);
   const [daily, setDaily] = useState<CampaignRow[]>([]);
   const [gbpRows, setGbpRows] = useState<GbpRow[]>([]);
+  const [summaryText, setSummaryText] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -176,6 +177,62 @@ function StoreDetailContent() {
       } finally { setLoading(false); }
     })();
   }, [shopName]);
+
+  // KPIデータが揃ったらAI文章を生成
+  useEffect(() => {
+    if (monthly.length === 0 || summaryText) return;
+    (async () => {
+      try {
+        const token = (await supabase.auth.getSession()).data.session?.access_token;
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (token) headers.Authorization = `Bearer ${token}`;
+
+        const now = new Date();
+        const yr = now.getFullYear();
+        const mo = now.getMonth() + 1;
+        const curKey = `${yr}-${String(mo).padStart(2, "0")}`;
+        const prevD = new Date(yr, mo - 2, 1);
+        const prevKey = `${prevD.getFullYear()}-${String(prevD.getMonth() + 1).padStart(2, "0")}`;
+
+        const sumMonth = (key: string) => {
+          const rows = monthly.filter(r => (r.month || "").startsWith(key));
+          const imp = rows.reduce((s, r) => s + r.impressions, 0);
+          const clk = rows.reduce((s, r) => s + r.clicks, 0);
+          const cost = rows.reduce((s, r) => s + r.costMicros, 0);
+          return { imp, clk, cost, ctr: imp > 0 ? clk / imp : 0, cpc: clk > 0 ? cost / clk : 0 };
+        };
+        const cur = sumMonth(curKey);
+        const prev = sumMonth(prevKey);
+
+        const gbpCurKey = `${yr}/${String(mo).padStart(2, "0")}`;
+        const gbpPrevKey = `${prevD.getFullYear()}/${String(prevD.getMonth() + 1).padStart(2, "0")}`;
+        const gbpCur = gbpRows.find(r => r.month === gbpCurKey);
+        const gbpPrv = gbpRows.find(r => r.month === gbpPrevKey);
+
+        const body = {
+          currentMonth: `${yr}年${mo}月`,
+          impressions: { current: cur.imp, prev: prev.imp },
+          clicks: { current: cur.clk, prev: prev.clk },
+          cost: { current: cur.cost, prev: prev.cost },
+          ctr: { current: cur.ctr, prev: prev.ctr },
+          totalVisits: { current: gbpCur?.totalVisits ?? 0, prev: gbpPrv?.totalVisits ?? 0 },
+          phone: { current: gbpCur?.phone ?? 0, prev: gbpPrv?.phone ?? 0 },
+          directions: { current: gbpCur?.directions ?? 0, prev: gbpPrv?.directions ?? 0 },
+          menuClicks: { current: gbpCur?.menuClicks ?? 0, prev: gbpPrv?.menuClicks ?? 0 },
+          website: { current: gbpCur?.website ?? 0, prev: gbpPrv?.website ?? 0 },
+          saveShare: { current: gbpCur?.saveShare ?? 0, prev: gbpPrv?.saveShare ?? 0 },
+        };
+
+        const res = await fetch("/api/pmax/summary-text", { method: "POST", headers, body: JSON.stringify(body) });
+        if (res.ok) {
+          const data = await res.json();
+          setSummaryText(data.text || "");
+        }
+      } catch {
+        // 文章生成失敗は無視（レポート表示には影響しない）
+      }
+    })();
+  }, [monthly, gbpRows, summaryText]);
 
   if (loading) {
     return (
@@ -220,9 +277,9 @@ function StoreDetailContent() {
   const dailyByLang: Record<string, CampaignRow[]> = {};
   for (const lang of languages) {
     monthlyByLang[lang] = monthly.filter(r => r.language === lang).sort((a, b) => (a.month || "").localeCompare(b.month || ""));
-    // 日次: 全期間の日次データを含める（currentMonthKeyフィルターを緩和）
+    // 日次: 今月分のみ
     dailyByLang[lang] = daily
-      .filter(r => r.language === lang)
+      .filter(r => r.language === lang && (r.date || "").startsWith(currentMonthKey))
       .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
   }
 
@@ -258,8 +315,8 @@ function StoreDetailContent() {
   const prevMonthLabel = `${prevMonthDate.getMonth() + 1}月`;
   const currentMonthLabel = `${currentMonthNum}月`;
 
-  // ページ数計算: P1(KPI) + P2(広告数値) + P3(GBP統合) + 言語別
-  const totalPages = 3 + languages.length;
+  // ページ数計算: P1(KPI) + 言語別 + 最終ページ(まとめ)
+  const totalPages = 2 + languages.length;
 
   // KPIカード
   const kpiCards = [
@@ -271,8 +328,8 @@ function StoreDetailContent() {
     { label: "経路案内", value: gbpCurrent?.directions ?? 0, format: formatNum, prev: gbpPrev?.directions ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.directions ?? 0) : null },
     { label: "メニュークリック", value: gbpCurrent?.menuClicks ?? 0, format: formatNum, prev: gbpPrev?.menuClicks ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.menuClicks ?? 0) : null },
     { label: "予約", value: 0, format: formatNum, prev: 0, lastYear: null },
-    { label: "保存・共有", value: gbpCurrent?.saveShare ?? 0, format: formatNum, prev: gbpPrev?.saveShare ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.saveShare ?? 0) : null },
     { label: "WEBサイト", value: gbpCurrent?.website ?? 0, format: formatNum, prev: gbpPrev?.website ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.website ?? 0) : null },
+    { label: "保存・共有", value: gbpCurrent?.saveShare ?? 0, format: formatNum, prev: gbpPrev?.saveShare ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.saveShare ?? 0) : null },
   ];
 
   let pageNum = 0;
@@ -312,78 +369,6 @@ function StoreDetailContent() {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 14 }}>
             {kpiCards.slice(6, 10).map((kpi, i) => <KpiCard key={kpi.label} kpi={kpi} colorIdx={i + 6} />)}
           </div>
-        </div>
-      </div>
-
-      {/* ===== P2: 広告指標（縦並び: 前月→今月） ===== */}
-      {(() => { pageNum++; return null; })()}
-      <div style={slideStyle}>
-        <div style={slideBarStyle}>
-          <span>{shopName} — 広告指標</span>
-          <span>{pageNum} / {totalPages}</span>
-        </div>
-        <div style={{ ...slideBodyStyle, justifyContent: "flex-start", paddingTop: 28 }}>
-          {[
-            { title: `前月（${prevMonthLabel}）`, data: adsPrev, bg: "#f8f9fb" },
-            { title: `今月（${currentMonthLabel}）`, data: adsCurrent, bg: "#fff8f0" },
-          ].map((section) => (
-            <div key={section.title} style={{ marginBottom: 20 }}>
-              <div style={stitleStyle}>{section.title}</div>
-              <table style={{ width: "80%", margin: "0 auto", borderCollapse: "collapse", fontSize: 15 }}>
-                <tbody>
-                  {[
-                    { label: "表示回数", value: formatNum(section.data.impressions) },
-                    { label: "クリック数", value: formatNum(section.data.clicks) },
-                    { label: "クリック率", value: formatCtr(section.data.ctr) },
-                    { label: "平均クリック単価", value: formatCpc(section.data.averageCpc) },
-                    { label: "広告費", value: formatCost(section.data.costMicros), bold: true },
-                  ].map((row, i) => (
-                    <tr key={row.label} style={{ background: i % 2 === 0 ? "#fff" : section.bg }}>
-                      <td style={{ padding: "10px 16px", fontWeight: 600, color: "#555", fontSize: 15 }}>{row.label}</td>
-                      <td style={{ textAlign: "center", padding: "10px 16px", fontSize: 20, fontWeight: row.bold ? 900 : 700 }}>{row.value}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ===== P3: GBP指標（縦並び: 前月→今月） ===== */}
-      {(() => { pageNum++; return null; })()}
-      <div style={slideStyle}>
-        <div style={slideBarStyle}>
-          <span>{shopName} — GBP指標</span>
-          <span>{pageNum} / {totalPages}</span>
-        </div>
-        <div style={{ ...slideBodyStyle, justifyContent: "flex-start", paddingTop: 28 }}>
-          {[
-            { title: `前月（${prevMonthLabel}）`, src: gbpPrev },
-            { title: `今月（${currentMonthLabel}）`, src: gbpCurrent },
-          ].map((section) => (
-            <div key={section.title} style={{ marginBottom: 20 }}>
-              <div style={stitleStyle}>{section.title}</div>
-              <table style={{ width: "80%", margin: "0 auto", borderCollapse: "collapse", fontSize: 15 }}>
-                <tbody>
-                  {[
-                    { label: "総表示回数", value: formatNum(section.src?.totalImpressions ?? 0) },
-                    { label: "合計来店数", value: formatNum(section.src?.totalVisits ?? 0) },
-                    { label: "電話", value: formatNum(section.src?.phone ?? 0) },
-                    { label: "経路案内", value: formatNum(section.src?.directions ?? 0) },
-                    { label: "メニュークリック", value: formatNum(section.src?.menuClicks ?? 0) },
-                    { label: "WEBサイト", value: formatNum(section.src?.website ?? 0) },
-                    { label: "保存・共有", value: formatNum(section.src?.saveShare ?? 0) },
-                  ].map((row, i) => (
-                    <tr key={row.label} style={{ background: i % 2 === 0 ? "#fff" : "#f8f9fb" }}>
-                      <td style={{ padding: "8px 16px", fontWeight: 600, color: "#555", fontSize: 15 }}>{row.label}</td>
-                      <td style={{ textAlign: "center", padding: "8px 16px", fontSize: 20, fontWeight: 700 }}>{row.value}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ))}
         </div>
       </div>
 
@@ -433,7 +418,7 @@ function StoreDetailContent() {
                   {(["impressions", "clicks", "ctr", "averageCpc", "costMicros"] as const).map((field, ri) => (
                     <tr key={field} style={{ background: ri % 2 === 0 ? "#f8f9fa" : "#f8f9fb" }}>
                       <td style={{ padding: "6px 10px", fontWeight: 600, color: "#666" }}>
-                        {{ impressions: "表示回数", clicks: "クリック数", ctr: "クリック率", averageCpc: "平均CPC", costMicros: "広告費" }[field]}
+                        {{ impressions: "表示回数", clicks: "クリック数", ctr: "クリック率", averageCpc: "平均クリック単価", costMicros: "広告費" }[field]}
                       </td>
                       {mRows.map((r, i) => (
                         <td key={i} style={{ textAlign: "center", padding: "6px", fontWeight: field === "costMicros" ? 700 : undefined, background: i === mRows.length - 1 ? "#fff8f0" : undefined }}>
@@ -457,7 +442,7 @@ function StoreDetailContent() {
                     <table style={{ width: "95%", margin: "0 auto", borderCollapse: "collapse", fontSize: 13 }}>
                       <thead>
                         <tr>
-                          {["日付", "表示回数", "クリック数", "クリック率", "平均CPC", "広告費"].map((h, i) => (
+                          {["日付", "表示回数", "クリック数", "クリック率", "平均クリック単価", "広告費"].map((h, i) => (
                             <th key={h} style={{ background: "#0f3460", color: "#fff", padding: "7px 8px", fontWeight: 600, textAlign: i === 0 ? "left" : "center", position: "sticky", top: 0 }}>{h}</th>
                           ))}
                         </tr>
@@ -490,6 +475,25 @@ function StoreDetailContent() {
           </div>
         );
       })}
+
+      {/* ===== 最終ページ: まとめ ===== */}
+      {summaryText && (() => {
+        pageNum++;
+        return (
+          <div style={slideStyle}>
+            <div style={slideBarStyle}>
+              <span>{shopName} — まとめ</span>
+              <span>{pageNum} / {totalPages}</span>
+            </div>
+            <div style={{ ...slideBodyStyle, justifyContent: "flex-start", paddingTop: 36 }}>
+              <div style={stitleStyle}>まとめ</div>
+              <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", fontSize: 15, lineHeight: 1.8, color: "#333", whiteSpace: "pre-wrap" }}>
+                {summaryText}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
