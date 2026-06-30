@@ -370,7 +370,29 @@ function StoreDetailContent() {
       {/* トップバー */}
       <div className="no-print" style={{ background: "rgba(0,0,0,0.3)", padding: "12px 32px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100, backdropFilter: "blur(10px)" }}>
         <button onClick={() => router.push("/pmax")} style={{ color: "rgba(255,255,255,0.8)", background: "none", border: "none", cursor: "pointer", fontSize: 14 }}>← 店舗一覧に戻る</button>
-        <span style={{ fontSize: 12, color: "#4fc3f7", background: "rgba(79,195,247,0.15)", padding: "4px 12px", borderRadius: 20, border: "1px solid rgba(79,195,247,0.3)" }}>P-MAX広告レポート</span>
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <button
+            onClick={async () => {
+              try {
+                const token = (await supabase.auth.getSession()).data.session?.access_token;
+                const res = await fetch("/api/pmax/share", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                  body: JSON.stringify({ shopName, year: targetYear, month: targetMonthNum }),
+                });
+                if (!res.ok) throw new Error("発行失敗");
+                const { token: shareToken } = await res.json();
+                const url = `${window.location.origin}/pmax/share/${shareToken}`;
+                await navigator.clipboard.writeText(url);
+                alert("共有URLをコピーしました");
+              } catch { alert("共有URL発行に失敗しました"); }
+            }}
+            style={{ color: "#fff", background: "rgba(79,195,247,0.2)", border: "1px solid rgba(79,195,247,0.4)", padding: "5px 14px", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600 }}
+          >
+            共有URLを発行
+          </button>
+          <span style={{ fontSize: 12, color: "#4fc3f7", background: "rgba(79,195,247,0.15)", padding: "4px 12px", borderRadius: 20, border: "1px solid rgba(79,195,247,0.3)" }}>P-MAX広告レポート</span>
+        </div>
       </div>
 
       {/* ===== P1: KPIサマリー ===== */}
