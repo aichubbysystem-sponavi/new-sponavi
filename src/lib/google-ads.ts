@@ -287,6 +287,8 @@ export async function getStoreDetail(
   startDate: string,
   endDate: string,
   knownAccountIds?: string[],
+  dailyStartDate?: string,
+  dailyEndDate?: string,
 ): Promise<{ monthly: StoreDetailCampaign[]; daily: StoreDetailCampaign[] }> {
   // knownAccountIdsがあればそのアカウントのみ検索（高速化）
   let targetIds = knownAccountIds;
@@ -294,6 +296,10 @@ export async function getStoreDetail(
     const accounts = await listAccounts();
     targetIds = accounts.map(a => a.customerId);
   }
+
+  // 日次は別の日付範囲（指定がなければ月次と同じ）
+  const dStart = dailyStartDate || startDate;
+  const dEnd = dailyEndDate || endDate;
 
   const monthly: StoreDetailCampaign[] = [];
   const daily: StoreDetailCampaign[] = [];
@@ -306,7 +312,7 @@ export async function getStoreDetail(
       batch.map(async (customerId) => {
         const [m, d] = await Promise.all([
           getCampaignMonthly(customerId, startDate, endDate).catch(() => []),
-          getCampaignDaily(customerId, startDate, endDate).catch(() => []),
+          getCampaignDaily(customerId, dStart, dEnd).catch(() => []),
         ]);
         return { monthly: m, daily: d };
       })

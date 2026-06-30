@@ -164,8 +164,9 @@ function StoreDetailContent() {
         const token = (await supabase.auth.getSession()).data.session?.access_token;
         const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
         const { startDate, endDate } = getDateRange(targetYear, targetMonthNum, 13);
+        const { startDate: dailyStart, endDate: dailyEnd } = getDateRange(targetYear, targetMonthNum, 0);
         const [adsRes, gbpRes] = await Promise.all([
-          fetch(`/api/pmax/store-detail?shopName=${encodeURIComponent(shopName)}&startDate=${startDate}&endDate=${endDate}`, { headers }),
+          fetch(`/api/pmax/store-detail?shopName=${encodeURIComponent(shopName)}&startDate=${startDate}&endDate=${endDate}&dailyStart=${dailyStart}&dailyEnd=${dailyEnd}`, { headers }),
           fetch(`/api/pmax/gbp?shopName=${encodeURIComponent(shopName)}`, { headers }),
         ]);
         if (!adsRes.ok) {
@@ -280,9 +281,9 @@ function StoreDetailContent() {
   const dailyByLang: Record<string, CampaignRow[]> = {};
   for (const lang of languages) {
     monthlyByLang[lang] = monthly.filter(r => r.language === lang).sort((a, b) => (a.month || "").localeCompare(b.month || ""));
-    // 日次: 対象月のデータを表示
+    // 日次: APIが対象月1ヶ月分のみ返すのでフィルター不要
     dailyByLang[lang] = daily
-      .filter(r => r.language === lang && (r.date || "").startsWith(currentMonthKey))
+      .filter(r => r.language === lang)
       .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
   }
 

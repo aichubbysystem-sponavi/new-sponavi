@@ -7,8 +7,10 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 /**
- * GET /api/pmax/store-detail?shopName=X&startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+ * GET /api/pmax/store-detail?shopName=X&startDate=YYYY-MM-DD&endDate=YYYY-MM-DD&dailyStart=YYYY-MM-DD&dailyEnd=YYYY-MM-DD
  * 特定店舗の言語別キャンペーンデータ（月次+日次）を返す（6時間キャッシュ）
+ * startDate/endDate: 月次データの取得範囲（13ヶ月分）
+ * dailyStart/dailyEnd: 日次データの取得範囲（対象月1ヶ月分）
  */
 export async function GET(request: NextRequest) {
   const r = await requireRole(request, ["president", "manager"]);
@@ -18,13 +20,15 @@ export async function GET(request: NextRequest) {
   const shopName = searchParams.get("shopName");
   const startDate = searchParams.get("startDate");
   const endDate = searchParams.get("endDate");
+  const dailyStart = searchParams.get("dailyStart");
+  const dailyEnd = searchParams.get("dailyEnd");
   const refresh = searchParams.get("refresh") === "true";
 
   if (!shopName || !startDate || !endDate) {
     return NextResponse.json({ error: "shopName, startDate, endDate は必須です" }, { status: 400 });
   }
 
-  const cacheKey = `store-detail:${shopName}:${startDate}:${endDate}`;
+  const cacheKey = `store-detail:${shopName}:${startDate}:${endDate}:${dailyStart || ""}:${dailyEnd || ""}`;
 
   if (!refresh) {
     const cached = await getPmaxCache<{ monthly: unknown[]; daily: unknown[] }>(cacheKey);
@@ -41,7 +45,10 @@ export async function GET(request: NextRequest) {
       knownAccountIds = summaryKeys;
     }
 
-    const data = await getStoreDetail(shopName, startDate, endDate, knownAccountIds);
+    const data = await getStoreDetail(
+      shopName, startDate, endDate, knownAccountIds,
+      dailyStart || undefined, dailyEnd || undefined,
+    );
     setPmaxCache(cacheKey, data);
     return NextResponse.json({ ...data, cached: false });
   } catch (error: unknown) {
