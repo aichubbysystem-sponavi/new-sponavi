@@ -378,7 +378,7 @@ function StoreDetailContent() {
                 const res = await fetch("/api/pmax/share", {
                   method: "POST",
                   headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-                  body: JSON.stringify({ shopName, year: targetYear, month: targetMonthNum }),
+                  body: JSON.stringify({ shopName, year: targetYear, month: targetMonthNum, summaryText }),
                 });
                 if (!res.ok) throw new Error("発行失敗");
                 const { token: shareToken } = await res.json();

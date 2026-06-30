@@ -112,6 +112,7 @@ export default function SharedPmaxReport() {
   const [shopName, setShopName] = useState("");
   const [targetYear, setTargetYear] = useState(0);
   const [targetMonthNum, setTargetMonthNum] = useState(0);
+  const [summaryText, setSummaryText] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -131,6 +132,7 @@ export default function SharedPmaxReport() {
         setMonthly(data.monthly || []);
         setDaily(data.daily || []);
         setGbpRows(data.gbp || []);
+        setSummaryText(data.summaryText || "");
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : "エラーが発生しました");
       } finally { setLoading(false); }
@@ -222,7 +224,8 @@ export default function SharedPmaxReport() {
   const gbpLastYear = gbpRows.find(r => r.month === gbpLastYearKey);
   const hasGbpYearData = !!gbpLastYear;
 
-  const totalPages = 1 + languages.length;
+  const hasSummary = summaryText.length > 0;
+  const totalPages = 1 + languages.length + (hasSummary ? 1 : 0);
 
   const kpiCards = [
     { label: "総表示回数", value: adsCurrent.impressions, format: formatNum, prev: adsPrev.impressions, lastYear: hasYearData ? adsLastYear.impressions : null },
@@ -344,6 +347,22 @@ export default function SharedPmaxReport() {
           </div>
         );
       })}
+
+      {/* まとめページ */}
+      {hasSummary && (
+        <div style={slideStyle}>
+          <div style={slideBarStyle}>
+            <span>{shopName} — まとめ</span>
+            <span>{totalPages} / {totalPages}</span>
+          </div>
+          <div style={{ ...slideBodyStyle, justifyContent: "flex-start", paddingTop: 36 }}>
+            <div style={stitleStyle}>まとめ</div>
+            <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", fontSize: 15, lineHeight: 1.8, color: "#333", whiteSpace: "pre-wrap" }}>
+              {summaryText}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

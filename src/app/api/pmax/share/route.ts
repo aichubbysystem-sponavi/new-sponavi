@@ -11,14 +11,14 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { shopName, year, month } = await request.json();
+    const { shopName, year, month, summaryText } = await request.json();
     if (!shopName || !year || !month) {
       return NextResponse.json({ error: "shopName, year, month は必須です" }, { status: 400 });
     }
 
     const sb = getSupabase();
 
-    // 同じ店舗+月の既存トークンがあればそれを返す
+    // 同じ店舗+月の既存トークンがあれば、summaryTextを更新して返す
     const { data: existing } = await sb
       .from("pmax_share_tokens")
       .select("token")
@@ -28,13 +28,16 @@ export async function POST(request: NextRequest) {
       .limit(1);
 
     if (existing && existing.length > 0) {
+      if (summaryText) {
+        await sb.from("pmax_share_tokens").update({ summary_text: summaryText }).eq("token", existing[0].token);
+      }
       return NextResponse.json({ token: existing[0].token });
     }
 
     // 新規発行
     const { data, error } = await sb
       .from("pmax_share_tokens")
-      .insert({ shop_name: shopName, year, month, created_by: auth.sub })
+      .insert({ shop_name: shopName, year, month, created_by: auth.sub, summary_text: summaryText || "" })
       .select("token")
       .single();
 

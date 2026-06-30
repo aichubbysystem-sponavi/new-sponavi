@@ -22,7 +22,7 @@ export async function GET(
     const sb = getSupabase();
     const { data: shareData } = await sb
       .from("pmax_share_tokens")
-      .select("shop_name, year, month")
+      .select("shop_name, year, month, summary_text")
       .eq("token", token)
       .single();
 
@@ -30,13 +30,13 @@ export async function GET(
       return NextResponse.json({ error: "無効または期限切れのリンクです" }, { status: 404 });
     }
 
-    const { shop_name: shopName, year, month } = shareData;
+    const { shop_name: shopName, year, month, summary_text: summaryText } = shareData;
 
     // キャッシュチェック
     const cacheKey = `share:${token}`;
     const cached = await getPmaxCache<{ monthly: unknown[]; daily: unknown[]; gbp: unknown[] }>(cacheKey);
     if (cached) {
-      return NextResponse.json({ ...cached, shopName, year, month, cached: true });
+      return NextResponse.json({ ...cached, shopName, year, month, summaryText: summaryText || "", cached: true });
     }
 
     // 月次: 13ヶ月分
@@ -76,7 +76,7 @@ export async function GET(
 
     setPmaxCache(cacheKey, result);
 
-    return NextResponse.json({ ...result, shopName, year, month, cached: false });
+    return NextResponse.json({ ...result, shopName, year, month, summaryText: summaryText || "", cached: false });
   } catch (err) {
     console.error("[pmax/share/token] Error:", err);
     return NextResponse.json({ error: "データ取得に失敗しました" }, { status: 500 });
