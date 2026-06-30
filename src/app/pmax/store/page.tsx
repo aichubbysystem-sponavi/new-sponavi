@@ -315,13 +315,8 @@ function StoreDetailContent() {
   const prevMonthLabel = `${prevMonthDate.getMonth() + 1}月`;
   const currentMonthLabel = `${currentMonthNum}月`;
 
-  // 棒グラフ表示可能な言語（月次2ヶ月以上）
-  const langsWithChart = languages.filter(lang => monthlyByLang[lang].length > 1);
-  // 日次データがある言語
-  const langsWithDaily = languages.filter(lang => dailyByLang[lang].length > 0);
-  // ページ数計算: P1(KPI) + 言語別月次 + 日次まとめ(条件付き) + 最終ページ(まとめ)
-  const hasDailyPage = langsWithChart.length > 0 && langsWithDaily.length > 0;
-  const totalPages = 1 + languages.length + (hasDailyPage ? 1 : 0) + 1;
+  // ページ数計算: P1(KPI) + 言語別(月次+日次) + 最終ページ(まとめ)
+  const totalPages = 1 + languages.length + 1;
 
   // KPIカード
   const kpiCards = [
@@ -377,10 +372,11 @@ function StoreDetailContent() {
         </div>
       </div>
 
-      {/* ===== 言語別: 月次ページ ===== */}
+      {/* ===== 言語別: 月次+日次統合ページ ===== */}
       {languages.map((lang, langIdx) => {
         pageNum++;
         const mRows = monthlyByLang[lang];
+        const dRows = dailyByLang[lang];
         const thisPageNum = pageNum;
 
         return (
@@ -390,6 +386,7 @@ function StoreDetailContent() {
               <span>{thisPageNum} / {totalPages}</span>
             </div>
             <div style={{ ...slideBodyStyle, overflow: "visible" }}>
+              {/* 月次セクション */}
               <div style={stitleStyle}>月次推移</div>
               {mRows.length > 1 && (
                 <div style={{ height: 200, marginBottom: 12 }}>
@@ -406,7 +403,7 @@ function StoreDetailContent() {
                   />
                 </div>
               )}
-              <table style={{ width: "95%", margin: "0 auto", borderCollapse: "collapse", fontSize: 13 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr>
                     <th style={{ background: "#0f3460", color: "#fff", padding: "8px 10px", fontWeight: 600 }}>月</th>
@@ -436,64 +433,48 @@ function StoreDetailContent() {
                   ))}
                 </tbody>
               </table>
+
+              {/* 日次セクション（スクロール可能） */}
+              {dRows.length > 0 && (
+                <>
+                  <div style={{ ...stitleStyle, marginTop: 24, marginBottom: 10 }}>日次データ（{currentMonthLabel}）</div>
+                  <div style={{ overflowY: "auto", maxHeight: 280, border: "1px solid #e0e0e0", borderRadius: 8 }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                      <thead>
+                        <tr>
+                          {["日付", "表示回数", "クリック数", "クリック率", "平均クリック単価", "広告費"].map((h, i) => (
+                            <th key={h} style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", fontWeight: 600, textAlign: i === 0 ? "left" : "center", position: "sticky", top: 0, zIndex: 1 }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dRows.map((r, i) => (
+                          <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#f8f9fb" }}>
+                            <td style={{ padding: "6px 12px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>{formatDate(r.date || "")}</td>
+                            <td style={{ textAlign: "center", padding: "6px 12px" }}>{r.impressions.toLocaleString()}</td>
+                            <td style={{ textAlign: "center", padding: "6px 12px" }}>{r.clicks.toLocaleString()}</td>
+                            <td style={{ textAlign: "center", padding: "6px 12px" }}>{formatCtr(r.ctr)}</td>
+                            <td style={{ textAlign: "center", padding: "6px 12px" }}>{formatCpc(r.averageCpc)}</td>
+                            <td style={{ textAlign: "center", padding: "6px 12px", fontWeight: 700 }}>{formatCost(r.costMicros)}</td>
+                          </tr>
+                        ))}
+                        <tr style={{ background: "#e8eaf0", fontWeight: 700 }}>
+                          <td style={{ padding: "8px 12px" }}>合計</td>
+                          <td style={{ textAlign: "center", padding: "8px 12px" }}>{dRows.reduce((s, r) => s + r.impressions, 0).toLocaleString()}</td>
+                          <td style={{ textAlign: "center", padding: "8px 12px" }}>{dRows.reduce((s, r) => s + r.clicks, 0).toLocaleString()}</td>
+                          <td style={{ textAlign: "center", padding: "8px 12px" }}>{formatCtr(dRows.reduce((s, r) => s + r.clicks, 0) / Math.max(dRows.reduce((s, r) => s + r.impressions, 0), 1))}</td>
+                          <td style={{ textAlign: "center", padding: "8px 12px" }}>{formatCpc(dRows.reduce((s, r) => s + r.costMicros, 0) / Math.max(dRows.reduce((s, r) => s + r.clicks, 0), 1))}</td>
+                          <td style={{ textAlign: "center", padding: "8px 12px" }}>{formatCost(dRows.reduce((s, r) => s + r.costMicros, 0))}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         );
       })}
-
-      {/* ===== 日次まとめページ（言語別、スクロール可能） ===== */}
-      {hasDailyPage && (() => {
-        pageNum++;
-        return (
-          <div style={{ ...slideStyle, width: 1280, minHeight: "auto" }}>
-            <div style={slideBarStyle}>
-              <span>{shopName} — 日次データ（{currentMonthLabel}）</span>
-              <span>{pageNum} / {totalPages}</span>
-            </div>
-            <div style={{ ...slideBodyStyle, overflow: "visible", padding: "20px 28px" }}>
-              {langsWithDaily.map((lang, langIdx) => {
-                const dRows = dailyByLang[lang];
-                return (
-                  <div key={lang} style={{ marginBottom: langIdx < langsWithDaily.length - 1 ? 28 : 0 }}>
-                    <div style={stitleStyle}>{lang}</div>
-                    <div style={{ overflowY: "auto", maxHeight: 300, border: "1px solid #e0e0e0", borderRadius: 8 }}>
-                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                        <thead>
-                          <tr>
-                            {["日付", "表示回数", "クリック数", "クリック率", "平均クリック単価", "広告費"].map((h, i) => (
-                              <th key={h} style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", fontWeight: 600, textAlign: i === 0 ? "left" : "center", position: "sticky", top: 0, zIndex: 1 }}>{h}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {dRows.map((r, i) => (
-                            <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#f8f9fb" }}>
-                              <td style={{ padding: "6px 12px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>{formatDate(r.date || "")}</td>
-                              <td style={{ textAlign: "center", padding: "6px 12px" }}>{r.impressions.toLocaleString()}</td>
-                              <td style={{ textAlign: "center", padding: "6px 12px" }}>{r.clicks.toLocaleString()}</td>
-                              <td style={{ textAlign: "center", padding: "6px 12px" }}>{formatCtr(r.ctr)}</td>
-                              <td style={{ textAlign: "center", padding: "6px 12px" }}>{formatCpc(r.averageCpc)}</td>
-                              <td style={{ textAlign: "center", padding: "6px 12px", fontWeight: 700 }}>{formatCost(r.costMicros)}</td>
-                            </tr>
-                          ))}
-                          <tr style={{ background: "#e8eaf0", fontWeight: 700 }}>
-                            <td style={{ padding: "8px 12px" }}>合計</td>
-                            <td style={{ textAlign: "center", padding: "8px 12px" }}>{dRows.reduce((s, r) => s + r.impressions, 0).toLocaleString()}</td>
-                            <td style={{ textAlign: "center", padding: "8px 12px" }}>{dRows.reduce((s, r) => s + r.clicks, 0).toLocaleString()}</td>
-                            <td style={{ textAlign: "center", padding: "8px 12px" }}>{formatCtr(dRows.reduce((s, r) => s + r.clicks, 0) / Math.max(dRows.reduce((s, r) => s + r.impressions, 0), 1))}</td>
-                            <td style={{ textAlign: "center", padding: "8px 12px" }}>{formatCpc(dRows.reduce((s, r) => s + r.costMicros, 0) / Math.max(dRows.reduce((s, r) => s + r.clicks, 0), 1))}</td>
-                            <td style={{ textAlign: "center", padding: "8px 12px" }}>{formatCost(dRows.reduce((s, r) => s + r.costMicros, 0))}</td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })()}
 
       {/* ===== 最終ページ: まとめ ===== */}
       {summaryText && (() => {
