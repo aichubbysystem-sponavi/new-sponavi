@@ -280,11 +280,40 @@ function StoreDetailContent() {
   const monthlyByLang: Record<string, CampaignRow[]> = {};
   const dailyByLang: Record<string, CampaignRow[]> = {};
   for (const lang of languages) {
-    monthlyByLang[lang] = monthly.filter(r => r.language === lang).sort((a, b) => (a.month || "").localeCompare(b.month || ""));
-    // 日次: APIが対象月1ヶ月分のみ返すのでフィルター不要
-    dailyByLang[lang] = daily
-      .filter(r => r.language === lang)
-      .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    // 同一言語+同一月の複数キャンペーンを集約
+    const langRows = monthly.filter(r => r.language === lang);
+    const monthMap = new Map<string, CampaignRow>();
+    for (const r of langRows) {
+      const key = r.month || "";
+      const existing = monthMap.get(key);
+      if (existing) {
+        existing.impressions += r.impressions;
+        existing.clicks += r.clicks;
+        existing.costMicros += r.costMicros;
+        existing.ctr = existing.impressions > 0 ? existing.clicks / existing.impressions : 0;
+        existing.averageCpc = existing.clicks > 0 ? existing.costMicros / existing.clicks : 0;
+      } else {
+        monthMap.set(key, { ...r });
+      }
+    }
+    monthlyByLang[lang] = Array.from(monthMap.values()).sort((a, b) => (a.month || "").localeCompare(b.month || ""));
+    // 日次: 同一言語+同一日の複数キャンペーンを集約
+    const langDailyRows = daily.filter(r => r.language === lang);
+    const dayMap = new Map<string, CampaignRow>();
+    for (const r of langDailyRows) {
+      const key = r.date || "";
+      const existing = dayMap.get(key);
+      if (existing) {
+        existing.impressions += r.impressions;
+        existing.clicks += r.clicks;
+        existing.costMicros += r.costMicros;
+        existing.ctr = existing.impressions > 0 ? existing.clicks / existing.impressions : 0;
+        existing.averageCpc = existing.clicks > 0 ? existing.costMicros / existing.clicks : 0;
+      } else {
+        dayMap.set(key, { ...r });
+      }
+    }
+    dailyByLang[lang] = Array.from(dayMap.values()).sort((a, b) => (a.date || "").localeCompare(b.date || ""));
   }
 
   // 広告データ: 月別合計（全言語）
