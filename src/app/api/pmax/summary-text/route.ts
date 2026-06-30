@@ -59,11 +59,45 @@ interface KpiData {
   saveShare: { current: number; prev: number };
 }
 
+// 明示的にja-JPロケールで数値フォーマット（C3修正: サーバーロケール依存回避）
+const fmtNum = (n: number) => n.toLocaleString("ja-JP");
+
 function formatPct(current: number, prev: number): string {
   if (prev === 0 && current === 0) return "±0.0％";
   if (prev === 0) return "NEW";
   const pct = ((current - prev) / prev) * 100;
   return `${pct >= 0 ? "＋" : "－"}${Math.abs(pct).toFixed(1)}％`;
+}
+
+function sanitizeNum(v: unknown): number {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 0;
+  return n;
+}
+
+function sanitizePair(pair: unknown): { current: number; prev: number } {
+  if (!pair || typeof pair !== "object") return { current: 0, prev: 0 };
+  const p = pair as Record<string, unknown>;
+  return { current: sanitizeNum(p.current), prev: sanitizeNum(p.prev) };
+}
+
+function sanitizeKpiData(raw: unknown): KpiData | null {
+  if (!raw || typeof raw !== "object") return null;
+  const d = raw as Record<string, unknown>;
+  if (typeof d.currentMonth !== "string" || !d.currentMonth) return null;
+  return {
+    currentMonth: d.currentMonth as string,
+    impressions: sanitizePair(d.impressions),
+    clicks: sanitizePair(d.clicks),
+    cost: sanitizePair(d.cost),
+    ctr: sanitizePair(d.ctr),
+    totalVisits: sanitizePair(d.totalVisits),
+    phone: sanitizePair(d.phone),
+    directions: sanitizePair(d.directions),
+    menuClicks: sanitizePair(d.menuClicks),
+    website: sanitizePair(d.website),
+    saveShare: sanitizePair(d.saveShare),
+  };
 }
 
 function buildUserPrompt(data: KpiData): string {
@@ -73,18 +107,18 @@ function buildUserPrompt(data: KpiData): string {
   return `以下は${data.currentMonth}のP-MAX広告・GBPデータです。この数値を元に文章を作成してください。
 
 【広告データ】
-・表示回数：${data.impressions.current.toLocaleString()}回（先月比 ${formatPct(data.impressions.current, data.impressions.prev)}）
-・クリック数：${data.clicks.current.toLocaleString()}件（先月比 ${formatPct(data.clicks.current, data.clicks.prev)}）
+・表示回数：${fmtNum(data.impressions.current)}回（先月比 ${formatPct(data.impressions.current, data.impressions.prev)}）
+・クリック数：${fmtNum(data.clicks.current)}件（先月比 ${formatPct(data.clicks.current, data.clicks.prev)}）
 ・クリック率：${ctrPct(data.ctr.current)}％（先月 ${ctrPct(data.ctr.prev)}％）
-・広告費：¥${costYen(data.cost.current).toLocaleString()}（先月比 ${formatPct(costYen(data.cost.current), costYen(data.cost.prev))}）
+・広告費：¥${fmtNum(costYen(data.cost.current))}（先月比 ${formatPct(costYen(data.cost.current), costYen(data.cost.prev))}）
 
 【MAP行動データ】
-・合計来店数：${data.totalVisits.current.toLocaleString()}件（先月比 ${formatPct(data.totalVisits.current, data.totalVisits.prev)}）
-・電話：${data.phone.current.toLocaleString()}件（先月比 ${formatPct(data.phone.current, data.phone.prev)}）
-・経路案内：${data.directions.current.toLocaleString()}件（先月比 ${formatPct(data.directions.current, data.directions.prev)}）
-・WEBサイト：${data.website.current.toLocaleString()}件（先月比 ${formatPct(data.website.current, data.website.prev)}）
-・メニュークリック：${data.menuClicks.current.toLocaleString()}件（先月比 ${formatPct(data.menuClicks.current, data.menuClicks.prev)}）
-・保存・共有：${data.saveShare.current.toLocaleString()}件（先月比 ${formatPct(data.saveShare.current, data.saveShare.prev)}）`;
+・合計来店数：${fmtNum(data.totalVisits.current)}件（先月比 ${formatPct(data.totalVisits.current, data.totalVisits.prev)}）
+・電話：${fmtNum(data.phone.current)}件（先月比 ${formatPct(data.phone.current, data.phone.prev)}）
+・経路案内：${fmtNum(data.directions.current)}件（先月比 ${formatPct(data.directions.current, data.directions.prev)}）
+・WEBサイト：${fmtNum(data.website.current)}件（先月比 ${formatPct(data.website.current, data.website.prev)}）
+・メニュークリック：${fmtNum(data.menuClicks.current)}件（先月比 ${formatPct(data.menuClicks.current, data.menuClicks.prev)}）
+・保存・共有：${fmtNum(data.saveShare.current)}件（先月比 ${formatPct(data.saveShare.current, data.saveShare.prev)}）`;
 }
 
 export async function POST(request: NextRequest) {
@@ -96,7 +130,11 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const body: KpiData = await request.json();
+    const rawBody = await request.json();
+    const body = sanitizeKpiData(rawBody);
+    if (!body) {
+      return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+    }
     const userPrompt = buildUserPrompt(body);
 
     const controller = new AbortController();

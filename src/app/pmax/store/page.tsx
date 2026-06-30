@@ -84,7 +84,7 @@ const stitleStyle: React.CSSProperties = {
 
 // ── ユーティリティ ──
 const formatCost = (micros: number) => `¥${Math.round(micros / 1_000_000).toLocaleString()}`;
-const formatCpc = (micros: number) => `¥${Math.round(micros / 1_000_000).toLocaleString()}`;
+const formatCpc = (micros: number) => `¥${(micros / 1_000_000).toFixed(1)}`;
 const formatCtr = (ctr: number) => `${(ctr * 100).toFixed(2)}%`;
 const formatMonthShort = (m: string) => { if (!m) return ""; const d = new Date(m); return `${d.getMonth() + 1}月`; };
 const formatDate = (d: string) => d ? d.replace(/^(\d{4})-(\d{2})-(\d{2})$/, "$2/$3") : "";
@@ -100,9 +100,10 @@ function getDateRange(monthsBack: number) {
 }
 
 // ── 比較バッジコンポーネント ──
-function ComparisonBadge({ current, previous, label }: { current: number; previous: number; label: string }) {
+function ComparisonBadge({ current, previous, label, format }: { current: number; previous: number; label: string; format?: (v: number) => string }) {
+  const fmt = format || ((v: number) => v.toLocaleString());
   if (previous === 0 && current === 0) {
-    return <div style={{ fontSize: 11, color: "#888", lineHeight: 1.5 }}>→ 0.0%（{previous.toLocaleString()}→{current.toLocaleString()}）{label}</div>;
+    return <div style={{ fontSize: 11, color: "#888", lineHeight: 1.5 }}>→ 0.0%（{fmt(previous)}→{fmt(current)}）{label}</div>;
   }
   if (previous === 0) {
     return <div style={{ fontSize: 11, color: "#0a8f3c", lineHeight: 1.5 }}>▲ NEW {label}</div>;
@@ -114,7 +115,7 @@ function ComparisonBadge({ current, previous, label }: { current: number; previo
   const color = isFlat ? "#888" : isUp ? "#0a8f3c" : "#c0392b";
   return (
     <div style={{ fontSize: 11, color, lineHeight: 1.5 }}>
-      {arrow} {isFlat ? "0.0" : (isUp ? "+" : "") + pct.toFixed(1)}%（{previous.toLocaleString()}→{current.toLocaleString()}）{label}
+      {arrow} {isFlat ? "0.0" : (isUp ? "+" : "") + pct.toFixed(1)}%（{fmt(previous)}→{fmt(current)}）{label}
     </div>
   );
 }
@@ -145,8 +146,12 @@ function StoreDetailContent() {
   const [daily, setDaily] = useState<CampaignRow[]>([]);
   const [gbpRows, setGbpRows] = useState<GbpRow[]>([]);
   const [summaryText, setSummaryText] = useState("");
+  const [summaryRequested, setSummaryRequested] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  // 日付をstate化してレンダー全体で同一の値を使う（M1修正）
+  const [now] = useState(() => new Date());
 
   useEffect(() => {
     if (!shopName) { setLoading(false); setError("店舗名が指定されていません"); return; }
@@ -178,16 +183,16 @@ function StoreDetailContent() {
     })();
   }, [shopName]);
 
-  // KPIデータが揃ったらAI文章を生成
+  // KPIデータが揃ったらAI文章を1回だけ生成（C2修正: summaryRequestedで制御）
   useEffect(() => {
-    if (monthly.length === 0 || summaryText) return;
+    if (monthly.length === 0 || summaryRequested) return;
+    setSummaryRequested(true);
     (async () => {
       try {
         const token = (await supabase.auth.getSession()).data.session?.access_token;
         const headers: Record<string, string> = { "Content-Type": "application/json" };
         if (token) headers.Authorization = `Bearer ${token}`;
 
-        const now = new Date();
         const yr = now.getFullYear();
         const mo = now.getMonth() + 1;
         const curKey = `${yr}-${String(mo).padStart(2, "0")}`;
@@ -226,13 +231,13 @@ function StoreDetailContent() {
         const res = await fetch("/api/pmax/summary-text", { method: "POST", headers, body: JSON.stringify(body) });
         if (res.ok) {
           const data = await res.json();
-          setSummaryText(data.text || "");
+          if (data.text) setSummaryText(data.text);
         }
       } catch {
         // 文章生成失敗は無視（レポート表示には影響しない）
       }
     })();
-  }, [monthly, gbpRows, summaryText]);
+  }, [monthly, gbpRows, summaryRequested, now]);
 
   if (loading) {
     return (
@@ -259,7 +264,6 @@ function StoreDetailContent() {
   }
 
   // ── データ集計 ──
-  const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonthNum = now.getMonth() + 1;
   const currentMonthKey = `${currentYear}-${String(currentMonthNum).padStart(2, "0")}`;
@@ -271,8 +275,8 @@ function StoreDetailContent() {
   const periodStart = `${currentYear}/${String(currentMonthNum).padStart(2, "0")}/01`;
   const periodEnd = `${currentYear}/${String(currentMonthNum).padStart(2, "0")}/${new Date(currentYear, currentMonthNum, 0).getDate()}`;
 
-  // 言語でグループ化
-  const languages = Array.from(new Set(monthly.map(r => r.language))).sort();
+  // 言語でグループ化（monthly+daily両方から抽出）
+  const languages = Array.from(new Set([...monthly.map(r => r.language), ...daily.map(r => r.language)])).sort();
   const monthlyByLang: Record<string, CampaignRow[]> = {};
   const dailyByLang: Record<string, CampaignRow[]> = {};
   for (const lang of languages) {
@@ -310,13 +314,13 @@ function StoreDetailContent() {
   const gbpPrev = gbpRows.find(r => r.month === gbpPrevKey);
   const gbpLastYear = gbpRows.find(r => r.month === gbpLastYearKey);
   const hasGbpYearData = !!gbpLastYear;
-  const gbpSorted = [...gbpRows].sort((a, b) => a.month.localeCompare(b.month));
 
   const prevMonthLabel = `${prevMonthDate.getMonth() + 1}月`;
   const currentMonthLabel = `${currentMonthNum}月`;
 
-  // ページ数計算: P1(KPI) + 言語別(月次+日次) + 最終ページ(まとめ)
-  const totalPages = 1 + languages.length + 1;
+  // ページ数計算: P1(KPI) + 言語別(月次+日次) + 最終ページ(まとめ、表示時のみ)
+  const hasSummary = summaryText.length > 0;
+  const totalPages = 1 + languages.length + (hasSummary ? 1 : 0);
 
   // KPIカード
   const kpiCards = [
@@ -332,8 +336,6 @@ function StoreDetailContent() {
     { label: "保存・共有", value: gbpCurrent?.saveShare ?? 0, format: formatNum, prev: gbpPrev?.saveShare ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.saveShare ?? 0) : null },
   ];
 
-  let pageNum = 0;
-
   return (
     <div style={{ background: "#1a1a2e", minHeight: "100vh", paddingBottom: 40 }}>
       {/* トップバー */}
@@ -343,7 +345,6 @@ function StoreDetailContent() {
       </div>
 
       {/* ===== P1: KPIサマリー ===== */}
-      {(() => { pageNum++; return null; })()}
       <div style={slideStyle}>
         <div style={{ background: "linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%)", color: "#fff", padding: "28px 36px 20px", flexShrink: 0, position: "relative" }}>
           <h1 style={{ margin: 0, fontSize: 26, fontWeight: 900, letterSpacing: 1 }}>{shopName}</h1>
@@ -374,10 +375,9 @@ function StoreDetailContent() {
 
       {/* ===== 言語別: 月次+日次統合ページ ===== */}
       {languages.map((lang, langIdx) => {
-        pageNum++;
         const mRows = monthlyByLang[lang];
         const dRows = dailyByLang[lang];
-        const thisPageNum = pageNum;
+        const thisPageNum = 2 + langIdx; // P1=1, 言語=2〜
 
         return (
           <div key={lang} style={{ ...slideStyle, minHeight: "auto" }}>
@@ -477,13 +477,11 @@ function StoreDetailContent() {
       })}
 
       {/* ===== 最終ページ: まとめ ===== */}
-      {summaryText && (() => {
-        pageNum++;
-        return (
+      {hasSummary && (
           <div style={slideStyle}>
             <div style={slideBarStyle}>
               <span>{shopName} — まとめ</span>
-              <span>{pageNum} / {totalPages}</span>
+              <span>{totalPages} / {totalPages}</span>
             </div>
             <div style={{ ...slideBodyStyle, justifyContent: "flex-start", paddingTop: 36 }}>
               <div style={stitleStyle}>まとめ</div>
@@ -492,8 +490,7 @@ function StoreDetailContent() {
               </div>
             </div>
           </div>
-        );
-      })()}
+      )}
     </div>
   );
 }
@@ -508,58 +505,8 @@ function KpiCard({ kpi, colorIdx }: {
       <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: 3, background: kpiTopColors[colorIdx % kpiTopColors.length] }} />
       <div style={{ fontSize: 12, color: "#888", fontWeight: 500 }}>{kpi.label}</div>
       <div style={{ fontSize: 24, fontWeight: 900, lineHeight: 1.1, margin: "4px 0 6px" }}>{kpi.format(kpi.value)}</div>
-      <ComparisonBadge current={kpi.value} previous={kpi.prev} label="前月比" />
-      {kpi.lastYear !== null && <ComparisonBadge current={kpi.value} previous={kpi.lastYear} label="前年比" />}
-    </div>
-  );
-}
-
-// ── GBP月次推移ページ（テーブルのみ、棒グラフなし） ──
-type GbpMetricKey = "totalImpressions" | "phone" | "directions" | "website" | "menuClicks" | "saveShare" | "booking";
-
-function GbpTrendPage({ shopName, pageNum, totalPages, title, metrics, data }: {
-  shopName: string; pageNum: number; totalPages: number; title: string;
-  metrics: { key: GbpMetricKey; label: string }[];
-  data: GbpRow[];
-}) {
-  const getValue = (row: GbpRow, key: GbpMetricKey): number => {
-    if (key === "booking") return 0;
-    return row[key] ?? 0;
-  };
-
-  return (
-    <div style={slideStyle}>
-      <div style={slideBarStyle}>
-        <span>{shopName} — {title}</span>
-        <span>{pageNum} / {totalPages}</span>
-      </div>
-      <div style={{ ...slideBodyStyle, justifyContent: "flex-start", paddingTop: 36 }}>
-        <div style={stitleStyle}>{title}</div>
-        <table style={{ width: "95%", margin: "0 auto", borderCollapse: "collapse", fontSize: 11 }}>
-          <thead>
-            <tr>
-              <th style={{ background: "#0f3460", color: "#fff", padding: "6px 8px", fontWeight: 600 }}>月</th>
-              {data.map((r, i) => (
-                <th key={i} style={{ background: i === data.length - 1 ? "#e94560" : "#0f3460", color: "#fff", padding: "6px 4px", fontWeight: 600, textAlign: "center" }}>
-                  {Number(r.month.split("/")[1])}月
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {metrics.map((metric, ri) => (
-              <tr key={metric.key} style={{ background: ri % 2 === 0 ? "#f8f9fa" : "#f8f9fb" }}>
-                <td style={{ padding: "4px 8px", fontWeight: 600, color: "#666" }}>{metric.label}</td>
-                {data.map((r, i) => (
-                  <td key={i} style={{ textAlign: "center", padding: "4px", background: i === data.length - 1 ? "#fff8f0" : undefined }}>
-                    {getValue(r, metric.key).toLocaleString()}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <ComparisonBadge current={kpi.value} previous={kpi.prev} label="前月比" format={kpi.format} />
+      {kpi.lastYear !== null && <ComparisonBadge current={kpi.value} previous={kpi.lastYear} label="前年比" format={kpi.format} />}
     </div>
   );
 }
