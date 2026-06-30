@@ -280,19 +280,11 @@ function StoreDetailContent() {
   const dailyByLang: Record<string, CampaignRow[]> = {};
   for (const lang of languages) {
     monthlyByLang[lang] = monthly.filter(r => r.language === lang).sort((a, b) => (a.month || "").localeCompare(b.month || ""));
-    // 日次: 対象月を優先、なければ最新月にフォールバック
+    // 日次: 対象月 → 前月の順で探す。どちらもなければ非表示
     const langDaily = daily.filter(r => r.language === lang).sort((a, b) => (a.date || "").localeCompare(b.date || ""));
-    const targetMonthDaily = langDaily.filter(r => (r.date || "").startsWith(currentMonthKey));
-    if (targetMonthDaily.length > 0) {
-      dailyByLang[lang] = targetMonthDaily;
-    } else if (langDaily.length > 0) {
-      // 最新月のデータのみ取得
-      const latestDate = langDaily[langDaily.length - 1].date || "";
-      const latestMonthKey = latestDate.slice(0, 7); // "YYYY-MM"
-      dailyByLang[lang] = langDaily.filter(r => (r.date || "").startsWith(latestMonthKey));
-    } else {
-      dailyByLang[lang] = [];
-    }
+    const targetDaily = langDaily.filter(r => (r.date || "").startsWith(currentMonthKey));
+    const prevDaily = langDaily.filter(r => (r.date || "").startsWith(prevMonthKey));
+    dailyByLang[lang] = targetDaily.length > 0 ? targetDaily : prevDaily;
   }
 
   // 広告データ: 月別合計（全言語）
