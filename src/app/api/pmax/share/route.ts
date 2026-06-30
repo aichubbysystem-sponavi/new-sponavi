@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireRole, getSupabase } from "@/lib/supabase";
+import { verifyAuth, getSupabase } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
 /** POST: 共有トークンを発行 */
 export async function POST(request: NextRequest) {
-  const r = await requireRole(request, ["president", "manager"]);
-  if (r.error) return r.error;
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   try {
     const { shopName, year, month } = await request.json();
@@ -32,7 +34,7 @@ export async function POST(request: NextRequest) {
     // 新規発行
     const { data, error } = await sb
       .from("pmax_share_tokens")
-      .insert({ shop_name: shopName, year, month, created_by: r.sub })
+      .insert({ shop_name: shopName, year, month, created_by: auth.sub })
       .select("token")
       .single();
 
