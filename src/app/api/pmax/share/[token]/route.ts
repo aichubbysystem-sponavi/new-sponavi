@@ -46,11 +46,23 @@ export async function GET(
     const dailyStart = new Date(year, month - 1, 1);
     const dailyEnd = new Date(year, month, 0);
 
+    // store-summaryキャッシュからaccountIdsを取得（全アカウント検索を回避）
+    let knownAccountIds: string[] | undefined;
+    const { data: cacheRows } = await sb.from("pmax_cache").select("cache_key, data");
+    if (cacheRows) {
+      for (const row of cacheRows) {
+        if (!row.cache_key.startsWith("store-summary:")) continue;
+        const stores = (row.data as { stores?: { shopName: string; accountIds: string[] }[] })?.stores;
+        const match = stores?.find(s => s.shopName === shopName);
+        if (match?.accountIds) { knownAccountIds = match.accountIds; break; }
+      }
+    }
+
     const [adsData, gbpData] = await Promise.all([
       getStoreDetail(
         shopName,
         fmtDate(monthlyStart), fmtDate(monthlyEnd),
-        undefined,
+        knownAccountIds,
         fmtDate(dailyStart), fmtDate(dailyEnd),
       ),
       getGbpDataForShop(shopName).catch(() => []),
