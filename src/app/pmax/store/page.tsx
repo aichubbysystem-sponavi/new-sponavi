@@ -91,11 +91,11 @@ const formatDate = (d: string) => d ? d.replace(/^(\d{4})-(\d{2})-(\d{2})$/, "$2
 const formatNum = (n: number) => n.toLocaleString();
 
 function getDateRange(year: number, month: number, monthsBack: number) {
-  // 対象月の末日を終了日にする
-  const end = new Date(year, month, 0); // month is 1-based, so this gives last day of target month
-  const start = new Date(year, month - 1 - monthsBack, 1);
-  const fmt = (d: Date) => d.toISOString().split("T")[0];
-  return { startDate: fmt(start), endDate: fmt(end) };
+  // タイムゾーン問題を回避: toISOString()はUTC変換で日付がズレるため手動フォーマット
+  const endD = new Date(year, month, 0); // 対象月の末日
+  const startD = new Date(year, month - 1 - monthsBack, 1);
+  const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return { startDate: fmt(startD), endDate: fmt(endD) };
 }
 
 // ── 比較バッジコンポーネント ──
@@ -280,11 +280,10 @@ function StoreDetailContent() {
   const dailyByLang: Record<string, CampaignRow[]> = {};
   for (const lang of languages) {
     monthlyByLang[lang] = monthly.filter(r => r.language === lang).sort((a, b) => (a.month || "").localeCompare(b.month || ""));
-    // 日次: 対象月 → 前月の順で探す。どちらもなければ非表示
-    const langDaily = daily.filter(r => r.language === lang).sort((a, b) => (a.date || "").localeCompare(b.date || ""));
-    const targetDaily = langDaily.filter(r => (r.date || "").startsWith(currentMonthKey));
-    const prevDaily = langDaily.filter(r => (r.date || "").startsWith(prevMonthKey));
-    dailyByLang[lang] = targetDaily.length > 0 ? targetDaily : prevDaily;
+    // 日次: 対象月のデータを表示
+    dailyByLang[lang] = daily
+      .filter(r => r.language === lang && (r.date || "").startsWith(currentMonthKey))
+      .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
   }
 
   // 広告データ: 月別合計（全言語）
