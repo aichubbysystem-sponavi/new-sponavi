@@ -90,11 +90,10 @@ const formatMonthShort = (m: string) => { if (!m) return ""; const d = new Date(
 const formatDate = (d: string) => d ? d.replace(/^(\d{4})-(\d{2})-(\d{2})$/, "$2/$3") : "";
 const formatNum = (n: number) => n.toLocaleString();
 
-function getDateRange(monthsBack: number) {
-  const end = new Date();
-  const start = new Date();
-  start.setMonth(start.getMonth() - monthsBack);
-  start.setDate(1);
+function getDateRange(year: number, month: number, monthsBack: number) {
+  // 対象月の末日を終了日にする
+  const end = new Date(year, month, 0); // month is 1-based, so this gives last day of target month
+  const start = new Date(year, month - 1 - monthsBack, 1);
   const fmt = (d: Date) => d.toISOString().split("T")[0];
   return { startDate: fmt(start), endDate: fmt(end) };
 }
@@ -164,7 +163,7 @@ function StoreDetailContent() {
       try {
         const token = (await supabase.auth.getSession()).data.session?.access_token;
         const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-        const { startDate, endDate } = getDateRange(13);
+        const { startDate, endDate } = getDateRange(targetYear, targetMonthNum, 13);
         const [adsRes, gbpRes] = await Promise.all([
           fetch(`/api/pmax/store-detail?shopName=${encodeURIComponent(shopName)}&startDate=${startDate}&endDate=${endDate}`, { headers }),
           fetch(`/api/pmax/gbp?shopName=${encodeURIComponent(shopName)}`, { headers }),
@@ -185,7 +184,7 @@ function StoreDetailContent() {
         setError(err instanceof Error ? err.message : "取得に失敗しました");
       } finally { setLoading(false); }
     })();
-  }, [shopName]);
+  }, [shopName, targetYear, targetMonthNum]);
 
   // KPIデータが揃ったらAI文章を1回だけ生成（C2修正: summaryRequestedで制御）
   useEffect(() => {
