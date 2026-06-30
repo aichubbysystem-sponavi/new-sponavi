@@ -15,9 +15,10 @@ export default function AppShell({ children, isReportDomain = false, isPmaxDomai
   const isLoginPage = pathname === "/login";
   const isReportPage = isReportDomain || pathname === "/report" || pathname.startsWith("/report/");
   const isPmaxPage = isPmaxDomain || pathname === "/pmax" || pathname.startsWith("/pmax/");
+  const isSharePage = pathname.startsWith("/pmax/share/");
 
   return (
-    <AuthGuard>
+    <AuthGuard skipAuth={isSharePage}>
       {isLoginPage || isReportPage || isPmaxPage ? (
         children
       ) : (
