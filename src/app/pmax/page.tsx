@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import api from "@/lib/api";
 
@@ -25,20 +25,33 @@ const LANG_COLORS: Record<string, string> = {
   Unknown: "bg-slate-100 text-slate-600",
 };
 
+function extractErrorDetail(err: unknown): string {
+  try {
+    // eslint-disable-next-line
+    const data = (err as any)?.response?.data;
+    if (data?.error) {
+      if (typeof data.error === "string" && data.error.includes("429")) {
+        return "Google Ads APIの1日の利用上限に達しました。しばらく時間をおいてから再試行してください。";
+      }
+      return typeof data.error === "string" ? data.error : JSON.stringify(data.error).slice(0, 200);
+    }
+  } catch {}
+  return err instanceof Error ? err.message : "不明なエラー";
+}
+
 export default function PmaxTopPage() {
   const [stores, setStores] = useState<StoreSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
-  const router = useRouter();
-
   const [syncing, setSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState("");
+  const router = useRouter();
 
   const now = new Date();
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
-  const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1); // 1-indexed
+  const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
 
   const monthOptions = useMemo(() => {
     const opts = [];
@@ -56,6 +69,7 @@ export default function PmaxTopPage() {
 
   const monthKey = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}`;
 
+  // DBからデータ読み込み（APIは呼ばない）
   const fetchStores = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -79,48 +93,19 @@ export default function PmaxTopPage() {
     fetchStores();
   }, [fetchStores]);
 
-  // データがない月は自動同期（1回のAPI呼び出しで全店舗分を取得）
-  // 失敗時は30分間リトライしない
-  const autoSyncTriggered = useRef<Record<string, number>>({});
-  useEffect(() => {
-    if (loading || syncing) return;
-    if (stores.length > 0) return;
-    const lastAttempt = autoSyncTriggered.current[monthKey] || 0;
-    if (Date.now() - lastAttempt < 30 * 60 * 1000) return; // 30分以内はスキップ
-    autoSyncTriggered.current[monthKey] = Date.now();
-    (async () => {
-      setSyncing(true);
-      setSyncProgress("Google Ads APIから全店舗データを同期中（約2分）...");
-      try {
-        const res = await api.post("/api/pmax/sync", { month: monthKey }, { timeout: 290000 });
-        setSyncProgress(`${res.data.shops}店舗の同期完了（月次${res.data.monthlyRows}件・日次${res.data.dailyRows}件）`);
-        autoSyncTriggered.current[monthKey] = 0; // 成功したらリセット
-        await fetchStores();
-      } catch (err: unknown) {
-        const detail = (err as Record<string, Record<string, Record<string, string>>>)?.response?.data?.error
-          || (err instanceof Error ? err.message : "不明なエラー");
-        setSyncProgress(`同期エラー: ${detail}`);
-      } finally {
-        setSyncing(false);
-      }
-    })();
-  }, [loading, syncing, stores.length, monthKey, fetchStores]);
-
-  // 反映ボタン（全店舗再同期）
+  // 手動同期（全店舗のデータをGoogle Ads APIから取得→DB保存）
   const handleSync = async () => {
     setSyncing(true);
-    setSyncProgress("Google Ads APIから最新データを同期中...");
+    setSyncProgress("Google Ads APIから全店舗データを同期中（約2分）...");
     try {
       const res = await api.post("/api/pmax/sync", { month: monthKey }, { timeout: 290000 });
       setSyncProgress(`${res.data.shops}店舗の同期完了（月次${res.data.monthlyRows}件・日次${res.data.dailyRows}件）`);
       await fetchStores();
+      setTimeout(() => setSyncProgress(""), 10000);
     } catch (err: unknown) {
-      const detail = (err as Record<string, Record<string, Record<string, string>>>)?.response?.data?.error
-        || (err instanceof Error ? err.message : "不明なエラー");
-      setSyncProgress(`同期エラー: ${detail}`);
+      setSyncProgress(extractErrorDetail(err));
     } finally {
       setSyncing(false);
-      setTimeout(() => setSyncProgress(""), 10000);
     }
   };
 
@@ -135,7 +120,6 @@ export default function PmaxTopPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
-      {/* ヘッダー */}
       <header className="bg-white border-b border-slate-200 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -153,7 +137,6 @@ export default function PmaxTopPage() {
         </div>
       </header>
 
-      {/* KPIバー */}
       <div className="bg-white border-b border-slate-100">
         <div className="max-w-7xl mx-auto px-6 py-4 grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="bg-slate-50 rounded-lg p-4">
@@ -175,9 +158,7 @@ export default function PmaxTopPage() {
         </div>
       </div>
 
-      {/* メインコンテンツ */}
       <main className="max-w-7xl mx-auto px-6 py-6">
-        {/* 操作バー */}
         <div className="flex flex-wrap items-center gap-3 mb-3">
           <input
             type="text"
@@ -226,7 +207,7 @@ export default function PmaxTopPage() {
 
         {/* 同期プログレス */}
         {syncProgress && (
-          <div className={`mb-4 px-4 py-3 rounded-lg text-sm ${syncing ? "bg-blue-50 text-blue-700" : syncProgress.includes("エラー") ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>
+          <div className={`mb-4 px-4 py-3 rounded-lg text-sm ${syncing ? "bg-blue-50 text-blue-700" : syncProgress.includes("完了") ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>
             {syncProgress}
           </div>
         )}
@@ -239,17 +220,18 @@ export default function PmaxTopPage() {
         )}
 
         {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
-            {error}
-          </div>
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">{error}</div>
         )}
 
         {!loading && !error && (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {filtered.length === 0 ? (
-              <p className="text-sm text-slate-500 py-8 text-center col-span-full">
-                {search ? "該当する店舗が見つかりません" : "この月のデータはまだ同期されていません。店舗を選択して「反映」してください。"}
-              </p>
+              <div className="col-span-full py-12 text-center">
+                <p className="text-slate-500 mb-2">{search ? "該当する店舗が見つかりません" : "この月のデータはまだありません"}</p>
+                {!search && (
+                  <p className="text-xs text-slate-400">「最新データに更新」ボタンでGoogle Ads APIからデータを取得できます</p>
+                )}
+              </div>
             ) : (
               filtered.map((store) => (
                 <button
@@ -257,35 +239,35 @@ export default function PmaxTopPage() {
                   onClick={() => router.push(`/pmax/store?name=${encodeURIComponent(store.shopName)}&year=${selectedYear}&month=${selectedMonth}`)}
                   className="bg-white rounded-xl border border-slate-200 p-5 hover:border-[#003D6B]/30 hover:shadow-lg transition-all text-left group"
                 >
-                      <div className="flex items-start justify-between mb-3">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-semibold text-slate-800 group-hover:text-[#003D6B] truncate">{store.shopName}</p>
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {store.languages.map((lang) => (
-                              <span key={lang} className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${LANG_COLORS[lang] || LANG_COLORS.Unknown}`}>
-                                {lang}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                        <svg className="w-5 h-5 text-slate-300 group-hover:text-[#003D6B] transition-colors flex-shrink-0 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                        </svg>
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-slate-800 group-hover:text-[#003D6B] truncate">{store.shopName}</p>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {store.languages.map((lang) => (
+                          <span key={lang} className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${LANG_COLORS[lang] || LANG_COLORS.Unknown}`}>
+                            {lang}
+                          </span>
+                        ))}
                       </div>
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="bg-blue-50 rounded-lg p-2 text-center">
-                          <p className="text-[10px] text-blue-500">表示</p>
-                          <p className="text-sm font-bold text-blue-700">{store.impressions.toLocaleString("ja-JP")}</p>
-                        </div>
-                        <div className="bg-emerald-50 rounded-lg p-2 text-center">
-                          <p className="text-[10px] text-emerald-500">クリック</p>
-                          <p className="text-sm font-bold text-emerald-700">{store.clicks.toLocaleString("ja-JP")}</p>
-                        </div>
-                        <div className="bg-orange-50 rounded-lg p-2 text-center">
-                          <p className="text-[10px] text-orange-500">広告費</p>
-                          <p className="text-sm font-bold text-orange-700">{formatCost(store.costMicros)}</p>
-                        </div>
-                      </div>
+                    </div>
+                    <svg className="w-5 h-5 text-slate-300 group-hover:text-[#003D6B] transition-colors flex-shrink-0 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="bg-blue-50 rounded-lg p-2 text-center">
+                      <p className="text-[10px] text-blue-500">表示</p>
+                      <p className="text-sm font-bold text-blue-700">{store.impressions.toLocaleString("ja-JP")}</p>
+                    </div>
+                    <div className="bg-emerald-50 rounded-lg p-2 text-center">
+                      <p className="text-[10px] text-emerald-500">クリック</p>
+                      <p className="text-sm font-bold text-emerald-700">{store.clicks.toLocaleString("ja-JP")}</p>
+                    </div>
+                    <div className="bg-orange-50 rounded-lg p-2 text-center">
+                      <p className="text-[10px] text-orange-500">広告費</p>
+                      <p className="text-sm font-bold text-orange-700">{formatCost(store.costMicros)}</p>
+                    </div>
+                  </div>
                 </button>
               ))
             )}
