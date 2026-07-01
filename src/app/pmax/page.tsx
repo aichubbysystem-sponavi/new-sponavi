@@ -118,11 +118,12 @@ export default function PmaxTopPage() {
         setSyncProgress(`${totalSynced}店舗の自動同期完了（月次${totalMonthly}件・日次${totalDaily}件）`);
         await fetchStores();
       } catch (err: unknown) {
-        setSyncProgress(`自動同期エラー: ${err instanceof Error ? err.message : "不明なエラー"}`);
+        // eslint-disable-next-line
+        const detail = (err as any)?.response?.data?.error || (err instanceof Error ? err.message : "不明なエラー");
+        setSyncProgress(`自動同期エラー: ${detail}`);
       } finally {
         setFetchingStores(false);
         setSyncing(false);
-        setTimeout(() => setSyncProgress(""), 8000);
       }
     })();
   }, [loading, syncing, fetchingStores, stores.length, monthKey, fetchStores]);
