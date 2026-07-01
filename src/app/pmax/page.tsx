@@ -49,6 +49,12 @@ export default function PmaxTopPage() {
   const [syncProgress, setSyncProgress] = useState("");
   const router = useRouter();
 
+  // 店舗選択
+  const [knownShops, setKnownShops] = useState<string[]>([]);
+  const [selectedShops, setSelectedShops] = useState<Set<string>>(new Set());
+  const [showSelector, setShowSelector] = useState(false);
+  const [shopSearch, setShopSearch] = useState("");
+
   const now = new Date();
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
@@ -106,12 +112,36 @@ export default function PmaxTopPage() {
     fetchStores();
   }, [fetchStores]);
 
-  // 手動同期（全店舗のデータをGoogle Ads APIから取得→DB保存）
-  const handleSync = async () => {
+  // 店舗選択パネルを開く
+  const openSelector = async () => {
+    if (knownShops.length === 0) {
+      try {
+        const res = await api.get("/api/pmax/known-shops");
+        setKnownShops(res.data.shops || []);
+      } catch {
+        setSyncProgress("店舗一覧の取得に失敗しました");
+        return;
+      }
+    }
+    setShowSelector(true);
+  };
+
+  // 手動同期
+  const handleSync = async (mode: "all" | "selected") => {
+    const names = mode === "selected" ? Array.from(selectedShops) : undefined;
+    if (mode === "selected" && (!names || names.length === 0)) {
+      setSyncProgress("店舗を選択してください");
+      return;
+    }
+
     setSyncing(true);
-    setSyncProgress("Google Ads APIから全店舗データを同期中（約2分）...");
+    setShowSelector(false);
+    const label = mode === "selected" ? `${names!.length}店舗` : "全店舗";
+    setSyncProgress(`Google Ads APIから${label}のデータを同期中...`);
     try {
-      const res = await api.post("/api/pmax/sync", { month: monthKey }, { timeout: 290000 });
+      const payload: Record<string, unknown> = { month: monthKey };
+      if (names) payload.shopNames = names;
+      const res = await api.post("/api/pmax/sync", payload, { timeout: 290000 });
       const d = res.data;
       const dbInfo = d.dbCount != null ? ` DB保存: ${d.dbCount}件` : "";
       const errInfo = d.insertErrors?.length ? ` [INSERT失敗: ${d.insertErrors[0]}]` : "";
@@ -124,6 +154,10 @@ export default function PmaxTopPage() {
       setSyncing(false);
     }
   };
+
+  const filteredKnownShops = knownShops.filter(
+    (s) => s.toLowerCase().includes(shopSearch.toLowerCase())
+  );
 
   const filtered = stores.filter(
     (s) => s.shopName.toLowerCase().includes(search.toLowerCase())
@@ -204,7 +238,7 @@ export default function PmaxTopPage() {
         {/* 同期操作バー */}
         <div className="flex flex-wrap items-center gap-3 mb-5 bg-white border border-slate-200 rounded-lg px-4 py-3">
           <button
-            onClick={handleSync}
+            onClick={() => handleSync("all")}
             disabled={syncing}
             className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
               syncing
@@ -212,7 +246,18 @@ export default function PmaxTopPage() {
                 : "bg-[#003D6B] text-white hover:bg-[#002a4d] shadow-sm"
             }`}
           >
-            {syncing ? "同期中..." : "最新データに更新"}
+            {syncing ? "同期中..." : "全店舗を更新"}
+          </button>
+          <button
+            onClick={openSelector}
+            disabled={syncing}
+            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+              syncing
+                ? "bg-slate-200 text-slate-400 cursor-not-allowed"
+                : "bg-white text-[#003D6B] border border-[#003D6B] hover:bg-[#003D6B]/5"
+            }`}
+          >
+            店舗を選んで更新
           </button>
           {lastSyncedAt && (
             <span className="text-xs text-slate-400">
@@ -220,6 +265,74 @@ export default function PmaxTopPage() {
             </span>
           )}
         </div>
+
+        {/* 店舗選択パネル */}
+        {showSelector && (
+          <div className="mb-5 bg-white border border-slate-200 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-bold text-slate-700">更新する店舗を選択（{selectedShops.size}件選択中）</h3>
+              <button onClick={() => setShowSelector(false)} className="text-slate-400 hover:text-slate-600 text-lg leading-none">&times;</button>
+            </div>
+            <div className="flex items-center gap-2 mb-3">
+              <input
+                type="text"
+                placeholder="店舗名で絞り込み..."
+                value={shopSearch}
+                onChange={(e) => setShopSearch(e.target.value)}
+                className="flex-1 px-3 py-1.5 border border-slate-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-[#003D6B]/30"
+              />
+              <button
+                onClick={() => {
+                  if (selectedShops.size === filteredKnownShops.length) {
+                    const next = new Set(selectedShops);
+                    filteredKnownShops.forEach((s) => next.delete(s));
+                    setSelectedShops(next);
+                  } else {
+                    setSelectedShops(new Set([...Array.from(selectedShops), ...filteredKnownShops]));
+                  }
+                }}
+                className="px-3 py-1.5 text-xs font-medium text-[#003D6B] border border-[#003D6B]/30 rounded hover:bg-[#003D6B]/5 whitespace-nowrap"
+              >
+                {selectedShops.size === filteredKnownShops.length && filteredKnownShops.length > 0 ? "全解除" : "全選択"}
+              </button>
+              <button
+                onClick={() => handleSync("selected")}
+                disabled={syncing || selectedShops.size === 0}
+                className={`px-4 py-1.5 rounded text-xs font-bold whitespace-nowrap transition-all ${
+                  syncing || selectedShops.size === 0
+                    ? "bg-slate-200 text-slate-400 cursor-not-allowed"
+                    : "bg-[#003D6B] text-white hover:bg-[#002a4d]"
+                }`}
+              >
+                {selectedShops.size}件を更新
+              </button>
+            </div>
+            <div className="max-h-60 overflow-y-auto border border-slate-100 rounded">
+              {filteredKnownShops.map((name) => (
+                <label
+                  key={name}
+                  className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 cursor-pointer text-sm border-b border-slate-50 last:border-b-0"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedShops.has(name)}
+                    onChange={() => {
+                      const next = new Set(selectedShops);
+                      if (next.has(name)) next.delete(name);
+                      else next.add(name);
+                      setSelectedShops(next);
+                    }}
+                    className="rounded border-slate-300 text-[#003D6B] focus:ring-[#003D6B]/30"
+                  />
+                  <span className="truncate">{name}</span>
+                </label>
+              ))}
+              {filteredKnownShops.length === 0 && (
+                <p className="text-center text-slate-400 text-sm py-4">該当する店舗がありません</p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* 同期プログレス */}
         {syncProgress && (

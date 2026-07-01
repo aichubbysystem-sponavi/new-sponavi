@@ -56,10 +56,11 @@ export async function POST(request: NextRequest) {
   const r = await requireRole(request, ["president", "manager"]);
   if (r.error) return r.error;
 
-  let body: { month?: string; forceFullScan?: boolean };
+  let body: { month?: string; forceFullScan?: boolean; shopNames?: string[] };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "不正なリクエスト" }, { status: 400 }); }
 
-  const { month, forceFullScan } = body;
+  const { month, forceFullScan, shopNames: selectedShops } = body;
+  const isSelectiveSync = Array.isArray(selectedShops) && selectedShops.length > 0;
   if (!month || !/^\d{4}-\d{2}$/.test(month)) {
     return NextResponse.json({ error: "month は YYYY-MM 形式" }, { status: 400 });
   }
@@ -79,7 +80,23 @@ export async function POST(request: NextRequest) {
   let targetAccountIds: string[] = [];
   let isFullScan = false;
 
-  if (!forceFullScan) {
+  if (isSelectiveSync) {
+    // 選択店舗のアカウントだけ取得
+    const { data: mappings } = await sb
+      .from("pmax_account_mapping")
+      .select("account_id, shop_name")
+      .limit(5000);
+
+    if (mappings && mappings.length > 0) {
+      const selectedSet = new Set(selectedShops);
+      const filtered = mappings.filter((m: { shop_name: string }) => selectedSet.has(m.shop_name));
+      targetAccountIds = Array.from(new Set(filtered.map((m: { account_id: string }) => m.account_id)));
+      console.log(`[pmax/sync] Selective sync: ${selectedShops.length} shops → ${targetAccountIds.length} accounts`);
+    }
+    if (targetAccountIds.length === 0) {
+      return NextResponse.json({ error: "選択した店舗のアカウントマッピングが見つかりません。先に全店舗同期を実行してください。" }, { status: 400 });
+    }
+  } else if (!forceFullScan) {
     // DBからマッピング済みアカウントIDを取得
     const { data: mappings } = await sb
       .from("pmax_account_mapping")
@@ -92,7 +109,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (targetAccountIds.length === 0) {
+  if (!isSelectiveSync && targetAccountIds.length === 0) {
     // マッピングなし or forceFullScan → 全アカウントスキャン
     isFullScan = true;
     const accounts = await withRetry(() => listAccounts(), "listAccounts");
@@ -153,11 +170,20 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Step 4: DB保存 ──
-  const { error: deleteError, count: deleteCount } = await sb
-    .from("pmax_store_data")
-    .delete({ count: "exact" })
-    .eq("month", month);
-  console.log(`[pmax/sync] Deleted ${deleteCount ?? "?"} rows for month=${month}`, deleteError ? `ERROR: ${deleteError.message}` : "OK");
+  // 選択同期: 選択店舗のデータだけ削除 / 全店舗同期: 月全体を削除
+  if (isSelectiveSync) {
+    const syncedShopNames = Array.from(new Set(allMonthly.map(r => r.shopName)));
+    for (const name of syncedShopNames) {
+      await sb.from("pmax_store_data").delete().eq("month", month).eq("shop_name", name);
+    }
+    console.log(`[pmax/sync] Deleted data for ${syncedShopNames.length} shops in month=${month}`);
+  } else {
+    const { error: deleteError, count: deleteCount } = await sb
+      .from("pmax_store_data")
+      .delete({ count: "exact" })
+      .eq("month", month);
+    console.log(`[pmax/sync] Deleted ${deleteCount ?? "?"} rows for month=${month}`, deleteError ? `ERROR: ${deleteError.message}` : "OK");
+  }
 
   const insertErrors: string[] = [];
   if (allMonthly.length > 0) {
