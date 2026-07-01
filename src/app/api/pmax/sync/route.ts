@@ -64,6 +64,7 @@ export async function POST(request: NextRequest) {
 
   const sb = getSupabase();
 
+  try {
   // 1. アカウント一覧取得（1 API呼び出し）
   const accounts = await withRetry(() => listAccounts(), "listAccounts");
   console.log(`[pmax/sync] ${accounts.length} accounts found`);
@@ -227,4 +228,10 @@ export async function POST(request: NextRequest) {
     dbCount: count,
     insertErrors: insertErrors.length > 0 ? insertErrors : undefined,
   });
+
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[pmax/sync] Fatal error:", msg);
+    return NextResponse.json({ error: `同期失敗: ${msg.slice(0, 300)}` }, { status: 500 });
+  }
 }

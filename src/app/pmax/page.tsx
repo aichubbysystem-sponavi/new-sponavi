@@ -35,7 +35,6 @@ export default function PmaxTopPage() {
 
   const [syncing, setSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState("");
-  const [fetchingStores, setFetchingStores] = useState(false);
 
   const now = new Date();
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
@@ -81,18 +80,21 @@ export default function PmaxTopPage() {
   }, [fetchStores]);
 
   // データがない月は自動同期（1回のAPI呼び出しで全店舗分を取得）
-  const autoSyncTriggered = useRef(false);
+  // 失敗時は30分間リトライしない
+  const autoSyncTriggered = useRef<Record<string, number>>({});
   useEffect(() => {
-    if (loading || syncing || fetchingStores) return;
-    if (stores.length > 0) { autoSyncTriggered.current = false; return; }
-    if (autoSyncTriggered.current) return;
-    autoSyncTriggered.current = true;
+    if (loading || syncing) return;
+    if (stores.length > 0) return;
+    const lastAttempt = autoSyncTriggered.current[monthKey] || 0;
+    if (Date.now() - lastAttempt < 30 * 60 * 1000) return; // 30分以内はスキップ
+    autoSyncTriggered.current[monthKey] = Date.now();
     (async () => {
       setSyncing(true);
-      setSyncProgress("Google Ads APIから全店舗データを同期中...");
+      setSyncProgress("Google Ads APIから全店舗データを同期中（約2分）...");
       try {
         const res = await api.post("/api/pmax/sync", { month: monthKey }, { timeout: 290000 });
         setSyncProgress(`${res.data.shops}店舗の同期完了（月次${res.data.monthlyRows}件・日次${res.data.dailyRows}件）`);
+        autoSyncTriggered.current[monthKey] = 0; // 成功したらリセット
         await fetchStores();
       } catch (err: unknown) {
         const detail = (err as Record<string, Record<string, Record<string, string>>>)?.response?.data?.error
@@ -100,10 +102,9 @@ export default function PmaxTopPage() {
         setSyncProgress(`同期エラー: ${detail}`);
       } finally {
         setSyncing(false);
-        setTimeout(() => setSyncProgress(""), 10000);
       }
     })();
-  }, [loading, syncing, fetchingStores, stores.length, monthKey, fetchStores]);
+  }, [loading, syncing, stores.length, monthKey, fetchStores]);
 
   // 反映ボタン（全店舗再同期）
   const handleSync = async () => {
