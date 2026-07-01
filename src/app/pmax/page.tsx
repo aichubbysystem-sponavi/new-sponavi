@@ -33,8 +33,6 @@ export default function PmaxTopPage() {
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const router = useRouter();
 
-  // 選択状態
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [syncing, setSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState("");
   const [fetchingStores, setFetchingStores] = useState(false);
@@ -82,7 +80,7 @@ export default function PmaxTopPage() {
     fetchStores();
   }, [fetchStores]);
 
-  // データがない月は自動同期
+  // データがない月は自動同期（1回のAPI呼び出しで全店舗分を取得）
   const autoSyncTriggered = useRef(false);
   useEffect(() => {
     if (loading || syncing || fetchingStores) return;
@@ -90,115 +88,38 @@ export default function PmaxTopPage() {
     if (autoSyncTriggered.current) return;
     autoSyncTriggered.current = true;
     (async () => {
-      setFetchingStores(true);
-      setSyncProgress("初回同期: Google Ads APIから全店舗を取得中...");
+      setSyncing(true);
+      setSyncProgress("Google Ads APIから全店舗データを同期中...");
       try {
-        const listRes = await api.get(`/api/pmax/list-stores?month=${monthKey}`, { timeout: 120000 });
-        const apiStores: StoreSummary[] = listRes.data.stores || [];
-        if (apiStores.length === 0) {
-          setSyncProgress("この月のデータはGoogle Adsにありません。");
-          setFetchingStores(false);
-          return;
-        }
-        setStores(apiStores);
-        setFetchingStores(false);
-        setSyncing(true);
-        const shopNames = apiStores.map((s) => s.shopName);
-        const BATCH = 50;
-        let totalSynced = 0, totalMonthly = 0, totalDaily = 0, totalGbp = 0;
-        for (let i = 0; i < shopNames.length; i += BATCH) {
-          const batch = shopNames.slice(i, i + BATCH);
-          setSyncProgress(`初回同期: ${i + 1}〜${Math.min(i + BATCH, shopNames.length)} / ${shopNames.length}店舗`);
-          const res = await api.post("/api/pmax/sync", { shopNames: batch, month: monthKey }, { timeout: 290000 });
-          totalSynced += res.data.synced || 0;
-          totalMonthly += res.data.monthlyRows || 0;
-          totalDaily += res.data.dailyRows || 0;
-          totalGbp += res.data.gbpSynced || 0;
-        }
-        setSyncProgress(`${totalSynced}店舗の自動同期完了（月次${totalMonthly}件・日次${totalDaily}件）`);
+        const res = await api.post("/api/pmax/sync", { month: monthKey }, { timeout: 290000 });
+        setSyncProgress(`${res.data.shops}店舗の同期完了（月次${res.data.monthlyRows}件・日次${res.data.dailyRows}件）`);
         await fetchStores();
       } catch (err: unknown) {
-        // eslint-disable-next-line
-        const detail = (err as any)?.response?.data?.error || (err instanceof Error ? err.message : "不明なエラー");
-        setSyncProgress(`自動同期エラー: ${detail}`);
+        const detail = (err as Record<string, Record<string, Record<string, string>>>)?.response?.data?.error
+          || (err instanceof Error ? err.message : "不明なエラー");
+        setSyncProgress(`同期エラー: ${detail}`);
       } finally {
-        setFetchingStores(false);
         setSyncing(false);
+        setTimeout(() => setSyncProgress(""), 10000);
       }
     })();
   }, [loading, syncing, fetchingStores, stores.length, monthKey, fetchStores]);
 
-  // 全選択/全解除
-  const toggleSelectAll = () => {
-    if (selected.size === filtered.length) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(filtered.map((s) => s.shopName)));
-    }
-  };
-
-  const toggleSelect = (shopName: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(shopName)) next.delete(shopName);
-      else next.add(shopName);
-      return next;
-    });
-  };
-
-  // 全店舗取得（Google Ads APIから店舗一覧を取得してカード表示）
-  const handleFetchStores = async () => {
-    setFetchingStores(true);
-    setSyncProgress("Google Ads APIから全店舗を取得中...");
-    try {
-      const res = await api.get(`/api/pmax/list-stores?month=${monthKey}`, { timeout: 120000 });
-      const apiStores: StoreSummary[] = res.data.stores || [];
-      // DB同期済みの店舗とマージ（同期済みはDBの値、未同期はAPI値）
-      const dbNames = new Set(stores.map((s) => s.shopName));
-      const merged = [...stores];
-      for (const s of apiStores) {
-        if (!dbNames.has(s.shopName)) {
-          merged.push(s);
-        }
-      }
-      merged.sort((a, b) => b.impressions - a.impressions);
-      setStores(merged);
-      setSyncProgress(`${apiStores.length}店舗を取得しました。同期する店舗を選択して「反映」してください。`);
-    } catch (err: unknown) {
-      setSyncProgress(`取得エラー: ${err instanceof Error ? err.message : "不明なエラー"}`);
-    } finally {
-      setFetchingStores(false);
-      setTimeout(() => setSyncProgress(""), 8000);
-    }
-  };
-
-  // 反映ボタン
+  // 反映ボタン（全店舗再同期）
   const handleSync = async () => {
-    if (selected.size === 0) return;
     setSyncing(true);
-    const shopNames = Array.from(selected);
-    const BATCH_SIZE = 50;
-    let totalSynced = 0, totalMonthly = 0, totalDaily = 0, totalGbp = 0;
-    let lastRes: { dbVerifyCount?: number; insertErrors?: string[] } | null = null;
+    setSyncProgress("Google Ads APIから最新データを同期中...");
     try {
-      for (let i = 0; i < shopNames.length; i += BATCH_SIZE) {
-        const batch = shopNames.slice(i, i + BATCH_SIZE);
-        setSyncProgress(`同期中... ${i + 1}〜${Math.min(i + BATCH_SIZE, shopNames.length)} / ${shopNames.length}店舗`);
-        const res = await api.post("/api/pmax/sync", { shopNames: batch, month: monthKey }, { timeout: 290000 });
-        lastRes = res.data;
-        totalSynced += res.data.synced || 0;
-        totalMonthly += res.data.monthlyRows || 0;
-        totalDaily += res.data.dailyRows || 0;
-        totalGbp += res.data.gbpSynced || 0;
-      }
-      setSyncProgress(`${totalSynced}店舗の同期完了（月次${totalMonthly}件・日次${totalDaily}件・GBP${totalGbp}件）DB検証: ${lastRes?.dbVerifyCount ?? "?"}件${lastRes?.insertErrors ? " エラー: " + lastRes.insertErrors.join(", ") : ""}`);
-      setSelected(new Set());
+      const res = await api.post("/api/pmax/sync", { month: monthKey }, { timeout: 290000 });
+      setSyncProgress(`${res.data.shops}店舗の同期完了（月次${res.data.monthlyRows}件・日次${res.data.dailyRows}件）`);
       await fetchStores();
     } catch (err: unknown) {
-      setSyncProgress(`同期エラー（${totalSynced}店舗完了済み）: ${err instanceof Error ? err.message : "不明なエラー"}`);
+      const detail = (err as Record<string, Record<string, Record<string, string>>>)?.response?.data?.error
+        || (err instanceof Error ? err.message : "不明なエラー");
+      setSyncProgress(`同期エラー: ${detail}`);
     } finally {
       setSyncing(false);
-      setTimeout(() => setSyncProgress(""), 8000);
+      setTimeout(() => setSyncProgress(""), 10000);
     }
   };
 
@@ -270,7 +191,6 @@ export default function PmaxTopPage() {
               const [y, m] = e.target.value.split("-").map(Number);
               setSelectedYear(y);
               setSelectedMonth(m);
-              setSelected(new Set());
             }}
             className="px-4 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20"
           >
@@ -286,37 +206,18 @@ export default function PmaxTopPage() {
         {/* 同期操作バー */}
         <div className="flex flex-wrap items-center gap-3 mb-5 bg-white border border-slate-200 rounded-lg px-4 py-3">
           <button
-            onClick={handleFetchStores}
-            disabled={fetchingStores || syncing}
-            className={`text-xs px-3 py-1.5 rounded-md transition-colors ${
-              fetchingStores || syncing
-                ? "bg-slate-200 text-slate-400 cursor-not-allowed"
-                : "bg-emerald-600 text-white hover:bg-emerald-700"
-            }`}
-          >
-            {fetchingStores ? "取得中..." : "全店舗取得"}
-          </button>
-          <button
-            onClick={toggleSelectAll}
-            disabled={stores.length === 0}
-            className="text-xs px-3 py-1.5 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
-          >
-            {selected.size === filtered.length && filtered.length > 0 ? "全解除" : "全選択"}
-          </button>
-          <span className="text-xs text-slate-500">{selected.size}店舗選択中</span>
-          <button
             onClick={handleSync}
-            disabled={syncing || selected.size === 0}
-            className={`ml-auto px-5 py-2 rounded-lg text-sm font-bold transition-all ${
-              syncing || selected.size === 0
+            disabled={syncing}
+            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+              syncing
                 ? "bg-slate-200 text-slate-400 cursor-not-allowed"
                 : "bg-[#003D6B] text-white hover:bg-[#002a4d] shadow-sm"
             }`}
           >
-            {syncing ? "同期中..." : `反映（${selected.size}店舗）`}
+            {syncing ? "同期中..." : "最新データに更新"}
           </button>
           {lastSyncedAt && (
-            <span className="text-[10px] text-slate-400">
+            <span className="text-xs text-slate-400">
               最終同期: {new Date(lastSyncedAt).toLocaleString("ja-JP")}
             </span>
           )}
@@ -350,25 +251,11 @@ export default function PmaxTopPage() {
               </p>
             ) : (
               filtered.map((store) => (
-                <div
+                <button
                   key={store.shopName}
-                  className={`bg-white rounded-xl border p-5 transition-all ${
-                    selected.has(store.shopName) ? "border-[#003D6B] ring-2 ring-[#003D6B]/20" : "border-slate-200 hover:border-[#003D6B]/30 hover:shadow-lg"
-                  }`}
+                  onClick={() => router.push(`/pmax/store?name=${encodeURIComponent(store.shopName)}&year=${selectedYear}&month=${selectedMonth}`)}
+                  className="bg-white rounded-xl border border-slate-200 p-5 hover:border-[#003D6B]/30 hover:shadow-lg transition-all text-left group"
                 >
-                  <div className="flex items-start gap-3">
-                    {/* チェックボックス */}
-                    <input
-                      type="checkbox"
-                      checked={selected.has(store.shopName)}
-                      onChange={() => toggleSelect(store.shopName)}
-                      className="mt-1 w-4 h-4 rounded border-slate-300 text-[#003D6B] focus:ring-[#003D6B]/20 cursor-pointer flex-shrink-0"
-                    />
-                    {/* 店舗カード */}
-                    <button
-                      onClick={() => router.push(`/pmax/store?name=${encodeURIComponent(store.shopName)}&year=${selectedYear}&month=${selectedMonth}`)}
-                      className="flex-1 text-left group"
-                    >
                       <div className="flex items-start justify-between mb-3">
                         <div className="flex-1 min-w-0">
                           <p className="font-semibold text-slate-800 group-hover:text-[#003D6B] truncate">{store.shopName}</p>
@@ -398,9 +285,7 @@ export default function PmaxTopPage() {
                           <p className="text-sm font-bold text-orange-700">{formatCost(store.costMicros)}</p>
                         </div>
                       </div>
-                    </button>
-                  </div>
-                </div>
+                </button>
               ))
             )}
           </div>

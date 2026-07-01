@@ -1,7 +1,10 @@
 /**
  * POST /api/pmax/sync
- * 指定店舗+月のP-MAXデータをGoogle Ads APIから取得→Supabaseに保存
- * body: { shopNames: string[], month: string (YYYY-MM) }
+ * 全店舗のP-MAXデータを一括取得→DB保存
+ * body: { month: "YYYY-MM" }
+ *
+ * 設計: listAccounts→getCampaignMonthly×全アカウント→getCampaignDaily×全アカウント
+ * の計~60 API呼び出しで全店舗分を取得（バッチ分割不要）
  */
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, requireRole } from "@/lib/supabase";
@@ -11,26 +14,43 @@ import {
   getCampaignDaily,
   parseCampaignName,
 } from "@/lib/google-ads";
-import { getGbpDataForShop } from "@/lib/pmax-sheet";
+import { getGbpDataForShop, type PmaxGbpRow } from "@/lib/pmax-sheet";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
+
+/** 429エラー時のリトライ（指数バックオフ） */
+async function withRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
+  const delays = [3000, 8000, 15000];
+  for (let i = 0; i <= delays.length; i++) {
+    try {
+      return await fn();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const is429 = msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED");
+      if (is429 && i < delays.length) {
+        console.log(`[pmax/sync] ${label} 429 retry ${i + 1}/${delays.length}, waiting ${delays[i]}ms`);
+        await new Promise(r => setTimeout(r, delays[i]));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw new Error("unreachable");
+}
 
 export async function POST(request: NextRequest) {
   const r = await requireRole(request, ["president", "manager"]);
   if (r.error) return r.error;
 
-  let body: { shopNames?: string[]; month?: string };
+  let body: { month?: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "不正なリクエスト" }, { status: 400 });
   }
 
-  const { shopNames, month } = body;
-  if (!shopNames || !Array.isArray(shopNames) || shopNames.length === 0) {
-    return NextResponse.json({ error: "shopNames は1つ以上指定してください" }, { status: 400 });
-  }
+  const { month } = body;
   if (!month || !/^\d{4}-\d{2}$/.test(month)) {
     return NextResponse.json({ error: "month は YYYY-MM 形式で指定してください" }, { status: 400 });
   }
@@ -38,19 +58,20 @@ export async function POST(request: NextRequest) {
   const [yearStr, monthStr] = month.split("-");
   const year = Number(yearStr);
   const mon = Number(monthStr);
-  // toISOString()はUTC変換で日付がズレるので手動フォーマット
   const startDate = `${year}-${String(mon).padStart(2, "0")}-01`;
   const lastDay = new Date(year, mon, 0).getDate();
   const endDate = `${year}-${String(mon).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
 
   const sb = getSupabase();
-  const shopNameSet = new Set(shopNames);
 
-  // 1. 全アカウントのキャンペーンデータを取得
-  const accounts = await listAccounts();
-  const BATCH = 10;
+  // 1. アカウント一覧取得（1 API呼び出し）
+  const accounts = await withRetry(() => listAccounts(), "listAccounts");
+  console.log(`[pmax/sync] ${accounts.length} accounts found`);
 
-  type CampaignRow = {
+  // 2. 全アカウントの月次+日次データを並列取得（10アカウントずつ）
+  type ParsedRow = {
+    shopName: string;
+    language: string;
     accountId: string;
     campaignName: string;
     campaignId: string;
@@ -63,55 +84,49 @@ export async function POST(request: NextRequest) {
     costMicros: number;
   };
 
-  const allMonthly: CampaignRow[] = [];
-  const allDaily: CampaignRow[] = [];
+  const allMonthly: ParsedRow[] = [];
+  const allDaily: ParsedRow[] = [];
+  const BATCH = 10;
 
   for (let i = 0; i < accounts.length; i += BATCH) {
     const batch = accounts.slice(i, i + BATCH);
     const results = await Promise.allSettled(
       batch.map(async (a) => {
         const [m, d] = await Promise.all([
-          getCampaignMonthly(a.customerId, startDate, endDate).catch(() => []),
-          getCampaignDaily(a.customerId, startDate, endDate).catch(() => []),
+          withRetry(() => getCampaignMonthly(a.customerId, startDate, endDate), `monthly:${a.customerId}`).catch(() => []),
+          withRetry(() => getCampaignDaily(a.customerId, startDate, endDate), `daily:${a.customerId}`).catch(() => []),
         ]);
-        return {
-          monthly: m.map((c) => ({ accountId: a.customerId, ...c })),
-          daily: d.map((c) => ({ accountId: a.customerId, ...c })),
-        };
+        return { accountId: a.customerId, monthly: m, daily: d };
       })
     );
     for (const res of results) {
       if (res.status !== "fulfilled") continue;
-      allMonthly.push(...res.value.monthly);
-      allDaily.push(...res.value.daily);
+      const { accountId, monthly, daily } = res.value;
+      for (const c of monthly) {
+        const parsed = parseCampaignName(c.campaignName);
+        allMonthly.push({ ...c, shopName: parsed.shopName, language: parsed.language, accountId });
+      }
+      for (const c of daily) {
+        const parsed = parseCampaignName(c.campaignName);
+        allDaily.push({ ...c, shopName: parsed.shopName, language: parsed.language, accountId });
+      }
+    }
+    // バッチ間で少し待機（レート制限対策）
+    if (i + BATCH < accounts.length) {
+      await new Promise(r => setTimeout(r, 500));
     }
   }
 
-  // 2. 対象店舗のデータだけフィルタ
-  const monthlyRows = allMonthly
-    .map((c) => {
-      const parsed = parseCampaignName(c.campaignName);
-      return { ...c, shopName: parsed.shopName, language: parsed.language };
-    })
-    .filter((c) => shopNameSet.has(c.shopName));
+  console.log(`[pmax/sync] Fetched: ${allMonthly.length} monthly, ${allDaily.length} daily rows`);
 
-  const dailyRows = allDaily
-    .map((c) => {
-      const parsed = parseCampaignName(c.campaignName);
-      return { ...c, shopName: parsed.shopName, language: parsed.language };
-    })
-    .filter((c) => shopNameSet.has(c.shopName));
+  // 3. 対象月の既存データを一括削除
+  await sb.from("pmax_store_data").delete().eq("month", month);
+  await sb.from("pmax_store_daily").delete().gte("date", startDate).lte("date", endDate);
 
-  // 3. 既存データを削除してから挿入（対象店舗+月のみ）
-  for (const name of shopNames) {
-    await sb.from("pmax_store_data").delete().eq("shop_name", name).eq("month", month);
-    await sb.from("pmax_store_daily").delete().eq("shop_name", name).gte("date", startDate).lte("date", endDate);
-  }
-
-  // 4. 月次データ挿入
+  // 4. 月次データ一括挿入
   const insertErrors: string[] = [];
-  if (monthlyRows.length > 0) {
-    const insertRows = monthlyRows.map((c) => ({
+  if (allMonthly.length > 0) {
+    const rows = allMonthly.map((c) => ({
       shop_name: c.shopName,
       language: c.language,
       month,
@@ -125,18 +140,18 @@ export async function POST(request: NextRequest) {
       account_id: c.accountId,
       synced_at: new Date().toISOString(),
     }));
-    for (let j = 0; j < insertRows.length; j += 50) {
-      const { error } = await sb.from("pmax_store_data").insert(insertRows.slice(j, j + 50));
+    for (let j = 0; j < rows.length; j += 100) {
+      const { error } = await sb.from("pmax_store_data").insert(rows.slice(j, j + 100));
       if (error) {
-        console.error("[pmax/sync] monthly insert error:", error.message, error.details, error.hint);
-        insertErrors.push(`monthly batch ${j}: ${error.message}`);
+        console.error("[pmax/sync] monthly insert:", error.message);
+        insertErrors.push(error.message);
       }
     }
   }
 
-  // 5. 日次データ挿入
-  if (dailyRows.length > 0) {
-    const insertRows = dailyRows.map((c) => ({
+  // 5. 日次データ一括挿入
+  if (allDaily.length > 0) {
+    const rows = allDaily.map((c) => ({
       shop_name: c.shopName,
       language: c.language,
       date: c.date,
@@ -150,30 +165,26 @@ export async function POST(request: NextRequest) {
       account_id: c.accountId,
       synced_at: new Date().toISOString(),
     }));
-    for (let j = 0; j < insertRows.length; j += 50) {
-      const { error } = await sb.from("pmax_store_daily").insert(insertRows.slice(j, j + 50));
+    for (let j = 0; j < rows.length; j += 100) {
+      const { error } = await sb.from("pmax_store_daily").insert(rows.slice(j, j + 100));
       if (error) {
-        console.error("[pmax/sync] daily insert error:", error.message, error.details);
-        insertErrors.push(`daily batch ${j}: ${error.message}`);
+        console.error("[pmax/sync] daily insert:", error.message);
+        insertErrors.push(error.message);
       }
     }
   }
 
-  // 5.5 DB保存の検証
-  const { count: verifyCount } = await sb
-    .from("pmax_store_data")
-    .select("*", { count: "exact", head: true })
-    .eq("month", month);
-  console.log(`[pmax/sync] Verify: ${verifyCount} rows in pmax_store_data for month=${month}`);
-
-  // 6. GBPデータ同期（スプレッドシートから取得→DB保存）
-  const gbpMonthKey = `${year}/${String(mon).padStart(2, "0")}`; // "2026/06" 形式（シート準拠）
+  // 6. GBPデータ一括同期（スプレッドシートから全店舗分を1回で取得）
+  const gbpMonthKey = `${year}/${String(mon).padStart(2, "0")}`;
+  const shopNames = Array.from(new Set(allMonthly.map((r) => r.shopName)));
   let gbpSynced = 0;
+
+  // スプレッドシートは1回取得でキャッシュされるので、全店舗分をまとめて処理
   for (const name of shopNames) {
     try {
-      const gbpRows = await getGbpDataForShop(name, gbpMonthKey);
+      const gbpRows: PmaxGbpRow[] = await getGbpDataForShop(name, gbpMonthKey);
       if (gbpRows.length > 0) {
-        const row = gbpRows[0]; // 1店舗1月に1行
+        const row = gbpRows[0];
         await sb.from("pmax_gbp_data").upsert({
           shop_name: name,
           month: gbpMonthKey,
@@ -188,37 +199,32 @@ export async function POST(request: NextRequest) {
         }, { onConflict: "shop_name,month" });
         gbpSynced++;
       }
-    } catch (e: unknown) {
-      console.error(`[pmax/sync] GBP sync error (${name}):`, e instanceof Error ? e.message : e);
-    }
+    } catch {}
   }
 
-  // 7. 同期ログ記録
-  const syncedShops = new Set(monthlyRows.map((r) => r.shopName));
-  const notFound = shopNames.filter((n) => !syncedShops.has(n));
+  // 7. 同期ログ（月単位で1レコード）
+  await sb.from("pmax_sync_log").upsert({
+    shop_name: "__all__",
+    month,
+    synced_by: r.sub || null,
+    synced_at: new Date().toISOString(),
+    status: insertErrors.length === 0 ? "success" : "partial",
+    message: insertErrors.length > 0 ? insertErrors.slice(0, 3).join("; ") : null,
+  }, { onConflict: "shop_name,month" });
 
-  for (const name of shopNames) {
-    await sb.from("pmax_sync_log").upsert(
-      {
-        shop_name: name,
-        month,
-        synced_by: r.sub || null,
-        synced_at: new Date().toISOString(),
-        status: syncedShops.has(name) ? "success" : "no_data",
-        message: syncedShops.has(name) ? null : "Google Adsにデータなし",
-      },
-      { onConflict: "shop_name,month" }
-    );
-  }
+  // 8. 検証
+  const { count } = await sb
+    .from("pmax_store_data")
+    .select("*", { count: "exact", head: true })
+    .eq("month", month);
 
   return NextResponse.json({
     success: insertErrors.length === 0,
-    synced: syncedShops.size,
-    monthlyRows: monthlyRows.length,
-    dailyRows: dailyRows.length,
+    shops: shopNames.length,
+    monthlyRows: allMonthly.length,
+    dailyRows: allDaily.length,
     gbpSynced,
-    notFound,
+    dbCount: count,
     insertErrors: insertErrors.length > 0 ? insertErrors : undefined,
-    dbVerifyCount: verifyCount,
   });
 }
