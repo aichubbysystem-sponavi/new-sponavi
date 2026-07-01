@@ -1132,7 +1132,11 @@ export default function GridRankingPage() {
                         if (res.data?.found && res.data.keywords?.length > 0) {
                           await api.put("/api/report/shop-keywords", { shopId: s.id, keywords: res.data.keywords, source: "sheet" });
                           kwUpdated++;
-                        } else { kwFailed++; }
+                        } else {
+                          // KW見つからず → 空マーカーを保存して次回スキップ
+                          await api.put("/api/report/shop-keywords", { shopId: s.id, keywords: [], source: "not_found" }).catch(() => {});
+                          kwFailed++;
+                        }
                       } catch { kwFailed++; }
                       await new Promise(r => setTimeout(r, 500));
                     }
