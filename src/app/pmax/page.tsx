@@ -76,7 +76,7 @@ export default function PmaxTopPage() {
     try {
       const res = await api.get(`/api/pmax/store-summary?month=${monthKey}`);
       const data = res.data;
-      console.log(`[pmax] store-summary response:`, { month: monthKey, totalDbRows: data.totalDbRows, filteredRows: data.filteredRows, storeCount: data.stores?.length });
+      console.log(`[pmax] store-summary:`, { month: monthKey, totalRows: data.totalRows, storeCount: data.stores?.length });
       if (data.error) {
         setError(data.error);
       } else {
