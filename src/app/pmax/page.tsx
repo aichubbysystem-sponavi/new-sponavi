@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import api from "@/lib/api";
 
@@ -69,19 +69,31 @@ export default function PmaxTopPage() {
 
   const monthKey = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}`;
 
-  // DBからデータ読み込み（APIは呼ばない）
-  const fetchStores = useCallback(async () => {
+  // 月別キャッシュ（同じ月の再取得を防止）
+  const cacheRef = useRef<Record<string, { stores: StoreSummary[]; lastSyncedAt: string | null }>>({});
+
+  const fetchStores = useCallback(async (forceRefresh = false) => {
+    // キャッシュがあれば即表示（sync後のforceRefreshは除く）
+    if (!forceRefresh && cacheRef.current[monthKey]) {
+      const cached = cacheRef.current[monthKey];
+      setStores(cached.stores);
+      setLastSyncedAt(cached.lastSyncedAt);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError("");
     try {
       const res = await api.get(`/api/pmax/store-summary?month=${monthKey}`);
       const data = res.data;
-      console.log(`[pmax] store-summary:`, { month: monthKey, totalRows: data.totalRows, storeCount: data.stores?.length });
       if (data.error) {
         setError(data.error);
       } else {
-        setStores(data.stores || []);
-        setLastSyncedAt(data.lastSyncedAt || null);
+        const result = { stores: data.stores || [], lastSyncedAt: data.lastSyncedAt || null };
+        cacheRef.current[monthKey] = result;
+        setStores(result.stores);
+        setLastSyncedAt(result.lastSyncedAt);
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "取得に失敗しました");
@@ -104,7 +116,7 @@ export default function PmaxTopPage() {
       const dbInfo = d.dbCount != null ? ` DB保存: ${d.dbCount}件` : "";
       const errInfo = d.insertErrors?.length ? ` [INSERT失敗: ${d.insertErrors[0]}]` : "";
       setSyncProgress(`${d.shops}店舗の同期完了（API取得: ${d.monthlyRows}件${dbInfo}${errInfo}）`);
-      await fetchStores();
+      await fetchStores(true);
       setTimeout(() => setSyncProgress(""), 30000);
     } catch (err: unknown) {
       setSyncProgress(extractErrorDetail(err));
