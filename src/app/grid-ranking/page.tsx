@@ -1091,31 +1091,58 @@ export default function GridRankingPage() {
 
                   setAllShopsBatchRunning(true);
 
-                  // Phase 1: 座標取得
-                  setAllShopsBatchProgress("Phase 1/3: 座標を取得中...");
-                  try {
-                    await api.post("/api/report/sync-coordinates", {}, { timeout: 300000 });
-                  } catch {}
-                  await new Promise(r => setTimeout(r, 1000));
-
-                  // Phase 2: KW取得
-                  let kwUpdated = 0, kwFailed = 0;
-                  for (let i = 0; i < allShopsFiltered.length; i++) {
-                    const s = allShopsFiltered[i];
-                    const shopName = s.name || s.id;
-                    setAllShopsBatchProgress(`Phase 2/3: KW取得 ${i + 1}/${allShopsFiltered.length} ${shopName}`);
+                  // Phase 1: 座標取得（未取得の店舗がある場合のみ）
+                  setAllShopsBatchProgress("Phase 1/3: 座標を確認中...");
+                  const { data: coordRows } = await supabase
+                    .from("shops")
+                    .select("name")
+                    .not("gbp_latitude", "is", null)
+                    .gt("gbp_latitude", 0)
+                    .limit(10000);
+                  const coordShopNames = new Set((coordRows || []).map((r: { name: string }) => r.name));
+                  const shopsWithoutCoord = allShopsFiltered.filter(s => !coordShopNames.has(s.name || s.id));
+                  if (shopsWithoutCoord.length > 0) {
+                    setAllShopsBatchProgress(`Phase 1/3: 座標未取得${shopsWithoutCoord.length}店舗の座標を取得中...`);
                     try {
-                      const res = await api.get(`/api/report/ranking-keywords?shopName=${encodeURIComponent(shopName)}`);
-                      if (res.data?.found && res.data.keywords?.length > 0) {
-                        await api.put("/api/report/shop-keywords", { shopId: s.id, keywords: res.data.keywords, source: "sheet" });
-                        kwUpdated++;
-                      } else { kwFailed++; }
-                    } catch { kwFailed++; }
+                      await api.post("/api/report/sync-coordinates", {}, { timeout: 300000 });
+                    } catch {}
                     await new Promise(r => setTimeout(r, 500));
+                  } else {
+                    setAllShopsBatchProgress("Phase 1/3: 座標取得済み — スキップ");
+                    await new Promise(r => setTimeout(r, 300));
                   }
-                  if (kwFailed > 0) {
-                    setAllShopsBatchProgress(`Phase 2/3: KW${kwUpdated}件取得（${kwFailed}件見つからず）`);
-                    await new Promise(r => setTimeout(r, 1500));
+
+                  // Phase 2: KW取得（未取得の店舗のみ）
+                  setAllShopsBatchProgress("Phase 2/3: KWを確認中...");
+                  const { data: kwRows } = await supabase
+                    .from("shop_keywords")
+                    .select("shop_id")
+                    .limit(10000);
+                  const kwShopIds = new Set((kwRows || []).map((r: { shop_id: string }) => r.shop_id));
+                  const shopsWithoutKw = allShopsFiltered.filter(s => !kwShopIds.has(s.id));
+
+                  let kwUpdated = 0, kwFailed = 0;
+                  if (shopsWithoutKw.length > 0) {
+                    for (let i = 0; i < shopsWithoutKw.length; i++) {
+                      const s = shopsWithoutKw[i];
+                      const shopName = s.name || s.id;
+                      setAllShopsBatchProgress(`Phase 2/3: KW取得 ${i + 1}/${shopsWithoutKw.length} ${shopName}`);
+                      try {
+                        const res = await api.get(`/api/report/ranking-keywords?shopName=${encodeURIComponent(shopName)}`);
+                        if (res.data?.found && res.data.keywords?.length > 0) {
+                          await api.put("/api/report/shop-keywords", { shopId: s.id, keywords: res.data.keywords, source: "sheet" });
+                          kwUpdated++;
+                        } else { kwFailed++; }
+                      } catch { kwFailed++; }
+                      await new Promise(r => setTimeout(r, 500));
+                    }
+                    if (kwFailed > 0) {
+                      setAllShopsBatchProgress(`Phase 2/3: KW${kwUpdated}件取得（${kwFailed}件見つからず）`);
+                      await new Promise(r => setTimeout(r, 1500));
+                    }
+                  } else {
+                    setAllShopsBatchProgress(`Phase 2/3: KW取得済み（${kwShopIds.size}店舗） — スキップ`);
+                    await new Promise(r => setTimeout(r, 300));
                   }
 
                   // Phase 3: 計測（座標+KWがある店舗のみ、今月計測済みスキップ）
