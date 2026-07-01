@@ -1132,8 +1132,30 @@ export default function GridRankingPage() {
                   </div>
                 </div>
               )}
-              {gridStats?.lastMeasuredAt && (
-                <p className="text-xs text-slate-400 text-right">最終計測: {new Date(gridStats.lastMeasuredAt).toLocaleString("ja-JP")}</p>
+              {gridStats && (
+                <div className="flex items-center justify-between">
+                  {gridStats.lastMeasuredAt && (
+                    <p className="text-xs text-slate-400">最終計測: {new Date(gridStats.lastMeasuredAt).toLocaleString("ja-JP")}</p>
+                  )}
+                  <button
+                    onClick={async () => {
+                      try {
+                        const now = new Date();
+                        const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+                        const res = await api.get(`/api/report/grid-export?month=${month}`, { responseType: "blob" });
+                        const url = URL.createObjectURL(res.data);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = `grid_ranking_${month}.csv`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      } catch { alert("CSVダウンロードに失敗しました"); }
+                    }}
+                    className="text-xs text-[#003D6B] hover:text-[#002a4d] underline underline-offset-2"
+                  >
+                    今月の計測データをCSVダウンロード
+                  </button>
+                </div>
               )}
 
               {/* 全店舗一括計測ボタン */}
