@@ -23,9 +23,10 @@ export async function GET(request: NextRequest) {
 
   const [yearStr, monthStr] = month.split("-");
   const year = Number(yearStr);
-  const mon = Number(monthStr) - 1;
-  const startDate = new Date(year, mon, 1).toISOString().split("T")[0];
-  const endDate = new Date(year, mon + 1, 0).toISOString().split("T")[0];
+  const mon = Number(monthStr);
+  const startDate = `${year}-${String(mon).padStart(2, "0")}-01`;
+  const lastDay = new Date(year, mon, 0).getDate();
+  const endDate = `${year}-${String(mon).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
 
   try {
     const stores = await getStoreSummaries(startDate, endDate);

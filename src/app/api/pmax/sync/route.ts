@@ -37,9 +37,11 @@ export async function POST(request: NextRequest) {
 
   const [yearStr, monthStr] = month.split("-");
   const year = Number(yearStr);
-  const mon = Number(monthStr) - 1;
-  const startDate = new Date(year, mon, 1).toISOString().split("T")[0];
-  const endDate = new Date(year, mon + 1, 0).toISOString().split("T")[0];
+  const mon = Number(monthStr);
+  // toISOString()はUTC変換で日付がズレるので手動フォーマット
+  const startDate = `${year}-${String(mon).padStart(2, "0")}-01`;
+  const lastDay = new Date(year, mon, 0).getDate();
+  const endDate = `${year}-${String(mon).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
 
   const sb = getSupabase();
   const shopNameSet = new Set(shopNames);
@@ -165,7 +167,7 @@ export async function POST(request: NextRequest) {
   console.log(`[pmax/sync] Verify: ${verifyCount} rows in pmax_store_data for month=${month}`);
 
   // 6. GBPデータ同期（スプレッドシートから取得→DB保存）
-  const gbpMonthKey = `${year}/${String(mon + 1).padStart(2, "0")}`; // "2026/06" 形式（シート準拠）
+  const gbpMonthKey = `${year}/${String(mon).padStart(2, "0")}`; // "2026/06" 形式（シート準拠）
   let gbpSynced = 0;
   for (const name of shopNames) {
     try {

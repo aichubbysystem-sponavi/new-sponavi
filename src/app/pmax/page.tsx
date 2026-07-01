@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import api from "@/lib/api";
 
@@ -81,6 +81,51 @@ export default function PmaxTopPage() {
   useEffect(() => {
     fetchStores();
   }, [fetchStores]);
+
+  // データがない月は自動同期
+  const autoSyncTriggered = useRef(false);
+  useEffect(() => {
+    if (loading || syncing || fetchingStores) return;
+    if (stores.length > 0) { autoSyncTriggered.current = false; return; }
+    if (autoSyncTriggered.current) return;
+    autoSyncTriggered.current = true;
+    (async () => {
+      setFetchingStores(true);
+      setSyncProgress("初回同期: Google Ads APIから全店舗を取得中...");
+      try {
+        const listRes = await api.get(`/api/pmax/list-stores?month=${monthKey}`, { timeout: 120000 });
+        const apiStores: StoreSummary[] = listRes.data.stores || [];
+        if (apiStores.length === 0) {
+          setSyncProgress("この月のデータはGoogle Adsにありません。");
+          setFetchingStores(false);
+          return;
+        }
+        setStores(apiStores);
+        setFetchingStores(false);
+        setSyncing(true);
+        const shopNames = apiStores.map((s) => s.shopName);
+        const BATCH = 50;
+        let totalSynced = 0, totalMonthly = 0, totalDaily = 0, totalGbp = 0;
+        for (let i = 0; i < shopNames.length; i += BATCH) {
+          const batch = shopNames.slice(i, i + BATCH);
+          setSyncProgress(`初回同期: ${i + 1}〜${Math.min(i + BATCH, shopNames.length)} / ${shopNames.length}店舗`);
+          const res = await api.post("/api/pmax/sync", { shopNames: batch, month: monthKey }, { timeout: 290000 });
+          totalSynced += res.data.synced || 0;
+          totalMonthly += res.data.monthlyRows || 0;
+          totalDaily += res.data.dailyRows || 0;
+          totalGbp += res.data.gbpSynced || 0;
+        }
+        setSyncProgress(`${totalSynced}店舗の自動同期完了（月次${totalMonthly}件・日次${totalDaily}件）`);
+        await fetchStores();
+      } catch (err: unknown) {
+        setSyncProgress(`自動同期エラー: ${err instanceof Error ? err.message : "不明なエラー"}`);
+      } finally {
+        setFetchingStores(false);
+        setSyncing(false);
+        setTimeout(() => setSyncProgress(""), 8000);
+      }
+    })();
+  }, [loading, syncing, fetchingStores, stores.length, monthKey, fetchStores]);
 
   // 全選択/全解除
   const toggleSelectAll = () => {
