@@ -153,6 +153,14 @@ export default function GridRankingPage() {
   const [kwMissingShops, setKwMissingShops] = useState<{ shopId: string; shopName: string; checkedAt: string }[]>([]);
   const [kwMissingLoaded, setKwMissingLoaded] = useState(false);
 
+  // ステータスサマリー
+  const [gridStats, setGridStats] = useState<{
+    totalShops: number; withCoord: number; withoutCoord: number;
+    withKw: number; kwNotFound: number;
+    measuredThisMonth: number; unmeasuredThisMonth: number;
+    lastMeasuredAt: string | null;
+  } | null>(null);
+
   // プリセット読み込み（空データで上書きしないよう保護）
   const refreshPresets = useCallback(async () => {
     try {
@@ -173,7 +181,7 @@ export default function GridRankingPage() {
 
   useEffect(() => { refreshPresets(); }, [refreshPresets]);
 
-  // KW未取得一覧の読み込み
+  // KW未取得一覧 + ステータスサマリーの読み込み
   const refreshKwMissing = useCallback(async () => {
     try {
       const res = await api.get("/api/report/kw-missing");
@@ -181,7 +189,13 @@ export default function GridRankingPage() {
       setKwMissingLoaded(true);
     } catch {}
   }, []);
-  useEffect(() => { refreshKwMissing(); }, [refreshKwMissing]);
+  const refreshGridStats = useCallback(async () => {
+    try {
+      const res = await api.get("/api/report/grid-stats");
+      setGridStats(res.data);
+    } catch {}
+  }, []);
+  useEffect(() => { refreshKwMissing(); refreshGridStats(); }, [refreshKwMissing, refreshGridStats]);
 
   // プリセットに追加（シートからKW自動取得）
   const [addingPreset, setAddingPreset] = useState(false);
@@ -1097,6 +1111,31 @@ export default function GridRankingPage() {
                 </div>
               )}
 
+              {/* ステータスサマリー */}
+              {gridStats && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  <div className="bg-blue-50 rounded-lg px-3 py-2 text-center">
+                    <p className="text-[10px] text-blue-400 font-medium">今月計測済み</p>
+                    <p className="text-lg font-bold text-blue-700">{gridStats.measuredThisMonth}<span className="text-xs font-normal text-blue-400">/{gridStats.totalShops}</span></p>
+                  </div>
+                  <div className="bg-orange-50 rounded-lg px-3 py-2 text-center">
+                    <p className="text-[10px] text-orange-400 font-medium">未計測</p>
+                    <p className="text-lg font-bold text-orange-600">{gridStats.unmeasuredThisMonth}</p>
+                  </div>
+                  <div className="bg-emerald-50 rounded-lg px-3 py-2 text-center">
+                    <p className="text-[10px] text-emerald-400 font-medium">座標あり</p>
+                    <p className="text-lg font-bold text-emerald-700">{gridStats.withCoord}<span className="text-xs font-normal text-emerald-400">/{gridStats.totalShops}</span></p>
+                  </div>
+                  <div className="bg-purple-50 rounded-lg px-3 py-2 text-center">
+                    <p className="text-[10px] text-purple-400 font-medium">KW設定済み</p>
+                    <p className="text-lg font-bold text-purple-700">{gridStats.withKw}<span className="text-xs font-normal text-purple-400">/{gridStats.totalShops}</span></p>
+                  </div>
+                </div>
+              )}
+              {gridStats?.lastMeasuredAt && (
+                <p className="text-xs text-slate-400 text-right">最終計測: {new Date(gridStats.lastMeasuredAt).toLocaleString("ja-JP")}</p>
+              )}
+
               {/* 全店舗一括計測ボタン */}
               <button
                 onClick={async () => {
@@ -1270,6 +1309,7 @@ export default function GridRankingPage() {
                   if (skipped > 0) allSkipMsg.push(`座標/KWなし${skipped}件`);
                   setAllShopsBatchProgress(`✓ ${completed}店舗 × ${totalKws}KWの計測完了${allSkipMsg.length > 0 ? `（${allSkipMsg.join("・")}スキップ）` : ""}`);
                   refreshKwMissing();
+                  refreshGridStats();
                 }}
                 disabled={allShopsBatchRunning}
                 className={`w-full py-3.5 rounded-lg text-sm font-bold transition-all ${allShopsBatchRunning ? "bg-slate-200 text-slate-500" : "bg-orange-500 text-white hover:bg-orange-600 shadow-sm"}`}
