@@ -99,7 +99,7 @@ export default function PmaxTopPage() {
     setSyncProgress("Google Ads APIから全店舗データを同期中（約2分）...");
     try {
       const res = await api.post("/api/pmax/sync", { month: monthKey }, { timeout: 290000 });
-      setSyncProgress(`${res.data.shops}店舗の同期完了（月次${res.data.monthlyRows}件・日次${res.data.dailyRows}件）`);
+      setSyncProgress(`${res.data.shops}店舗の同期完了（${res.data.monthlyRows}件）`);
       await fetchStores();
       setTimeout(() => setSyncProgress(""), 10000);
     } catch (err: unknown) {

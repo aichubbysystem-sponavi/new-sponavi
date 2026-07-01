@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, requireRole } from "@/lib/supabase";
+import { getCampaignDaily, parseCampaignName } from "@/lib/google-ads";
 
 export const dynamic = "force-dynamic";
 
@@ -43,12 +44,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "月次データ取得失敗" }, { status: 500 });
   }
 
-  // 日次データ取得（対象月のみ）
+  // 日次データ取得（対象月のみ）— DBになければAPIからオンデマンド取得
   const startDate = `${month}-01`;
   const endDay = new Date(y, m, 0).getDate();
   const endDate = `${month}-${String(endDay).padStart(2, "0")}`;
 
-  const { data: dailyRows, error: dErr } = await sb
+  let dailyRows: typeof monthlyRows = [];
+  const { data: dbDaily } = await sb
     .from("pmax_store_daily")
     .select("*")
     .eq("shop_name", shopName)
@@ -56,9 +58,48 @@ export async function GET(request: NextRequest) {
     .lte("date", endDate)
     .order("date", { ascending: true });
 
-  if (dErr) {
-    console.error("[pmax/store-detail] daily error:", dErr.message);
-    return NextResponse.json({ error: "日次データ取得失敗" }, { status: 500 });
+  if (dbDaily && dbDaily.length > 0) {
+    dailyRows = dbDaily;
+  } else {
+    // DBにないのでAPIから取得して保存（この店舗のaccountIdだけ使う）
+    try {
+      const accountIds = Array.from(new Set((monthlyRows || []).map((r) => r.account_id).filter(Boolean)));
+      if (accountIds.length > 0) {
+        const apiDaily: typeof dailyRows = [];
+        for (const accId of accountIds) {
+          const rows = await getCampaignDaily(accId, startDate, endDate).catch(() => []);
+          for (const c of rows) {
+            const parsed = parseCampaignName(c.campaignName);
+            if (parsed.shopName === shopName) {
+              apiDaily.push({
+                id: "",
+                shop_name: shopName,
+                language: parsed.language,
+                date: c.date || "",
+                campaign_name: c.campaignName,
+                campaign_id: c.campaignId,
+                impressions: c.impressions,
+                clicks: c.clicks,
+                ctr: c.ctr,
+                average_cpc: c.averageCpc,
+                cost_micros: c.costMicros,
+                account_id: accId,
+                synced_at: new Date().toISOString(),
+              });
+            }
+          }
+        }
+        // DB保存
+        if (apiDaily.length > 0) {
+          await sb.from("pmax_store_daily").delete().eq("shop_name", shopName).gte("date", startDate).lte("date", endDate);
+          const insertRows = apiDaily.map(({ id: _id, ...rest }) => rest);
+          await sb.from("pmax_store_daily").insert(insertRows);
+        }
+        dailyRows = apiDaily;
+      }
+    } catch (e) {
+      console.error("[pmax/store-detail] daily API fetch:", e instanceof Error ? e.message : e);
+    }
   }
 
   // フロントの既存形式に合わせる
