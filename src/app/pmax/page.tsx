@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import api from "@/lib/api";
 
 type StoreSummary = {
   shopName: string;
@@ -12,15 +12,8 @@ type StoreSummary = {
   costMicros: number;
 };
 
-function getMonthRange(year: number, month: number) {
-  const start = new Date(year, month, 1);
-  const end = new Date(year, month + 1, 0);
-  const fmt = (d: Date) => d.toISOString().split("T")[0];
-  return { startDate: fmt(start), endDate: fmt(end) };
-}
-
 function formatCost(micros: number) {
-  return `¥${Math.round(micros / 1_000_000).toLocaleString()}`;
+  return `¥${Math.round(micros / 1_000_000).toLocaleString("ja-JP")}`;
 }
 
 const LANG_COLORS: Record<string, string> = {
@@ -37,48 +30,93 @@ export default function PmaxTopPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const router = useRouter();
+
+  // 選択状態
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [syncing, setSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState("");
 
   const now = new Date();
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
-  const [selectedMonth, setSelectedMonth] = useState(now.getMonth());
+  const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1); // 1-indexed
 
   const monthOptions = useMemo(() => {
     const opts = [];
     for (let i = 0; i < 12; i++) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      opts.push({ year: d.getFullYear(), month: d.getMonth(), label: `${d.getFullYear()}年${d.getMonth() + 1}月` });
+      opts.push({
+        year: d.getFullYear(),
+        month: d.getMonth() + 1,
+        label: `${d.getFullYear()}年${d.getMonth() + 1}月`,
+      });
     }
     return opts;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const getAuthHeaders = useCallback(async (): Promise<Record<string, string>> => {
-    const token = (await supabase.auth.getSession()).data.session?.access_token;
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  }, []);
+  const monthKey = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}`;
+
+  const fetchStores = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await api.get(`/api/pmax/store-summary?month=${monthKey}`);
+      const data = res.data;
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setStores(data.stores || []);
+        setLastSyncedAt(data.lastSyncedAt || null);
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "取得に失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  }, [monthKey]);
 
   useEffect(() => {
-    (async () => {
-      setLoading(true);
-      setError("");
-      try {
-        const headers = await getAuthHeaders();
-        const { startDate, endDate } = getMonthRange(selectedYear, selectedMonth);
-        const res = await fetch(`/api/pmax/store-summary?startDate=${startDate}&endDate=${endDate}`, { headers });
-        const data = await res.json();
-        if (data.error) {
-          setError(data.error);
-        } else {
-          setStores(data.stores || []);
-        }
-      } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : "取得に失敗しました");
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [selectedYear, selectedMonth, getAuthHeaders]);
+    fetchStores();
+  }, [fetchStores]);
+
+  // 全選択/全解除
+  const toggleSelectAll = () => {
+    if (selected.size === filtered.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(filtered.map((s) => s.shopName)));
+    }
+  };
+
+  const toggleSelect = (shopName: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(shopName)) next.delete(shopName);
+      else next.add(shopName);
+      return next;
+    });
+  };
+
+  // 反映ボタン
+  const handleSync = async () => {
+    if (selected.size === 0) return;
+    setSyncing(true);
+    setSyncProgress(`${selected.size}店舗のデータを同期中...`);
+    try {
+      const shopNames = Array.from(selected);
+      const res = await api.post("/api/pmax/sync", { shopNames, month: monthKey });
+      setSyncProgress(`${res.data.synced}店舗の同期完了（月次${res.data.monthlyRows}件・日次${res.data.dailyRows}件）`);
+      setSelected(new Set());
+      await fetchStores();
+    } catch (err: unknown) {
+      setSyncProgress(`同期エラー: ${err instanceof Error ? err.message : "不明なエラー"}`);
+    } finally {
+      setSyncing(false);
+      setTimeout(() => setSyncProgress(""), 5000);
+    }
+  };
 
   const filtered = stores.filter(
     (s) => s.shopName.toLowerCase().includes(search.toLowerCase())
@@ -118,11 +156,11 @@ export default function PmaxTopPage() {
           </div>
           <div className="bg-slate-50 rounded-lg p-4">
             <p className="text-[11px] text-slate-500 font-medium">総表示回数</p>
-            <p className="text-2xl font-bold text-blue-600">{totalImpressions.toLocaleString()}<span className="text-sm font-normal text-slate-400 ml-1">回</span></p>
+            <p className="text-2xl font-bold text-blue-600">{totalImpressions.toLocaleString("ja-JP")}<span className="text-sm font-normal text-slate-400 ml-1">回</span></p>
           </div>
           <div className="bg-slate-50 rounded-lg p-4">
             <p className="text-[11px] text-slate-500 font-medium">総クリック数</p>
-            <p className="text-2xl font-bold text-emerald-600">{totalClicks.toLocaleString()}<span className="text-sm font-normal text-slate-400 ml-1">回</span></p>
+            <p className="text-2xl font-bold text-emerald-600">{totalClicks.toLocaleString("ja-JP")}<span className="text-sm font-normal text-slate-400 ml-1">回</span></p>
           </div>
           <div className="bg-slate-50 rounded-lg p-4">
             <p className="text-[11px] text-slate-500 font-medium">総広告費</p>
@@ -133,7 +171,8 @@ export default function PmaxTopPage() {
 
       {/* メインコンテンツ */}
       <main className="max-w-7xl mx-auto px-6 py-6">
-        <div className="flex flex-wrap items-center gap-3 mb-5">
+        {/* 操作バー */}
+        <div className="flex flex-wrap items-center gap-3 mb-3">
           <input
             type="text"
             placeholder="店舗名で検索..."
@@ -147,6 +186,7 @@ export default function PmaxTopPage() {
               const [y, m] = e.target.value.split("-").map(Number);
               setSelectedYear(y);
               setSelectedMonth(m);
+              setSelected(new Set());
             }}
             className="px-4 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20"
           >
@@ -159,10 +199,44 @@ export default function PmaxTopPage() {
           <span className="text-xs text-slate-400">{filtered.length} / {stores.length} 店舗</span>
         </div>
 
+        {/* 同期操作バー */}
+        <div className="flex flex-wrap items-center gap-3 mb-5 bg-white border border-slate-200 rounded-lg px-4 py-3">
+          <button
+            onClick={toggleSelectAll}
+            className="text-xs px-3 py-1.5 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
+          >
+            {selected.size === filtered.length && filtered.length > 0 ? "全解除" : "全選択"}
+          </button>
+          <span className="text-xs text-slate-500">{selected.size}店舗選択中</span>
+          <button
+            onClick={handleSync}
+            disabled={syncing || selected.size === 0}
+            className={`ml-auto px-5 py-2 rounded-lg text-sm font-bold transition-all ${
+              syncing || selected.size === 0
+                ? "bg-slate-200 text-slate-400 cursor-not-allowed"
+                : "bg-[#003D6B] text-white hover:bg-[#002a4d] shadow-sm"
+            }`}
+          >
+            {syncing ? "同期中..." : `反映（${selected.size}店舗）`}
+          </button>
+          {lastSyncedAt && (
+            <span className="text-[10px] text-slate-400">
+              最終同期: {new Date(lastSyncedAt).toLocaleString("ja-JP")}
+            </span>
+          )}
+        </div>
+
+        {/* 同期プログレス */}
+        {syncProgress && (
+          <div className={`mb-4 px-4 py-3 rounded-lg text-sm ${syncing ? "bg-blue-50 text-blue-700" : syncProgress.includes("エラー") ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>
+            {syncProgress}
+          </div>
+        )}
+
         {loading && (
           <div className="flex items-center justify-center py-20">
             <div className="animate-spin w-8 h-8 border-2 border-[#003D6B] border-t-transparent rounded-full" />
-            <span className="ml-3 text-sm text-slate-500">全アカウントから店舗データを取得中...</span>
+            <span className="ml-3 text-sm text-slate-500">データを読み込み中...</span>
           </div>
         )}
 
@@ -176,45 +250,61 @@ export default function PmaxTopPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {filtered.length === 0 ? (
               <p className="text-sm text-slate-500 py-8 text-center col-span-full">
-                {search ? "該当する店舗が見つかりません" : "店舗データがありません"}
+                {search ? "該当する店舗が見つかりません" : "この月のデータはまだ同期されていません。店舗を選択して「反映」してください。"}
               </p>
             ) : (
               filtered.map((store) => (
-                <button
+                <div
                   key={store.shopName}
-                  onClick={() => router.push(`/pmax/store?name=${encodeURIComponent(store.shopName)}&year=${selectedYear}&month=${selectedMonth + 1}`)}
-                  className="bg-white rounded-xl border border-slate-200 p-5 hover:border-[#003D6B]/30 hover:shadow-lg transition-all text-left group"
+                  className={`bg-white rounded-xl border p-5 transition-all ${
+                    selected.has(store.shopName) ? "border-[#003D6B] ring-2 ring-[#003D6B]/20" : "border-slate-200 hover:border-[#003D6B]/30 hover:shadow-lg"
+                  }`}
                 >
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-slate-800 group-hover:text-[#003D6B] truncate">{store.shopName}</p>
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {store.languages.map((lang) => (
-                          <span key={lang} className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${LANG_COLORS[lang] || LANG_COLORS.Unknown}`}>
-                            {lang}
-                          </span>
-                        ))}
+                  <div className="flex items-start gap-3">
+                    {/* チェックボックス */}
+                    <input
+                      type="checkbox"
+                      checked={selected.has(store.shopName)}
+                      onChange={() => toggleSelect(store.shopName)}
+                      className="mt-1 w-4 h-4 rounded border-slate-300 text-[#003D6B] focus:ring-[#003D6B]/20 cursor-pointer flex-shrink-0"
+                    />
+                    {/* 店舗カード */}
+                    <button
+                      onClick={() => router.push(`/pmax/store?name=${encodeURIComponent(store.shopName)}&year=${selectedYear}&month=${selectedMonth}`)}
+                      className="flex-1 text-left group"
+                    >
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-slate-800 group-hover:text-[#003D6B] truncate">{store.shopName}</p>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {store.languages.map((lang) => (
+                              <span key={lang} className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${LANG_COLORS[lang] || LANG_COLORS.Unknown}`}>
+                                {lang}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <svg className="w-5 h-5 text-slate-300 group-hover:text-[#003D6B] transition-colors flex-shrink-0 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
                       </div>
-                    </div>
-                    <svg className="w-5 h-5 text-slate-300 group-hover:text-[#003D6B] transition-colors flex-shrink-0 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="bg-blue-50 rounded-lg p-2 text-center">
+                          <p className="text-[10px] text-blue-500">表示</p>
+                          <p className="text-sm font-bold text-blue-700">{store.impressions.toLocaleString("ja-JP")}</p>
+                        </div>
+                        <div className="bg-emerald-50 rounded-lg p-2 text-center">
+                          <p className="text-[10px] text-emerald-500">クリック</p>
+                          <p className="text-sm font-bold text-emerald-700">{store.clicks.toLocaleString("ja-JP")}</p>
+                        </div>
+                        <div className="bg-orange-50 rounded-lg p-2 text-center">
+                          <p className="text-[10px] text-orange-500">広告費</p>
+                          <p className="text-sm font-bold text-orange-700">{formatCost(store.costMicros)}</p>
+                        </div>
+                      </div>
+                    </button>
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="bg-blue-50 rounded-lg p-2 text-center">
-                      <p className="text-[10px] text-blue-500">表示</p>
-                      <p className="text-sm font-bold text-blue-700">{store.impressions.toLocaleString()}</p>
-                    </div>
-                    <div className="bg-emerald-50 rounded-lg p-2 text-center">
-                      <p className="text-[10px] text-emerald-500">クリック</p>
-                      <p className="text-sm font-bold text-emerald-700">{store.clicks.toLocaleString()}</p>
-                    </div>
-                    <div className="bg-orange-50 rounded-lg p-2 text-center">
-                      <p className="text-[10px] text-orange-500">広告費</p>
-                      <p className="text-sm font-bold text-orange-700">{formatCost(store.costMicros)}</p>
-                    </div>
-                  </div>
-                </button>
+                </div>
               ))
             )}
           </div>

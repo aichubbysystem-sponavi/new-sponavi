@@ -1,17 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
-import { getStoreDetail } from "@/lib/google-ads";
-import { getGbpDataForShop } from "@/lib/pmax-sheet";
-import { getPmaxCache, setPmaxCache } from "@/lib/pmax-cache";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
 
-function fmtDate(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-/** GET: トークンでレポートデータを取得（認証不要） */
+/** GET: トークンでレポートデータを取得（認証不要、DBから読み込み） */
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ token: string }> }
@@ -31,52 +23,92 @@ export async function GET(
     }
 
     const { shop_name: shopName, year, month, summary_text: summaryText } = shareData;
+    const monthKey = `${year}-${String(month).padStart(2, "0")}`;
 
-    // キャッシュチェック
-    const cacheKey = `share:${token}`;
-    const cached = await getPmaxCache<{ monthly: unknown[]; daily: unknown[]; gbp: unknown[] }>(cacheKey);
-    if (cached) {
-      return NextResponse.json({ ...cached, shopName, year, month, summaryText: summaryText || "", cached: true });
+    // 13ヶ月分の月リストを生成
+    const months: string[] = [];
+    for (let i = 12; i >= 0; i--) {
+      const d = new Date(year, month - 1 - i, 1);
+      months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
     }
 
-    // 月次: 13ヶ月分
-    const monthlyEnd = new Date(year, month, 0);
-    const monthlyStart = new Date(year, month - 1 - 13, 1);
-    // 日次: 対象月のみ
-    const dailyStart = new Date(year, month - 1, 1);
-    const dailyEnd = new Date(year, month, 0);
+    // 月次データ取得
+    const { data: monthlyRows } = await sb
+      .from("pmax_store_data")
+      .select("*")
+      .eq("shop_name", shopName)
+      .in("month", months)
+      .order("month", { ascending: true });
 
-    // store-summaryキャッシュからaccountIdsを取得（全アカウント検索を回避）
-    let knownAccountIds: string[] | undefined;
-    const { data: cacheRows } = await sb.from("pmax_cache").select("cache_key, data");
-    if (cacheRows) {
-      for (const row of cacheRows) {
-        if (!row.cache_key.startsWith("store-summary:")) continue;
-        const stores = (row.data as { stores?: { shopName: string; accountIds: string[] }[] })?.stores;
-        const match = stores?.find(s => s.shopName === shopName);
-        if (match?.accountIds) { knownAccountIds = match.accountIds; break; }
-      }
-    }
+    // 日次データ取得（対象月のみ）
+    const startDate = `${monthKey}-01`;
+    const endDay = new Date(year, month, 0).getDate();
+    const endDate = `${monthKey}-${String(endDay).padStart(2, "0")}`;
 
-    const [adsData, gbpData] = await Promise.all([
-      getStoreDetail(
-        shopName,
-        fmtDate(monthlyStart), fmtDate(monthlyEnd),
-        knownAccountIds,
-        fmtDate(dailyStart), fmtDate(dailyEnd),
-      ),
-      getGbpDataForShop(shopName).catch(() => []),
-    ]);
+    const { data: dailyRows } = await sb
+      .from("pmax_store_daily")
+      .select("*")
+      .eq("shop_name", shopName)
+      .gte("date", startDate)
+      .lte("date", endDate)
+      .order("date", { ascending: true });
 
-    const result = {
-      monthly: adsData.monthly,
-      daily: adsData.daily,
-      gbp: gbpData,
-    };
+    const monthly = (monthlyRows || []).map((r) => ({
+      language: r.language,
+      campaignName: r.campaign_name,
+      campaignId: r.campaign_id,
+      month: r.month,
+      impressions: Number(r.impressions),
+      clicks: Number(r.clicks),
+      ctr: Number(r.ctr),
+      averageCpc: Number(r.average_cpc),
+      costMicros: Number(r.cost_micros),
+    }));
 
-    setPmaxCache(cacheKey, result);
+    const daily = (dailyRows || []).map((r) => ({
+      language: r.language,
+      campaignName: r.campaign_name,
+      campaignId: r.campaign_id,
+      date: r.date,
+      impressions: Number(r.impressions),
+      clicks: Number(r.clicks),
+      ctr: Number(r.ctr),
+      averageCpc: Number(r.average_cpc),
+      costMicros: Number(r.cost_micros),
+    }));
 
-    return NextResponse.json({ ...result, shopName, year, month, summaryText: summaryText || "", cached: false });
+    // GBPデータ取得
+    const gbpMonths = months.map((m) => {
+      const [yy, mm] = m.split("-");
+      return `${yy}/${mm}`;
+    });
+    const { data: gbpRows } = await sb
+      .from("pmax_gbp_data")
+      .select("*")
+      .eq("shop_name", shopName)
+      .in("month", gbpMonths);
+
+    const gbp = (gbpRows || []).map((r) => ({
+      month: r.month,
+      shopName: r.shop_name,
+      totalImpressions: Number(r.total_impressions),
+      totalVisits: Number(r.total_visits),
+      phone: Number(r.phone),
+      directions: Number(r.directions),
+      website: Number(r.website),
+      menuClicks: Number(r.menu_clicks),
+      saveShare: Number(r.save_share),
+    }));
+
+    return NextResponse.json({
+      monthly,
+      daily,
+      gbp,
+      shopName,
+      year,
+      month,
+      summaryText: summaryText || "",
+    });
   } catch (err) {
     console.error("[pmax/share/token] Error:", err);
     return NextResponse.json({ error: "データ取得に失敗しました" }, { status: 500 });

@@ -163,12 +163,8 @@ function StoreDetailContent() {
       try {
         const token = (await supabase.auth.getSession()).data.session?.access_token;
         const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-        const { startDate, endDate } = getDateRange(targetYear, targetMonthNum, 13);
-        const { startDate: dailyStart, endDate: dailyEnd } = getDateRange(targetYear, targetMonthNum, 0);
-        const [adsRes, gbpRes] = await Promise.all([
-          fetch(`/api/pmax/store-detail?shopName=${encodeURIComponent(shopName)}&startDate=${startDate}&endDate=${endDate}&dailyStart=${dailyStart}&dailyEnd=${dailyEnd}`, { headers }),
-          fetch(`/api/pmax/gbp?shopName=${encodeURIComponent(shopName)}`, { headers }),
-        ]);
+        const monthKey = `${targetYear}-${String(targetMonthNum).padStart(2, "0")}`;
+        const adsRes = await fetch(`/api/pmax/store-detail?shopName=${encodeURIComponent(shopName)}&month=${monthKey}`, { headers });
         if (!adsRes.ok) {
           const text = await adsRes.text().catch(() => "");
           throw new Error(`広告データ取得失敗 (${adsRes.status})${text ? ": " + text.slice(0, 100) : ""}`);
@@ -177,10 +173,7 @@ function StoreDetailContent() {
         if (adsData.error) throw new Error(adsData.error);
         setMonthly(adsData.monthly || []);
         setDaily(adsData.daily || []);
-        if (gbpRes.ok) {
-          const gbpData = await gbpRes.json();
-          setGbpRows(gbpData.data || []);
-        }
+        setGbpRows(adsData.gbp || []);
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : "取得に失敗しました");
       } finally { setLoading(false); }

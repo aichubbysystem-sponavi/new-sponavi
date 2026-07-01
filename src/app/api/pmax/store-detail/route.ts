@@ -1,16 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getStoreDetail } from "@/lib/google-ads";
-import { requireRole } from "@/lib/supabase";
-import { getPmaxCache, setPmaxCache } from "@/lib/pmax-cache";
+import { getSupabase, requireRole } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
 
 /**
- * GET /api/pmax/store-detail?shopName=X&startDate=YYYY-MM-DD&endDate=YYYY-MM-DD&dailyStart=YYYY-MM-DD&dailyEnd=YYYY-MM-DD
- * 特定店舗の言語別キャンペーンデータ（月次+日次）を返す（6時間キャッシュ）
- * startDate/endDate: 月次データの取得範囲（13ヶ月分）
- * dailyStart/dailyEnd: 日次データの取得範囲（対象月1ヶ月分）
+ * GET /api/pmax/store-detail?shopName=X&month=YYYY-MM
+ * Supabaseから店舗の月次+日次データを返す（Google Ads APIは呼ばない）
+ * 月次は13ヶ月分（対象月から遡り）、日次は対象月のみ
  */
 export async function GET(request: NextRequest) {
   const r = await requireRole(request, ["president", "manager"]);
@@ -18,60 +14,114 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = request.nextUrl;
   const shopName = searchParams.get("shopName");
-  const startDate = searchParams.get("startDate");
-  const endDate = searchParams.get("endDate");
-  const dailyStart = searchParams.get("dailyStart");
-  const dailyEnd = searchParams.get("dailyEnd");
-  const refresh = searchParams.get("refresh") === "true";
+  const month = searchParams.get("month");
 
-  if (!shopName || !startDate || !endDate) {
-    return NextResponse.json({ error: "shopName, startDate, endDate は必須です" }, { status: 400 });
+  if (!shopName || !month || !/^\d{4}-\d{2}$/.test(month)) {
+    return NextResponse.json({ error: "shopName, month(YYYY-MM) は必須です" }, { status: 400 });
   }
 
-  const cacheKey = `store-detail:${shopName}:${startDate}:${endDate}:${dailyStart || ""}:${dailyEnd || ""}`;
+  const sb = getSupabase();
 
-  if (!refresh) {
-    const cached = await getPmaxCache<{ monthly: unknown[]; daily: unknown[] }>(cacheKey);
-    if (cached) {
-      return NextResponse.json({ ...cached, cached: true });
-    }
+  // 13ヶ月分の月リストを生成（対象月を含む過去13ヶ月）
+  const [y, m] = month.split("-").map(Number);
+  const months: string[] = [];
+  for (let i = 12; i >= 0; i--) {
+    const d = new Date(y, m - 1 - i, 1);
+    months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
   }
 
-  try {
-    // store-summaryキャッシュからこの店舗のaccountIdsを取得（全アカウント検索を回避）
-    let knownAccountIds: string[] | undefined;
-    const summaryKeys = await findStoreSummaryAccountIds(shopName);
-    if (summaryKeys.length > 0) {
-      knownAccountIds = summaryKeys;
-    }
+  // 月次データ取得（13ヶ月分）
+  const { data: monthlyRows, error: mErr } = await sb
+    .from("pmax_store_data")
+    .select("*")
+    .eq("shop_name", shopName)
+    .in("month", months)
+    .order("month", { ascending: true });
 
-    const data = await getStoreDetail(
-      shopName, startDate, endDate, knownAccountIds,
-      dailyStart || undefined, dailyEnd || undefined,
-    );
-    setPmaxCache(cacheKey, data);
-    return NextResponse.json({ ...data, cached: false });
-  } catch (error: unknown) {
-    console.error("[pmax/store-detail] Error:", error);
-    return NextResponse.json({ error: "店舗詳細の取得に失敗しました" }, { status: 500 });
+  if (mErr) {
+    console.error("[pmax/store-detail] monthly error:", mErr.message);
+    return NextResponse.json({ error: "月次データ取得失敗" }, { status: 500 });
   }
-}
 
-/** store-summaryキャッシュからshopNameに対応するaccountIdsを探す */
-async function findStoreSummaryAccountIds(shopName: string): Promise<string[]> {
-  try {
-    const { getSupabase } = await import("@/lib/supabase");
-    const sb = getSupabase();
-    const { data: rows } = await sb.from("pmax_cache").select("cache_key, data");
-    if (!rows) return [];
+  // 日次データ取得（対象月のみ）
+  const startDate = `${month}-01`;
+  const endDay = new Date(y, m, 0).getDate();
+  const endDate = `${month}-${String(endDay).padStart(2, "0")}`;
 
-    for (const row of rows) {
-      if (!row.cache_key.startsWith("store-summary:")) continue;
-      const stores = (row.data as { stores?: { shopName: string; accountIds: string[] }[] })?.stores;
-      if (!stores) continue;
-      const match = stores.find(s => s.shopName === shopName);
-      if (match?.accountIds) return match.accountIds;
-    }
-  } catch {}
-  return [];
+  const { data: dailyRows, error: dErr } = await sb
+    .from("pmax_store_daily")
+    .select("*")
+    .eq("shop_name", shopName)
+    .gte("date", startDate)
+    .lte("date", endDate)
+    .order("date", { ascending: true });
+
+  if (dErr) {
+    console.error("[pmax/store-detail] daily error:", dErr.message);
+    return NextResponse.json({ error: "日次データ取得失敗" }, { status: 500 });
+  }
+
+  // フロントの既存形式に合わせる
+  const monthly = (monthlyRows || []).map((r) => ({
+    language: r.language,
+    campaignName: r.campaign_name,
+    campaignId: r.campaign_id,
+    month: r.month,
+    impressions: Number(r.impressions),
+    clicks: Number(r.clicks),
+    ctr: Number(r.ctr),
+    averageCpc: Number(r.average_cpc),
+    costMicros: Number(r.cost_micros),
+  }));
+
+  const daily = (dailyRows || []).map((r) => ({
+    language: r.language,
+    campaignName: r.campaign_name,
+    campaignId: r.campaign_id,
+    date: r.date,
+    impressions: Number(r.impressions),
+    clicks: Number(r.clicks),
+    ctr: Number(r.ctr),
+    averageCpc: Number(r.average_cpc),
+    costMicros: Number(r.cost_micros),
+  }));
+
+  // GBPデータ取得（13ヶ月分、"YYYY/MM"形式）
+  const gbpMonths = months.map((m) => {
+    const [yy, mm] = m.split("-");
+    return `${yy}/${mm}`;
+  });
+  const { data: gbpRows } = await sb
+    .from("pmax_gbp_data")
+    .select("*")
+    .eq("shop_name", shopName)
+    .in("month", gbpMonths);
+
+  const gbp = (gbpRows || []).map((r) => ({
+    month: r.month,
+    shopName: r.shop_name,
+    totalImpressions: Number(r.total_impressions),
+    totalVisits: Number(r.total_visits),
+    phone: Number(r.phone),
+    directions: Number(r.directions),
+    website: Number(r.website),
+    menuClicks: Number(r.menu_clicks),
+    saveShare: Number(r.save_share),
+  }));
+
+  // 同期ログ
+  const { data: syncLog } = await sb
+    .from("pmax_sync_log")
+    .select("synced_at, status")
+    .eq("shop_name", shopName)
+    .eq("month", month)
+    .maybeSingle();
+
+  return NextResponse.json({
+    monthly,
+    daily,
+    gbp,
+    lastSyncedAt: syncLog?.synced_at || null,
+    syncStatus: syncLog?.status || "not_synced",
+  });
 }
