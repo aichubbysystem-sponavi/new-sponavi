@@ -25,12 +25,24 @@ async function getToken(): Promise<string | null> {
     return cachedToken;
   }
   try {
+    // まずセッション取得を試み、期限切れならリフレッシュ
     const { data } = await supabase.auth.getSession();
-    cachedToken = data?.session?.access_token || null;
-    tokenExpiresAt = data?.session?.expires_at ? data.session.expires_at * 1000 : 0;
+    const session = data?.session;
+    if (session && session.expires_at && session.expires_at * 1000 > Date.now() + 60000) {
+      cachedToken = session.access_token;
+      tokenExpiresAt = session.expires_at * 1000;
+      return cachedToken;
+    }
+    // セッション期限切れ or 期限切れ間近 → リフレッシュ
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    if (refreshed?.session) {
+      cachedToken = refreshed.session.access_token;
+      tokenExpiresAt = refreshed.session.expires_at ? refreshed.session.expires_at * 1000 : 0;
+      return cachedToken;
+    }
     return cachedToken;
   } catch {
-    return cachedToken; // 取得失敗時もキャッシュがあれば使う
+    return cachedToken;
   }
 }
 

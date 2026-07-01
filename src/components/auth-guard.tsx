@@ -31,7 +31,7 @@ export default function AuthGuard({ children, skipAuth }: { children: React.Reac
       timer = setTimeout(logout, SESSION_TIMEOUT_MS);
     };
 
-    const events = ["mousedown", "keydown", "scroll", "touchstart"];
+    const events = ["mousedown", "keydown", "scroll", "touchstart", "batch-activity"];
     events.forEach((event) => window.addEventListener(event, resetTimer));
     resetTimer();
 

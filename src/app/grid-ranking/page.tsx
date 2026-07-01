@@ -2,6 +2,7 @@
 
 import { useEffect, useCallback, useState, useRef, useMemo } from "react";
 import api from "@/lib/api";
+import { supabase } from "@/lib/supabase";
 import { useShop } from "@/components/shop-provider";
 import DateRangePicker, { useDateRange } from "@/components/date-range-picker";
 import { jstToday } from "@/lib/jst-date";
@@ -866,9 +867,7 @@ export default function GridRankingPage() {
                     try {
                       let lat = 0, lng = 0;
                       try {
-                        const { createClient } = await import("@supabase/supabase-js");
-                        const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL || "", process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "");
-                        const { data: coordRow } = await sb.from("shops").select("gbp_latitude, gbp_longitude").eq("name", p.shop_name).not("gbp_latitude", "is", null).gt("gbp_latitude", 0).limit(1).maybeSingle();
+                        const { data: coordRow } = await supabase.from("shops").select("gbp_latitude, gbp_longitude").eq("name", p.shop_name).not("gbp_latitude", "is", null).gt("gbp_latitude", 0).limit(1).maybeSingle();
                         if (coordRow) { lat = coordRow.gbp_latitude || 0; lng = coordRow.gbp_longitude || 0; }
                       } catch {}
                       if (!lat || !lng) { skipped++; continue; }
@@ -892,6 +891,7 @@ export default function GridRankingPage() {
                           const pt = points[j];
                           const label = isMain ? "7x7" : "3x3";
                           setBatchProgress(`${i + 1}/${targetPresets.length} ${p.shop_name} [KW ${ki + 1}/${keywords.length} ${label}] (${j + 1}/${points.length})`);
+                          window.dispatchEvent(new Event("batch-activity"));
                           try {
                             let res;
                             for (let retry = 0; retry < 3; retry++) {
@@ -1119,13 +1119,11 @@ export default function GridRankingPage() {
                   }
 
                   // Phase 3: 計測（座標+KWがある店舗のみ、今月計測済みスキップ）
-                  const { createClient } = await import("@supabase/supabase-js");
-                  const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL || "", process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "");
 
                   // 今月計測済みshop_idを一括取得
                   const now = new Date();
                   const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01T00:00:00`;
-                  const { data: measuredRows } = await sb
+                  const { data: measuredRows } = await supabase
                     .from("grid_ranking_logs")
                     .select("shop_id")
                     .gte("measured_at", monthStart)
@@ -1144,13 +1142,13 @@ export default function GridRankingPage() {
                     const shopName = s.name || s.id;
                     try {
                       // 座標取得
-                      const { data: coordRow } = await sb.from("shops").select("gbp_latitude, gbp_longitude").eq("name", s.name || s.id).not("gbp_latitude", "is", null).gt("gbp_latitude", 0).limit(1).maybeSingle();
+                      const { data: coordRow } = await supabase.from("shops").select("gbp_latitude, gbp_longitude").eq("name", s.name || s.id).not("gbp_latitude", "is", null).gt("gbp_latitude", 0).limit(1).maybeSingle();
                       if (!coordRow?.gbp_latitude) { skipped++; continue; }
                       const lat = coordRow.gbp_latitude;
                       const lng = coordRow.gbp_longitude;
 
                       // KW取得
-                      const kwRes = await sb.from("shop_keywords").select("keywords").eq("shop_id", s.id).maybeSingle();
+                      const kwRes = await supabase.from("shop_keywords").select("keywords").eq("shop_id", s.id).maybeSingle();
                       const keywords: string[] = kwRes?.data?.keywords || [];
                       if (keywords.length === 0) { skipped++; continue; }
 
@@ -1165,6 +1163,7 @@ export default function GridRankingPage() {
                           const pt = points[j];
                           const label = isMain ? "7x7" : "3x3";
                           setAllShopsBatchProgress(`${i + 1}/${allTargetShops.length} ${shopName} [KW ${ki + 1}/${keywords.length} ${label}] (${j + 1}/${points.length})`);
+                          window.dispatchEvent(new Event("batch-activity"));
                           try {
                             let res;
                             for (let retry = 0; retry < 3; retry++) {
