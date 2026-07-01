@@ -8,7 +8,7 @@ import { requireRole } from "@/lib/supabase";
 import { getStoreSummaries } from "@/lib/google-ads";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 export async function GET(request: NextRequest) {
   const r = await requireRole(request, ["president", "manager"]);
@@ -40,7 +40,8 @@ export async function GET(request: NextRequest) {
       })),
     });
   } catch (error: unknown) {
-    console.error("[pmax/list-stores] Error:", error);
-    return NextResponse.json({ error: "店舗一覧の取得に失敗しました" }, { status: 500 });
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error("[pmax/list-stores] Error:", msg);
+    return NextResponse.json({ error: `店舗一覧の取得に失敗: ${msg.slice(0, 200)}` }, { status: 500 });
   }
 }
