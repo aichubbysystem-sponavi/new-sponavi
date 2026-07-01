@@ -1137,24 +1137,36 @@ export default function GridRankingPage() {
                   {gridStats.lastMeasuredAt && (
                     <p className="text-xs text-slate-400">最終計測: {new Date(gridStats.lastMeasuredAt).toLocaleString("ja-JP")}</p>
                   )}
-                  <button
-                    onClick={async () => {
-                      try {
-                        const now = new Date();
-                        const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-                        const res = await api.get(`/api/report/grid-export?month=${month}`, { responseType: "blob" });
-                        const url = URL.createObjectURL(res.data);
-                        const a = document.createElement("a");
-                        a.href = url;
-                        a.download = `grid_ranking_${month}.csv`;
-                        a.click();
-                        URL.revokeObjectURL(url);
-                      } catch { alert("CSVダウンロードに失敗しました"); }
-                    }}
-                    className="text-xs text-[#003D6B] hover:text-[#002a4d] underline underline-offset-2"
-                  >
-                    今月の計測データをCSVダウンロード
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <select
+                      id="csv-month"
+                      defaultValue={`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`}
+                      className="text-xs border border-slate-200 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-[#003D6B]/30"
+                    >
+                      {Array.from({ length: 12 }, (_, i) => {
+                        const d = new Date(new Date().getFullYear(), new Date().getMonth() - i, 1);
+                        const val = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+                        return <option key={val} value={val}>{d.getFullYear()}年{d.getMonth() + 1}月</option>;
+                      })}
+                    </select>
+                    <button
+                      onClick={async () => {
+                        try {
+                          const sel = (document.getElementById("csv-month") as HTMLSelectElement).value;
+                          const res = await api.get(`/api/report/grid-export?month=${sel}`, { responseType: "blob" });
+                          const url = URL.createObjectURL(res.data);
+                          const a = document.createElement("a");
+                          a.href = url;
+                          a.download = `grid_ranking_${sel}.csv`;
+                          a.click();
+                          URL.revokeObjectURL(url);
+                        } catch { alert("CSVダウンロードに失敗しました"); }
+                      }}
+                      className="text-xs text-[#003D6B] hover:text-[#002a4d] underline underline-offset-2 whitespace-nowrap"
+                    >
+                      CSVダウンロード
+                    </button>
+                  </div>
                 </div>
               )}
 
