@@ -107,6 +107,7 @@ export async function POST(request: NextRequest) {
   }
 
   // 4. 月次データ挿入
+  const insertErrors: string[] = [];
   if (monthlyRows.length > 0) {
     const insertRows = monthlyRows.map((c) => ({
       shop_name: c.shopName,
@@ -124,7 +125,10 @@ export async function POST(request: NextRequest) {
     }));
     for (let j = 0; j < insertRows.length; j += 50) {
       const { error } = await sb.from("pmax_store_data").insert(insertRows.slice(j, j + 50));
-      if (error) console.error("[pmax/sync] monthly insert error:", error.message);
+      if (error) {
+        console.error("[pmax/sync] monthly insert error:", error.message, error.details, error.hint);
+        insertErrors.push(`monthly batch ${j}: ${error.message}`);
+      }
     }
   }
 
@@ -146,9 +150,19 @@ export async function POST(request: NextRequest) {
     }));
     for (let j = 0; j < insertRows.length; j += 50) {
       const { error } = await sb.from("pmax_store_daily").insert(insertRows.slice(j, j + 50));
-      if (error) console.error("[pmax/sync] daily insert error:", error.message);
+      if (error) {
+        console.error("[pmax/sync] daily insert error:", error.message, error.details);
+        insertErrors.push(`daily batch ${j}: ${error.message}`);
+      }
     }
   }
+
+  // 5.5 DB保存の検証
+  const { count: verifyCount } = await sb
+    .from("pmax_store_data")
+    .select("*", { count: "exact", head: true })
+    .eq("month", month);
+  console.log(`[pmax/sync] Verify: ${verifyCount} rows in pmax_store_data for month=${month}`);
 
   // 6. GBPデータ同期（スプレッドシートから取得→DB保存）
   const gbpMonthKey = `${year}/${String(mon + 1).padStart(2, "0")}`; // "2026/06" 形式（シート準拠）
@@ -196,11 +210,13 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({
-    success: true,
+    success: insertErrors.length === 0,
     synced: syncedShops.size,
     monthlyRows: monthlyRows.length,
     dailyRows: dailyRows.length,
     gbpSynced,
     notFound,
+    insertErrors: insertErrors.length > 0 ? insertErrors : undefined,
+    dbVerifyCount: verifyCount,
   });
 }
