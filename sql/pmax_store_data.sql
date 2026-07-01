@@ -64,6 +64,14 @@ CREATE TABLE IF NOT EXISTS public.pmax_gbp_data (
   UNIQUE(shop_name, month)
 );
 
+-- アカウント→店舗マッピング（P-MAXキャンペーンがあるアカウントだけ記録）
+CREATE TABLE IF NOT EXISTS public.pmax_account_mapping (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  account_id TEXT NOT NULL,
+  shop_name TEXT NOT NULL,
+  UNIQUE(account_id, shop_name)
+);
+
 -- インデックス
 CREATE INDEX IF NOT EXISTS idx_pmax_store_data_shop_month ON pmax_store_data(shop_name, month);
 CREATE INDEX IF NOT EXISTS idx_pmax_store_daily_shop_date ON pmax_store_daily(shop_name, date);
@@ -80,4 +88,6 @@ CREATE POLICY "service_role_all" ON pmax_store_daily FOR ALL TO service_role USI
 CREATE POLICY "service_role_all" ON pmax_sync_log FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 ALTER TABLE pmax_gbp_data ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pmax_account_mapping ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "service_role_all" ON pmax_gbp_data FOR ALL TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "service_role_all" ON pmax_account_mapping FOR ALL TO service_role USING (true) WITH CHECK (true);
