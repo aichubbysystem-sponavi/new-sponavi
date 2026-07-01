@@ -37,6 +37,7 @@ export default function PmaxTopPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [syncing, setSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState("");
+  const [fetchingStores, setFetchingStores] = useState(false);
 
   const now = new Date();
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
@@ -97,6 +98,32 @@ export default function PmaxTopPage() {
       else next.add(shopName);
       return next;
     });
+  };
+
+  // 全店舗取得（Google Ads APIから店舗一覧を取得してカード表示）
+  const handleFetchStores = async () => {
+    setFetchingStores(true);
+    setSyncProgress("Google Ads APIから全店舗を取得中...");
+    try {
+      const res = await api.get(`/api/pmax/list-stores?month=${monthKey}`);
+      const apiStores: StoreSummary[] = res.data.stores || [];
+      // DB同期済みの店舗とマージ（同期済みはDBの値、未同期はAPI値）
+      const dbNames = new Set(stores.map((s) => s.shopName));
+      const merged = [...stores];
+      for (const s of apiStores) {
+        if (!dbNames.has(s.shopName)) {
+          merged.push(s);
+        }
+      }
+      merged.sort((a, b) => b.impressions - a.impressions);
+      setStores(merged);
+      setSyncProgress(`${apiStores.length}店舗を取得しました。同期する店舗を選択して「反映」してください。`);
+    } catch (err: unknown) {
+      setSyncProgress(`取得エラー: ${err instanceof Error ? err.message : "不明なエラー"}`);
+    } finally {
+      setFetchingStores(false);
+      setTimeout(() => setSyncProgress(""), 8000);
+    }
   };
 
   // 反映ボタン
@@ -202,7 +229,19 @@ export default function PmaxTopPage() {
         {/* 同期操作バー */}
         <div className="flex flex-wrap items-center gap-3 mb-5 bg-white border border-slate-200 rounded-lg px-4 py-3">
           <button
+            onClick={handleFetchStores}
+            disabled={fetchingStores || syncing}
+            className={`text-xs px-3 py-1.5 rounded-md transition-colors ${
+              fetchingStores || syncing
+                ? "bg-slate-200 text-slate-400 cursor-not-allowed"
+                : "bg-emerald-600 text-white hover:bg-emerald-700"
+            }`}
+          >
+            {fetchingStores ? "取得中..." : "全店舗取得"}
+          </button>
+          <button
             onClick={toggleSelectAll}
+            disabled={stores.length === 0}
             className="text-xs px-3 py-1.5 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
           >
             {selected.size === filtered.length && filtered.length > 0 ? "全解除" : "全選択"}
