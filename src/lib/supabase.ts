@@ -28,7 +28,12 @@ export function getSupabase(): SupabaseClient {
     }
     const isServiceKey = serviceKey.startsWith("eyJ") && serviceKey.length > 200;
     console.error(`[getSupabase] key prefix=${serviceKey.slice(0, 20)}..., len=${serviceKey.length}, isServiceKey=${isServiceKey}`);
-    _adminClient = createClient(SUPABASE_URL, serviceKey);
+    _adminClient = createClient(SUPABASE_URL, serviceKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    });
   }
   return _adminClient;
 }

@@ -153,7 +153,11 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Step 4: DB保存 ──
-  await sb.from("pmax_store_data").delete().eq("month", month);
+  const { error: deleteError, count: deleteCount } = await sb
+    .from("pmax_store_data")
+    .delete({ count: "exact" })
+    .eq("month", month);
+  console.log(`[pmax/sync] Deleted ${deleteCount ?? "?"} rows for month=${month}`, deleteError ? `ERROR: ${deleteError.message}` : "OK");
 
   const insertErrors: string[] = [];
   if (allMonthly.length > 0) {
@@ -165,8 +169,14 @@ export async function POST(request: NextRequest) {
       account_id: c.accountId, synced_at: new Date().toISOString(),
     }));
     for (let j = 0; j < rows.length; j += 100) {
-      const { error } = await sb.from("pmax_store_data").insert(rows.slice(j, j + 100));
-      if (error) { insertErrors.push(error.message); }
+      const batch = rows.slice(j, j + 100);
+      const { error, count: insertedCount } = await sb.from("pmax_store_data").insert(batch, { count: "exact" });
+      if (error) {
+        console.error(`[pmax/sync] INSERT batch ${j / 100 + 1} failed:`, error.message, error.details, error.hint);
+        insertErrors.push(error.message);
+      } else {
+        console.log(`[pmax/sync] INSERT batch ${j / 100 + 1}: ${insertedCount ?? batch.length} rows OK`);
+      }
     }
   }
 

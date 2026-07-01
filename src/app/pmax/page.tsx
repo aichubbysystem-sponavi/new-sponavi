@@ -76,6 +76,7 @@ export default function PmaxTopPage() {
     try {
       const res = await api.get(`/api/pmax/store-summary?month=${monthKey}`);
       const data = res.data;
+      console.log(`[pmax] store-summary response:`, { month: monthKey, totalDbRows: data.totalDbRows, filteredRows: data.filteredRows, storeCount: data.stores?.length });
       if (data.error) {
         setError(data.error);
       } else {
@@ -99,9 +100,12 @@ export default function PmaxTopPage() {
     setSyncProgress("Google Ads APIから全店舗データを同期中（約2分）...");
     try {
       const res = await api.post("/api/pmax/sync", { month: monthKey }, { timeout: 290000 });
-      setSyncProgress(`${res.data.shops}店舗の同期完了（${res.data.monthlyRows}件）`);
+      const d = res.data;
+      const dbInfo = d.dbCount != null ? ` DB保存: ${d.dbCount}件` : "";
+      const errInfo = d.insertErrors?.length ? ` [INSERT失敗: ${d.insertErrors[0]}]` : "";
+      setSyncProgress(`${d.shops}店舗の同期完了（API取得: ${d.monthlyRows}件${dbInfo}${errInfo}）`);
       await fetchStores();
-      setTimeout(() => setSyncProgress(""), 10000);
+      setTimeout(() => setSyncProgress(""), 30000);
     } catch (err: unknown) {
       setSyncProgress(extractErrorDetail(err));
     } finally {
