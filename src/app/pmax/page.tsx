@@ -130,18 +130,27 @@ export default function PmaxTopPage() {
   const handleSync = async () => {
     if (selected.size === 0) return;
     setSyncing(true);
-    setSyncProgress(`${selected.size}店舗のデータを同期中...`);
+    const shopNames = Array.from(selected);
+    const BATCH_SIZE = 50;
+    let totalSynced = 0, totalMonthly = 0, totalDaily = 0, totalGbp = 0;
     try {
-      const shopNames = Array.from(selected);
-      const res = await api.post("/api/pmax/sync", { shopNames, month: monthKey });
-      setSyncProgress(`${res.data.synced}店舗の同期完了（月次${res.data.monthlyRows}件・日次${res.data.dailyRows}件）`);
+      for (let i = 0; i < shopNames.length; i += BATCH_SIZE) {
+        const batch = shopNames.slice(i, i + BATCH_SIZE);
+        setSyncProgress(`同期中... ${i + 1}〜${Math.min(i + BATCH_SIZE, shopNames.length)} / ${shopNames.length}店舗`);
+        const res = await api.post("/api/pmax/sync", { shopNames: batch, month: monthKey }, { timeout: 290000 });
+        totalSynced += res.data.synced || 0;
+        totalMonthly += res.data.monthlyRows || 0;
+        totalDaily += res.data.dailyRows || 0;
+        totalGbp += res.data.gbpSynced || 0;
+      }
+      setSyncProgress(`${totalSynced}店舗の同期完了（月次${totalMonthly}件・日次${totalDaily}件・GBP${totalGbp}件）`);
       setSelected(new Set());
       await fetchStores();
     } catch (err: unknown) {
-      setSyncProgress(`同期エラー: ${err instanceof Error ? err.message : "不明なエラー"}`);
+      setSyncProgress(`同期エラー（${totalSynced}店舗完了済み）: ${err instanceof Error ? err.message : "不明なエラー"}`);
     } finally {
       setSyncing(false);
-      setTimeout(() => setSyncProgress(""), 5000);
+      setTimeout(() => setSyncProgress(""), 8000);
     }
   };
 
