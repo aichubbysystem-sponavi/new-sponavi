@@ -149,6 +149,10 @@ export default function GridRankingPage() {
   const [allShopsKwSyncing, setAllShopsKwSyncing] = useState(false);
   const [allShopsKwResult, setAllShopsKwResult] = useState("");
 
+  // KW未取得一覧
+  const [kwMissingShops, setKwMissingShops] = useState<{ shopId: string; shopName: string; checkedAt: string }[]>([]);
+  const [kwMissingLoaded, setKwMissingLoaded] = useState(false);
+
   // プリセット読み込み（空データで上書きしないよう保護）
   const refreshPresets = useCallback(async () => {
     try {
@@ -168,6 +172,16 @@ export default function GridRankingPage() {
   }, []);
 
   useEffect(() => { refreshPresets(); }, [refreshPresets]);
+
+  // KW未取得一覧の読み込み
+  const refreshKwMissing = useCallback(async () => {
+    try {
+      const res = await api.get("/api/report/kw-missing");
+      setKwMissingShops(res.data.shops || []);
+      setKwMissingLoaded(true);
+    } catch {}
+  }, []);
+  useEffect(() => { refreshKwMissing(); }, [refreshKwMissing]);
 
   // プリセットに追加（シートからKW自動取得）
   const [addingPreset, setAddingPreset] = useState(false);
@@ -1255,6 +1269,7 @@ export default function GridRankingPage() {
                   if (allSkippedMeasured > 0) allSkipMsg.push(`計測済み${allSkippedMeasured}件`);
                   if (skipped > 0) allSkipMsg.push(`座標/KWなし${skipped}件`);
                   setAllShopsBatchProgress(`✓ ${completed}店舗 × ${totalKws}KWの計測完了${allSkipMsg.length > 0 ? `（${allSkipMsg.join("・")}スキップ）` : ""}`);
+                  refreshKwMissing();
                 }}
                 disabled={allShopsBatchRunning}
                 className={`w-full py-3.5 rounded-lg text-sm font-bold transition-all ${allShopsBatchRunning ? "bg-slate-200 text-slate-500" : "bg-orange-500 text-white hover:bg-orange-600 shadow-sm"}`}
@@ -1263,6 +1278,29 @@ export default function GridRankingPage() {
               </button>
               {allShopsBatchProgress && !allShopsBatchRunning && allShopsBatchProgress.startsWith("✓") && (
                 <p className="text-sm text-emerald-600 font-medium text-center">{allShopsBatchProgress}</p>
+              )}
+
+              {/* KW未取得一覧 */}
+              {kwMissingLoaded && kwMissingShops.length > 0 && (
+                <div className="mt-4 border border-amber-200 rounded-lg bg-amber-50">
+                  <div className="px-4 py-2.5 border-b border-amber-200 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-amber-600 font-bold text-sm">KW未取得店舗</span>
+                      <span className="bg-amber-200 text-amber-800 text-xs font-bold px-2 py-0.5 rounded-full">{kwMissingShops.length}件</span>
+                    </div>
+                    <span className="text-xs text-amber-500">シートにKW設定 → 次回バッチで自動解消</span>
+                  </div>
+                  <div className="max-h-48 overflow-y-auto">
+                    {kwMissingShops.map((s) => (
+                      <div key={s.shopId} className="px-4 py-1.5 border-b border-amber-100 last:border-b-0 flex items-center justify-between text-sm">
+                        <span className="text-slate-700 truncate">{s.shopName}</span>
+                        <span className="text-xs text-amber-400 whitespace-nowrap ml-2">
+                          {new Date(s.checkedAt).toLocaleDateString("ja-JP")}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
           );
