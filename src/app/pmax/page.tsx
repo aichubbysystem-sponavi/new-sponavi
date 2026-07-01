@@ -105,7 +105,7 @@ export default function PmaxTopPage() {
     setFetchingStores(true);
     setSyncProgress("Google Ads APIから全店舗を取得中...");
     try {
-      const res = await api.get(`/api/pmax/list-stores?month=${monthKey}`);
+      const res = await api.get(`/api/pmax/list-stores?month=${monthKey}`, { timeout: 120000 });
       const apiStores: StoreSummary[] = res.data.stores || [];
       // DB同期済みの店舗とマージ（同期済みはDBの値、未同期はAPI値）
       const dbNames = new Set(stores.map((s) => s.shopName));
