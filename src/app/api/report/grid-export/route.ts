@@ -56,28 +56,22 @@ export async function GET(request: NextRequest) {
     .limit(5000);
   const nameMap = new Map((shopRows || []).map((s: { id: string; name: string }) => [s.id, s.name]));
 
-  // CSV生成
+  // CSV生成（中心地点の順位のみ）
   const BOM = "\uFEFF";
-  const header = "店舗名,キーワード,グリッドサイズ,間隔(m),平均順位,TOP3率,TOP10率,圏外率,計測日時";
+  const header = "店舗名,キーワード,中心順位,計測日時";
   const rows = (logs || []).map((log: {
     shop_id: string; keyword: string; grid_size: number;
-    interval_m: number; results: { rank: number }[]; measured_at: string;
+    results: { row: number; col: number; rank: number }[]; measured_at: string;
   }) => {
     const shopName = nameMap.get(log.shop_id) || log.shop_id;
     const results = log.results || [];
-    const total = results.length;
-    const ranked = results.filter(r => r.rank > 0);
-    const avgRank = ranked.length > 0
-      ? (ranked.reduce((a, b) => a + b.rank, 0) / ranked.length).toFixed(1)
-      : "-";
-    const top3 = total > 0 ? ((ranked.filter(r => r.rank <= 3).length / total) * 100).toFixed(1) + "%" : "-";
-    const top10 = total > 0 ? ((ranked.filter(r => r.rank <= 10).length / total) * 100).toFixed(1) + "%" : "-";
-    const outOfRange = total > 0 ? ((results.filter(r => r.rank <= 0).length / total) * 100).toFixed(1) + "%" : "-";
+    const center = Math.floor(log.grid_size / 2);
+    const centerPoint = results.find(r => r.row === center && r.col === center);
+    const centerRank = centerPoint && centerPoint.rank > 0 ? centerPoint.rank : "圏外";
     const date = new Date(log.measured_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
 
-    // CSV値のエスケープ
     const esc = (v: string) => v.includes(",") || v.includes('"') ? `"${v.replace(/"/g, '""')}"` : v;
-    return [esc(shopName), esc(log.keyword), log.grid_size, log.interval_m, avgRank, top3, top10, outOfRange, date].join(",");
+    return [esc(shopName), esc(log.keyword), centerRank, date].join(",");
   });
 
   const csv = BOM + header + "\n" + rows.join("\n");
