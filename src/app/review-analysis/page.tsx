@@ -112,6 +112,7 @@ export default function ReviewAnalysisPage() {
       }
       const shop = selectedShops[i];
       setProgress({ current: i, total: selectedShops.length });
+      window.dispatchEvent(new Event("batch-activity"));
       try {
         // 280秒タイムアウト（大量口コミ店舗対応）
         const res = await Promise.race([
