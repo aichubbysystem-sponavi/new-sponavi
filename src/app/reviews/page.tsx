@@ -633,6 +633,7 @@ export default function ReviewsPage() {
       const shopId = allShopIds[i];
       const shopName = shopNameMap.get(shopId) || `店舗${i + 1}`;
       setSyncMsg(`全店舗同期中... ${i}/${allShopIds.length}店舗完了（スキップ${skippedCount}、${totalSynced}件取得）\n処理中: ${shopName}`);
+      window.dispatchEvent(new Event("batch-activity"));
 
       // 個別店舗の同期済みチェック（7日以内に同期済みならスキップ）
       try {

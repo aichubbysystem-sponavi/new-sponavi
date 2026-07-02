@@ -27,7 +27,9 @@ export function getSupabase(): SupabaseClient {
       throw new Error("SUPABASE_SERVICE_ROLE_KEY が未設定です。Vercel環境変数を確認してください。");
     }
     const isServiceKey = serviceKey.startsWith("eyJ") && serviceKey.length > 200;
-    console.error(`[getSupabase] key prefix=${serviceKey.slice(0, 20)}..., len=${serviceKey.length}, isServiceKey=${isServiceKey}`);
+    if (!isServiceKey) {
+      console.error(`[getSupabase] WARNING: key may not be service_role (len=${serviceKey.length})`);
+    }
     _adminClient = createClient(SUPABASE_URL, serviceKey, {
       auth: {
         autoRefreshToken: false,
@@ -93,13 +95,24 @@ export type AppRole = "president" | "manager" | "part_time";
 export async function getUserRole(userId: string): Promise<AppRole | null> {
   const sb = getSupabase();
 
-  // user_profiles を全件取得してJSで検索（.eq()フィルターがPostgRESTで不安定なため）
-  const { data: profiles } = await sb.from("user_profiles").select("id, auth_uid, role");
-  if (profiles && profiles.length > 0) {
-    const match = profiles.find(
-      (p: { id: string; auth_uid: string }) => p.id === userId || p.auth_uid === userId
-    );
-    if (match?.role) return match.role as AppRole;
+  // auth_uidで検索（.eq()はauth修正済みで正常動作）
+  const { data: byAuthUid } = await sb
+    .from("user_profiles")
+    .select("role")
+    .eq("auth_uid", userId)
+    .limit(1);
+  if (byAuthUid && byAuthUid.length > 0 && byAuthUid[0].role) {
+    return byAuthUid[0].role as AppRole;
+  }
+
+  // idで検索（フォールバック）
+  const { data: byId } = await sb
+    .from("user_profiles")
+    .select("role")
+    .eq("id", userId)
+    .limit(1);
+  if (byId && byId.length > 0 && byId[0].role) {
+    return byId[0].role as AppRole;
   }
 
   console.warn(`[getUserRole] Role not found for userId: ${userId}`);
