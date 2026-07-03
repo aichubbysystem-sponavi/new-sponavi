@@ -6,10 +6,48 @@ export const maxDuration = 300;
 
 const GCP_API_KEY = process.env.GCP_API_KEY || "";
 
+// ===== 検索結果キャッシュ（コスト削減） =====
+// 計測地点を全国共通の格子にスナップすることで、
+// ①同月内の同一検索（同KW×同地点）はAPIを呼ばずキャッシュから返す
+// ②近隣店舗同士が同じ格子点を共有し、1回の検索で複数店舗の順位を確定できる
+// 格子幅 ≈ 1km（グリッド間隔と同等）。locationBias半径2000mに対しズレの影響は軽微
+const LAT_STEP = 0.009; // ≈ 1000m
+const LNG_STEP = 0.011; // ≈ 1000m（日本の緯度帯）
+
+function snapCoord(v: number, step: number): string {
+  return (Math.round(v / step) * step).toFixed(6);
+}
+
+// JSTの 'YYYY-MM'
+function jstMonth(): string {
+  return new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+  }).format(new Date());
+}
+
+// 順位順の店名リストから対象店舗の順位を返す（0 = 見つからない）
+function findRank(places: string[], targetName: string): number {
+  if (!targetName) return 0;
+  for (let i = 0; i < places.length; i++) {
+    const placeName = places[i] || "";
+    if (!placeName) continue; // 空文字は .includes("") が常にtrueになるためスキップ
+    if (
+      placeName === targetName ||
+      placeName.includes(targetName) ||
+      targetName.includes(placeName)
+    ) {
+      return i + 1;
+    }
+  }
+  return 0;
+}
 
 /**
  * POST /api/report/grid-ranking
  * 1地点×1キーワードの順位計測（最大100位まで5ページ検索）
+ * 検索結果は grid_search_cache に月次保存し、同月の再計測はAPIを呼ばない
  */
 export async function POST(request: NextRequest) {
   const body = await request.json();
@@ -44,10 +82,40 @@ export async function POST(request: NextRequest) {
 
   const targetName = shop.gbp_shop_name || shop.name;
 
+  // 計測地点を格子にスナップ（キャッシュキー＝実際の検索中心。一貫性を保つ）
+  const latKey = snapCoord(lat, LAT_STEP);
+  const lngKey = snapCoord(lng, LNG_STEP);
+  const month = jstMonth();
+
+  // ① キャッシュ照会: 同月×同KW×同格子点が計測済みならAPIを呼ばない
+  try {
+    const { data: cached } = await supabase
+      .from("grid_search_cache")
+      .select("places, complete")
+      .eq("keyword", keyword)
+      .eq("lat_key", latKey)
+      .eq("lng_key", lngKey)
+      .eq("month", month)
+      .maybeSingle();
+
+    if (cached && Array.isArray(cached.places)) {
+      const cachedRank = findRank(cached.places as string[], targetName);
+      // 発見できた、または全ページ取得済みリスト（＝本当に圏外）ならキャッシュで確定
+      if (cachedRank > 0 || cached.complete) {
+        return NextResponse.json({ rank: cachedRank, shopName: targetName, cached: true });
+      }
+      // 不完全リストで未発見 → 下の実測にフォールバック（リストを完全版に更新）
+    }
+  } catch (e) {
+    // キャッシュ障害時は実測にフォールバック（テーブル未作成等）
+    console.error("[grid-ranking] cache read error:", e instanceof Error ? e.message : e);
+  }
+
   try {
     let rank = 0;
     let pageToken: string | undefined;
-    let position = 0;
+    const allPlaces: string[] = []; // 順位順の全店名（キャッシュ保存用）
+    let complete = false;
 
     // 最大5ページ（100位）まで検索
     for (let page = 0; page < 5; page++) {
@@ -57,7 +125,7 @@ export async function POST(request: NextRequest) {
         rankPreference: "RELEVANCE",
         locationBias: {
           circle: {
-            center: { latitude: lat, longitude: lng },
+            center: { latitude: parseFloat(latKey), longitude: parseFloat(lngKey) },
             radius: 2000,
           },
         },
@@ -79,24 +147,39 @@ export async function POST(request: NextRequest) {
 
       const data = await res.json();
       const places = data.places || [];
-
-      for (let i = 0; i < places.length; i++) {
-        const placeName = places[i].displayName?.text || "";
-        if (
-          placeName === targetName ||
-          placeName.includes(targetName) ||
-          targetName.includes(placeName)
-        ) {
-          rank = position + i + 1;
-          break;
-        }
+      for (const p of places) {
+        allPlaces.push(p.displayName?.text || "");
       }
 
-      if (rank > 0) break;
+      // このページが最終か（次ページなし or 5ページ=100位到達）
+      const isLastPage = !data.nextPageToken || places.length === 0 || page === 4;
+      if (isLastPage) complete = true; // 最後まで見た＝リスト完全
 
-      position += places.length;
+      rank = findRank(allPlaces, targetName);
+      if (rank > 0) break; // 発見したら打ち切り（未到達ページがあれば complete=false のまま）
+      if (isLastPage) break;
+
       pageToken = data.nextPageToken;
-      if (!pageToken || places.length === 0) break;
+    }
+
+    // ② 結果リスト全体を保存（次回以降・他店舗の照会をAPIゼロにする）
+    if (allPlaces.length > 0) {
+      try {
+        await supabase.from("grid_search_cache").upsert(
+          {
+            keyword,
+            lat_key: latKey,
+            lng_key: lngKey,
+            month,
+            places: allPlaces,
+            complete,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "keyword,lat_key,lng_key,month" }
+        );
+      } catch (e) {
+        console.error("[grid-ranking] cache write error:", e instanceof Error ? e.message : e);
+      }
     }
 
     return NextResponse.json({ rank, shopName: targetName });
