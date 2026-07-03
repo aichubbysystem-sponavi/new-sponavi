@@ -58,3 +58,35 @@
   → 未分類に出た店舗はシート側の表記を実データに合わせて修正すればグループに入る。
 - 共有トークンはグループ名固定。シート編集後は共有ページの表示も自動追随する。
 - 「更新」ボタンはシート再読込のみ。ADS APIからの新店舗取得は既存の「全店舗を更新」で行う。
+
+-------------------------------------------------------------
+追記(同日): 共有ページから各店舗の詳細レポートを閲覧可能に
+-------------------------------------------------------------
+## 問題
+- グループ共有ページ(/pmax/group/[token])の店舗カードがクリック不可の<div>で、
+  各店舗の詳細レポート（グラフ・月次・GBP指標）に入れなかった。
+- また当初、共有ページ自体がログイン要求 → app-shell.tsxのisSharePageに
+  /pmax/group/ を追加して解消済み（skipAuth）。
+
+## 対応
+- src/components/pmax-report-view.tsx 新規
+  - 既存 /pmax/share/[token] の表示部分を共通コンポーネント化（データはprops）。
+  - backHref propで「グループ一覧へ戻る」リンク表示。
+- src/app/pmax/share/[token]/page.tsx をリファクタ
+  - 取得→<PmaxReportView data=.../> に委譲（表示は完全同一）。
+- src/app/api/pmax/group-share/[token]/store/route.ts 新規
+  - ★認証不要。token→group_name→シートのグループ所属を検証してから
+    その店舗の詳細データを返す（所属外は403）。形状は share/[token] と同一。
+  - 表記ゆれ対策: in(months)で広く取得し正規化一致でDB実名を解決。
+- src/app/pmax/group/[token]/store/page.tsx 新規
+  - useSearchParams利用のためSuspenseでラップ（既存/pmax/storeと同パターン）。
+  - PmaxReportViewでレンダリング + backHref。
+- src/app/pmax/group/[token]/page.tsx
+  - 店舗カードを<div>→<a href=.../store?name=...>に変更（クリックで詳細へ）。
+
+## 検証
+- next build 成功。/pmax/group/[token]/store, /api/pmax/group-share/[token]/store 生成確認。
+
+## セキュリティ
+- 店舗詳細も「そのグループに属する店舗のみ」返す（所属外はサーバー側で403）。
+  トークンを知っていても他グループ店舗の詳細は取得不可。

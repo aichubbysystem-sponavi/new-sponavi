@@ -165,13 +165,14 @@ export default function PmaxGroupSharePage() {
               </div>
             ) : (
               stores.map((store) => (
-                <div
+                <a
                   key={store.shopName}
-                  className="bg-white rounded-xl border border-slate-200 p-5"
+                  href={`/pmax/group/${encodeURIComponent(token)}/store?name=${encodeURIComponent(store.shopName)}&year=${selectedYear}&month=${selectedMonth}`}
+                  className="bg-white rounded-xl border border-slate-200 p-5 hover:border-[#003D6B]/30 hover:shadow-lg transition-all text-left group block"
                 >
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-slate-800 truncate">{store.shopName}</p>
+                      <p className="font-semibold text-slate-800 group-hover:text-[#003D6B] truncate">{store.shopName}</p>
                       <div className="flex flex-wrap gap-1 mt-1">
                         {store.languages.map((lang) => (
                           <span key={lang} className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${LANG_COLORS[lang] || LANG_COLORS.Unknown}`}>
@@ -180,6 +181,9 @@ export default function PmaxGroupSharePage() {
                         ))}
                       </div>
                     </div>
+                    <svg className="w-5 h-5 text-slate-300 group-hover:text-[#003D6B] transition-colors flex-shrink-0 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
                   </div>
                   <div className="grid grid-cols-3 gap-2">
                     <div className="bg-blue-50 rounded-lg p-2 text-center">
@@ -195,7 +199,7 @@ export default function PmaxGroupSharePage() {
                       <p className="text-sm font-bold text-orange-700">{formatCost(store.costMicros)}</p>
                     </div>
                   </div>
-                </div>
+                </a>
               ))
             )}
           </div>
