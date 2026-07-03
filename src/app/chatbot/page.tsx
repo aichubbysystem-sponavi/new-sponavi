@@ -121,7 +121,7 @@ export default function ChatbotPage() {
           )}
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200">
             <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-xs font-medium text-emerald-700">Dify連携中</span>
+            <span className="text-xs font-medium text-emerald-700">AI稼働中</span>
           </div>
         </div>
       </div>
@@ -135,7 +135,7 @@ export default function ChatbotPage() {
             </div>
             <h3 className="text-lg font-bold text-slate-700 mb-2">AI社長に質問してみましょう</h3>
             <p className="text-sm text-slate-400 mb-6 max-w-md">
-              MEO対策、GBP運用、業務マニュアルなど、社内ナレッジベースから回答します。
+              システムの使い方、MEO対策、GBP運用など、業務に関する質問にAIが回答します。
               {selectedShop && <span className="block mt-1">現在選択中: {selectedShop.name}</span>}
             </p>
 
@@ -228,7 +228,7 @@ export default function ChatbotPage() {
           </button>
         </div>
         <p className="text-[10px] text-slate-400 mt-1.5 text-center">
-          AI社長はDifyナレッジベース（MEOマニュアル・会議録・業務ルール）を参照して回答します
+          AI社長はSPOTLIGHT NAVIGATORの使い方とMEO対策の知識をもとに回答します
         </p>
       </div>
     </div>
