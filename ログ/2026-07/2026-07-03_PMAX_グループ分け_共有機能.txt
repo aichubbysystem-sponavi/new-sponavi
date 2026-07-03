@@ -130,3 +130,51 @@
 
 ## 検証
 - next build 成功（警告は既存の他ファイル分のみ）。
+
+=============================================================
+セッション終了サマリー（定型フォーマット）
+=============================================================
+
+## 2026-07-03
+### 決定事項
+- /pmax 店舗一覧をグループ定義シート（列=グループ、1行目=グループ名、2行目以降=店舗名）でグループ分け表示する。
+- グループ別の公開共有URL（ログイン不要）を発行。トークンはグループ名のみ紐付け、他グループ店舗は構造的に閲覧不可。
+- 共有ページからも各店舗の詳細レポートを閲覧可能にする（グループ範囲内のみ、所属外は403）。
+- 店舗レポート表示は共通コンポーネント PmaxReportView に一本化し、管理画面・店舗共有・グループ共有の3箇所で共用する。
+- レポートにコンバージョン（GBP由来アクション）の月次棒グラフページを追加する。
+- 「更新」ボタン＝グループ定義シートの再読込のみ（ADS同期は既存の「全店舗を更新」）。
+
+### 変更内容（具体的に）
+- 新規 src/lib/pmax-groups.ts: グループ定義シートCSV取得→列ごとにグループ化。normalizeShopName（NFKC+空白除去+小文字）、parseCSV、getPmaxGroups/getGroupStores。10分キャッシュ+forceRefresh。
+- 新規 src/app/api/pmax/groups/route.ts: GET（requireRole president/manager）、?refresh=1でシート再読込。
+- 新規 sql/pmax_group_shares.sql: token(PK,uuid)/group_name(UNIQUE)/created_by/created_at。★本番Supabaseで実行済み。
+- 新規 src/app/api/pmax/group-share/route.ts: POST（認証要）グループ名で共有トークン発行（既存あれば再利用）。
+- 新規 src/app/api/pmax/group-share/[token]/route.ts: GET（★認証不要）token→group→シートの所属店舗のみ集計して返す。?month=YYYY-MM。
+- 新規 src/app/api/pmax/group-share/[token]/store/route.ts: GET（★認証不要）グループ所属を検証して店舗詳細を返す（所属外403）。まとめは pmax_share_tokens から取得。表記ゆれ対策で in(months)取得→正規化一致でDB実名解決。
+- 新規 src/app/pmax/group/[token]/page.tsx: 公開グループ一覧（月セレクタ+合計+店舗カード=詳細リンク）。
+- 新規 src/app/pmax/group/[token]/store/page.tsx: 公開店舗詳細（Suspenseラップ、PmaxReportView+backHref）。
+- 新規 src/components/pmax-report-view.tsx: 店舗レポート表示の共通コンポーネント。KPIサマリー/コンバージョン月次棒グラフ/言語別/まとめ。backHref対応。
+- 改修 src/app/pmax/page.tsx: groups取得、「グループを更新」ボタン(緑)、groupSections(useMemo)でグループ分け表示（未分類セクション/折りたたみ/グループ合計/共有ボタン＋モーダル）。
+- 改修 src/components/app-shell.tsx: isSharePage に /pmax/group/ を追加（AuthGuard skipAuth＝ログイン不要化）。
+- 改修 src/app/pmax/share/[token]/page.tsx: 表示部を PmaxReportView に委譲（薄いラッパ化）。
+- 改修 src/app/pmax/store/page.tsx: 独自レンダリング約380行を削除し PmaxReportView に統一（トップバー/共有URL発行/AI要約生成は維持）。
+
+### 数値・設定値
+- グループ定義シート: 1nTpdDIATNJhsKkx6hZwwquMhFvvfnstVKs4nsA6CWg4 (gid=0)。実データ=47グループ/定義167店舗/複数グループ重複0件。
+- pmax-groups キャッシュTTL: 10分。
+- コンバージョン棒グラフ対象6指標: 合計来店数(totalVisits)/電話(phone)/経路案内(directions)/メニュークリック(menuClicks)/WEBサイト(website)/保存・共有(saveShare)。※「予約」はデータソースなし(常0)で除外。
+- レポートページ番号: 1=KPI, 2=コンバージョン(convOffset), 以降=言語別, 末尾=まとめ。
+- 共有トークン: gen_random_uuid()。group_name UNIQUE で1グループ=1URL。
+- 認可: /api/pmax/groups と group-share POST は requireRole(president/manager)。group-share GET系は認証不要（公開）。
+
+### 未解決・次回やること
+- 「未分類」に落ちる店舗は、シート表記とDBの shop_name の表記ゆれ（例: カ↔力 の別文字）が原因。シート側をDB実データに合わせて修正すれば解消。
+- まとめ(コンバージョンページ含む詳細)の「まとめ」文は、管理画面でその店舗のまとめを生成・保存済みの場合のみグループ共有に反映。未生成店舗は「まとめ」ページ非表示（要望あればグループ共有時の自動生成を検討）。
+- 「予約」指標を棒グラフに含めたい要望が出たら追加対応。
+
+### 注意点・ハマったこと
+- 認証はミドルウェアではなくクライアント側 AuthGuard(app-shell.tsx) で制御。公開ページは isSharePage(skipAuth) への登録が必須。/pmax/group/ 追加で解消。
+- 共有ページ(PmaxReportView)は反映されるのに管理画面(/pmax/store)に出ない → 両者が別実装(コード重複)だったのが原因。共通コンポーネント化で恒久解決。
+- 反映確認は Playwright で実ブラウザ検証（キャッシュ無し）。ユーザー側の「反映されない」はブラウザキャッシュのケースあり → ハードリロード(Ctrl+Shift+R)案内。
+- useSearchParams 使用ページは Suspense ラップ必須（/pmax/store と同パターン）。
+- 本番Supabaseは直接接続情報がローカルに無く、DDLはSQL Editorで手動実行（pmax_group_shares）。
