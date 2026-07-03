@@ -144,6 +144,21 @@ export async function GET(
       saveShare: Number(r.save_share),
     }));
 
+    // まとめテキスト: 店舗単位の共有トークン(pmax_share_tokens)に保存された
+    // その店舗・年月のサマリーを流用（存在すれば表示）
+    let summaryText = "";
+    const { data: summaryRows } = await sb
+      .from("pmax_share_tokens")
+      .select("summary_text")
+      .eq("shop_name", dbShopName)
+      .eq("year", year)
+      .eq("month", month)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    if (summaryRows && summaryRows.length > 0 && summaryRows[0].summary_text) {
+      summaryText = summaryRows[0].summary_text;
+    }
+
     return NextResponse.json({
       monthly,
       daily,
@@ -151,7 +166,7 @@ export async function GET(
       shopName: dbShopName,
       year,
       month,
-      summaryText: "",
+      summaryText,
     });
   } catch (err) {
     console.error("[pmax/group-share/token/store] Error:", err);
