@@ -126,6 +126,66 @@ export default function UserManagementPage() {
         </div>
       </div>
 
+      {/* 承認待ちユーザー */}
+      {users.filter(u => u.role === "pending").length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 mb-6">
+          <h3 className="text-sm font-bold text-amber-700 mb-3">
+            承認待ち（{users.filter(u => u.role === "pending").length}件）
+          </h3>
+          <div className="space-y-3">
+            {users.filter(u => u.role === "pending").map((user) => (
+              <div key={user.id} className="bg-white rounded-lg border border-amber-100 p-4 flex flex-wrap items-center gap-3">
+                <div className="flex-1 min-w-[200px]">
+                  <p className="text-sm font-semibold text-slate-800">{user.name}</p>
+                  <p className="text-xs text-slate-400">ユーザー名: {user.username} — 申請日: {new Date(user.created_at).toLocaleString("ja-JP")}</p>
+                </div>
+                <input
+                  type="text"
+                  defaultValue={user.name}
+                  placeholder="表示名"
+                  id={`approve-name-${user.id}`}
+                  className="border border-slate-200 rounded px-3 py-1.5 text-sm w-32"
+                />
+                <select
+                  id={`approve-role-${user.id}`}
+                  defaultValue="manager"
+                  className="border border-slate-200 rounded px-3 py-1.5 text-sm"
+                >
+                  {ROLE_OPTIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+                <button
+                  onClick={async () => {
+                    const name = (document.getElementById(`approve-name-${user.id}`) as HTMLInputElement).value;
+                    const role = (document.getElementById(`approve-role-${user.id}`) as HTMLSelectElement).value;
+                    try {
+                      await api.patch("/api/report/users", { userId: user.id, action: "approve", role, name });
+                      setMsg(`${name}さんを「${ROLE_OPTIONS.find(r => r.value === role)?.label}」で承認しました`);
+                      await fetchUsers(); await fetchLogs();
+                    } catch (e: any) { setMsg(`承認失敗: ${e?.response?.data?.error || e?.message}`); }
+                  }}
+                  className="px-4 py-1.5 rounded text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white"
+                >
+                  承認
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!confirm(`${user.name}さんの申請を却下しますか？`)) return;
+                    try {
+                      await api.patch("/api/report/users", { userId: user.id, action: "reject" });
+                      setMsg(`${user.name}さんの申請を却下しました`);
+                      await fetchUsers(); await fetchLogs();
+                    } catch (e: any) { setMsg(`却下失敗: ${e?.response?.data?.error || e?.message}`); }
+                  }}
+                  className="px-4 py-1.5 rounded text-xs font-bold bg-red-500 hover:bg-red-600 text-white"
+                >
+                  却下
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* 新規ユーザー作成ボタン */}
       <div className="flex items-center justify-end mb-5">
         <button onClick={() => setShowCreate(!showCreate)}
@@ -181,7 +241,7 @@ export default function UserManagementPage() {
         </div>
         {loading ? (
           <div className="p-12 text-center"><p className="text-slate-400 text-sm">読み込み中...</p></div>
-        ) : users.length === 0 ? (
+        ) : users.filter(u => u.role !== "pending").length === 0 ? (
           <div className="p-12 text-center"><p className="text-slate-400 text-sm">ユーザーがいません。「+ 新規ユーザー作成」から追加してください。</p></div>
         ) : (
           <table className="w-full text-xs">
@@ -195,18 +255,37 @@ export default function UserManagementPage() {
               </tr>
             </thead>
             <tbody>
-              {users.map((user) => (
+              {users.filter(u => u.role !== "pending").map((user) => (
                 <tr key={user.id} className="border-b border-slate-50 hover:bg-slate-50">
                   <td className="p-3 font-medium text-slate-800">{user.name}</td>
                   <td className="p-3 text-slate-600">{user.username}</td>
                   <td className="p-3 text-center">
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                      user.role === "president" ? "bg-amber-50 text-amber-600" :
-                      user.role === "manager" ? "bg-blue-50 text-blue-600" :
-                      "bg-slate-50 text-slate-600"
-                    }`}>
-                      {ROLE_OPTIONS.find((r) => r.value === user.role)?.label || user.role}
-                    </span>
+                    <select
+                      value={user.role}
+                      onChange={async (e) => {
+                        const newRole = e.target.value;
+                        const label = ROLE_OPTIONS.find(r => r.value === newRole)?.label || newRole;
+                        if (!confirm(`${user.name}さんのロールを「${label}」に変更しますか？`)) {
+                          e.target.value = user.role;
+                          return;
+                        }
+                        try {
+                          await api.patch("/api/report/users", { userId: user.id, action: "change_role", role: newRole });
+                          setMsg(`${user.name}さんのロールを「${label}」に変更しました`);
+                          await fetchUsers(); await fetchLogs();
+                        } catch (err: any) {
+                          setMsg(`変更失敗: ${err?.response?.data?.error || err?.message}`);
+                          e.target.value = user.role;
+                        }
+                      }}
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border-0 cursor-pointer ${
+                        user.role === "president" ? "bg-amber-50 text-amber-600" :
+                        user.role === "manager" ? "bg-blue-50 text-blue-600" :
+                        "bg-slate-50 text-slate-600"
+                      }`}
+                    >
+                      {ROLE_OPTIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                    </select>
                   </td>
                   <td className="p-3 text-right text-slate-400">{new Date(user.created_at).toLocaleDateString("ja-JP")}</td>
                   <td className="p-3">

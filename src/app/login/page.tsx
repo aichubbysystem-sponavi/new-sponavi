@@ -11,7 +11,7 @@ import {
   resetLoginAttempts,
 } from "@/lib/password-validation";
 
-type Mode = "login" | "reset" | "change-password";
+type Mode = "login" | "reset" | "change-password" | "register";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -25,6 +25,7 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [lockoutSeconds, setLockoutSeconds] = useState(0);
+  const [regName, setRegName] = useState("");
   const router = useRouter();
 
   // ロックアウトのカウントダウン
@@ -168,6 +169,40 @@ export default function LoginPage() {
     setLoading(false);
   };
 
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setSuccess("");
+    if (!regName || !email || !password) {
+      setError("全項目を入力してください");
+      return;
+    }
+    if (password.length < 8) {
+      setError("パスワードは8文字以上にしてください");
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch("/api/report/users", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: regName, username: email, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "登録に失敗しました");
+      } else {
+        setSuccess("登録申請を送信しました。管理者の承認をお待ちください。");
+        setRegName("");
+        setEmail("");
+        setPassword("");
+      }
+    } catch {
+      setError("通信エラーが発生しました");
+    }
+    setLoading(false);
+  };
+
   const switchMode = useCallback((newMode: Mode) => {
     setMode(newMode);
     setError("");
@@ -180,6 +215,7 @@ export default function LoginPage() {
         onSubmit={
           mode === "login" ? handleLogin :
           mode === "reset" ? handleResetPassword :
+          mode === "register" ? handleRegister :
           handleChangePassword
         }
         className="bg-white rounded-2xl shadow-xl p-10 w-[460px]"
@@ -204,6 +240,7 @@ export default function LoginPage() {
         <div className="text-center mb-6">
           <h2 className="text-sm font-semibold text-slate-600">
             {mode === "login" && "ログイン"}
+            {mode === "register" && "アカウント登録申請"}
             {mode === "reset" && "パスワードリセット"}
             {mode === "change-password" && "新しいパスワードを設定"}
           </h2>
@@ -282,6 +319,70 @@ export default function LoginPage() {
               className="w-full text-center text-xs text-slate-400 mt-4 hover:text-[#003D6B] transition cursor-pointer"
             >
               パスワードをお忘れの場合
+            </button>
+
+            <button
+              type="button"
+              onClick={() => switchMode("register")}
+              className="w-full text-center text-xs text-slate-400 mt-2 hover:text-[#003D6B] transition cursor-pointer"
+            >
+              アカウント登録申請はこちら
+            </button>
+          </>
+        )}
+
+        {/* ===== 登録申請モード ===== */}
+        {mode === "register" && (
+          <>
+            <div className="mb-4">
+              <label className="text-xs font-medium text-slate-500 block mb-1">表示名</label>
+              <input
+                type="text"
+                value={regName}
+                onChange={(e) => setRegName(e.target.value)}
+                placeholder="例: 山田太郎"
+                className="w-full border border-slate-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#003D6B]/30 focus:border-[#003D6B]"
+                required
+              />
+            </div>
+            <div className="mb-4">
+              <label className="text-xs font-medium text-slate-500 block mb-1">ユーザー名</label>
+              <input
+                type="text"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="例: yamada"
+                className="w-full border border-slate-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#003D6B]/30 focus:border-[#003D6B]"
+                required
+              />
+            </div>
+            <div className="mb-6">
+              <label className="text-xs font-medium text-slate-500 block mb-1">パスワード（8文字以上）</label>
+              <input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="パスワード"
+                className="w-full border border-slate-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#003D6B]/30 focus:border-[#003D6B]"
+                required
+                autoComplete="new-password"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-emerald-600 text-white py-3 rounded-lg font-medium hover:bg-emerald-700 transition disabled:opacity-50"
+            >
+              {loading ? "送信中..." : "登録申請を送信"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => switchMode("login")}
+              className="w-full text-center text-xs text-slate-400 mt-4 hover:text-[#003D6B] transition cursor-pointer"
+            >
+              ログインに戻る
             </button>
           </>
         )}
