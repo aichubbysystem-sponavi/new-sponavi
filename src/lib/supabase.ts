@@ -1,5 +1,18 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
+
+/** 定数時間文字列比較（タイミング攻撃防止） */
+export function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  try {
+    return crypto.timingSafeEqual(ab, bb);
+  } catch {
+    return false;
+  }
+}
 
 // ── 環境変数 ──
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
@@ -66,9 +79,9 @@ export async function verifyAuth(authHeader: string | null): Promise<{ valid: bo
 
 /** Cronルート用: CRON_SECRETのBearerトークンを検証 */
 export function verifyCron(request: NextRequest): NextResponse | null {
-  const authHeader = request.headers.get("authorization");
+  const authHeader = request.headers.get("authorization") || "";
   const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+  if (!cronSecret || !safeEqual(authHeader, `Bearer ${cronSecret}`)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   return null;
@@ -144,12 +157,14 @@ export async function requireRole(
 
 /**
  * ユーザーがアクセス可能な店舗名一覧を取得
- * - president: "all"（全店舗）
- * - その他: user_shop_access テーブルに登録された店舗名のみ
+ * - president / manager: "all"（全店舗）
+ * - part_time: user_shop_access テーブルに登録された店舗名のみ
  */
 export async function getUserAllowedShops(authUid: string): Promise<string[] | "all"> {
   const role = await getUserRole(authUid);
-  if (role === "president") return "all";
+  // 社長・社員は全店舗を閲覧可能（信頼された社内スタッフ）。
+  // バイト(part_time)のみ user_shop_access で割り当てられた店舗に限定する。
+  if (role === "president" || role === "manager") return "all";
 
   const sb = getSupabase();
   const { data } = await sb
@@ -165,8 +180,8 @@ export async function getUserAllowedShops(authUid: string): Promise<string[] | "
 export async function verifyShopAccess(authUid: string, shopName: string): Promise<boolean> {
   const allowed = await getUserAllowedShops(authUid);
   if (allowed === "all") return true;
-  // 正規化して比較（全角/半角・大小文字の揺れ対応）
-  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, "");
+  // 正規化して比較（NFKCで全角/半角を統一 + 空白除去 + 小文字化）
+  const norm = (s: string) => (s || "").normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
   return allowed.some((name) => norm(name) === norm(shopName));
 }
 

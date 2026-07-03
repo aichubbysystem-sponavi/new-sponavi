@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth, requireShopAccessById } from "@/lib/supabase";
+import { getSupabase, verifyAuth, requireShopAccessById, getUserAllowedShops, requireRole, safeEqual } from "@/lib/supabase";
 import { getAllOAuthTokens } from "@/lib/gbp-token";
 
 export const dynamic = "force-dynamic";
@@ -17,15 +17,23 @@ export async function GET(request: NextRequest) {
   if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   const shopId = request.nextUrl.searchParams.get("shopId");
 
+  const supabase = getSupabase();
+  let query = supabase.from("scheduled_posts").select("*").order("scheduled_at", { ascending: true });
+
   // 認可チェック
   if (shopId) {
     const access = await requireShopAccessById(request, shopId);
     if (access.error) return access.error;
+    query = query.eq("shop_id", shopId);
+  } else {
+    // shopId省略時: president以外は許可店舗のみに絞る（全店舗漏洩を防止）
+    const allowedShops = await getUserAllowedShops(auth.sub);
+    if (allowedShops !== "all") {
+      if (allowedShops.length === 0) return NextResponse.json([]);
+      query = query.in("shop_name", allowedShops);
+    }
   }
 
-  const supabase = getSupabase();
-  let query = supabase.from("scheduled_posts").select("*").order("scheduled_at", { ascending: true });
-  if (shopId) query = query.eq("shop_id", shopId);
   const { data } = await query;
   return NextResponse.json(data || []);
 }
@@ -129,12 +137,15 @@ export async function PATCH(request: NextRequest) {
  * 予約投稿を実行（cronから呼ばれる or 手動実行）
  */
 export async function PUT(request: NextRequest) {
-  // 認証: JWT or Cron Secret
+  // 認証: JWT or Cron Secret（定数時間比較）
   const cronSecret = process.env.CRON_SECRET;
-  const isCron = cronSecret && request.headers.get("x-cron-secret") === cronSecret;
+  const isCron = !!cronSecret && safeEqual(request.headers.get("x-cron-secret") || "", cronSecret);
+  let allowedShops: string[] | "all" = "all";
   if (!isCron) {
-    const auth = await verifyAuth(request.headers.get("authorization"));
-    if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+    // 手動実行は社長・社員のみ。かつ許可店舗の投稿だけを対象にする
+    const r = await requireRole(request, ["president", "manager"]);
+    if (r.error) return r.error;
+    allowedShops = await getUserAllowedShops(r.sub);
   }
 
   const supabase = getSupabase();
@@ -151,6 +162,11 @@ export async function PUT(request: NextRequest) {
   } else {
     query = query.eq("status", "pending").lte("scheduled_at", now);
   }
+  // 手動実行時はアクセス権のある店舗に限定（全店舗一斉公開を防止）
+  if (!isCron && allowedShops !== "all") {
+    if (allowedShops.length === 0) return NextResponse.json({ message: "実行対象なし", executed: 0 });
+    query = query.in("shop_name", allowedShops);
+  }
   const { data: posts } = await query;
 
   if (!posts || posts.length === 0) {
@@ -162,6 +178,15 @@ export async function PUT(request: NextRequest) {
 
   for (const post of posts) {
     try {
+      // 二重投稿防止: 現在のstatusからprocessingにクレーム。競合実行が先に取っていたらスキップ
+      const { data: claimed } = await supabase
+        .from("scheduled_posts")
+        .update({ status: "processing", processing_started_at: new Date().toISOString() })
+        .eq("id", post.id)
+        .eq("status", post.status)
+        .select("id");
+      if (!claimed || claimed.length === 0) continue; // 他の実行が先にクレーム済み
+
       if (!post.shop_id) {
         await supabase.from("scheduled_posts").update({ status: "error", error_detail: "shop_idなし" }).eq("id", post.id);
         errors++; continue;

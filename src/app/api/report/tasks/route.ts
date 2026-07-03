@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, verifyAuth, requireRole } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -13,8 +13,9 @@ const DIFY_DATASET_ID = process.env.DIFY_DATASET_ID || "";
  * 全機能から未完了タスクを集約して返す
  */
 export async function GET(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  // 全店舗横断の未対応タスク集計は社長・社員のみ
+  const r = await requireRole(request, ["president", "manager"]);
+  if (r.error) return r.error;
   const supabase = getSupabase();
   const tasks: { category: string; label: string; count: number; priority: "high" | "medium" | "low"; detail?: string }[] = [];
 

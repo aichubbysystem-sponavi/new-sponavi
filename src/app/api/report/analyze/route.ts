@@ -23,7 +23,9 @@ interface ReviewListResponse {
 }
 
 // Supabase DBから口コミ取得（Go API不要）- 直近1年
-async function fetchReviews(shopId: string): Promise<ReviewListResponse | null> {
+// 注意: reviews.shop_id は Supabase UUID（sync-reviewsが設定）で、Go APIのshop.idとは
+// 一致しないため、必ず shop_name で検索する（IDで引くと「口コミなし」誤判定になる）
+async function fetchReviews(shopName: string): Promise<ReviewListResponse | null> {
   try {
     const supabase = getSupabase();
     // 直近1年の口コミを取得
@@ -35,7 +37,7 @@ async function fetchReviews(shopId: string): Promise<ReviewListResponse | null> 
     const { data: reviews, count } = await supabase
       .from("reviews")
       .select("review_id, reviewer_name, star_rating, comment, create_time", { count: "exact" })
-      .eq("shop_id", shopId)
+      .eq("shop_name", shopName)
       .gte("create_time", oneYearAgo.toISOString())
       .not("comment", "is", null)
       .order("create_time", { ascending: false });
@@ -68,7 +70,7 @@ async function fetchReviews(shopId: string): Promise<ReviewListResponse | null> 
       totalReviewCount: count || reviews.length,
     };
   } catch (err) {
-    console.error(`[analyze] fetchReviews error for shopId=${shopId}:`, err instanceof Error ? err.message : err);
+    console.error(`[analyze] fetchReviews error for shopName=${shopName}:`, err instanceof Error ? err.message : err);
     return null;
   }
 }
@@ -445,7 +447,7 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      const reviewData = await fetchReviews(shop.id);
+      const reviewData = await fetchReviews(shop.name);
       if (!reviewData || !reviewData.reviews || reviewData.reviews.length === 0) {
         results.push({ shopId: shop.id, shopName: shop.name, status: "no_reviews", reason: "口コミデータなし（先に口コミ同期が必要）" });
         continue;

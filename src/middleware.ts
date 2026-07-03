@@ -81,6 +81,21 @@ export async function middleware(request: NextRequest) {
     }
   }
 
+  // === 登録申請（未認証エンドポイント）の濫用防止 ===
+  // PUT /api/report/users は認証不要でユーザーを作成するため、厳しめのレート制限
+  if (pathname === "/api/report/users" && request.method === "PUT") {
+    if (loginRateLimit) {
+      const { success } = await loginRateLimit.limit(`register:${ip}`);
+      if (!success) {
+        return NextResponse.json({ error: "登録申請の回数が上限に達しました。しばらく待ってからお試しください。" }, { status: 429 });
+      }
+    } else {
+      if (!checkFallbackLimit(`register:${ip}`, 10, 5 * 60_000)) {
+        return NextResponse.json({ error: "登録申請の回数が上限に達しました。しばらく待ってからお試しください。" }, { status: 429 });
+      }
+    }
+  }
+
   // === CSRF対策（状態変更リクエストのOriginチェック） ===
   const method = request.method;
   if (pathname.startsWith("/api/") && ["POST", "PUT", "DELETE", "PATCH"].includes(method)) {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyAuth } from "@/lib/supabase";
+import { verifyAuth, getUserAllowedShops } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +38,9 @@ function parseCSV(text: string): string[][] {
  */
 export async function GET(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+
+  const allowedShops = await getUserAllowedShops(auth.sub);
 
   const { getOAuthToken } = await import("@/lib/gbp-token");
   const token = await getOAuthToken();
@@ -89,5 +91,15 @@ export async function GET(request: NextRequest) {
     } catch {}
   }
 
-  return NextResponse.json({ mapping, tabs: tabNames.length });
+  // president以外は許可店舗のみに絞る（全店舗の列挙を防止）
+  let outMapping = mapping;
+  if (allowedShops !== "all") {
+    const norm = (s: string) => (s || "").toLowerCase().replace(/\s+/g, "");
+    const allowedSet = new Set(allowedShops.map(norm));
+    outMapping = Object.fromEntries(
+      Object.entries(mapping).filter(([shopName]) => allowedSet.has(norm(shopName)))
+    );
+  }
+
+  return NextResponse.json({ mapping: outMapping, tabs: tabNames.length });
 }

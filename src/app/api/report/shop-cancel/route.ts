@@ -37,12 +37,21 @@ export async function POST(request: NextRequest) {
   if (!shopId) return NextResponse.json({ error: "shopId is required" }, { status: 400 });
 
   const supabase = getSupabase();
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from("shops")
     .update({ cancelled_at: cancel ? new Date().toISOString() : null })
-    .eq("id", shopId);
+    .eq("id", shopId)
+    .select("id");
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // 0行更新の検出: IDが一致せず何も更新されなかった場合はサイレント成功にしない
+  if (!updated || updated.length === 0) {
+    return NextResponse.json(
+      { error: "対象の店舗が見つかりませんでした（IDが一致しません）", shopId },
+      { status: 404 }
+    );
+  }
 
   return NextResponse.json({ ok: true, shopId, cancelled: !!cancel });
 }

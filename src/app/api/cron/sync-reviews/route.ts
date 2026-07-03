@@ -26,6 +26,7 @@ interface FetchResult {
   reviews: GBPReview[];
   totalCount: number;
   avgRating: number;
+  authError: boolean; // 401/403（トークン失効）を検出。空応答と区別する
 }
 
 async function fetchReviews(fullPath: string, token: string): Promise<FetchResult> {
@@ -35,6 +36,7 @@ async function fetchReviews(fullPath: string, token: string): Promise<FetchResul
   let retries429 = 0;
   let totalCount = 0;
   let avgRating = 0;
+  let authError = false;
   const MAX_429_RETRIES = 3;
   do {
     const params = new URLSearchParams({ orderBy: "updateTime desc", pageSize: "50" });
@@ -52,6 +54,7 @@ async function fetchReviews(fullPath: string, token: string): Promise<FetchResul
       await new Promise(r => setTimeout(r, 10000 * retries429));
       continue;
     }
+    if (res.status === 401 || res.status === 403) { authError = true; break; }
     if (!res.ok) break;
     retries429 = 0;
     const data = await res.json();
@@ -61,7 +64,7 @@ async function fetchReviews(fullPath: string, token: string): Promise<FetchResul
     nextPage = data.nextPageToken;
     pages++;
   } while (nextPage && pages < 40);
-  return { reviews: all, totalCount, avgRating };
+  return { reviews: all, totalCount, avgRating, authError };
 }
 
 // ── 同期進捗管理（Supabase sync_progress テーブル） ──
@@ -183,10 +186,13 @@ export async function GET(request: NextRequest) {
 
   // 5. 1店舗ずつ同期
   const supabase = getSupabase();
+  const startTime = Date.now();
+  const TIME_LIMIT = 270_000; // 270秒でループを打ち切り、必ずオフセット保存まで到達させる（maxDuration=300s）
   let synced = 0;
   let errors = 0;
   let consecutiveAuthErrors = 0;
   let lastProcessedIndex = 0; // 最後に処理した店舗のインデックス（offset計算用）
+  let stoppedByTime = false;
 
   // Supabase shop_idマップを構築（Go API IDではなくSupabase IDを使うため）
   const batchNames = batch.map(s => s.name);
@@ -194,6 +200,14 @@ export async function GET(request: NextRequest) {
   const sbShopIdMap = new Map((sbShops || []).map(s => [s.name, s.id]));
 
   for (let i = 0; i < batch.length; i++) {
+    // 時間切れ前に打ち切り: ここでbreakすればループ後のオフセット保存が必ず実行され、
+    // 処理済み分だけ前進する（Vercelの強制killでオフセット未保存になるのを防ぐ）
+    if (Date.now() - startTime > TIME_LIMIT) {
+      stoppedByTime = true;
+      console.log(`[cron/sync-reviews] 時間切れ、${i}/${batch.length}店舗で打ち切り`);
+      break;
+    }
+
     const shop = batch[i];
 
     // フルパス解決
@@ -216,11 +230,27 @@ export async function GET(request: NextRequest) {
 
     try {
       // 全トークンを試す（アカウントごとにアクセス権が異なるため）
-      let result: FetchResult = { reviews: [], totalCount: 0, avgRating: 0 };
+      let result: FetchResult = { reviews: [], totalCount: 0, avgRating: 0, authError: false };
       for (const t of allTokens) {
         result = await fetchReviews(fullPath, t);
-        if (result.reviews.length > 0) break;
+        if (result.reviews.length > 0 || result.authError) break;
       }
+
+      // トークン失効（401/403）: 「口コミ0件」と誤認して同期済み扱いにしない。
+      if (result.authError) {
+        console.error(`[cron/sync-reviews] 認証エラー(401/403) for ${shop.name}`);
+        errors++;
+        consecutiveAuthErrors++;
+        // 連続3回 = トークンが全体的に失効している可能性 → オフセットを進めず中断（次回再試行）
+        if (consecutiveAuthErrors >= 3) {
+          console.error("[cron/sync-reviews] 連続3回の認証エラー、バッチ中断（オフセット非前進）");
+          break;
+        }
+        // 単発の401（その店舗だけ権限なし）→ スキップして前進（後続店舗が永久に滞留するのを防ぐ）
+        lastProcessedIndex = i + 1;
+        continue;
+      }
+
       const reviews = result.reviews;
       if (reviews.length === 0) {
         lastProcessedIndex = i + 1; // 口コミ0件でもスキップとしてカウント
@@ -289,6 +319,8 @@ export async function GET(request: NextRequest) {
     batchSize: batch.length,
     synced,
     errors,
+    stoppedByTime,
+    processed: lastProcessedIndex,
     nextOffset: nextOffset >= shops.length ? 0 : nextOffset,
     completedCycle: nextOffset >= shops.length,
   };

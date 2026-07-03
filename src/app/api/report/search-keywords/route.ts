@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, requireShopAccessById } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -10,11 +10,6 @@ export const dynamic = "force-dynamic";
  * 検索語句をSupabaseに保存
  */
 export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) {
-    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-  }
-
   const body = await request.json();
   const { shopId, keywords, periodStart, periodEnd } = body as {
     shopId: string;
@@ -26,6 +21,10 @@ export async function POST(request: NextRequest) {
   if (!shopId || !keywords || keywords.length === 0) {
     return NextResponse.json({ error: "shopIdとkeywordsが必要です" }, { status: 400 });
   }
+
+  // 認証 + 店舗アクセス権チェック（IDOR防止）
+  const access = await requireShopAccessById(request, shopId);
+  if (access.error) return access.error;
 
   const supabase = getSupabase();
   const periodLabel = new Date(periodStart).toISOString().slice(0, 7); // "2026-04"
@@ -66,13 +65,14 @@ export async function POST(request: NextRequest) {
  * 保存済み検索語句の履歴を取得
  */
 export async function GET(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-
   const shopId = request.nextUrl.searchParams.get("shopId");
   if (!shopId) {
     return NextResponse.json({ error: "shopIdが必要です" }, { status: 400 });
   }
+
+  // 認証 + 店舗アクセス権チェック（IDOR防止）
+  const access = await requireShopAccessById(request, shopId);
+  if (access.error) return access.error;
 
   const supabase = getSupabase();
   const { data, error } = await supabase

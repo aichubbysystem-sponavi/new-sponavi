@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, verifyAuth, getUserAllowedShops } from "@/lib/supabase";
 import { detectLanguage, starToNum } from "@/lib/detect-language";
 
 export const dynamic = "force-dynamic";
@@ -36,7 +36,7 @@ interface ReviewDetail {
  */
 export async function POST(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
   const body = await request.json().catch(() => ({}));
   const shopIds: string[] = (body.shopIds || []).slice(0, 20);
@@ -46,6 +46,11 @@ export async function POST(request: NextRequest) {
   if (shopIds.length === 0 && shopNames.length === 0) {
     return NextResponse.json({ error: "shopIds または shopNames が必要です" }, { status: 400 });
   }
+
+  // 店舗アクセス権（president以外は許可店舗のみ。IDOR防止）
+  const allowedShops = await getUserAllowedShops(auth.sub);
+  const normName = (s: string) => (s || "").toLowerCase().replace(/\s+/g, "");
+  const allowedSet = allowedShops === "all" ? null : new Set(allowedShops.map(normName));
 
   const supabase = getSupabase();
 
@@ -108,6 +113,11 @@ export async function POST(request: NextRequest) {
       if (data.length < pageSize) break;
       from += pageSize;
     }
+  }
+
+  // 権限外店舗の口コミを除外（president以外）
+  if (allowedSet) {
+    allReviews = allReviews.filter((r) => allowedSet.has(normName(r.shop_name)));
   }
 
   // 言語判定 & 集計

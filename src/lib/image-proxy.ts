@@ -13,12 +13,25 @@ const BUCKET = "post-images";
  * - Dropbox一時URL → ダウンロード → Supabase Storage → 公開URL
  * - 既にpublic URLの場合はそのまま返す
  */
+// SSRF防止: 実ホスト名がDropboxの正規ドメインの場合のみサーバー側fetchを許可
+function isDropboxHost(rawUrl: string): boolean {
+  let host: string;
+  try {
+    const u = new URL(rawUrl);
+    if (u.protocol !== "https:" && u.protocol !== "http:") return false;
+    host = u.hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  const allowed = ["dropbox.com", "dropboxusercontent.com"];
+  return allowed.some((d) => host === d || host.endsWith("." + d));
+}
+
 export async function resolveImageUrl(imageUrl: string, postId: string): Promise<string | null> {
   if (!imageUrl) return null;
 
-  // Dropbox以外の一般的な画像URLはそのまま返す
-  const isDropbox = imageUrl.includes("dropbox") || imageUrl.includes("dropboxusercontent");
-  if (!isDropbox) return imageUrl;
+  // Dropboxの正規ホストのみサーバー側でダウンロード（SSRF防止）。それ以外はそのまま返す
+  if (!isDropboxHost(imageUrl)) return imageUrl;
 
   try {
     // 1. 画像をダウンロード

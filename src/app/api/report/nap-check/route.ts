@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth, verifyShopAccess } from "@/lib/supabase";
+import { getSupabase, verifyAuth, verifyShopAccess, requireRole } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -165,8 +165,9 @@ export async function POST(request: NextRequest) {
  * GET /api/report/nap-check
  */
 export async function GET(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  // NAPチェック結果（全店舗横断）は社長・社員のみ
+  const r = await requireRole(request, ["president", "manager"]);
+  if (r.error) return r.error;
 
   const supabase = getSupabase();
   const { data } = await supabase

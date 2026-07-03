@@ -35,16 +35,16 @@ export async function GET(request: NextRequest) {
     const { data, error } = await query.order("updated_at", { ascending: false }).limit(1).maybeSingle();
 
     if (error) {
-      // テーブルが存在しない場合
-      if (error.code === "42P01" || error.message?.includes("does not exist")) {
-        return NextResponse.json({ memo: "" });
-      }
-      return NextResponse.json({ memo: "" });
+      // UIは memo="" で継続させつつ、原因を _error で観測可能にする（握りつぶし防止）
+      console.error("[report/memo] GET error:", error.code, error.message);
+      const tableMissing = error.code === "42P01" || error.message?.includes("does not exist");
+      return NextResponse.json({ memo: "", _error: tableMissing ? "table_missing" : error.message });
     }
 
     return NextResponse.json({ memo: data?.memo || "" });
-  } catch {
-    return NextResponse.json({ memo: "" });
+  } catch (e: any) {
+    console.error("[report/memo] GET exception:", e?.message);
+    return NextResponse.json({ memo: "", _error: e?.message || "unknown" });
   }
 }
 
