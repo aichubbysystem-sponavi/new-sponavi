@@ -1,0 +1,55 @@
+========================================================================
+2026-07-03  多地点順位計測 対策②: SKU Pro→Essentials化（単価▲84%）
+========================================================================
+
+【背景】
+同日の「月次キャッシュ実装」ログの続き。
+Places API searchText の課金SKUはFieldMask（何を返してもらうか）で決まる:
+  - places.displayName を含む → Text Search Pro        $32/1000 ≒ ¥4.8/回 ← 従来
+  - places.id のみ            → Text Search Essentials  $5/1000 ≒ ¥0.75/回 ← 今回
+順位リストの並びは同一。店名の代わりにプレイスIDで自店を照合すれば単価1/6.4。
+Essentialsには月1万リクエストの無料枠もある。
+
+【実装内容】
+■ SQL: sql/2026-07-03_place_id_essentials.sql（冪等・前回SQL未実行でも単体で完結）
+  - shops.gbp_place_id text 追加
+  - grid_search_cache.place_ids jsonb 追加（順位順のID配列）
+
+■ src/app/api/report/grid-ranking/route.ts POST 改修
+  1. shops.gbp_place_id を別クエリで取得（列未作成でも壊れないようメインselectから分離）
+  2. IDあり店舗 → FieldMask "places.id,nextPageToken"（Essentials）、ID一致で順位判定
+     IDなし店舗 → FieldMask "places.id,places.displayName,nextPageToken"（Pro・従来同額）
+  3. 【自動移行】店名モードで順位発見時、店名が完全一致(trim)ならそのplace_idを
+     shops.gbp_place_id に保存 → 次回計測から自動的にEssentialsに切替
+     （部分一致は別店舗の可能性があるため保存しない＝誤ID固定の防止）
+  4. キャッシュ: place_ids(ID配列)とplaces(店名配列)を併存保存
+     - IDモード計測時は places=[]（古い店名配列と新しい順位の混在を防ぐ）
+     - キャッシュ照合: ID持ち店舗はplace_ids、無し店舗はplacesで判定
+     - 「照合材料が無い組合せ」（ID配列のみの行×店名のみの店舗等）は実測へフォールバック
+  5. place_ids列が未作成の環境ではupsertを列なしで再試行（旧スキーマ互換）
+
+【移行の流れ（運用ゼロタッチ）】
+  1回目の計測: 従来通りPro（¥4.8）で店名照合 + IDを自動保存
+  2回目以降  : Essentials（¥0.75）でID照合
+  → バックフィル作業不要。計測するだけで店ごとに自動移行される
+  ※ 完全一致しない店（GBP名と表記揺れ）はProのまま＝従来同額で継続（悪化はしない）
+
+【効果】
+  移行完了後の計測単価: ¥4.8 → ¥0.75（▲84%）
+  100店×構成A×5ページの月1回計測: 約¥18万 → 約¥2.8万
+  副次効果: ID完全一致により店名部分一致の誤マッチ（別店舗を自店と誤認）が解消
+
+【検証方法】
+  1. Supabaseで sql/2026-07-03_place_id_essentials.sql 実行
+  2. 適当な店で計測 → shops.gbp_place_id が入る（1回目）
+  3. 翌月 or キャッシュ外の地点で再計測 → GCP請求画面のSKU行に
+     「Text Search Essentials (IDs Only)」が現れ、Pro行が減ることを確認 ★重要
+  ※ SKU切替は請求に直結するため、デプロイ後に必ず請求画面で確認すること
+
+【ビルド】next build 成功（2026-07-03）
+
+【残タスク】
+  - ⑤GCP予算アラート+日次クォータ（未実施）
+  - ③探索5→2ページ（保留）
+  - （任意）GBP Business Information API metadata.placeId による一括バックフィル
+    （無料・照合リスク無し。現状はレイジー移行で足りるため未実装）
