@@ -182,7 +182,25 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
   const hasGbpYearData = !!gbpLastYear;
 
   const hasSummary = summaryText.length > 0;
-  const totalPages = 1 + languages.length + (hasSummary ? 1 : 0);
+
+  // コンバージョン（GBP由来アクション）の月次系列
+  const convRows = [...gbpRows].sort((a, b) => (a.month || "").localeCompare(b.month || ""));
+  const convLabels = convRows.map((r) => {
+    const mm = (r.month || "").split("/")[1];
+    return mm ? `${Number(mm)}月` : r.month;
+  });
+  const convMetrics: { key: keyof GbpRow; label: string }[] = [
+    { key: "totalVisits", label: "合計来店数" },
+    { key: "phone", label: "電話" },
+    { key: "directions", label: "経路案内" },
+    { key: "menuClicks", label: "メニュークリック" },
+    { key: "website", label: "WEBサイト" },
+    { key: "saveShare", label: "保存・共有" },
+  ];
+  const hasConversion = convRows.length > 0;
+  const convOffset = hasConversion ? 1 : 0;
+
+  const totalPages = 1 + convOffset + languages.length + (hasSummary ? 1 : 0);
 
   const kpiCards = [
     { label: "総表示回数", value: adsCurrent.impressions, format: formatNum, prev: adsPrev.impressions, lastYear: hasYearData ? adsLastYear.impressions : null },
@@ -235,6 +253,39 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
         </div>
       </div>
 
+      {/* コンバージョン月次推移ページ */}
+      {hasConversion && (
+        <div style={{ ...slideStyle, minHeight: "auto" }}>
+          <div style={slideBarStyle}>
+            <span>{shopName} — コンバージョン推移</span>
+            <span>2 / {totalPages}</span>
+          </div>
+          <div style={{ ...slideBodyStyle, overflow: "visible" }}>
+            <div style={stitleStyle}>コンバージョン月次推移</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 18 }}>
+              {convMetrics.map((m, i) => {
+                const values = convRows.map((r) => Number(r[m.key] || 0));
+                const total = values.reduce((s, v) => s + v, 0);
+                return (
+                  <div key={m.key} style={{ background: "#fff", borderRadius: 12, padding: "14px 16px", boxShadow: "0 1px 6px rgba(0,0,0,.04)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "#0f3460" }}>{m.label}</span>
+                      <span style={{ fontSize: 11, color: "#888" }}>計 {total.toLocaleString()}</span>
+                    </div>
+                    <div style={{ height: 150 }}>
+                      <Bar
+                        data={{ labels: convLabels, datasets: [{ label: m.label, data: values, backgroundColor: chartColors[i % chartColors.length], borderColor: chartBorderColors[i % chartBorderColors.length], borderWidth: 1 }] }}
+                        options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false }, ticks: { font: { size: 10 } } }, y: { beginAtZero: true, grid: { color: "#f0f0f0" }, ticks: { precision: 0, font: { size: 10 }, callback: (v) => Number(v).toLocaleString() } } } }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 言語別ページ */}
       {languages.map((lang, langIdx) => {
         const mRows = monthlyByLang[lang];
@@ -243,7 +294,7 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
           <div key={lang} style={{ ...slideStyle, minHeight: "auto" }}>
             <div style={slideBarStyle}>
               <span>{shopName} — {lang}</span>
-              <span>{2 + langIdx} / {totalPages}</span>
+              <span>{2 + convOffset + langIdx} / {totalPages}</span>
             </div>
             <div style={{ ...slideBodyStyle, overflow: "visible" }}>
               <div style={stitleStyle}>月次推移</div>
