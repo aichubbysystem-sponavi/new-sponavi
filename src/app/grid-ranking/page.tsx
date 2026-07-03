@@ -63,6 +63,25 @@ function isMeasuredThisMonth(measuredAt: string | undefined | null): boolean {
   return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
 }
 
+// ===== Places API 費用目安 =====
+// 単価: 店名照合(Pro) ¥4.8/リクエスト ／ ID照合(Essentials) ¥0.75/リクエスト
+// 1地点 = 1〜5リクエスト（順位発見ページで打ち切り。圏外=5ページ全消費）
+// 同月内の再計測・近隣店舗との共有キャッシュ命中分は ¥0
+const YEN_PER_REQ_PRO = 4.8;
+const YEN_PER_REQ_ESSENTIALS = 0.75;
+function estimateCost(totalPoints: number): { max: number; afterId: number } {
+  return {
+    // 初回店舗（店名照合・圏外多め）の上限
+    max: Math.round(totalPoints * 5 * YEN_PER_REQ_PRO),
+    // ID移行後（Essentials・平均2ページ想定）の目安
+    afterId: Math.round(totalPoints * 2 * YEN_PER_REQ_ESSENTIALS),
+  };
+}
+// 1店舗の計測地点数: メインKW 7×7=49 + サブKW 3×3=9×(KW数-1)
+function pointsPerShop(kwCount: number): number {
+  return 49 + 9 * Math.max(0, kwCount - 1);
+}
+
 /** 中心座標からグリッド地点を生成 */
 function generateGrid(
   centerLat: number,
@@ -819,7 +838,13 @@ export default function GridRankingPage() {
                   if (noCoord > 0) steps.push(`座標取得(${noCoord}件)`);
                   if (noKw > 0) steps.push(`KW取得(${noKw}件)`);
                   steps.push(`計測(${unmeasuredPresets.length}/${presets.length}店舗 — 今月計測済みはスキップ)`);
-                  if (!confirm(`${steps.join(" → ")} を実行します。\n約${Math.ceil(unmeasuredPresets.length * 50 / 60)}分かかります。よろしいですか？`)) return;
+                  // API費用目安（KW数はプリセットから正確に集計）
+                  const totalPoints = unmeasuredPresets.reduce((sum, p) => {
+                    const kwCount = (p.all_keywords && p.all_keywords.length > 0) ? p.all_keywords.length : 1;
+                    return sum + pointsPerShop(kwCount);
+                  }, 0);
+                  const cost = estimateCost(totalPoints);
+                  if (!confirm(`${steps.join(" → ")} を実行します。\n約${Math.ceil(unmeasuredPresets.length * 50 / 60)}分かかります。\n\n💰 API費用目安: 最大 ¥${cost.max.toLocaleString()}（初回店舗・圏外多めの上限）\n　　ID移行後は 約¥${cost.afterId.toLocaleString()}／同月再計測・共有キャッシュ分は¥0\n\nよろしいですか？`)) return;
 
                   setBatchRunning(true);
 
@@ -1174,7 +1199,9 @@ export default function GridRankingPage() {
               <button
                 onClick={async () => {
                   if (allShopsBatchRunning) return;
-                  if (!confirm(`全${allShopsFiltered.length}店舗（いつもの店舗を除く）を計測します。\n今月計測済みの店舗は自動スキップします。\n座標・KW未取得の店舗は自動取得します。\n約${Math.ceil(allShopsFiltered.length * 50 / 60)}分かかります。よろしいですか？`)) return;
+                  // API費用目安（KW数は計測時に取得のため1店舗6KW想定で概算）
+                  const allCost = estimateCost(allShopsFiltered.length * pointsPerShop(6));
+                  if (!confirm(`全${allShopsFiltered.length}店舗（いつもの店舗を除く）を計測します。\n今月計測済みの店舗は自動スキップします。\n座標・KW未取得の店舗は自動取得します。\n約${Math.ceil(allShopsFiltered.length * 50 / 60)}分かかります。\n\n💰 API費用目安（1店舗6KW想定・スキップ前の全店分）:\n　　最大 ¥${allCost.max.toLocaleString()}（初回店舗・圏外多めの上限）\n　　ID移行後は 約¥${allCost.afterId.toLocaleString()}／今月計測済み・共有キャッシュ分は¥0\n\nよろしいですか？`)) return;
 
                   setAllShopsBatchRunning(true);
 
@@ -1508,6 +1535,13 @@ export default function GridRankingPage() {
             )}
           </div>
         )}
+
+        {/* API費用目安 */}
+        <p className="text-xs text-gray-400">
+          💰 API費用目安（1KW・{gridSize * gridSize}地点）: 初回店舗 最大 ¥
+          {estimateCost(gridSize * gridSize).max.toLocaleString()} ／ ID取得済み店舗 約¥
+          {estimateCost(gridSize * gridSize).afterId.toLocaleString()} ／ 同月の再計測 ¥0
+        </p>
 
         {/* 実行ボタン */}
         <div className="flex gap-3 items-center">
