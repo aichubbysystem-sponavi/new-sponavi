@@ -1,0 +1,60 @@
+=============================================================
+2026-07-03 P-MAX 店舗グループ分け＋グループ別共有機能 実装
+=============================================================
+
+## 要望（ユーザー）
+- /pmax の店舗一覧を、グループ定義シートに沿ってグループ分けして表示したい
+  - シート: 1nTpdDIATNJhsKkx6hZwwquMhFvvfnstVKs4nsA6CWg4 (gid=0)
+  - レイアウト: 列ごとにグループ。1行目=グループ名、2行目以降=その列の店舗名
+- 管理画面に「更新」ボタン → シートを再読込して新店舗を再グループ化
+- グループごとの共有URLを出せるようにする（クライアントに渡す＝ログイン不要）
+  - そのグループの店舗の情報だけ見れる。他グループは一切見れないこと（確認済み要件）
+
+## 実装内容
+新規:
+- src/lib/pmax-groups.ts
+  - グループ定義シートをCSVで取得。列ごとにグループ化。10分キャッシュ+forceRefresh。
+  - normalizeShopName(): NFKC+空白除去+小文字（supabase.ts verifyShopAccessと同規則）
+  - parseCSV(): クォート内カンマ/改行対応の全体パーサ
+  - getPmaxGroups() / getGroupStores()
+- src/app/api/pmax/groups/route.ts
+  - GET。requireRole(president/manager)。?refresh=1 でシート再読込。
+- sql/pmax_group_shares.sql
+  - token(PK,uuid) / group_name(UNIQUE) / created_by / created_at
+- src/app/api/pmax/group-share/route.ts
+  - POST。requireRole。グループ名で既存トークン再利用（1グループ=1URL安定）。
+  - シートに実在するグループのみ発行可（getGroupStoresで照合）。
+- src/app/api/pmax/group-share/[token]/route.ts
+  - GET。★認証不要（クライアント公開）。token→group_name→現在のシート定義から
+    そのグループの店舗名セットを取得し、pmax_store_dataを対象月で取得後
+    memberSet(正規化名)に含まれる店舗だけに絞って集計。他グループは構造的に出ない。
+  - ?month=YYYY-MM（未指定は当月）
+- src/app/pmax/group/[token]/page.tsx
+  - 公開ページ。素のfetch（axios interceptor経由しない）。月セレクタ+グループ合計+店舗カード。
+
+改修:
+- src/app/pmax/page.tsx
+  - groups取得(fetchGroups)+マウント時ロード
+  - 「グループを更新」ボタン(緑) → fetchGroups(true)でシート再読込
+  - groupSections(useMemo): シート順にグループ分け。該当店舗のある月のみ表示。
+    どのグループにも属さない店舗は「未分類」セクションへ。
+  - 各グループヘッダー: 折りたたみトグル+店舗数+グループ合計+「共有」ボタン
+  - 「共有」→ /api/pmax/group-share POST → URL生成→クリップボードコピー+モーダル表示
+  - 検索はグループ内店舗に対して有効（filtered経由）
+
+## 検証
+- next build 成功（/pmax, /pmax/group/[token], 各API route コンパイルOK）
+- グループ定義シートのパース実データ検証: 47グループ / 定義167店舗 / 複数グループ重複0件
+  （first-match方式で安全。重複がないため店舗がどのグループに入るか一意）
+
+## ★未完了（デプロイ前に必須）
+1. 本番Supabase SQL Editorで sql/pmax_group_shares.sql を実行してテーブル作成
+   （ローカルにservice role key/直接接続がないため手動実行が必要）
+2. 上記完了後、Vercelへデプロイ
+
+## 注意点/既知の制約
+- グループ分けは「シートの店舗名」と「pmax_store_dataのshop_name」の
+  正規化一致で判定。表記ゆれ（例: カ↔力 のような別文字）は一致せず「未分類」に落ちる。
+  → 未分類に出た店舗はシート側の表記を実データに合わせて修正すればグループに入る。
+- 共有トークンはグループ名固定。シート編集後は共有ページの表示も自動追随する。
+- 「更新」ボタンはシート再読込のみ。ADS APIからの新店舗取得は既存の「全店舗を更新」で行う。

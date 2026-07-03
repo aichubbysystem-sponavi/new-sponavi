@@ -55,6 +55,13 @@ export default function PmaxTopPage() {
   const [showSelector, setShowSelector] = useState(false);
   const [shopSearch, setShopSearch] = useState("");
 
+  // グループ分け
+  const [groups, setGroups] = useState<{ name: string; stores: string[] }[]>([]);
+  const [groupRefreshing, setGroupRefreshing] = useState(false);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [sharingGroup, setSharingGroup] = useState<string | null>(null);
+  const [shareModal, setShareModal] = useState<{ group: string; url: string } | null>(null);
+
   const now = new Date();
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
@@ -112,6 +119,60 @@ export default function PmaxTopPage() {
     fetchStores();
   }, [fetchStores]);
 
+  // グループ定義シートを取得
+  const fetchGroups = useCallback(async (refresh = false) => {
+    try {
+      const res = await api.get(`/api/pmax/groups${refresh ? "?refresh=1" : ""}`);
+      setGroups(res.data.groups || []);
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchGroups();
+  }, [fetchGroups]);
+
+  // 「グループを更新」: シートを再読込して再グループ化
+  const handleGroupRefresh = async () => {
+    setGroupRefreshing(true);
+    const ok = await fetchGroups(true);
+    setSyncProgress(ok ? "グループ定義シートを再読込しました" : "グループ定義シートの取得に失敗しました");
+    setTimeout(() => setSyncProgress(""), 8000);
+    setGroupRefreshing(false);
+  };
+
+  // グループ別の共有リンクを発行してクリップボードにコピー
+  const handleShareGroup = async (groupName: string) => {
+    setSharingGroup(groupName);
+    try {
+      const res = await api.post("/api/pmax/group-share", { groupName });
+      const token = res.data.token;
+      const url = `${window.location.origin}/pmax/group/${token}`;
+      setShareModal({ group: groupName, url });
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch {
+        /* クリップボード不可でもモーダルにURLを表示するので問題なし */
+      }
+    } catch {
+      setSyncProgress(`「${groupName}」の共有リンク発行に失敗しました`);
+      setTimeout(() => setSyncProgress(""), 8000);
+    } finally {
+      setSharingGroup(null);
+    }
+  };
+
+  const toggleCollapse = (name: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
   // 店舗選択パネルを開く
   const openSelector = async () => {
     if (knownShops.length === 0) {
@@ -162,6 +223,41 @@ export default function PmaxTopPage() {
   const filtered = stores.filter(
     (s) => s.shopName.toLowerCase().includes(search.toLowerCase())
   );
+
+  // 店舗名の正規化（グループ定義シートとの照合用: NFKC + 空白除去 + 小文字化）
+  const normName = (s: string) => (s || "").normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
+
+  // シート定義に沿って店舗をグループ分け（該当店舗がある月のみ表示）
+  const groupSections = useMemo(() => {
+    const nameToGroup = new Map<string, string>();
+    for (const g of groups) {
+      for (const sName of g.stores) {
+        const k = normName(sName);
+        if (!nameToGroup.has(k)) nameToGroup.set(k, g.name);
+      }
+    }
+
+    const byGroup = new Map<string, StoreSummary[]>();
+    const ungrouped: StoreSummary[] = [];
+    for (const s of filtered) {
+      const g = nameToGroup.get(normName(s.shopName));
+      if (g) {
+        if (!byGroup.has(g)) byGroup.set(g, []);
+        byGroup.get(g)!.push(s);
+      } else {
+        ungrouped.push(s);
+      }
+    }
+
+    const sections: { name: string; stores: StoreSummary[]; isUngrouped?: boolean }[] = [];
+    for (const g of groups) {
+      const arr = byGroup.get(g.name);
+      if (arr && arr.length) sections.push({ name: g.name, stores: arr });
+    }
+    if (ungrouped.length) sections.push({ name: "未分類", stores: ungrouped, isUngrouped: true });
+    return sections;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, groups]);
 
   const totalStores = stores.length;
   const totalImpressions = stores.reduce((s, v) => s + v.impressions, 0);
@@ -259,6 +355,21 @@ export default function PmaxTopPage() {
           >
             店舗を選んで更新
           </button>
+          <button
+            onClick={handleGroupRefresh}
+            disabled={groupRefreshing}
+            title="グループ定義シートを再読込して、新しい店舗をグループに反映します"
+            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all inline-flex items-center gap-1.5 ${
+              groupRefreshing
+                ? "bg-slate-200 text-slate-400 cursor-not-allowed"
+                : "bg-white text-emerald-700 border border-emerald-600 hover:bg-emerald-50"
+            }`}
+          >
+            <svg className={`w-4 h-4 ${groupRefreshing ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            {groupRefreshing ? "更新中..." : "グループを更新"}
+          </button>
           {lastSyncedAt && (
             <span className="text-xs text-slate-400">
               最終同期: {new Date(lastSyncedAt).toLocaleString("ja-JP")}
@@ -353,56 +464,148 @@ export default function PmaxTopPage() {
         )}
 
         {!loading && !error && (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {filtered.length === 0 ? (
-              <div className="col-span-full py-12 text-center">
-                <p className="text-slate-500 mb-2">{search ? "該当する店舗が見つかりません" : "この月のデータはまだありません"}</p>
-                {!search && (
-                  <p className="text-xs text-slate-400">「最新データに更新」ボタンでGoogle Ads APIからデータを取得できます</p>
-                )}
-              </div>
-            ) : (
-              filtered.map((store) => (
-                <button
-                  key={store.shopName}
-                  onClick={() => router.push(`/pmax/store?name=${encodeURIComponent(store.shopName)}&year=${selectedYear}&month=${selectedMonth}`)}
-                  className="bg-white rounded-xl border border-slate-200 p-5 hover:border-[#003D6B]/30 hover:shadow-lg transition-all text-left group"
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-slate-800 group-hover:text-[#003D6B] truncate">{store.shopName}</p>
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {store.languages.map((lang) => (
-                          <span key={lang} className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${LANG_COLORS[lang] || LANG_COLORS.Unknown}`}>
-                            {lang}
-                          </span>
+          filtered.length === 0 ? (
+            <div className="py-12 text-center">
+              <p className="text-slate-500 mb-2">{search ? "該当する店舗が見つかりません" : "この月のデータはまだありません"}</p>
+              {!search && (
+                <p className="text-xs text-slate-400">「全店舗を更新」ボタンでGoogle Ads APIからデータを取得できます</p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {groupSections.map((section) => {
+                const isOpen = !collapsed.has(section.name);
+                const gImpr = section.stores.reduce((s, v) => s + v.impressions, 0);
+                const gClicks = section.stores.reduce((s, v) => s + v.clicks, 0);
+                const gCost = section.stores.reduce((s, v) => s + v.costMicros, 0);
+                return (
+                  <section key={section.name} className="bg-white/60 rounded-xl border border-slate-200 overflow-hidden">
+                    {/* グループヘッダー */}
+                    <div className="flex flex-wrap items-center gap-3 px-4 py-3 bg-white border-b border-slate-100">
+                      <button
+                        onClick={() => toggleCollapse(section.name)}
+                        className="flex items-center gap-2 flex-1 min-w-0 text-left"
+                      >
+                        <svg
+                          className={`w-4 h-4 text-slate-400 transition-transform flex-shrink-0 ${isOpen ? "rotate-90" : ""}`}
+                          fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                        <h2 className={`font-bold truncate ${section.isUngrouped ? "text-slate-500" : "text-slate-800"}`}>
+                          {section.name}
+                        </h2>
+                        <span className="text-xs font-medium text-slate-400 flex-shrink-0">{section.stores.length}店舗</span>
+                        <span className="hidden md:inline text-[11px] text-slate-400 flex-shrink-0">
+                          表示 {gImpr.toLocaleString("ja-JP")}・クリック {gClicks.toLocaleString("ja-JP")}・{formatCost(gCost)}
+                        </span>
+                      </button>
+                      {!section.isUngrouped && (
+                        <button
+                          onClick={() => handleShareGroup(section.name)}
+                          disabled={sharingGroup === section.name}
+                          title="このグループの共有リンク（ログイン不要）を発行します"
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap transition-all ${
+                            sharingGroup === section.name
+                              ? "bg-slate-200 text-slate-400 cursor-not-allowed"
+                              : "bg-[#003D6B] text-white hover:bg-[#002a4d]"
+                          }`}
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                          </svg>
+                          {sharingGroup === section.name ? "発行中..." : "共有"}
+                        </button>
+                      )}
+                    </div>
+
+                    {/* グループ内の店舗カード */}
+                    {isOpen && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 p-4">
+                        {section.stores.map((store) => (
+                          <button
+                            key={store.shopName}
+                            onClick={() => router.push(`/pmax/store?name=${encodeURIComponent(store.shopName)}&year=${selectedYear}&month=${selectedMonth}`)}
+                            className="bg-white rounded-xl border border-slate-200 p-5 hover:border-[#003D6B]/30 hover:shadow-lg transition-all text-left group"
+                          >
+                            <div className="flex items-start justify-between mb-3">
+                              <div className="flex-1 min-w-0">
+                                <p className="font-semibold text-slate-800 group-hover:text-[#003D6B] truncate">{store.shopName}</p>
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {store.languages.map((lang) => (
+                                    <span key={lang} className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${LANG_COLORS[lang] || LANG_COLORS.Unknown}`}>
+                                      {lang}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                              <svg className="w-5 h-5 text-slate-300 group-hover:text-[#003D6B] transition-colors flex-shrink-0 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                              </svg>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2">
+                              <div className="bg-blue-50 rounded-lg p-2 text-center">
+                                <p className="text-[10px] text-blue-500">表示</p>
+                                <p className="text-sm font-bold text-blue-700">{store.impressions.toLocaleString("ja-JP")}</p>
+                              </div>
+                              <div className="bg-emerald-50 rounded-lg p-2 text-center">
+                                <p className="text-[10px] text-emerald-500">クリック</p>
+                                <p className="text-sm font-bold text-emerald-700">{store.clicks.toLocaleString("ja-JP")}</p>
+                              </div>
+                              <div className="bg-orange-50 rounded-lg p-2 text-center">
+                                <p className="text-[10px] text-orange-500">広告費</p>
+                                <p className="text-sm font-bold text-orange-700">{formatCost(store.costMicros)}</p>
+                              </div>
+                            </div>
+                          </button>
                         ))}
                       </div>
-                    </div>
-                    <svg className="w-5 h-5 text-slate-300 group-hover:text-[#003D6B] transition-colors flex-shrink-0 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="bg-blue-50 rounded-lg p-2 text-center">
-                      <p className="text-[10px] text-blue-500">表示</p>
-                      <p className="text-sm font-bold text-blue-700">{store.impressions.toLocaleString("ja-JP")}</p>
-                    </div>
-                    <div className="bg-emerald-50 rounded-lg p-2 text-center">
-                      <p className="text-[10px] text-emerald-500">クリック</p>
-                      <p className="text-sm font-bold text-emerald-700">{store.clicks.toLocaleString("ja-JP")}</p>
-                    </div>
-                    <div className="bg-orange-50 rounded-lg p-2 text-center">
-                      <p className="text-[10px] text-orange-500">広告費</p>
-                      <p className="text-sm font-bold text-orange-700">{formatCost(store.costMicros)}</p>
-                    </div>
-                  </div>
-                </button>
-              ))
-            )}
-          </div>
+                    )}
+                  </section>
+                );
+              })}
+            </div>
+          )
         )}
       </main>
+
+      {/* グループ共有リンク モーダル */}
+      {shareModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4" onClick={() => setShareModal(null)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between mb-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-800">共有リンクを発行しました</h3>
+                <p className="text-xs text-slate-500 mt-0.5">「{shareModal.group}」の店舗のみ表示・ログイン不要</p>
+              </div>
+              <button onClick={() => setShareModal(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                readOnly
+                value={shareModal.url}
+                onFocus={(e) => e.target.select()}
+                className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 text-slate-700"
+              />
+              <button
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(shareModal.url);
+                    setSyncProgress("共有リンクをコピーしました");
+                    setTimeout(() => setSyncProgress(""), 5000);
+                  } catch {}
+                }}
+                className="px-4 py-2 rounded-lg text-sm font-bold bg-[#003D6B] text-white hover:bg-[#002a4d] whitespace-nowrap"
+              >
+                コピー
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-3">
+              このリンクを知っている人だけがアクセスできます。表示される店舗はグループ定義シートに追随します。
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
