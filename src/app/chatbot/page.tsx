@@ -55,15 +55,17 @@ export default function ChatbotPage() {
 
     try {
       // 初回メッセージ時にタスク状況をコンテキストとして注入
-      const contextPrefix = !conversationId && taskSummary
+      const contextPrefix = messages.length === 0 && taskSummary
         ? `【現在の業務状況】\n${taskSummary}\n\n【質問】`
         : "";
       const fullQuery = contextPrefix ? `${contextPrefix}${query}` : query;
 
+      // 直近の会話履歴を送信（Claude APIはステートレスなため）
+      const history = messages.map((m) => ({ role: m.role, content: m.content }));
+
       const res = await api.post("/api/chat", {
         query: fullQuery,
-        conversationId,
-        userId: `web-${selectedShop?.name || "user"}`,
+        history,
       }, { timeout: 100000 });
 
       const aiMsg: Message = { role: "assistant", content: res.data.answer || "回答を取得できませんでした", timestamp: new Date() };
@@ -104,7 +106,7 @@ export default function ChatbotPage() {
           <p className="text-sm text-slate-500 mt-0.5">MEO・GBP・業務に関する質問にAIが回答します</p>
         </div>
         <div className="flex items-center gap-2">
-          {conversationId && (
+          {messages.length > 0 && (
             <button
               onClick={handleNewChat}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all"
