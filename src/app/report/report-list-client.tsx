@@ -5,6 +5,7 @@ import { useState, useMemo, useTransition, useEffect, useCallback } from "react"
 import type { ShopListItem } from "@/lib/report-data";
 import { syncAllData, syncShopData } from "./actions";
 import { supabase } from "@/lib/supabase";
+import BackToTopLink from "@/components/back-to-top-link";
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
@@ -432,6 +433,7 @@ export default function ReportListClient({
       <header className="bg-[#E6EEFF] shadow-sm border-b border-slate-200 sticky top-0 z-50">
         <div className="max-w-[1440px] mx-auto px-6 h-[60px] flex items-center justify-between">
           <div className="flex items-center gap-3">
+            <BackToTopLink className="text-xs font-semibold text-[#003D6B] bg-white/60 hover:bg-white px-2.5 py-1 rounded-lg transition whitespace-nowrap" />
             <h1 className="text-lg font-bold text-[#003D6B] tracking-wide">SPOTLIGHT NAVIGATOR</h1>
             <span className="text-xs text-slate-500 bg-white/60 px-2.5 py-0.5 rounded-full">レポート管理</span>
           </div>

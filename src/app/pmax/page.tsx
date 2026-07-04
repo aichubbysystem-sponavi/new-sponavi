@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import api from "@/lib/api";
+import BackToTopLink from "@/components/back-to-top-link";
 
 type StoreSummary = {
   shopName: string;
@@ -269,6 +270,7 @@ export default function PmaxTopPage() {
       <header className="bg-white border-b border-slate-200 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
+            <BackToTopLink className="text-xs font-semibold text-[#003D6B] bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg transition whitespace-nowrap" />
             <div className="w-10 h-10 rounded-lg bg-[#003D6B] flex items-center justify-center">
               <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
@@ -522,11 +524,19 @@ export default function PmaxTopPage() {
                     {/* グループ内の店舗カード */}
                     {isOpen && (
                       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 p-4">
-                        {section.stores.map((store) => (
-                          <button
+                        {section.stores.map((store) => {
+                          const storeHref = `/pmax/store?name=${encodeURIComponent(store.shopName)}&year=${selectedYear}&month=${selectedMonth}`;
+                          return (
+                          <a
                             key={store.shopName}
-                            onClick={() => router.push(`/pmax/store?name=${encodeURIComponent(store.shopName)}&year=${selectedYear}&month=${selectedMonth}`)}
-                            className="bg-white rounded-xl border border-slate-200 p-5 hover:border-[#003D6B]/30 hover:shadow-lg transition-all text-left group"
+                            href={storeHref}
+                            onClick={(e) => {
+                              // Ctrl/Cmd/Shift・中クリックはブラウザ既定（新規タブ）に任せる
+                              if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                              e.preventDefault();
+                              router.push(storeHref);
+                            }}
+                            className="bg-white rounded-xl border border-slate-200 p-5 hover:border-[#003D6B]/30 hover:shadow-lg transition-all text-left group block"
                           >
                             <div className="flex items-start justify-between mb-3">
                               <div className="flex-1 min-w-0">
@@ -557,8 +567,9 @@ export default function PmaxTopPage() {
                                 <p className="text-sm font-bold text-orange-700">{formatCost(store.costMicros)}</p>
                               </div>
                             </div>
-                          </button>
-                        ))}
+                          </a>
+                          );
+                        })}
                       </div>
                     )}
                   </section>
