@@ -199,7 +199,7 @@ async function _GET_disabled(request: NextRequest) {
     .eq("status", "processing")
     .lt("processing_started_at", staleThreshold);
 
-  const { data: posts } = await supabase
+  const { data: rawPosts } = await supabase
     .from("scheduled_posts")
     .select("*")
     .eq("status", "pending")
@@ -207,7 +207,11 @@ async function _GET_disabled(request: NextRequest) {
     .order("scheduled_at", { ascending: true })
     .limit(500);
 
-  if (!posts || posts.length === 0) {
+  // 差戻し済み（approval_status=rejected）は実行対象から除外
+  // ※NULL比較の罠を避けるためDBフィルタではなくJS側で除外（approval_statusはNULLの行が多い）
+  const posts = (rawPosts || []).filter((p) => p.approval_status !== "rejected");
+
+  if (posts.length === 0) {
     console.log("[cron/execute-posts] 実行対象なし");
     return NextResponse.json({ success: true, message: "実行対象なし", posted: 0 });
   }

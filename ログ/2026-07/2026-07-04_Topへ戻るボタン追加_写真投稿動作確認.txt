@@ -1,0 +1,77 @@
+## 【2026-07-04】Topへ戻るボタン追加 + /posts写真投稿の動作確認（コードレビューのみ・実行なし）
+
+### 決定事項
+- /report と /pmax のヘッダーに「← Topへ戻る」ボタンを設置
+- report.* / p-max.* サブドメイン表示時はボタン非表示（顧客向け画面のため + middlewareで"/"が同ページにリライトされ機能しないため）
+
+### 変更内容
+■ src/components/back-to-top-link.tsx（新規）
+  - "use client"。useEffectでwindow.location.hostnameを判定し、
+    report./p-max.サブドメインなら非表示、メインドメインなら href="/" のリンクを表示
+■ src/app/report/report-list-client.tsx
+  - ヘッダー左側（SPOTLIGHT NAVIGATORタイトルの前）にBackToTopLink設置
+■ src/app/pmax/page.tsx
+  - ヘッダー左側（アイコンの前）にBackToTopLink設置
+■ next build 成功確認済み。コミット・デプロイは未実施（ユーザー確認待ち）
+
+### /posts 写真投稿の動作確認結果（実行なし・コードレビュー）
+【結論: 現在は動作しない状態】
+- 2026-06-28のセキュリティ対応（コミット a2fe640）で外部GBP操作6機能が意図的に全面停止中:
+  - /api/report/create-post → 503（新規投稿フォームからの即時投稿・写真付き投稿）
+  - /api/report/auto-post → 503（シートから自動投稿。PHOTO/通常/予約登録すべて）
+  - /api/report/delete-post → 503（投稿削除）
+  - /api/cron/execute-posts → no-op + vercel.jsonからCron定義削除済み（予約投稿の自動実行）
+  - /api/cron/auto-reply, /api/report/reply-review も停止
+- 唯一生きている経路: /api/report/scheduled-posts PUT（「予約投稿を今すぐ実行」ボタン）
+  → ただし予約投稿の主な作成経路（auto-post scheduleMode）が503のため、実質フローが分断されている
+
+### 復活時に直すべき潜在バグ（_POST_disabled内に現存）
+1. 【重要】auto-post scheduleMode: Dropbox get_temporary_link（有効期限4時間）のURLを
+   scheduled_posts.photo_urlにそのまま保存 → 翌日実行時にはURL失効して投稿失敗する。
+   即時投稿パスはresolveImageUrl()でSupabase Storageの安定URLに変換しているが、
+   予約パスには変換がない。復活前に予約パスにも同じ変換を入れること
+2. scheduled-posts PUT force=true は on_hold（保留）も実行する。
+   UI上は「保留=自動実行されません」と表示しているが「今すぐ実行」ボタンで保留も公開される
+3. approval_status（承認/差戻し）はPUT実行時にチェックされない（承認フローが実質飾り）
+4. 通常投稿パス（auto-post即時）は写真付き失敗時に写真なしSTANDARDでリトライするが、
+   リトライ時topicTypeがOFFERでもSTANDARDに落ちる（意図か要確認）
+
+### 注意点
+- 無効化はバグではなく2026-06-28の意図的な決定（構造改善完了まで停止）。
+  復活手順: _GET_disabled/_POST_disabledを戻す + vercel.jsonにCron再追加（6/28ログ参照）
+- フロント（posts/page.tsx）は無効化を知らないため、ボタンは全部押せるが
+  実行すると「一時停止中です」エラーが返る（503）。ユーザー向けに
+  「投稿機能は一時停止中」バナーを出すなどの案内があると親切
+
+## 【2026-07-04 追記】無効化を維持したまま潜在バグを修正
+
+### 方針
+- 503無効化はそのまま。退避コード（_POST_disabled）内のバグを修正し、復活時に直った状態で戻せるようにした
+- 稼働中の scheduled-posts PUT（「予約投稿を今すぐ実行」）のみ本番挙動が変わる（安全側）
+
+### 変更内容
+■ src/app/api/report/auto-post/route.ts（退避コード内・本番挙動変化なし）
+  1. scheduleMode: Dropbox一時URL（4時間で失効）をresolveImageUrl()で
+     Supabase Storageの安定URLに変換してからscheduled_posts.photo_urlに保存。
+     変換失敗時: PHOTO投稿=エラースキップ / 通常投稿=写真なし保存+警告(on_hold行き)
+     ※Storage画像は実行完了まで必要なのでcleanupImageは呼ばない
+  2. 写真付き投稿失敗時のリトライでtopicTypeをSTANDARD固定にしていた
+     → match.topicTypeを維持、OFFERならevent（題名・期間）も維持
+■ src/app/api/report/scheduled-posts/route.ts（稼働中・本番挙動が変わる）
+  3. PUT force=true が on_hold（保留）まで実行していた → pendingのみに変更。
+     保留はUI通り「承認→予約」でpendingにしてから実行する流れに統一
+  4. approval_status="rejected"（差戻し）をJS側フィルタで実行対象から除外
+     （.neq()だとNULL行も除外されるPostgRESTの罠があるためJS側で実施）
+  5. PUT実行時にresolveImageUrl()で写真URLを公開URLに変換（cronと同じ方式）。
+     www.dropbox.com共有リンクのままGBPに渡すとHTMLを取得して失敗するため。
+     変換失敗時: PHOTO=エラー / 通常投稿=写真なしで続行
+■ src/app/api/cron/execute-posts/route.ts（退避コード内・本番挙動変化なし）
+  6. cron実行対象からもapproval_status="rejected"をJS側フィルタで除外（PUTと整合）
+
+### 確認
+- next build 成功。コミット・デプロイ未実施（ユーザー確認待ち）
+
+### 残課題（復活時に検討）
+- approval_statusの承認必須化はしていない（rejected除外のみ）。
+  承認済みのみ実行にすると既存フローが全停止するため、運用判断が必要
+- post-images バケットの古い画像掃除（cleanupImageを呼ばない設計にしたため蓄積する。実害小）

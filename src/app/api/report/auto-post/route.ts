@@ -875,6 +875,24 @@ async function _POST_disabled(request: NextRequest) {
       // === 予約投稿バリデーション ===
       const warnings: string[] = [];
 
+      // 0. Dropbox一時URL（get_temporary_link・有効期限4時間）を安定URLに変換してから保存
+      //    実行は予約時刻（翌日以降もあり得る）のため、一時URLのままだと実行時に失効している
+      //    ※Storage上の画像は実行完了まで必要なので、ここではcleanupImageを呼ばないこと
+      if (match.photoUrl && match.photoUrl.includes("dropbox")) {
+        const { resolveImageUrl } = await import("@/lib/image-proxy");
+        const stableUrl = await resolveImageUrl(match.photoUrl, `sched-${shop.id}-${crypto.randomUUID().slice(0, 8)}`);
+        if (stableUrl) {
+          match.photoUrl = stableUrl;
+        } else if (isPhotoOnly) {
+          schedResults.push({ shopName: match.shopName, status: "写真URL変換失敗（スキップ）", detail: `元URL: ${match.photoUrl.slice(0, 80)}` });
+          schedErrors++;
+          continue;
+        } else {
+          warnings.push("写真URL変換失敗（写真なしで保存されます）");
+          match.photoUrl = "";
+        }
+      }
+
       // 1. CTAリンク生存確認（J列にURLがある場合）
       if (match.ctaUrl) {
         try {
@@ -1090,9 +1108,12 @@ async function _POST_disabled(request: NextRequest) {
         signal: AbortSignal.timeout(30000),
       });
 
-      // 写真付きで失敗したら写真なしでリトライ
+      // 写真付きで失敗したら写真なしでリトライ（topicType・OFFER情報は維持する）
       if (!res.ok && match.photoUrl) {
-        const retryBody: any = { summary: trimmedSummary, topicType: "STANDARD", languageCode: "ja" };
+        const retryBody: any = { summary: trimmedSummary, topicType: match.topicType || "STANDARD", languageCode: "ja" };
+        if (match.topicType === "OFFER" && match.offerTitle) {
+          retryBody.event = { title: match.offerTitle, schedule: { startDate: match.offerStartDate, endDate: match.offerEndDate } };
+        }
         if (match.ctaUrl) retryBody.callToAction = { actionType: "LEARN_MORE", url: match.ctaUrl };
         res = await fetch(`${GBP_API_BASE}/${locationName}/localPosts`, {
           cache: "no-store" as const,

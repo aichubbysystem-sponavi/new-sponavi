@@ -158,7 +158,9 @@ export async function PUT(request: NextRequest) {
 
   let query = supabase.from("scheduled_posts").select("*");
   if (force) {
-    query = query.in("status", ["pending", "on_hold"]);
+    // UI上「保留（on_hold）は自動実行されません」と案内しているため、
+    // 「今すぐ実行」でもpendingのみ対象。保留は「承認→予約」でpendingにしてから実行する
+    query = query.eq("status", "pending");
   } else {
     query = query.eq("status", "pending").lte("scheduled_at", now);
   }
@@ -167,9 +169,13 @@ export async function PUT(request: NextRequest) {
     if (allowedShops.length === 0) return NextResponse.json({ message: "実行対象なし", executed: 0 });
     query = query.in("shop_name", allowedShops);
   }
-  const { data: posts } = await query;
+  const { data: rawPosts } = await query;
 
-  if (!posts || posts.length === 0) {
+  // 差戻し済み（approval_status=rejected）は実行対象から除外
+  // ※NULL比較の罠を避けるためDBフィルタではなくJS側で除外（approval_statusはNULLの行が多い）
+  const posts = (rawPosts || []).filter((p) => p.approval_status !== "rejected");
+
+  if (posts.length === 0) {
     return NextResponse.json({ message: "実行対象なし", executed: 0 });
   }
 
@@ -190,6 +196,21 @@ export async function PUT(request: NextRequest) {
       if (!post.shop_id) {
         await supabase.from("scheduled_posts").update({ status: "error", error_detail: "shop_idなし" }).eq("id", post.id);
         errors++; continue;
+      }
+
+      // 写真URLをGBPがfetch可能な公開URLに変換（cron/execute-postsと同じ方式）
+      // Dropbox共有リンク(www.dropbox.com)のままだとGBPがHTMLを取得して失敗する
+      if (post.photo_url) {
+        const { resolveImageUrl } = await import("@/lib/image-proxy");
+        const resolvedUrl = await resolveImageUrl(post.photo_url, post.id);
+        if (resolvedUrl) {
+          post.photo_url = resolvedUrl;
+        } else if (post.topic_type === "PHOTO") {
+          await supabase.from("scheduled_posts").update({ status: "error", error_detail: "写真URL変換失敗（Dropboxから画像取得不可）" }).eq("id", post.id);
+          errors++; continue;
+        } else {
+          post.photo_url = null; // 通常投稿は写真なしで続行
+        }
       }
 
       let postOk = false;
