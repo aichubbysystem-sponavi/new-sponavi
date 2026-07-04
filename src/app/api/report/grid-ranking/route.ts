@@ -299,6 +299,9 @@ export async function PUT(request: NextRequest) {
   };
 
   if (!shopId) return NextResponse.json({ error: "shopIdが必要です" }, { status: 400 });
+  // 計測結果の保存は計測フロー(社長のみ)の一部。偽データ書込み防止のため同権限に統一
+  const rolePut = await requireRole(request, ["president"]);
+  if (rolePut.error) return rolePut.error;
   const accessPut = await requireShopAccessById(request, shopId);
   if (accessPut.error) return accessPut.error;
 
@@ -365,6 +368,9 @@ export async function GET(request: NextRequest) {
  * 計測履歴を削除
  */
 export async function DELETE(request: NextRequest) {
+  // 履歴削除はデータ破壊操作のため社長・社員のみ（バイトのAPI直叩き防止）
+  const roleDel = await requireRole(request, ["president", "manager"]);
+  if (roleDel.error) return roleDel.error;
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid || !auth.sub) {
     return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
