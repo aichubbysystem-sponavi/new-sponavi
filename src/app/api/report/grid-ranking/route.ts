@@ -27,6 +27,34 @@ function jstMonth(): string {
   }).format(new Date());
 }
 
+// プレイスIDの失効確認と自動更新（Place Details IDのみ=無料SKU、追加費用ゼロ）
+// 戻り値: 最新の有効ID（変化なし含む）／ null = 失効(404)につき shops をクリア済み
+async function refreshPlaceId(supabase: any, shopId: string, currentId: string): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `https://places.googleapis.com/v1/places/${encodeURIComponent(currentId)}`,
+      { headers: { "X-Goog-Api-Key": GCP_API_KEY, "X-Goog-FieldMask": "id" } }
+    );
+    if (res.ok) {
+      const freshId = (await res.json())?.id || "";
+      if (freshId && freshId !== currentId) {
+        // IDが更新されていた → 保存して新IDを返す
+        await supabase.from("shops").update({ gbp_place_id: freshId }).eq("id", shopId);
+        return freshId;
+      }
+      return currentId; // 有効・変化なし
+    }
+    if (res.status === 404) {
+      // 失効: クリアして次回計測時に店名モードで再取得させる
+      await supabase.from("shops").update({ gbp_place_id: null }).eq("id", shopId);
+      return null;
+    }
+  } catch (e) {
+    console.error("[grid-ranking] place_id refresh error:", e instanceof Error ? e.message : e);
+  }
+  return currentId; // 一時エラー時は現状維持
+}
+
 // 順位順の店名リストから対象店舗の順位を返す（0 = 見つからない）
 function findRank(places: string[], targetName: string): number {
   if (!targetName) return 0;
@@ -99,7 +127,7 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
     shopPlaceId = (pidRow as any)?.gbp_place_id || "";
   }
-  const useIdMode = !!shopPlaceId;
+  let useIdMode = !!shopPlaceId; // ID失効検知時に店名モードへ切替えるためlet
 
   // 計測地点を格子にスナップ（キャッシュキー＝実際の検索中心。一貫性を保つ）
   // 格子幅は距離間隔に比例させる: 500m間隔の計測で隣接地点が同一格子に潰れるのを防ぐ
@@ -141,7 +169,28 @@ export async function POST(request: NextRequest) {
 
       // 発見できた、または全ページ取得済みリスト（＝本当に圏外）ならキャッシュで確定
       if (decidable && (cachedRank > 0 || cached.complete)) {
-        return NextResponse.json({ rank: cachedRank, shopName: targetName, cached: true });
+        // 【自己修復】IDモードで中心地点が圏外の場合、キャッシュ経路でもID失効を確認する
+        // （近隣店舗の共有キャッシュが効いていると実測パスに到達せず、失効が放置されるため）
+        if (useIdMode && cachedRank === 0 && center === true) {
+          const freshId = await refreshPlaceId(supabase, shopId, shopPlaceId);
+          if (freshId === null) {
+            // 失効ID: 店名モードに切替えて下の実測へフォールバック（returnしない）
+            shopPlaceId = "";
+            useIdMode = false;
+          } else if (freshId !== shopPlaceId) {
+            // IDが更新されていた → キャッシュ済みリストと新IDで再照合
+            shopPlaceId = freshId;
+            return NextResponse.json({
+              rank: cachedIds.indexOf(freshId) + 1,
+              shopName: targetName,
+              cached: true,
+            });
+          } else {
+            return NextResponse.json({ rank: 0, shopName: targetName, cached: true }); // 本当に圏外
+          }
+        } else {
+          return NextResponse.json({ rank: cachedRank, shopName: targetName, cached: true });
+        }
       }
       // 不完全リストで未発見 → 下の実測にフォールバック（リストを完全版に更新）
     }
@@ -211,30 +260,15 @@ export async function POST(request: NextRequest) {
     }
 
     // 【IDの鮮度チェック】IDモードで中心地点すら圏外の場合、IDの失効を疑って確認する
-    // プレイスIDはリスティング統合等でまれに変わる。失効を放置すると
-    // 「全地点圏外の誤レポート + 毎回5ページ全消費」が続くため自動回復する。
-    // Place Details(IDのみ)は無料SKUのため追加費用ゼロ
+    // （失効を放置すると「全地点圏外の誤レポート + 毎回5ページ全消費」が続く。無料SKUで自動回復）
     if (useIdMode && rank === 0 && center === true) {
-      try {
-        const refRes = await fetch(
-          `https://places.googleapis.com/v1/places/${encodeURIComponent(shopPlaceId)}`,
-          { headers: { "X-Goog-Api-Key": GCP_API_KEY, "X-Goog-FieldMask": "id" } }
-        );
-        if (refRes.ok) {
-          const freshId = (await refRes.json())?.id || "";
-          if (freshId && freshId !== shopPlaceId) {
-            // IDが更新されていた → 新IDで照合し直し、保存
-            rank = allIds.indexOf(freshId) + 1;
-            await supabase.from("shops").update({ gbp_place_id: freshId }).eq("id", shopId);
-          }
-          // freshId === shopPlaceId なら本当に圏外（正常）
-        } else if (refRes.status === 404) {
-          // 失効ID: クリアして次回計測時に店名モードで再取得させる
-          await supabase.from("shops").update({ gbp_place_id: null }).eq("id", shopId);
-        }
-      } catch (e) {
-        console.error("[grid-ranking] place_id refresh error:", e instanceof Error ? e.message : e);
+      const freshId = await refreshPlaceId(supabase, shopId, shopPlaceId);
+      if (freshId && freshId !== shopPlaceId) {
+        // IDが更新されていた → 今回の検索結果と新IDで照合し直し
+        rank = allIds.indexOf(freshId) + 1;
+        shopPlaceId = freshId;
       }
+      // freshId === 現ID なら本当に圏外（正常）／ null なら失効クリア済み（次回計測で店名モード再取得）
     }
 
     // 店名モードで発見時: 完全一致ならプレイスIDを保存 → 次回からEssentials(¥0.75)に自動切替
@@ -368,13 +402,9 @@ export async function GET(request: NextRequest) {
  * 計測履歴を削除
  */
 export async function DELETE(request: NextRequest) {
-  // 履歴削除はデータ破壊操作のため社長・社員のみ（バイトのAPI直叩き防止）
+  // 履歴削除はデータ破壊操作のため社長・社員のみ（requireRoleが認証も兼ねる）
   const roleDel = await requireRole(request, ["president", "manager"]);
   if (roleDel.error) return roleDel.error;
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid || !auth.sub) {
-    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-  }
 
   const body = await request.json();
   const { id, shopId, keyword } = body as { id?: string; shopId?: string; keyword?: string };
