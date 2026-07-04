@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyAuth } from "@/lib/supabase";
+import { createHash } from "crypto";
+import { verifyAuth, getSupabase } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
+
+// プロンプト（テンプレート）のバージョン。SYSTEM_PROMPTを改良したらここを上げる
+// → 全店舗のキャッシュが自動的に無効化され、次回表示時に新形式で再生成される
+const PROMPT_VERSION = "v1";
 
 const SYSTEM_PROMPT = `あなたはP-MAX広告とGoogleマップ集客に特化したプロの広告運用者です。
 提供されたデータを読み取り、以下の【テンプレート】に厳密に従って文章を出力してください。
@@ -137,6 +142,37 @@ export async function POST(request: NextRequest) {
     if (!body) {
       return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
     }
+
+    // キャッシュキー（店舗×月）。旧クライアントは送ってこないため任意
+    const shopKey = typeof rawBody.shopName === "string" ? rawBody.shopName.trim() : "";
+    const monthKey = typeof rawBody.monthKey === "string" ? rawBody.monthKey.trim() : "";
+    const cacheable = !!(shopKey && monthKey);
+
+    // KPIデータ+プロンプト版のハッシュ。数値が1つでも変われば別ハッシュ＝自動再生成
+    const kpiHash = createHash("sha256")
+      .update(PROMPT_VERSION + JSON.stringify(body))
+      .digest("hex");
+
+    // ① キャッシュ照会: 同じ店舗×月×同じデータなら生成せずに返す（¥0・文面固定）
+    if (cacheable) {
+      try {
+        const supabase = getSupabase();
+        const { data: cached } = await supabase
+          .from("pmax_summary_cache")
+          .select("kpi_hash, summary_text")
+          .eq("shop_key", shopKey)
+          .eq("month", monthKey)
+          .maybeSingle();
+        if (cached?.summary_text && cached.kpi_hash === kpiHash) {
+          return NextResponse.json({ text: cached.summary_text, cached: true });
+        }
+        // ハッシュ不一致 = データが更新された → 下で再生成してキャッシュを更新
+      } catch (e) {
+        // テーブル未作成等はキャッシュなしで続行（従来動作）
+        console.error("[pmax-summary] cache read error:", e instanceof Error ? e.message : e);
+      }
+    }
+
     const userPrompt = buildUserPrompt(body);
 
     const controller = new AbortController();
@@ -169,7 +205,26 @@ export async function POST(request: NextRequest) {
     const result = await res.json();
     const text = result.content?.[0]?.text || "";
 
-    return NextResponse.json({ text });
+    // ② 生成結果を保存（次回以降は同じ文面を¥0で返す）
+    if (cacheable && text) {
+      try {
+        const supabase = getSupabase();
+        await supabase.from("pmax_summary_cache").upsert(
+          {
+            shop_key: shopKey,
+            month: monthKey,
+            kpi_hash: kpiHash,
+            summary_text: text,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "shop_key,month" }
+        );
+      } catch (e) {
+        console.error("[pmax-summary] cache write error:", e instanceof Error ? e.message : e);
+      }
+    }
+
+    return NextResponse.json({ text, cached: false });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: msg }, { status: 500 });

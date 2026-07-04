@@ -96,6 +96,8 @@ function StoreDetailContent() {
         const gbpPrv = gbpRows.find(r => r.month === gbpPrevKey);
 
         const body = {
+          shopName, // キャッシュキー: 同じ店×月×データなら再生成せず同じ文面を返す
+          monthKey: curKey,
           currentMonth: `${targetYear}年${targetMonthNum}月`,
           impressions: { current: cur.imp, prev: prev.imp },
           clicks: { current: cur.clk, prev: prev.clk },
