@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyAuth } from "@/lib/supabase";
+import { requireRole } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -11,8 +11,9 @@ const GCP_API_KEY = process.env.GCP_API_KEY || "";
  * キーワードの検索ボリューム推定（Places API結果件数ベース）
  */
 export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  // Places API課金を伴うため社長のみ実行可
+  const roleCheck = await requireRole(request, ["president"]);
+  if (roleCheck.error) return roleCheck.error;
   if (!GCP_API_KEY) return NextResponse.json({ error: "GCP_API_KEYが設定されていません" }, { status: 500 });
 
   const body = await request.json();

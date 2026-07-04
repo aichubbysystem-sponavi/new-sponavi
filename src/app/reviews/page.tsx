@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useShop } from "@/components/shop-provider";
+import { useRole } from "@/components/role-provider";
 import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
 import { logAudit } from "@/lib/audit-log";
@@ -27,6 +28,8 @@ const PER_PAGE = 20;
 
 export default function ReviewsPage() {
   const { selectedShopId, selectedShop, apiConnected, shops, shopFilterMode, favoriteShopIds } = useShop();
+  const { role } = useRole();
+  const canUseAi = role !== "part_time"; // Claude課金機能は社長・社員のみ
   const [reviews, setReviews] = useState<ReviewRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(1);
@@ -1367,6 +1370,7 @@ export default function ReviewsPage() {
                   </div>
                 )}
                 <div className="flex items-center gap-2 flex-wrap">
+                  {canUseAi && (
                   <button
                     onClick={() => handleAiReply(review)}
                     disabled={aiLoading && aiReplyId === review.id}
@@ -1376,6 +1380,7 @@ export default function ReviewsPage() {
                   >
                     {aiLoading && aiReplyId === review.id ? "AI生成中..." : aiReplyId === review.id ? "閉じる" : "AI返信提案"}
                   </button>
+                  )}
                   {!review.reply_comment && templates.length > 0 && (
                     <div className="relative group">
                       <button className="px-3 py-1 rounded-lg text-[11px] font-semibold bg-blue-50 text-blue-600 hover:bg-blue-100 transition-all">

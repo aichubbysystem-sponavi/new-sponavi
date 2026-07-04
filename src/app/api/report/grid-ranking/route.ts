@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth, requireShopAccessById, verifyShopAccess } from "@/lib/supabase";
+import { getSupabase, verifyAuth, requireRole, requireShopAccessById, verifyShopAccess } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -63,6 +63,10 @@ export async function POST(request: NextRequest) {
   if (!shopId || !keyword || !lat || !lng) {
     return NextResponse.json({ error: "shopId, keyword, lat, lngが必要です" }, { status: 400 });
   }
+
+  // Places API課金を伴う計測の実行は社長のみ（閲覧系のGETは全ロール可のまま）
+  const roleCheck = await requireRole(request, ["president"]);
+  if (roleCheck.error) return roleCheck.error;
 
   const access = await requireShopAccessById(request, shopId);
   if (access.error) return access.error;

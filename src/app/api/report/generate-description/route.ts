@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyAuth, verifyShopAccess } from "@/lib/supabase";
+import { requireRole, verifyShopAccess } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -11,8 +11,9 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
  * GBP説明文/カテゴリ提案をAIで生成
  */
 export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  // Claude API課金を伴うため社長・社員のみ
+  const r = await requireRole(request, ["president", "manager"]);
+  if (r.error) return r.error;
   if (!ANTHROPIC_API_KEY) return NextResponse.json({ error: "ANTHROPIC_API_KEYが設定されていません" }, { status: 500 });
 
   const body = await request.json();
@@ -20,7 +21,7 @@ export async function POST(request: NextRequest) {
 
   // 認可チェック
   if (shopName) {
-    const hasAccess = await verifyShopAccess(auth.sub, shopName);
+    const hasAccess = await verifyShopAccess(r.sub, shopName);
     if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
   }
 

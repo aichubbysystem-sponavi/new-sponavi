@@ -1,0 +1,48 @@
+========================================================================
+2026-07-04  API課金を伴う操作のロール制限（社長のみ/社長+社員）
+========================================================================
+
+【背景】
+ユーザー要望「管理者以外API代のかかるボタンなどは実行できないように」。
+AskUserQuestionで確認した方針:
+  - Places API系（高額）→ 社長(president)のみ
+  - Claude AI系（少額・日常業務）→ 管理者限定
+    → 選択肢の説明文どおり「社長+社員、バイト(part_time)不可」と解釈して実装
+
+【サーバー側（本丸の強制）】
+■ 社長のみ (requireRole ["president"])
+  - POST /api/report/grid-ranking      … 順位計測（Places・最高額）※GET/PUT/DELETEは従来通り
+  - POST /api/report/keyword-volume    … KWボリューム（Places）※フロント呼び出し元なしの休眠API
+  - POST /api/report/competitors      … 競合分析（Places）
+  - POST /api/report/sync-coordinates … 座標取得（Placesフォールバック）全モード
+    ※従来: 単店=店舗アクセス権 / 全店=社長+社員 → 全モード社長のみに統一
+    ※呼び出し元は grid-ranking / customer-master(社長専用ページ) のみで影響なし
+
+■ 社長+社員 (requireRole ["president","manager"])
+  - POST /api/report/reply-suggest        … AI返信提案（従来: 認証のみ=バイト可だった）
+  - POST /api/report/generate-description … 説明文生成（同上）
+  - POST /api/pmax/summary-text           … P-MAXまとめ生成（同上）
+  ※既に制限済みだった: generate-post / analyze / bulk-generate / chat
+
+■ 対象外（据え置き）
+  - /api/report/survey … 店舗のお客様が使う顧客向けアンケート機能のため
+  - cron系（auto-reply等）… CRON_SECRET認証のサーバー処理でボタンではない
+  - KW一括取得 … GBP API(無料)のため制限なし
+
+【フロント側（UX: 押せない/見えない）】
+■ grid-ranking/page.tsx
+  - useRole導入。isPresident = role === "president"
+  - 計測開始: disabled + startMeasure先頭ガード
+  - いつもの一括 / 全店舗一括 / 座標一括取得 / 単店GBP座標取得: onClick先頭ガード(alert)
+  - 非社長には注意書き表示「API課金を伴う操作は社長のみ（閲覧は可能）」
+■ reviews/page.tsx
+  - AI返信提案ボタンをバイト(part_time)に非表示（canUseAi）
+■ diagnosis/page.tsx
+  - 競合分析ボタンのonClickに社長ガード(alert)
+
+【設計メモ】
+- ページアクセス制御(roles.ts)は従来通り。今回は「API課金の実行」だけを締めた
+  （バイトはそもそも /grid-ranking 等に入れないが、API直叩きは防げていなかった）
+- 本質的な強制はサーバー側requireRole。フロントは案内用の二重化
+
+【ビルド】next build 成功（2026-07-04）

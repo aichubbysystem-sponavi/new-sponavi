@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth, verifyShopAccess } from "@/lib/supabase";
+import { getSupabase, requireRole, verifyShopAccess } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -12,10 +12,9 @@ const GCP_API_KEY = process.env.GCP_API_KEY || "";
  * 指定店舗の周辺競合店舗をGoogle Places API (New)で検索
  */
 export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid || !auth.sub) {
-    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-  }
+  // Places API課金を伴うため社長のみ実行可
+  const roleCheck = await requireRole(request, ["president"]);
+  if (roleCheck.error) return roleCheck.error;
 
   const body = await request.json();
   const { shopId } = body as { shopId: string };
@@ -27,7 +26,7 @@ export async function POST(request: NextRequest) {
   // shopIdからshop名を取得してアクセスチェック
   const sb = getSupabase();
   const { data: shopCheck } = await sb.from("shops").select("name").eq("id", shopId).maybeSingle();
-  if (shopCheck && !(await verifyShopAccess(auth.sub, shopCheck.name))) {
+  if (shopCheck && !(await verifyShopAccess(roleCheck.sub, shopCheck.name))) {
     return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
   }
   if (!GCP_API_KEY) {

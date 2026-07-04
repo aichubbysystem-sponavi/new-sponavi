@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth, requireRole, requireShopAccessById, verifyShopAccess } from "@/lib/supabase";
+import { getSupabase, requireRole } from "@/lib/supabase";
 import { getOAuthToken } from "@/lib/gbp-token";
 import { getLocationMap, resolveLocationName } from "@/lib/gbp-location";
 
@@ -65,27 +65,13 @@ function matchShopToLocation(
  * - shopId指定時はその店舗のみ
  */
 export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid || !auth.sub) {
-    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-  }
+  // Places APIフォールバック課金を伴うため、全モード社長のみ実行可
+  const roleCheck = await requireRole(request, ["president"]);
+  if (roleCheck.error) return roleCheck.error;
 
   const body = await request.json().catch(() => ({}));
   const targetShopId = body?.shopId;
   const targetShopName = body?.shopName;
-
-  // 認可チェック
-  if (targetShopId) {
-    const access = await requireShopAccessById(request, targetShopId);
-    if (access.error) return access.error;
-  } else if (targetShopName) {
-    const hasAccess = await verifyShopAccess(auth.sub, targetShopName);
-    if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
-  } else {
-    // 全店舗対象 → president/manager のみ
-    const roleCheck = await requireRole(request, ["president", "manager"]);
-    if (roleCheck.error) return roleCheck.error;
-  }
 
   const supabase = getSupabase();
 

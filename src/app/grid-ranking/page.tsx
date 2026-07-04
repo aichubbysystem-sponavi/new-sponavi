@@ -4,6 +4,7 @@ import { useEffect, useCallback, useState, useRef, useMemo } from "react";
 import api from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import { useShop } from "@/components/shop-provider";
+import { useRole } from "@/components/role-provider";
 import DateRangePicker, { useDateRange } from "@/components/date-range-picker";
 import { jstToday } from "@/lib/jst-date";
 
@@ -139,6 +140,8 @@ interface CostEstimate {
 
 export default function GridRankingPage() {
   const { selectedShopId, selectedShop, shops, shopFilterMode } = useShop();
+  const { role } = useRole();
+  const isPresident = role === "president"; // API課金を伴う実行操作は社長のみ
   const [keyword, setKeyword] = useState("");
   const [savedKeywords, setSavedKeywords] = useState<string[]>([]);
   const [gridSize, setGridSize] = useState<number>(7);
@@ -481,6 +484,7 @@ export default function GridRankingPage() {
 
   // グリッド計測実行
   const startMeasure = async () => {
+    if (!isPresident) { alert("計測の実行は社長アカウントのみ可能です"); return; }
     if (!selectedShopId || !keyword.trim() || !shopLat) return;
     setMeasuring(true);
     setError("");
@@ -769,6 +773,7 @@ export default function GridRankingPage() {
               <div className="flex gap-2">
                 <button
                   onClick={async () => {
+                    if (!isPresident) { alert("座標一括取得は社長アカウントのみ可能です"); return; }
                     if (coordSyncing) return;
                     setCoordSyncing(true);
                     setCoordSyncResult("座標取得中...");
@@ -831,6 +836,7 @@ export default function GridRankingPage() {
               {/* メイン: スマート一括計測ボタン */}
               <button
                 onClick={async () => {
+                  if (!isPresident) { alert("一括計測の実行は社長アカウントのみ可能です"); return; }
                   if (batchRunning) return;
                   const unmeasuredPresets = presets.filter(p => !isMeasuredThisMonth(p.last_measurement?.measured_at));
                   if (unmeasuredPresets.length === 0) { alert("全店舗 今月計測済みです"); return; }
@@ -1203,6 +1209,7 @@ export default function GridRankingPage() {
               {/* 全店舗一括計測ボタン */}
               <button
                 onClick={async () => {
+                  if (!isPresident) { alert("全店舗計測の実行は社長アカウントのみ可能です"); return; }
                   if (allShopsBatchRunning) return;
                   // API費用目安（KW数は計測時に取得のため1店舗6KW想定で概算）
                   const allCost = estimateCost(allShopsFiltered.length * pointsPerShop(6));
@@ -1518,6 +1525,7 @@ export default function GridRankingPage() {
             {selectedShopId && (
               <button
                 onClick={async () => {
+                  if (!isPresident) { alert("座標取得は社長アカウントのみ可能です"); return; }
                   try {
                     const res = await api.post("/api/report/sync-coordinates", { shopId: selectedShopId, shopName: (selectedShop as any)?.name || "" }, { timeout: 60000 });
                     if (res.data?.error) {
@@ -1551,11 +1559,17 @@ export default function GridRankingPage() {
           {estimateCost(gridSize * gridSize).afterId.toLocaleString()} ／ 同月の再計測 ¥0
         </p>
 
+        {!isPresident && (
+          <p className="text-xs text-orange-500 font-semibold">
+            ⚠️ 計測・座標取得などAPI課金を伴う操作は社長アカウントのみ実行できます（結果の閲覧は可能）
+          </p>
+        )}
+
         {/* 実行ボタン */}
         <div className="flex gap-3 items-center">
           <button
             onClick={startMeasure}
-            disabled={measuring || !keyword.trim() || !shopLat}
+            disabled={measuring || !keyword.trim() || !shopLat || !isPresident}
             className="bg-[#003D6B] text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-[#00507A] disabled:opacity-50 disabled:cursor-not-allowed transition"
           >
             {measuring ? "計測中..." : "計測開始"}

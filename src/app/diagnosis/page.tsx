@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useShop } from "@/components/shop-provider";
+import { useRole } from "@/components/role-provider";
 import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
 
@@ -22,6 +23,7 @@ interface Competitor {
 
 export default function DiagnosisPage() {
   const { selectedShopId, selectedShop, apiConnected } = useShop();
+  const { role } = useRole();
   const [items, setItems] = useState<DiagnosisItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [competitors, setCompetitors] = useState<Competitor[]>([]);
@@ -219,6 +221,7 @@ export default function DiagnosisPage() {
                 <p className="text-[10px] text-slate-400 mt-0.5">半径2km以内の同業種店舗と比較</p>
               </div>
               <button onClick={async () => {
+                if (role !== "president") { alert("競合分析の実行は社長アカウントのみ可能です（Places API課金のため）"); return; }
                 setCompLoading(true);
                 try {
                   const token = (await (await import("@/lib/supabase")).supabase.auth.getSession()).data.session?.access_token;
