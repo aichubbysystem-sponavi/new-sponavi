@@ -510,6 +510,8 @@ export default function GridRankingPage() {
           keyword: keyword.trim(),
           lat: pt.lat,
           lng: pt.lng,
+          interval, // 格子幅を間隔に合わせる（細間隔での潰れ防止）
+          center: pt.row === Math.floor(gridSize / 2) && pt.col === Math.floor(gridSize / 2),
         });
         pt.rank = res.data.rank || -1; // 0 = 見つからない → -1 (圏外)
       } catch {
@@ -945,12 +947,14 @@ export default function GridRankingPage() {
                           const label = isMain ? "7x7" : "3x3";
                           setBatchProgress(`${i + 1}/${targetPresets.length} ${p.shop_name} [KW ${ki + 1}/${keywords.length} ${label}] (${j + 1}/${points.length})`);
                           window.dispatchEvent(new Event("batch-activity"));
+                          let res: any = null;
                           try {
-                            let res;
                             for (let retry = 0; retry < 3; retry++) {
                               try {
                                 res = await api.post("/api/report/grid-ranking", {
                                   shopId: p.shop_id, keyword: kw, lat: pt.lat, lng: pt.lng,
+                                  interval: 1000,
+                                  center: pt.row === Math.floor(measureSize / 2) && pt.col === Math.floor(measureSize / 2),
                                 }, { timeout: 15000 });
                                 break;
                               } catch (e: any) {
@@ -962,7 +966,8 @@ export default function GridRankingPage() {
                             }
                             points[j] = { ...pt, rank: res?.data?.rank || 0 };
                           } catch { points[j] = { ...pt, rank: 0 }; }
-                          await new Promise(r => setTimeout(r, 1000));
+                          // キャッシュ命中(¥0)時は待機を短縮（一括の再実行を高速化）
+                          await new Promise(r => setTimeout(r, res?.data?.cached ? 50 : 1000));
                         }
 
                         if (isMain) {
@@ -1309,12 +1314,14 @@ export default function GridRankingPage() {
                           const label = isMain ? "7x7" : "3x3";
                           setAllShopsBatchProgress(`${i + 1}/${allTargetShops.length} ${shopName} [KW ${ki + 1}/${keywords.length} ${label}] (${j + 1}/${points.length})`);
                           window.dispatchEvent(new Event("batch-activity"));
+                          let res: any = null;
                           try {
-                            let res;
                             for (let retry = 0; retry < 3; retry++) {
                               try {
                                 res = await api.post("/api/report/grid-ranking", {
                                   shopId: s.id, keyword: kw, lat: pt.lat, lng: pt.lng,
+                                  interval: 1000,
+                                  center: pt.row === Math.floor(measureSize / 2) && pt.col === Math.floor(measureSize / 2),
                                 }, { timeout: 15000 });
                                 break;
                               } catch (e: any) {
@@ -1326,7 +1333,8 @@ export default function GridRankingPage() {
                             }
                             points[j] = { ...pt, rank: res?.data?.rank || 0 };
                           } catch { points[j] = { ...pt, rank: 0 }; }
-                          await new Promise(r => setTimeout(r, 1000));
+                          // キャッシュ命中(¥0)時は待機を短縮（一括の再実行を高速化）
+                          await new Promise(r => setTimeout(r, res?.data?.cached ? 50 : 1000));
                         }
 
                         if (isMain) {

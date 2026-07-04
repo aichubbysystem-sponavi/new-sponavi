@@ -51,11 +51,13 @@ function findRank(places: string[], targetName: string): number {
  */
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { shopId, keyword, lat, lng } = body as {
+  const { shopId, keyword, lat, lng, interval, center } = body as {
     shopId: string;
     keyword: string;
     lat: number;
     lng: number;
+    interval?: number; // 計測の距離間隔(m)。格子幅をこれに合わせる（未指定=1000m）
+    center?: boolean;  // グリッド中心地点フラグ（ID失効チェック用）
   };
 
   if (!shopId || !keyword || !lat || !lng) {
@@ -96,11 +98,16 @@ export async function POST(request: NextRequest) {
   const useIdMode = !!shopPlaceId;
 
   // 計測地点を格子にスナップ（キャッシュキー＝実際の検索中心。一貫性を保つ）
-  const latKey = snapCoord(lat, LAT_STEP);
-  const lngKey = snapCoord(lng, LNG_STEP);
+  // 格子幅は距離間隔に比例させる: 500m間隔の計測で隣接地点が同一格子に潰れるのを防ぐ
+  // （リクエスト数は間隔スケール前の従来仕様と同じ＝コスト増なし）
+  const intervalM = Number(interval) || 1000;
+  const gridFactor = Math.min(1, Math.max(0.25, intervalM / 1000));
+  const latKey = snapCoord(lat, LAT_STEP * gridFactor);
+  const lngKey = snapCoord(lng, LNG_STEP * gridFactor);
   const month = jstMonth();
 
   // ① キャッシュ照会: 同月×同KW×同格子点が計測済みならAPIを呼ばない
+  let existingCache: any = null; // upsert時のcomplete行保護にも使う
   try {
     const { data: cached } = await supabase
       .from("grid_search_cache")
@@ -110,6 +117,7 @@ export async function POST(request: NextRequest) {
       .eq("lng_key", lngKey)
       .eq("month", month)
       .maybeSingle();
+    existingCache = cached;
 
     if (cached) {
       const cachedIds: string[] = Array.isArray((cached as any).place_ids) ? (cached as any).place_ids : [];
@@ -198,6 +206,33 @@ export async function POST(request: NextRequest) {
       pageToken = data.nextPageToken;
     }
 
+    // 【IDの鮮度チェック】IDモードで中心地点すら圏外の場合、IDの失効を疑って確認する
+    // プレイスIDはリスティング統合等でまれに変わる。失効を放置すると
+    // 「全地点圏外の誤レポート + 毎回5ページ全消費」が続くため自動回復する。
+    // Place Details(IDのみ)は無料SKUのため追加費用ゼロ
+    if (useIdMode && rank === 0 && center === true) {
+      try {
+        const refRes = await fetch(
+          `https://places.googleapis.com/v1/places/${encodeURIComponent(shopPlaceId)}`,
+          { headers: { "X-Goog-Api-Key": GCP_API_KEY, "X-Goog-FieldMask": "id" } }
+        );
+        if (refRes.ok) {
+          const freshId = (await refRes.json())?.id || "";
+          if (freshId && freshId !== shopPlaceId) {
+            // IDが更新されていた → 新IDで照合し直し、保存
+            rank = allIds.indexOf(freshId) + 1;
+            await supabase.from("shops").update({ gbp_place_id: freshId }).eq("id", shopId);
+          }
+          // freshId === shopPlaceId なら本当に圏外（正常）
+        } else if (refRes.status === 404) {
+          // 失効ID: クリアして次回計測時に店名モードで再取得させる
+          await supabase.from("shops").update({ gbp_place_id: null }).eq("id", shopId);
+        }
+      } catch (e) {
+        console.error("[grid-ranking] place_id refresh error:", e instanceof Error ? e.message : e);
+      }
+    }
+
     // 店名モードで発見時: 完全一致ならプレイスIDを保存 → 次回からEssentials(¥0.75)に自動切替
     // （部分一致は別店舗の可能性があるため保存しない）
     if (!useIdMode && rank > 0) {
@@ -213,7 +248,9 @@ export async function POST(request: NextRequest) {
     }
 
     // ② 結果リスト全体を保存（次回以降・他店舗の照会をAPIゼロにする）
-    if (allIds.length > 0) {
+    // ただし「完全リスト」を「不完全リスト」で上書きしない
+    // （早期打ち切りの短いリストが、別店舗が使う100件のcomplete行を潰すのを防ぐ）
+    if (allIds.length > 0 && !(existingCache?.complete && !complete)) {
       const cacheRow: any = {
         keyword,
         lat_key: latKey,
