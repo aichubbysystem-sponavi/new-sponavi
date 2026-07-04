@@ -1,0 +1,88 @@
+========================================================================
+セッション終了ログ（2026-07-03〜04 通し）: Places API費用暴走の調査〜対策完了
+========================================================================
+
+## 【2026-07-03〜04】
+
+### 決定事項
+- Google Cloud請求高騰（6月¥157,773 / 7月1日単日¥261,662）の原因を
+  多地点順位計測(grid-ranking)のPlaces API Text Search Proと特定
+- 対策①月次キャッシュ ②格子共有 を実装する（③5ページ→2ページ削減は保留）
+- ④グリッド構成は従来通り維持（メインKW=7×7実測、サブKW=3×3実測+7×7推定）
+- SKUをPro→Essentialsに切替（店名照合→プレイスID照合）。移行は自動レイジー方式
+- GCP側の保険: 日次クォータ25,000回 + 予算アラート¥50,000/月（ユーザーがコンソールで設定済み）
+- P-MAXまとめ(AI文章)は店舗×月×KPIハッシュでキャッシュ（文面固定が主目的）
+- 権限: Places系課金操作=社長のみ / Claude系AI生成=社長+社員（バイト不可）
+  / 顧客向けアンケート(survey)とcron・無料APIは対象外
+- 全店一括計測は「月初に1回」運用を基本とする
+
+### 変更内容（具体的に）
+■ src/app/api/report/grid-ranking/route.ts（最重要・大改修）
+  - POST: 検索結果を grid_search_cache に月次保存。同月×同KW×同格子点はAPI不呼出
+  - 計測地点を全国格子にスナップ（近隣店舗で検索結果を共有）。格子幅は距離間隔に比例
+  - FieldMaskを places.id ベースに変更（SKU Essentials化）。ID未取得店は
+    Pro(id+displayName)で計測し、店名完全一致時にIDを自動保存→次回からEssentials
+  - refreshPlaceId()新設: ID失効(404)の検知と自動回復を実測/キャッシュ両経路に設置
+  - complete行をincomplete行で上書きしない保護
+  - findRank()関数化+空文字.includes("")ガード
+  - 権限: POST/PUT=社長のみ、DELETE=社長+社員（requireRole）
+■ src/app/grid-ranking/page.tsx
+  - API費用目安を常時表示+一括計測confirmに費用警告
+  - POSTにinterval/centerフラグ追加、キャッシュ命中時のsleep 1000ms→50ms
+  - useRole導入。非社長は計測/座標取得系ボタンをガード+注意書き表示
+■ src/app/api/pmax/summary-text/route.ts + src/app/pmax/store/page.tsx
+  - まとめ文章を pmax_summary_cache にキャッシュ（KPIハッシュ+PROMPT_VERSIONで変更検知）
+  - 権限: 社長+社員のみ
+■ 権限追加（サーバー側requireRole）
+  - 社長のみ: keyword-volume / competitors / sync-coordinates(全モード)
+  - 社長+社員: reply-suggest / generate-description
+  - フロント: reviews(AI返信提案をバイト非表示) / diagnosis(競合分析を社長ガード)
+■ SQL（Supabase実行済み）
+  - sql/2026-07-03_grid_search_cache.sql
+  - sql/2026-07-03_place_id_essentials.sql（shops.gbp_place_id / place_ids列）
+  - sql/2026-07-04_pmax_summary_cache.sql
+■ スプレッドシート
+  - 料金表SS(1IbSmfDC0...)「多地点順位計測料金表」タブ: 費用シミュレーション
+  - システム管理SS(1fREtiHUO...)「NEWSPONAVI」タブ: API費用詳細+対策まとめ+Vercel Pro修正
+■ コミット: 0426562 / 39277d2 / 4fc294c / b22d4ee / a5a4cc7 / bb62e06 / 960fe98 / ae51f6b
+
+### 数値・設定値
+- Places単価: Pro $32/1000≒¥4.8 → Essentials $5/1000≒¥0.75（▲84%、FieldMaskで決まる）
+- 格子: LAT_STEP=0.009° / LNG_STEP=0.011°（≒1km）× gridFactor=clamp(interval/1000, 0.25〜1)
+- locationBias半径: 2000m（従来通り）／探索: 最大5ページ=100位（③保留のため従来通り）
+- キャッシュ: 月単位('YYYY-MM' JST)。キャッシュ命中時のバッチsleep 1000ms→50ms
+- GCPクォータ: SearchTextRequest per day = 25,000回（デフォルト75,000から変更）
+- 予算アラート: ¥50,000/月、しきい値50/90/100%（請求先アカウント「順位計測API」）
+- 効果試算: 194店舗計測 ¥262,000→約¥41,000（1店平均¥1,350→約¥210）、同月再計測¥0
+- 1店舗最大(6KW全圏外): ¥2,256→¥353（ID移行後）
+- PMAXまとめ: 約¥4/生成 → 2回目以降¥0。PROMPT_VERSION="v1"
+
+### 未解決・次回やること
+- 【数日後・最重要の答え合わせ】GCP請求レポートのSKUに
+  「Text Search Essentials (IDs Only)」が出現することを確認（単価▲84%の実証）
+- 【8月】月初の全店一括計測: 総額が¥1〜3万台に収まるか / 完走できるか確認
+- 保留: ③探索5→2ページ（入れれば圏外店さらに▲6割）
+- 保留: 全店一括のサーバー側ジョブ化（現状ブラウザループ=社長タブ7時間依存。8月の実運用を見て判断）
+- 任意: GBP API metadata.placeId による place_id 一括バックフィル（無料・初回計測も全額Essentials化）
+- 小粒: /postsのAI生成ボタンがバイトに見える(403で実行は不可) / keyword-volume休眠API削除
+  / grid-ranking POSTのbody parseがtry外(壊れたJSONで500)
+- 運用: ID照合化で順位表記が変わる店あり（重複リスティング勢）→ 顧客へ一言告知推奨
+- 古い月の grid_search_cache 行の掃除方針（放置でも実害小、容量が気になったら）
+
+### 注意点・ハマったこと
+- 【最重要ナレッジ】Places APIのSKU（単価）はFieldMaskで決まる。
+  places.displayName を要求すると Pro(¥4.8)、places.id のみなら Essentials(¥0.75)。
+  Place Details(IDのみ)は無料。同じ検索結果なのに頼む情報で6.4倍違う
+- Google Maps Platformの「サブスクリプション Essentials $275/月」は
+  SKUのEssentialsとは完全な別物。絶対に契約しないこと（画面が紛らわしい）
+- 予算アラートは「通知のみ」で使用は止まらない。止めるのは日次クォータの役割
+- クォータの単位は「回数」であって「円」ではない（75,000回=Pro換算¥36万だった）
+- 一括計測はサーバーではなく**ブラウザのforループ**。タブを閉じると中断する
+- 自己修復(ID失効チェック)を実測パスだけに入れると、共有キャッシュが効いている
+  ほど発動しない（第2回レビューで発見→キャッシュ経路にも設置）
+- .includes("")は常にtrue（重要ナレッジ通り。findRankで実際に踏みかけた）
+- 早期打ち切りの不完全リストでcomplete行を上書きすると再計測ピンポンが起きる
+- 格子幅固定だと500m間隔計測で隣接地点が潰れる→距離間隔に比例させる
+- この環境からSupabase(rtqv...supabase.co)へはDNS到達不可。実データ集計は
+  サービスロールキーがあっても不可、コード+請求画面から推定した
+- 7月の予算アラートは対策前の被害(¥31万超)で即発火する。8月リセットが本番
