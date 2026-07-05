@@ -1242,14 +1242,28 @@ export default function ReportClient({
       )}
 
       {/* 指定月データなしバナー */}
-      {monthNotFound && (
+      {monthNotFound && (() => {
+        // 選択月が当月以降（未確定月）なら「集計中」案内、過去月なら反映案内を表示
+        const nowJST = new Date(Date.now() + 9 * 60 * 60 * 1000);
+        const curMonthNum = nowJST.getUTCFullYear() * 100 + (nowJST.getUTCMonth() + 1);
+        const isPendingMonth = monthToNum(targetMonth) >= curMonthNum;
+        const [ty, tm] = targetMonth.split("/").map(Number);
+        const nextMonthLabel = tm === 12 ? `${ty + 1}年1月` : `${tm + 1}月`;
+        const targetLabel = targetMonth.replace(/(\d{4})\/(\d{1,2})/, "$1年$2月");
+        const latestLabel = latestMonth.replace(/(\d{4})\/(\d{1,2})/, "$1年$2月");
+        return (
         <div style={{ background: "#FEF3C7", border: "1px solid #F59E0B", borderRadius: 8, padding: "12px 20px", margin: "0 0 12px", display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 18 }}>⚠</span>
           <span style={{ fontSize: 16, color: "#92400E" }}>
-            <strong>{targetMonth.replace(/(\d{4})\/(\d{1,2})/, "$1年$2月")}</strong>のデータがありません。最新月（{latestMonth.replace(/(\d{4})\/(\d{1,2})/, "$1年$2月")}）のデータを表示しています。レポート管理画面で「全店舗反映」を実行してください。
+            {isPendingMonth ? (
+              <><strong>{targetLabel}</strong>は集計期間中のため、最新の確定月（{latestLabel}）を表示しています。{targetLabel.replace(/^\d{4}年/, "")}分は{nextMonthLabel}上旬に反映予定です。</>
+            ) : (
+              <><strong>{targetLabel}</strong>のデータがありません。最新月（{latestLabel}）のデータを表示しています。レポート管理画面で「全店舗反映」を実行してください。</>
+            )}
           </span>
         </div>
-      )}
+        );
+      })()}
 
       {/* ════ P1: ヘッダー + KPI ════ */}
       <div style={slideStyle} className="slide">
@@ -2177,30 +2191,48 @@ export default function ReportClient({
           <div style={stitleStyle}>{isFirst ? "AIによるコメント" : "AIによるコメント（続き）"}</div>
           <div style={{ background: "linear-gradient(135deg,#f0f4ff,#fff)", border: "2px solid #0f3460", borderRadius: 14, padding: "16px 20px", flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", wordBreak: "break-word" }}>
             {isFirst && <h3 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", marginBottom: 16 }}>{curLabel} 総評</h3>}
-            <div style={{ margin: 0 }}>
-              {allComments.slice(page.start, page.end).map((c, i) => {
-                const globalIdx = page.start + i;
-                const heading = AI_COMMENT_HEADINGS[globalIdx] || "";
-                return (
-                <div key={globalIdx} style={{ fontSize: 15, lineHeight: 1.8, color: "#444", margin: "0 0 12px 0" }}>
-                  {heading && <div style={{ fontWeight: 700, color: COLORS.primary, fontSize: 15, marginBottom: 2 }}>{heading}</div>}
-                  {isEditingComments ? (
-                    <textarea
-                      value={editingComments[globalIdx] || ""}
-                      onChange={(e) => {
-                        const next = [...editingComments];
-                        next[globalIdx] = e.target.value;
-                        setEditingComments(next);
-                      }}
-                      style={{ width: "100%", minHeight: 80, padding: "8px 10px", fontSize: 14, lineHeight: 1.7, border: "1px solid #ccd", borderRadius: 8, resize: "vertical", fontFamily: "inherit", color: "#333" }}
-                    />
-                  ) : (
-                    <span dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(formatAIComment(c, shop.rating), { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
-                  )}
-                </div>
-                );
-              })}
-            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+              <thead>
+                <tr>
+                  <th style={{ width: 64, padding: "10px 8px", background: "#1F3864", color: "#fff", fontSize: 15, fontWeight: 700, textAlign: "center", border: "2px solid #fff" }}>番号</th>
+                  <th style={{ width: 170, padding: "10px 12px", background: "#1F3864", color: "#fff", fontSize: 15, fontWeight: 700, textAlign: "center", border: "2px solid #fff" }}>内容</th>
+                  <th style={{ padding: "10px 12px", background: "#1F3864", color: "#fff", fontSize: 15, fontWeight: 700, textAlign: "center", border: "2px solid #fff" }}>詳細</th>
+                </tr>
+              </thead>
+              <tbody>
+                {page.start === page.end && (
+                  <tr style={{ background: "#EFF1F6" }}>
+                    <td colSpan={3} style={{ padding: "20px 14px", textAlign: "center", fontSize: 15, color: "#999", fontStyle: "italic", border: "2px solid #fff" }}>データ準備中</td>
+                  </tr>
+                )}
+                {allComments.slice(page.start, page.end).map((c, i) => {
+                  const globalIdx = page.start + i;
+                  const heading = AI_COMMENT_HEADINGS[globalIdx] || "";
+                  const stripe = globalIdx % 2 === 0 ? "#D9DEE8" : "#EFF1F6";
+                  return (
+                  <tr key={globalIdx} style={{ background: stripe }}>
+                    <td style={{ padding: "10px 8px", textAlign: "center", fontSize: 17, fontWeight: 700, color: "#1F3864", border: "2px solid #fff", verticalAlign: "middle" }}>{"①②③④⑤⑥⑦⑧⑨⑩"[globalIdx] || globalIdx + 1}</td>
+                    <td style={{ padding: "10px 12px", fontSize: 15, fontWeight: 700, color: "#1F3864", border: "2px solid #fff", verticalAlign: "middle" }}>{heading}</td>
+                    <td style={{ padding: "10px 14px", fontSize: 15, lineHeight: 1.8, color: "#333", border: "2px solid #fff", verticalAlign: "middle" }}>
+                      {isEditingComments ? (
+                        <textarea
+                          value={editingComments[globalIdx] || ""}
+                          onChange={(e) => {
+                            const next = [...editingComments];
+                            next[globalIdx] = e.target.value;
+                            setEditingComments(next);
+                          }}
+                          style={{ width: "100%", minHeight: 80, padding: "8px 10px", fontSize: 14, lineHeight: 1.7, border: "1px solid #ccd", borderRadius: 8, resize: "vertical", fontFamily: "inherit", color: "#333", background: "#fff" }}
+                        />
+                      ) : (
+                        <span dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(formatAIComment(c, shop.rating), { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
+                      )}
+                    </td>
+                  </tr>
+                  );
+                })}
+              </tbody>
+            </table>
             {/* メモ欄（最終ページのみ、PDF非表示） */}
             {isLast && (
             <div className="no-print" style={{ marginTop: "auto", borderTop: "1px solid #dde", paddingTop: 12 }}>
