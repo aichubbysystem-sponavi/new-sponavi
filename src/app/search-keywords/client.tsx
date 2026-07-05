@@ -211,6 +211,8 @@ export default function SearchKeywordsClient() {
       }
       const t = targets[i];
       setSyncProgress({ current: i + 1, total: targets.length, shopName: t.shopName });
+      // 無操作30分の自動ログアウト（auth-guard）をバッチ処理中は抑止
+      window.dispatchEvent(new Event("batch-activity"));
       // 35秒の強制タイムアウト（syncOne内の30秒+猶予5秒）でハング防止
       const result = await Promise.race([
         syncOne(t.shopId, t.shopName, controller.signal, apiPath),

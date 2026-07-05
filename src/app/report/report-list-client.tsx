@@ -332,6 +332,8 @@ export default function ReportListClient({
         let synced = 0;
         for (let i = 0; i < allNames.length; i += BATCH) {
           const batch = allNames.slice(i, i + BATCH);
+          // 無操作30分の自動ログアウト（auth-guard）をバッチ処理中は抑止
+          window.dispatchEvent(new Event("batch-activity"));
           try {
             const r = await syncShopData(batch);
             synced += r?.count || 0;
