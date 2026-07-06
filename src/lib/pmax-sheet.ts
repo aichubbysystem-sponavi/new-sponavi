@@ -133,6 +133,11 @@ export async function getGbpDataForShop(
 /**
  * 全店舗名の一覧を取得（重複排除）
  */
+/** 全店舗×全月のGBP行を取得（バックフィル用） */
+export async function getAllGbpRows(): Promise<PmaxGbpRow[]> {
+  return fetchAllRows();
+}
+
 export async function getShopNames(): Promise<string[]> {
   const allRows = await fetchAllRows();
   return Array.from(new Set(allRows.map((r) => r.shopName))).sort();
