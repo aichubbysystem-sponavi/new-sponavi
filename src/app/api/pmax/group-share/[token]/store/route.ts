@@ -142,6 +142,7 @@ export async function GET(
       website: Number(r.website),
       menuClicks: Number(r.menu_clicks),
       saveShare: Number(r.save_share),
+      reservation: Number(r.reservation ?? 0),
     }));
 
     // まとめテキスト: 店舗単位の共有トークン(pmax_share_tokens)に保存された

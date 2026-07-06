@@ -36,6 +36,7 @@ export type GbpRow = {
   website: number;
   menuClicks: number;
   saveShare: number;
+  reservation: number; // 予約（GBPシートM列「注文」由来）
 };
 
 export type PmaxReportData = {
@@ -194,6 +195,7 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
     { key: "phone", label: "電話" },
     { key: "directions", label: "経路案内" },
     { key: "menuClicks", label: "メニュークリック" },
+    { key: "reservation", label: "予約" },
     { key: "website", label: "WEBサイト" },
     { key: "saveShare", label: "保存・共有" },
   ];
@@ -210,7 +212,7 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
     { label: "電話", value: gbpCurrent?.phone ?? 0, format: formatNum, prev: gbpPrev?.phone ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.phone ?? 0) : null },
     { label: "経路案内", value: gbpCurrent?.directions ?? 0, format: formatNum, prev: gbpPrev?.directions ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.directions ?? 0) : null },
     { label: "メニュークリック", value: gbpCurrent?.menuClicks ?? 0, format: formatNum, prev: gbpPrev?.menuClicks ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.menuClicks ?? 0) : null },
-    { label: "予約", value: 0, format: formatNum, prev: 0, lastYear: null },
+    { label: "予約", value: gbpCurrent?.reservation ?? 0, format: formatNum, prev: gbpPrev?.reservation ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.reservation ?? 0) : null },
     { label: "WEBサイト", value: gbpCurrent?.website ?? 0, format: formatNum, prev: gbpPrev?.website ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.website ?? 0) : null },
     { label: "保存・共有", value: gbpCurrent?.saveShare ?? 0, format: formatNum, prev: gbpPrev?.saveShare ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.saveShare ?? 0) : null },
   ];
@@ -253,7 +255,7 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
         </div>
       </div>
 
-      {/* コンバージョン月次推移ページ */}
+      {/* コンバージョン月次推移ページ（グラフなし・数値のみ） */}
       {hasConversion && (
         <div style={{ ...slideStyle, minHeight: "auto" }}>
           <div style={slideBarStyle}>
@@ -262,25 +264,31 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
           </div>
           <div style={{ ...slideBodyStyle, overflow: "visible" }}>
             <div style={stitleStyle}>コンバージョン月次推移</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 18 }}>
-              {convMetrics.map((m, i) => {
-                const values = convRows.map((r) => Number(r[m.key] || 0));
-                const total = values.reduce((s, v) => s + v, 0);
-                return (
-                  <div key={m.key} style={{ background: "#fff", borderRadius: 12, padding: "14px 16px", boxShadow: "0 1px 6px rgba(0,0,0,.04)" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: "#0f3460" }}>{m.label}</span>
-                      <span style={{ fontSize: 11, color: "#888" }}>計 {total.toLocaleString()}</span>
-                    </div>
-                    <div style={{ height: 150 }}>
-                      <Bar
-                        data={{ labels: convLabels, datasets: [{ label: m.label, data: values, backgroundColor: chartColors[i % chartColors.length], borderColor: chartBorderColors[i % chartBorderColors.length], borderWidth: 1 }] }}
-                        options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false }, ticks: { font: { size: 10 } } }, y: { beginAtZero: true, grid: { color: "#f0f0f0" }, ticks: { precision: 0, font: { size: 10 }, callback: (v) => Number(v).toLocaleString() } } } }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
+            <div style={{ overflowX: "auto", border: "1px solid #e0e0e0", borderRadius: 8 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+                <thead><tr>
+                  <th style={{ background: "#0f3460", color: "#fff", padding: "10px 14px", fontWeight: 600, textAlign: "left", whiteSpace: "nowrap" }}>指標</th>
+                  {convLabels.map((lbl, i) => (
+                    <th key={i} style={{ background: i === convLabels.length - 1 ? "#e94560" : "#0f3460", color: "#fff", padding: "10px 8px", fontWeight: 600, textAlign: "center", whiteSpace: "nowrap" }}>{lbl}</th>
+                  ))}
+                  <th style={{ background: "#16213e", color: "#fff", padding: "10px 14px", fontWeight: 600, textAlign: "center" }}>計</th>
+                </tr></thead>
+                <tbody>
+                  {convMetrics.map((m, ri) => {
+                    const values = convRows.map((r) => Number(r[m.key] || 0));
+                    const total = values.reduce((s, v) => s + v, 0);
+                    return (
+                      <tr key={m.key} style={{ background: ri % 2 === 0 ? "#f8f9fa" : "#fff" }}>
+                        <td style={{ padding: "9px 14px", fontWeight: 700, color: "#0f3460", whiteSpace: "nowrap" }}>{m.label}</td>
+                        {values.map((v, i) => (
+                          <td key={i} style={{ textAlign: "center", padding: "9px 8px", background: i === values.length - 1 ? "#fff8f0" : undefined }}>{v.toLocaleString()}</td>
+                        ))}
+                        <td style={{ textAlign: "center", padding: "9px 14px", fontWeight: 700, background: "#eef1f6" }}>{total.toLocaleString()}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>

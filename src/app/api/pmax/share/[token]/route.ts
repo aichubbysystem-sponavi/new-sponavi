@@ -98,6 +98,7 @@ export async function GET(
       website: Number(r.website),
       menuClicks: Number(r.menu_clicks),
       saveShare: Number(r.save_share),
+      reservation: Number(r.reservation ?? 0),
     }));
 
     return NextResponse.json({

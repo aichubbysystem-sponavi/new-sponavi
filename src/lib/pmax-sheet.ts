@@ -25,6 +25,7 @@ export interface PmaxGbpRow {
   website: number;     // WEBサイト (J列)
   menuClicks: number;  // メニュークリック (K列)
   saveShare: number;   // 保存・共有 (L列)
+  reservation: number; // 予約（シートに該当列なし・常に0。M列「注文」の流用は不採用）
 }
 
 let cache: { data: PmaxGbpRow[]; ts: number } | null = null;
@@ -74,6 +75,7 @@ async function fetchAllRows(): Promise<PmaxGbpRow[]> {
       website: parseNum(cols[9]),       // J列 = index 9
       menuClicks: parseNum(cols[10]),   // K列 = index 10
       saveShare: parseNum(cols[11]),    // L列 = index 11
+      reservation: 0, // シートに「予約」列は存在しない。M列「注文」の流用は不採用（2026-07-06ユーザー判断）→ 0固定
     });
   }
 
