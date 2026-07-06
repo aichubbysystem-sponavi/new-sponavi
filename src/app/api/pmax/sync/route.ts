@@ -219,6 +219,7 @@ export async function POST(request: NextRequest) {
           total_impressions: gbpRows[0].totalImpressions, total_visits: gbpRows[0].totalVisits,
           phone: gbpRows[0].phone, directions: gbpRows[0].directions, website: gbpRows[0].website,
           menu_clicks: gbpRows[0].menuClicks, save_share: gbpRows[0].saveShare,
+          reservation: gbpRows[0].reservation,
           synced_at: new Date().toISOString(),
         }, { onConflict: "shop_name,month" });
         gbpSynced++;

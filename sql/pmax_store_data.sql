@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS public.pmax_gbp_data (
   website BIGINT DEFAULT 0,
   menu_clicks BIGINT DEFAULT 0,
   save_share BIGINT DEFAULT 0,
+  reservation BIGINT DEFAULT 0,      -- 予約（数値はGBPシートM列「注文」由来）
   synced_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE(shop_name, month)
 );
