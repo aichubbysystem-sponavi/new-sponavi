@@ -8,6 +8,7 @@ import api from "@/lib/api";
 import { logAudit } from "@/lib/audit-log";
 import DateRangePicker, { useDateRange } from "@/components/date-range-picker";
 import { usePasswordGate } from "@/components/password-gate";
+import { useRole } from "@/components/role-provider";
 
 interface LocalPost {
   name?: string;
@@ -105,6 +106,9 @@ function diagnosePostError(error: any): { cause: string; fix: string } {
 export default function PostsPage() {
   const { selectedShopId, selectedShop, apiConnected, shops, shopFilterMode } = useShop();
   const { gate, PasswordGateModal } = usePasswordGate();
+  const { role } = useRole();
+  const canDeletePost = role === "president" || role === "manager"; // 削除APIはrequireRoleで同基準
+
   const [localPosts, setLocalPosts] = useState<LocalPost[]>([]);
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -1311,6 +1315,11 @@ export default function PostsPage() {
                 disabled={executeLoading}
                 onClick={async () => {
                   if (executeLoading) return;
+                  const pendingCount = scheduledPosts.filter(p => p.status === "pending").length;
+                  if (pendingCount === 0) { setMsg("実行対象の予約投稿（承認待ちを除く）がありません"); return; }
+                  if (!confirm(`予約中の投稿 ${pendingCount}件 を今すぐGBPに公開します。よろしいですか？`)) return;
+                  // 追加ロック: 一括で公開するためログインパスワードを再確認
+                  if (!(await gate(`予約投稿 ${pendingCount}件 の一括実行（GBPに公開されます）`))) return;
                   setExecuteLoading(true);
                   try {
                     const res = await api.put("/api/report/scheduled-posts", { force: true }, { timeout: 120000 });
@@ -1683,7 +1692,7 @@ export default function PostsPage() {
                                 GBP →
                               </a>
                             )}
-                            {(post.name || (post._allMediaNames && post._allMediaNames.length > 0)) && (
+                            {canDeletePost && (post.name || (post._allMediaNames && post._allMediaNames.length > 0)) && (
                               <button onClick={() => handleDelete(post.name!, post._allMediaNames)}
                                 className="px-2 py-1 rounded text-[10px] font-semibold bg-red-50 text-red-500 hover:bg-red-100">
                                 削除{post._allMediaNames && post._allMediaNames.length > 1 ? ` (${post._allMediaNames.length}枚)` : ""}
