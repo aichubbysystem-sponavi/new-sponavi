@@ -564,12 +564,7 @@ function parseCSV(text: string): string[][] {
  * スプレッドシートから自動投稿
  * body: { sheetId, targetDate (YYYY-MM-DD), dryRun? }
  */
-export async function POST(_request: NextRequest) {
-  // 一時無効化: 構造改善完了まで外部GBP操作を停止
-  return NextResponse.json({ error: "自動投稿機能は一時停止中です" }, { status: 503 });
-}
-
-async function _POST_disabled(request: NextRequest) {
+export async function POST(request: NextRequest) {
   const r = await requireRole(request, ["president", "manager"]);
   if (r.error) return r.error;
 

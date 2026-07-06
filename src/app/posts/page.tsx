@@ -7,6 +7,7 @@ import { jstToday } from "@/lib/jst-date";
 import api from "@/lib/api";
 import { logAudit } from "@/lib/audit-log";
 import DateRangePicker, { useDateRange } from "@/components/date-range-picker";
+import { usePasswordGate } from "@/components/password-gate";
 
 interface LocalPost {
   name?: string;
@@ -103,6 +104,7 @@ function diagnosePostError(error: any): { cause: string; fix: string } {
 
 export default function PostsPage() {
   const { selectedShopId, selectedShop, apiConnected, shops, shopFilterMode } = useShop();
+  const { gate, PasswordGateModal } = usePasswordGate();
   const [localPosts, setLocalPosts] = useState<LocalPost[]>([]);
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -384,6 +386,8 @@ export default function PostsPage() {
   const handleDelete = async (postName: string, allNames?: string[]) => {
     const names = allNames && allNames.length > 1 ? allNames : [postName];
     if (!confirm(`${names.length > 1 ? `${names.length}枚の写真` : "この投稿"}をGBPから削除しますか？`)) return;
+    // 追加ロック: 取消不可の削除のためログインパスワードを再確認
+    if (!(await gate("GBP投稿の削除（取り消せません）"))) return;
     try {
       let deleted = 0;
       for (const name of names) {
@@ -470,6 +474,7 @@ export default function PostsPage() {
 
   return (
     <>
+    {PasswordGateModal}
     <div className="animate-fade-in">
       <div className="mb-4 mt-2 flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -694,6 +699,8 @@ export default function PostsPage() {
                         const total = previewRes.data.matches || 0;
                         if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません` }); setAutoPosting(false); return; }
                         if (!confirm(`【${currentAttempt}回目実行】${autoPostDate}の投稿を実行しますか？\n\n${total}件を10件ずつバッチ処理します（${Math.ceil(total / 10)}回）`)) { setAutoPosting(false); return; }
+                        // 追加ロック: 一括で公開投稿するためログインパスワードを再確認
+                        if (!(await gate(`${total}件の一括自動投稿（GBPに公開されます）`))) { setAutoPosting(false); return; }
 
                         const bs = 10;
                         let totalPosted = 0, totalErrors = 0;

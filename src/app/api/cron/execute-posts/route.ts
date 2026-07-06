@@ -180,12 +180,7 @@ async function uploadPhotoDirectMediaApi(
  * 予約投稿の自動実行（5分ごと）
  * 方式: Go API優先 → 失敗時は直接GBP API
  */
-export async function GET(_request: NextRequest) {
-  // 一時無効化: 構造改善完了まで外部GBP操作を停止
-  return NextResponse.json({ success: true, message: "execute-posts は一時無効化中です", posted: 0 });
-}
-
-async function _GET_disabled(request: NextRequest) {
+export async function GET(request: NextRequest) {
   const cronErr = verifyCron(request); if (cronErr) return cronErr;
 
   const supabase = getSupabase();

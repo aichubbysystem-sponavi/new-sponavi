@@ -5,6 +5,7 @@ import api from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import { useShop } from "@/components/shop-provider";
 import { useRole } from "@/components/role-provider";
+import { usePasswordGate } from "@/components/password-gate";
 import DateRangePicker, { useDateRange } from "@/components/date-range-picker";
 import { jstToday } from "@/lib/jst-date";
 
@@ -142,6 +143,7 @@ export default function GridRankingPage() {
   const { selectedShopId, selectedShop, shops, shopFilterMode } = useShop();
   const { role } = useRole();
   const isPresident = role === "president"; // API課金を伴う実行操作は社長のみ
+  const { gate, PasswordGateModal } = usePasswordGate();
   const [keyword, setKeyword] = useState("");
   const [savedKeywords, setSavedKeywords] = useState<string[]>([]);
   const [gridSize, setGridSize] = useState<number>(7);
@@ -612,6 +614,7 @@ export default function GridRankingPage() {
 
   return (
     <div className="p-6 pt-20 max-w-[1400px] mx-auto space-y-6">
+      {PasswordGateModal}
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2">
@@ -853,6 +856,9 @@ export default function GridRankingPage() {
                   }, 0);
                   const cost = estimateCost(totalPoints);
                   if (!confirm(`${steps.join(" → ")} を実行します。\n約${Math.ceil(unmeasuredPresets.length * 50 / 60)}分かかります。\n\n💰 API費用目安: 最大 ¥${cost.max.toLocaleString()}（初回店舗・圏外多めの上限）\n　　ID移行後は 約¥${cost.afterId.toLocaleString()}／同月再計測・共有キャッシュ分は¥0\n\nよろしいですか？`)) return;
+
+                  // 追加ロック: お金がかかる操作のためログインパスワードを再確認
+                  if (!(await gate("多地点順位計測の一括計測（API費用が発生します）"))) return;
 
                   setBatchRunning(true);
 

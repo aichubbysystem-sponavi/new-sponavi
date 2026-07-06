@@ -10,12 +10,7 @@ const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
  * POST /api/report/create-post
  * GBP投稿を作成（写真対応）
  */
-export async function POST(_request: NextRequest) {
-  // 一時無効化: 構造改善完了まで外部GBP操作を停止
-  return NextResponse.json({ error: "投稿作成機能は一時停止中です" }, { status: 503 });
-}
-
-async function _POST_disabled(request: NextRequest) {
+export async function POST(request: NextRequest) {
   // 投稿作成は社長・マネージャーのみ
   const r = await requireRole(request, ["president", "manager"]);
   if (r.error) return r.error;

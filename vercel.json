@@ -22,6 +22,10 @@
     {
       "path": "/api/cron/sync-performance",
       "schedule": "0 21 5 * *"
+    },
+    {
+      "path": "/api/cron/execute-posts",
+      "schedule": "*/5 * * * *"
     }
   ],
   "headers": [
