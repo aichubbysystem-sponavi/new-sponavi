@@ -64,7 +64,12 @@ export async function POST(request: NextRequest) {
       // 部分一致（getGbpDataForShopと同基準）。ただし複数候補は誤マッチ防止でスキップ
       const cands = key.length > 0 ? sheetKeys.filter((k) => k.includes(key) || key.includes(k)) : [];
       if (cands.length === 1) months = byNorm.get(cands[0]);
-      else if (cands.length > 1) { ambiguous.push(adsName); continue; }
+      else if (cands.length > 1) {
+        // タイブレーク: 「Ads名+店」への完全一致だけは安全に採用（例: CHILLRI 堀江 → CHILLRI 堀江店）
+        const exactPlusTen = cands.filter((k) => k === `${key}店`);
+        if (exactPlusTen.length === 1) months = byNorm.get(exactPlusTen[0]);
+        else { ambiguous.push(adsName); continue; }
+      }
     }
     if (!months) { unmatched.push(adsName); continue; }
     matchedShops++;
