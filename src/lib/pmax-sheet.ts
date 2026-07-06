@@ -113,15 +113,20 @@ function parseCSVLine(line: string): string[] {
  * @param shopName 店舗名（部分一致）
  * @param targetMonth "YYYY/MM" 形式（省略時は全月）
  */
+/** 店舗名の照合用正規化（NFKCで全半角統一 + 空白除去 + 小文字化） */
+export function normShopName(s: string): string {
+  return s.normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
+}
+
 export async function getGbpDataForShop(
   shopName: string,
   targetMonth?: string
 ): Promise<PmaxGbpRow[]> {
   const allRows = await fetchAllRows();
-  const normalizedShop = shopName.toLowerCase().replace(/\s+/g, "");
+  const normalizedShop = normShopName(shopName);
 
   return allRows.filter((row) => {
-    const normalizedRow = row.shopName.toLowerCase().replace(/\s+/g, "");
+    const normalizedRow = normShopName(row.shopName);
     const nameMatch = normalizedRow.includes(normalizedShop) || normalizedShop.includes(normalizedRow);
     if (targetMonth) {
       return nameMatch && row.month === targetMonth;

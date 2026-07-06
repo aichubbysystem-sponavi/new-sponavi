@@ -64,8 +64,22 @@ export default function PmaxTopPage() {
   const [shareModal, setShareModal] = useState<{ group: string; url: string } | null>(null);
 
   const now = new Date();
-  const [selectedYear, setSelectedYear] = useState(now.getFullYear());
-  const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
+  // 選択月はURLクエリ(?year=&month=)で保持: 店舗ページから戻っても選択月を維持する
+  // （AuthGuard配下のためこのコンポーネントはクライアントでのみ描画される＝window参照OK）
+  const [selectedYear, setSelectedYear] = useState(() => {
+    if (typeof window !== "undefined") {
+      const y = Number(new URLSearchParams(window.location.search).get("year"));
+      if (y >= 2020 && y <= 2100) return y;
+    }
+    return now.getFullYear();
+  });
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    if (typeof window !== "undefined") {
+      const m = Number(new URLSearchParams(window.location.search).get("month"));
+      if (m >= 1 && m <= 12) return m;
+    }
+    return now.getMonth() + 1;
+  });
 
   const monthOptions = useMemo(() => {
     const opts = [];
@@ -321,6 +335,8 @@ export default function PmaxTopPage() {
               const [y, m] = e.target.value.split("-").map(Number);
               setSelectedYear(y);
               setSelectedMonth(m);
+              // URLに選択月を保持（店舗ページから戻った時にリセットさせない）
+              router.replace(`/pmax?year=${y}&month=${m}`, { scroll: false });
             }}
             className="px-4 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20"
           >

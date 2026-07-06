@@ -140,7 +140,7 @@ function StoreDetailContent() {
         <div style={{ background: "#fff", borderRadius: 12, padding: 32, maxWidth: 500, width: "100%" }}>
           <h2 style={{ color: "#c0392b", fontSize: 18, fontWeight: 700, marginBottom: 8 }}>エラー</h2>
           <p style={{ color: "#666", fontSize: 14 }}>{error}</p>
-          <button onClick={() => router.push("/pmax")} style={{ marginTop: 16, padding: "8px 20px", background: "#0f3460", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14 }}>戻る</button>
+          <button onClick={() => router.push(`/pmax?year=${targetYear}&month=${targetMonthNum}`)} style={{ marginTop: 16, padding: "8px 20px", background: "#0f3460", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14 }}>戻る</button>
         </div>
       </div>
     );
