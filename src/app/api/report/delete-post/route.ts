@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, requireRole } from "@/lib/supabase";
 import { getOAuthToken } from "@/lib/gbp-token";
+import { isValidGbpPostName } from "@/lib/gbp-validate";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -20,6 +21,10 @@ export async function POST(request: NextRequest) {
 
   const { postName, logId } = await request.json();
   if (!postName) return NextResponse.json({ error: "postNameが必要です" }, { status: 400 });
+  // 無検証で DELETE URL に連結するとパストラバーサル・クエリ混入で他リソースを操作され得る
+  if (!isValidGbpPostName(postName)) {
+    return NextResponse.json({ error: "postNameの形式が不正です" }, { status: 400 });
+  }
 
   const supabase = getSupabase();
 

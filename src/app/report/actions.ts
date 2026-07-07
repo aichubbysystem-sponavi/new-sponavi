@@ -29,12 +29,9 @@ export async function syncShopData(shopIds: string[]) {
   const { getReportFromSpreadsheet } = await import("@/lib/spreadsheet");
   const { writeReportDataToCache } = await import("@/lib/report-cache");
   const { syncShopSearchKeywords } = await import("@/lib/gbp-search-keywords");
-  const { createClient } = await import("@supabase/supabase-js");
-
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
-  );
+  const { getSupabase } = await import("@/lib/supabase");
+  // service_role で読む（anonフォールバックを廃止し、RLSロック後も動作させる）
+  const supabase = getSupabase();
 
   try {
     let synced = 0;

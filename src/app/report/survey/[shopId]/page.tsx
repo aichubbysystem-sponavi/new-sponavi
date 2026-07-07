@@ -1,14 +1,13 @@
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase } from "@/lib/supabase";
 import SurveyForm from "./client";
 
 export const dynamic = "force-dynamic";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-
 export default async function SurveyPage({ params }: { params: { shopId: string } }) {
   const shopId = decodeURIComponent(params.shopId);
-  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  // 顧客向け公開ページだがサーバーコンポーネントなので service_role で読む。
+  // これにより shops テーブルを RLS で anon 遮断してもアンケートは動作する。
+  const supabase = getSupabase();
 
   // 店舗名を取得
   const { data: shop } = await supabase

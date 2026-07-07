@@ -1,5 +1,5 @@
 import { getShopList } from "@/lib/report-api";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase } from "@/lib/supabase";
 import ReportListClient from "./report-list-client";
 
 export const revalidate = 3600; // 1時間キャッシュ（反映ボタンで即時更新）
@@ -7,12 +7,9 @@ export const revalidate = 3600; // 1時間キャッシュ（反映ボタンで�
 const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5555";
 
 async function getAnalyzedShops(): Promise<Set<string>> {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) return new Set();
-
+  // サーバーコンポーネント。service_role で読む（RLSで report_analysis を anon 遮断可能に）
   try {
-    const supabase = createClient(url, key);
+    const supabase = getSupabase();
     const { data } = await supabase.from("report_analysis").select("shop_name");
     return new Set((data || []).map((r: { shop_name: string }) => r.shop_name));
   } catch {
