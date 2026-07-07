@@ -372,6 +372,8 @@ export default function PostsPage() {
     const results: { id: string; name: string; ok: boolean; error?: string; e?: any }[] = [];
 
     for (const sid of targetIds) {
+      // 30分無操作タイマー(auth-guard)をリセット。一括処理中の自動ログアウトを防ぐ
+      window.dispatchEvent(new Event("batch-activity"));
       const shopName = nameOf(sid);
       try {
         if (newPost.scheduledAt) {

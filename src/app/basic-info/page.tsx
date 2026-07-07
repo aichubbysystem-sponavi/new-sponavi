@@ -196,10 +196,14 @@ export default function BasicInfoPage() {
                 }
 
                 // 住所・カテゴリ（構造化データがあれば復旧を試みる。失敗してもコア復旧は維持）
+                // 旧形式スナップショット（rawなし）はベースライン値があっても構造復旧できないため、
+                // 黙ってスキップせず「復旧できなかった項目」として必ず通知する。
                 const extraNotes: string[] = [];
                 if (prev.raw?.storefrontAddress) {
                   try { await api.patch(`/api/shop/${selectedShopId}/location`, { storefrontAddress: prev.raw.storefrontAddress }); }
                   catch { extraNotes.push("住所"); }
+                } else if (prev.address) {
+                  extraNotes.push("住所");
                 }
                 if (prev.raw?.primaryCategory) {
                   try {
@@ -207,6 +211,8 @@ export default function BasicInfoPage() {
                     if (prev.raw.additionalCategories) cats.additionalCategories = prev.raw.additionalCategories;
                     await api.patch(`/api/shop/${selectedShopId}/location`, { categories: cats });
                   } catch { extraNotes.push("カテゴリ"); }
+                } else if (prev.category) {
+                  extraNotes.push("カテゴリ");
                 }
 
                 setSaveMsg(extraNotes.length > 0

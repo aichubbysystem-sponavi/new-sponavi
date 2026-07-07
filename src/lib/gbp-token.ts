@@ -133,10 +133,13 @@ export async function getAllOAuthTokens(): Promise<string[]> {
             const t = await res.json();
             if (t.access_token) {
               tokenSet.add(t.access_token);
-              await supabase.from("system_oauth_tokens").update({
+              // 注意: system_oauth_tokens はJOIN+LIMIT付きVIEWのため自動更新不可の可能性が高い。
+              // 失敗しても動作は継続する（毎回リフレッシュになるだけ）が、無音では握りつぶさない。
+              const { error: updErr } = await supabase.from("system_oauth_tokens").update({
                 access_token: t.access_token,
                 expiry: new Date(Date.now() + (t.expires_in || 3600) * 1000).toISOString(),
               }).eq("refresh_token", row.refresh_token);
+              if (updErr) console.error("[gbp-token] トークン書き戻し失敗（VIEWは更新不可）:", updErr.message);
             }
           }
         } catch (e: any) { console.error("[gbp-token] oauth refresh:", e?.message); }
