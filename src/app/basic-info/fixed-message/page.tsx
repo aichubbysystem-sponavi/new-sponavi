@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useShop } from "@/components/shop-provider";
-import { supabase } from "@/lib/supabase";
+import api from "@/lib/api";
 
 interface FieldEntry {
   id?: string;
@@ -24,13 +24,9 @@ export default function FixedMessagePage() {
     setError("");
     setMsg("");
     try {
-      const { data, error: fetchErr } = await supabase
-        .from("fixed_messages")
-        .select("*")
-        .eq("shop_id", selectedShopId)
-        .order("created_at", { ascending: true });
-      if (fetchErr) throw fetchErr;
-      if (data && data.length > 0) {
+      const res = await api.get(`/api/report/fixed-messages?shopId=${encodeURIComponent(selectedShopId)}`);
+      const data = res.data?.messages || [];
+      if (Array.isArray(data) && data.length > 0) {
         setFields(data.map((m: any) => ({
           id: m.id,
           title: String(m.title || ""),
@@ -40,7 +36,7 @@ export default function FixedMessagePage() {
         setFields([]);
       }
     } catch (e: any) {
-      setError("差し込み文字列の取得に失敗しました: " + (e?.message || ""));
+      setError("差し込み文字列の取得に失敗しました: " + (e?.response?.data?.error || e?.message || ""));
     } finally {
       setLoading(false);
     }
@@ -72,22 +68,12 @@ export default function FixedMessagePage() {
     setSaving(true);
     setMsg("");
     try {
-      // 既存データを全削除して再挿入（upsert的動作）
-      await supabase.from("fixed_messages").delete().eq("shop_id", selectedShopId);
-      const rows = fields.filter(f => f.title.trim()).map(f => ({
-        id: f.id || crypto.randomUUID(),
-        shop_id: selectedShopId,
-        title: f.title.trim(),
-        message: f.message,
-      }));
-      if (rows.length > 0) {
-        const { error: insertErr } = await supabase.from("fixed_messages").insert(rows);
-        if (insertErr) throw insertErr;
-      }
+      // サーバー側で店舗アクセス認可のうえ全置換（旧: anonキーで直接delete/insert）
+      await api.put("/api/report/fixed-messages", { shopId: selectedShopId, fields });
       setMsg("保存しました");
       await fetchData();
     } catch (e: any) {
-      setMsg(`保存失敗: ${e?.message || "不明なエラー"}`);
+      setMsg(`保存失敗: ${e?.response?.data?.error || e?.message || "不明なエラー"}`);
     } finally {
       setSaving(false);
     }

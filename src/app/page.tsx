@@ -664,8 +664,10 @@ export default function Dashboard() {
                   <p className="text-xs text-slate-700 truncate">{alert.message}</p>
                 </div>
                 <button onClick={async () => {
-                  await supabase.from("line_alerts").update({ resolved: true }).eq("id", alert.id);
-                  setLineAlerts(lineAlerts.filter(a => a.id !== alert.id));
+                  try {
+                    await api.patch("/api/report/line-alerts", { id: alert.id });
+                    setLineAlerts(lineAlerts.filter(a => a.id !== alert.id));
+                  } catch { /* 失敗時はリストを維持 */ }
                 }} className="text-[10px] text-slate-400 hover:text-emerald-600 ml-2 flex-shrink-0">対応済み</button>
               </div>
             ))}

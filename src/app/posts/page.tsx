@@ -1373,18 +1373,22 @@ export default function PostsPage() {
                             className="text-[10px] text-blue-600 hover:text-blue-800 font-semibold bg-blue-50 px-2 py-0.5 rounded">編集</button>
                           {sp.approval_status !== "approved" && (
                             <button onClick={async () => {
-                              await supabase.from("scheduled_posts").update({ approval_status: "approved" }).eq("id", sp.id);
-                              setScheduledPosts(scheduledPosts.map(p => p.id === sp.id ? { ...p, approval_status: "approved" } : p));
-                              setMsg("承認しました");
+                              try {
+                                await api.patch("/api/report/scheduled-posts", { id: sp.id, approvalStatus: "approved" });
+                                setScheduledPosts(scheduledPosts.map(p => p.id === sp.id ? { ...p, approval_status: "approved" } : p));
+                                setMsg("承認しました");
+                              } catch (e: any) { setMsg(`承認失敗: ${e?.response?.data?.error || e?.message || "エラー"}`); }
                             }} className="text-[10px] text-emerald-600 hover:text-emerald-800 font-semibold bg-emerald-50 px-2 py-0.5 rounded">承認</button>
                           )}
                           {sp.approval_status === "approved" && (
                             <span className="text-[10px] text-emerald-600 font-semibold bg-emerald-50 px-2 py-0.5 rounded">承認済</span>
                           )}
                           <button onClick={async () => {
-                            await supabase.from("scheduled_posts").update({ approval_status: "rejected", status: "rejected" }).eq("id", sp.id);
-                            setScheduledPosts(scheduledPosts.filter(p => p.id !== sp.id));
-                            setMsg("差戻ししました");
+                            try {
+                              await api.patch("/api/report/scheduled-posts", { id: sp.id, approvalStatus: "rejected", status: "rejected" });
+                              setScheduledPosts(scheduledPosts.filter(p => p.id !== sp.id));
+                              setMsg("差戻ししました");
+                            } catch (e: any) { setMsg(`差戻し失敗: ${e?.response?.data?.error || e?.message || "エラー"}`); }
                           }} className="text-[10px] text-amber-600 hover:text-amber-800 font-semibold bg-amber-50 px-2 py-0.5 rounded">差戻し</button>
                           <button onClick={async () => {
                             if (!confirm("この予約を取り消しますか？")) return;
@@ -1447,9 +1451,11 @@ export default function PostsPage() {
                       </div>
                       <div className="flex items-center gap-1.5 ml-3 flex-shrink-0">
                         <button onClick={async () => {
-                          await supabase.from("scheduled_posts").update({ status: "pending" }).eq("id", sp.id);
-                          setScheduledPosts(scheduledPosts.map(p => p.id === sp.id ? { ...p, status: "pending" } : p));
-                          setMsg("承認して予約に変更しました");
+                          try {
+                            await api.patch("/api/report/scheduled-posts", { id: sp.id, status: "pending" });
+                            setScheduledPosts(scheduledPosts.map(p => p.id === sp.id ? { ...p, status: "pending" } : p));
+                            setMsg("承認して予約に変更しました");
+                          } catch (e: any) { setMsg(`変更失敗: ${e?.response?.data?.error || e?.message || "エラー"}`); }
                         }} className="text-[10px] text-emerald-600 hover:text-emerald-800 font-semibold bg-emerald-50 px-2 py-1 rounded">承認→予約</button>
                         <button onClick={() => { setEditingPostId(sp.id); setEditingSummary(sp.summary); }}
                           className="text-[10px] text-blue-600 hover:text-blue-800 font-semibold bg-blue-50 px-2 py-1 rounded">編集</button>

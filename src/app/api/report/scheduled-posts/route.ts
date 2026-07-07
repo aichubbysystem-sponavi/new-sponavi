@@ -106,8 +106,18 @@ export async function PATCH(request: NextRequest) {
   if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
   const body = await request.json();
-  const { id, summary, scheduledAt, status } = body;
+  const { id, summary, scheduledAt, status, approvalStatus } = body;
   if (!id) return NextResponse.json({ error: "idが必要です" }, { status: 400 });
+
+  // 状態値のホワイトリスト（任意文字列の書き込みを防ぐ）
+  const ALLOWED_STATUS = ["pending", "on_hold", "rejected", "approved", "posted", "failed"];
+  const ALLOWED_APPROVAL = ["pending", "approved", "rejected"];
+  if (status !== undefined && !ALLOWED_STATUS.includes(status)) {
+    return NextResponse.json({ error: "statusの値が不正です" }, { status: 400 });
+  }
+  if (approvalStatus !== undefined && !ALLOWED_APPROVAL.includes(approvalStatus)) {
+    return NextResponse.json({ error: "approvalStatusの値が不正です" }, { status: 400 });
+  }
 
   const supabase = getSupabase();
 
@@ -122,9 +132,13 @@ export async function PATCH(request: NextRequest) {
   if (summary !== undefined) update.summary = summary;
   if (scheduledAt !== undefined) update.scheduled_at = scheduledAt;
   if (status !== undefined) update.status = status;
+  if (approvalStatus !== undefined) update.approval_status = approvalStatus;
   if (status === "pending") {
     update.error_detail = null;
     update.approval_status = "pending";
+  }
+  if (Object.keys(update).length === 0) {
+    return NextResponse.json({ error: "更新項目がありません" }, { status: 400 });
   }
 
   const { error } = await supabase.from("scheduled_posts").update(update).eq("id", id);
