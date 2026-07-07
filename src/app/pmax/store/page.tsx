@@ -172,6 +172,24 @@ function StoreDetailContent() {
           >
             共有URLを発行
           </button>
+          <button
+            onClick={async () => {
+              if (!confirm("この店舗・月の共有URLを停止します。既に配布済みのURLは開けなくなります。よろしいですか？")) return;
+              try {
+                const token = (await supabase.auth.getSession()).data.session?.access_token;
+                const res = await fetch("/api/pmax/share", {
+                  method: "DELETE",
+                  headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                  body: JSON.stringify({ shopName, year: targetYear, month: targetMonthNum }),
+                });
+                if (!res.ok) throw new Error("失効失敗");
+                alert("共有URLを停止しました");
+              } catch { alert("共有URLの停止に失敗しました"); }
+            }}
+            style={{ color: "rgba(255,255,255,0.85)", background: "rgba(244,67,54,0.15)", border: "1px solid rgba(244,67,54,0.4)", padding: "5px 14px", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600 }}
+          >
+            共有を停止
+          </button>
           <span style={{ fontSize: 12, color: "#4fc3f7", background: "rgba(79,195,247,0.15)", padding: "4px 12px", borderRadius: 20, border: "1px solid rgba(79,195,247,0.3)" }}>P-MAX広告レポート</span>
         </div>
       </div>

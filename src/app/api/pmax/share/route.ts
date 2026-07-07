@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAuth, getSupabase } from "@/lib/supabase";
+import { isShareActive, shareExpiryISO } from "@/lib/share-token";
 
 export const dynamic = "force-dynamic";
 
-/** POST: 共有トークンを発行 */
+/** POST: 共有トークンを発行（有効期限付き。有効な既存トークンがあれば再利用し期限を延長） */
 export async function POST(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
   if (!auth.valid) {
@@ -18,26 +19,31 @@ export async function POST(request: NextRequest) {
 
     const sb = getSupabase();
 
-    // 同じ店舗+月の既存トークンがあれば、summaryTextを更新して返す
+    // 同じ店舗+月の既存トークンのうち「有効なもの」があれば再利用（期限を延長し、失効解除）
     const { data: existing } = await sb
       .from("pmax_share_tokens")
-      .select("token")
+      .select("token, expires_at, revoked_at")
       .eq("shop_name", shopName)
       .eq("year", year)
       .eq("month", month)
-      .limit(1);
+      .order("created_at", { ascending: false });
 
-    if (existing && existing.length > 0) {
-      if (summaryText) {
-        await sb.from("pmax_share_tokens").update({ summary_text: summaryText }).eq("token", existing[0].token);
-      }
-      return NextResponse.json({ token: existing[0].token });
+    const active = (existing || []).find((row) => isShareActive(row));
+    if (active) {
+      await sb.from("pmax_share_tokens").update({
+        expires_at: shareExpiryISO(),
+        ...(summaryText ? { summary_text: summaryText } : {}),
+      }).eq("token", active.token);
+      return NextResponse.json({ token: active.token });
     }
 
-    // 新規発行
+    // 有効なものが無ければ新規発行（失効/期限切れの旧トークンは残す＝旧URLは死んだまま）
     const { data, error } = await sb
       .from("pmax_share_tokens")
-      .insert({ shop_name: shopName, year, month, created_by: auth.sub, summary_text: summaryText || "" })
+      .insert({
+        shop_name: shopName, year, month, created_by: auth.sub,
+        summary_text: summaryText || "", expires_at: shareExpiryISO(),
+      })
       .select("token")
       .single();
 
@@ -47,6 +53,37 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ token: data.token });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+/**
+ * DELETE: 共有を停止（失効）。body: { shopName, year, month }
+ * 該当店舗・月の全トークンに revoked_at をセットし、以降そのURLを無効化する。
+ */
+export async function DELETE(request: NextRequest) {
+  const auth = await verifyAuth(request.headers.get("authorization"));
+  if (!auth.valid) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    const { shopName, year, month } = await request.json();
+    if (!shopName || !year || !month) {
+      return NextResponse.json({ error: "shopName, year, month は必須です" }, { status: 400 });
+    }
+
+    const sb = getSupabase();
+    const { error } = await sb
+      .from("pmax_share_tokens")
+      .update({ revoked_at: new Date().toISOString() })
+      .eq("shop_name", shopName).eq("year", year).eq("month", month)
+      .is("revoked_at", null);
+
+    if (error) return NextResponse.json({ error: "失効に失敗しました" }, { status: 500 });
+    return NextResponse.json({ success: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: msg }, { status: 500 });

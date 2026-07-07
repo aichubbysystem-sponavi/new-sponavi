@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { getGroupStores, normalizeShopName } from "@/lib/pmax-groups";
+import { isShareActive } from "@/lib/share-token";
 
 export const dynamic = "force-dynamic";
 
@@ -32,15 +33,15 @@ export async function GET(
   try {
     const sb = getSupabase();
 
-    // トークン → グループ名
+    // トークン → グループ名（有効期限・失効チェック込み）
     const { data: share } = await sb
       .from("pmax_group_shares")
-      .select("group_name")
+      .select("group_name, expires_at, revoked_at")
       .eq("token", token)
       .single();
 
-    if (!share) {
-      return NextResponse.json({ error: "無効なリンクです" }, { status: 404 });
+    if (!share || !isShareActive(share)) {
+      return NextResponse.json({ error: "無効または期限切れのリンクです" }, { status: 404 });
     }
 
     // このグループの店舗リストを取得し、要求された店舗が所属しているか検証

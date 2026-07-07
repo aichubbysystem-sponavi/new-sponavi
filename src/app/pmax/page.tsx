@@ -628,8 +628,28 @@ export default function PmaxTopPage() {
               </button>
             </div>
             <p className="text-[11px] text-slate-400 mt-3">
-              このリンクを知っている人だけがアクセスできます。表示される店舗はグループ定義シートに追随します。
+              このリンクを知っている人だけがアクセスできます。表示される店舗はグループ定義シートに追随します。有効期限は約1年で、発行のたびに延長されます。
             </p>
+            <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
+              <span className="text-[11px] text-slate-400">解約・漏洩時はこのリンクを停止できます</span>
+              <button
+                onClick={async () => {
+                  if (!confirm(`「${shareModal.group}」の共有リンクを停止します。配布済みのURLは開けなくなります。よろしいですか？`)) return;
+                  try {
+                    await api.delete("/api/pmax/group-share", { data: { groupName: shareModal.group } });
+                    setShareModal(null);
+                    setSyncProgress(`「${shareModal.group}」の共有リンクを停止しました`);
+                    setTimeout(() => setSyncProgress(""), 6000);
+                  } catch {
+                    setSyncProgress("共有リンクの停止に失敗しました");
+                    setTimeout(() => setSyncProgress(""), 6000);
+                  }
+                }}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-50 text-red-600 border border-red-200 hover:bg-red-100"
+              >
+                この共有を停止
+              </button>
+            </div>
           </div>
         </div>
       )}

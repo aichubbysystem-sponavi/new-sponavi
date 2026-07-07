@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
+import { isShareActive } from "@/lib/share-token";
 
 export const dynamic = "force-dynamic";
 
@@ -14,11 +15,11 @@ export async function GET(
     const sb = getSupabase();
     const { data: shareData } = await sb
       .from("pmax_share_tokens")
-      .select("shop_name, year, month, summary_text")
+      .select("shop_name, year, month, summary_text, expires_at, revoked_at")
       .eq("token", token)
       .single();
 
-    if (!shareData) {
+    if (!shareData || !isShareActive(shareData)) {
       return NextResponse.json({ error: "無効または期限切れのリンクです" }, { status: 404 });
     }
 
