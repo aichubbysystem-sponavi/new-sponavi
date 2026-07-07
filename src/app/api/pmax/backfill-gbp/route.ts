@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, verifyCron } from "@/lib/supabase";
-import { getAllGbpRows, normShopName, type PmaxGbpRow } from "@/lib/pmax-sheet";
+import { getAllGbpRows, normShopName, pickGbpMatch, type PmaxGbpRow } from "@/lib/pmax-sheet";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -58,19 +58,10 @@ export async function POST(request: NextRequest) {
   let matchedShops = 0;
 
   for (const adsName of Array.from(adsNames)) {
-    const key = normShopName(adsName);
-    let months = byNorm.get(key);
-    if (!months) {
-      // 部分一致（getGbpDataForShopと同基準）。ただし複数候補は誤マッチ防止でスキップ
-      const cands = key.length > 0 ? sheetKeys.filter((k) => k.includes(key) || key.includes(k)) : [];
-      if (cands.length === 1) months = byNorm.get(cands[0]);
-      else if (cands.length > 1) {
-        // タイブレーク: 「Ads名+店」への完全一致だけは安全に採用（例: CHILLRI 堀江 → CHILLRI 堀江店）
-        const exactPlusTen = cands.filter((k) => k === `${key}店`);
-        if (exactPlusTen.length === 1) months = byNorm.get(exactPlusTen[0]);
-        else { ambiguous.push(adsName); continue; }
-      }
-    }
+    // sync と共有する安全照合（完全一致 → 一意な相互部分一致 → 「{key}店」タイブレーク → 複数はambiguous）
+    const { key: matchKey, ambiguous: isAmbiguous } = pickGbpMatch(adsName, sheetKeys);
+    if (isAmbiguous) { ambiguous.push(adsName); continue; }
+    const months = matchKey ? byNorm.get(matchKey) : undefined;
     if (!months) { unmatched.push(adsName); continue; }
     matchedShops++;
     for (const r of Array.from(months.values())) {

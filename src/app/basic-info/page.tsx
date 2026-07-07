@@ -3,12 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useShop } from "@/components/shop-provider";
 import api from "@/lib/api";
-
-interface ChangeAlert {
-  field: string;
-  before: string;
-  after: string;
-}
+import { buildGbpSnapshot, detectGbpChanges, type ChangeAlert } from "@/lib/gbp-snapshot";
 
 export default function BasicInfoPage() {
   const { apiConnected, selectedShopId, selectedShop } = useShop();
@@ -30,7 +25,9 @@ export default function BasicInfoPage() {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
 
-  const fetchLocation = useCallback(async () => {
+  // trustCurrent=true: アプリ内の正規編集・復旧の直後に呼ぶ。現在値を新しい正常ベースラインとして
+  // 確定し、自分の変更を「改ざん」と誤検知しないようにする。
+  const fetchLocation = useCallback(async (trustCurrent = false) => {
     if (!selectedShopId) return;
     setLoading(true); setError(""); setChangeAlerts([]); setAlertDismissed(false);
     try {
@@ -38,41 +35,25 @@ export default function BasicInfoPage() {
       const data = res.data;
       setLocation(data);
 
-      // 変更検知: 前回保存と比較
+      // 変更検知: 前回保存(=正常時のベースライン)と比較
       const storageKey = `gbp-snapshot-${selectedShopId}`;
       const saved = localStorage.getItem(storageKey);
-      if (saved && data) {
+      let hadChange = false;
+      if (saved && data && !trustCurrent) {
         try {
           const prev = JSON.parse(saved);
-          const alerts: ChangeAlert[] = [];
-          const check = (field: string, prevVal: string, curVal: string) => {
-            const p = (prevVal || "").trim();
-            const c = (curVal || "").trim();
-            if (p && c && p !== c) alerts.push({ field, before: p, after: c });
-          };
-          check("店舗名", prev.title, data.title);
-          check("電話番号", prev.phone, data.phoneNumbers?.primaryPhone);
-          check("Webサイト", prev.website, data.websiteUri);
-          const catName = data.categories?.primaryCategory?.displayName;
-          check("メインカテゴリ", prev.category, typeof catName === "object" ? catName?.text || "" : String(catName || ""));
-          const prevAddr = prev.address || "";
-          const curAddr = (data.storefrontAddress?.addressLines || []).join(" ");
-          check("住所", prevAddr, curAddr);
-          if (alerts.length > 0) setChangeAlerts(alerts);
-        } catch {}
+          const alerts = detectGbpChanges(prev, data);
+          if (alerts.length > 0) { setChangeAlerts(alerts); hadChange = true; }
+        } catch { /* 破損したスナップショットは下で現在値で作り直す */ }
       }
 
-      // 現在の情報を保存
-      if (data) {
-        localStorage.setItem(storageKey, JSON.stringify({
-          title: data.title || "",
-          phone: data.phoneNumbers?.primaryPhone || "",
-          website: data.websiteUri || "",
-          category: typeof data.categories?.primaryCategory?.displayName === "object" ? data.categories.primaryCategory.displayName?.text || "" : String(data.categories?.primaryCategory?.displayName || ""),
-          address: (data.storefrontAddress?.addressLines || []).join(" "),
-          savedAt: new Date().toISOString(),
-        }));
+      // ベースラインの更新は「変更が検知されなかった時のみ」。
+      // 変更検知時に上書きすると復旧値が改ざん後の値になり復旧が無意味になる（重大バグの修正）。
+      // 初回・破損時、およびアプリ内の正規編集直後(trustCurrent)は現在値でベースラインを確立する。
+      if (data && (!hadChange || trustCurrent)) {
+        localStorage.setItem(storageKey, JSON.stringify(buildGbpSnapshot(data)));
       }
+      // hadChange === true の場合はベースラインを保持（復旧のため「前回の正常値」を残す）
     } catch { setError("GBPロケーション情報の取得に失敗しました"); setLocation(null); }
     finally { setLoading(false); }
   }, [selectedShopId]);
@@ -139,7 +120,7 @@ export default function BasicInfoPage() {
       await api.patch(`/api/shop/${selectedShopId}/location`, patchData);
       setSaveMsg("GBP情報を更新しました");
       setEditing(false);
-      await fetchLocation();
+      await fetchLocation(true); // 自分の編集を新しい正常ベースラインとして確定（誤検知防止）
     } catch (e: any) {
       setSaveMsg(`更新失敗: ${e?.response?.data?.message || e?.message || "不明なエラー"}`);
     }
@@ -197,20 +178,42 @@ export default function BasicInfoPage() {
             <button onClick={async () => {
               const storageKey = `gbp-snapshot-${selectedShopId}`;
               const saved = localStorage.getItem(storageKey);
-              if (!saved || !selectedShopId) return;
-              const prev = JSON.parse(saved);
-              if (!confirm("GBP情報を前回保存時の状態に復旧しますか？")) return;
+              if (!saved || !selectedShopId) { setSaveMsg("復旧用のバックアップが見つかりません"); return; }
+              let prev: any;
+              try { prev = JSON.parse(saved); }
+              catch { setSaveMsg("バックアップデータが破損しているため復旧できません"); return; }
+              if (!confirm("GBP情報を前回の正常時の状態に復旧しますか？")) return;
               setSaveMsg("");
               setSaving(true);
               try {
+                // コア項目（確実に復旧可能）: 店舗名・電話・Webサイト
                 const patchData: any = {};
                 if (prev.title) patchData.title = prev.title;
                 if (prev.phone) patchData.phoneNumbers = { primaryPhone: prev.phone };
                 if (prev.website) patchData.websiteUri = prev.website;
-                await api.patch(`/api/shop/${selectedShopId}/location`, patchData);
-                setSaveMsg("GBP情報を復旧しました");
+                if (Object.keys(patchData).length > 0) {
+                  await api.patch(`/api/shop/${selectedShopId}/location`, patchData);
+                }
+
+                // 住所・カテゴリ（構造化データがあれば復旧を試みる。失敗してもコア復旧は維持）
+                const extraNotes: string[] = [];
+                if (prev.raw?.storefrontAddress) {
+                  try { await api.patch(`/api/shop/${selectedShopId}/location`, { storefrontAddress: prev.raw.storefrontAddress }); }
+                  catch { extraNotes.push("住所"); }
+                }
+                if (prev.raw?.primaryCategory) {
+                  try {
+                    const cats: any = { primaryCategory: prev.raw.primaryCategory };
+                    if (prev.raw.additionalCategories) cats.additionalCategories = prev.raw.additionalCategories;
+                    await api.patch(`/api/shop/${selectedShopId}/location`, { categories: cats });
+                  } catch { extraNotes.push("カテゴリ"); }
+                }
+
+                setSaveMsg(extraNotes.length > 0
+                  ? `店舗名・電話・Webサイトを復旧しました（${extraNotes.join("・")}は自動復旧できませんでした。手動で確認してください）`
+                  : "GBP情報を復旧しました");
                 setChangeAlerts([]);
-                await fetchLocation();
+                await fetchLocation(true); // 復旧後の値を新しい正常ベースラインとして確定
               } catch (e: any) {
                 setSaveMsg(`復旧失敗: ${e?.response?.data?.message || e?.message || "エラー"}`);
               }
@@ -219,7 +222,14 @@ export default function BasicInfoPage() {
               className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50">
               {saving ? "復旧中..." : "元に戻す（自動復旧）"}
             </button>
-            <button onClick={() => setAlertDismissed(true)}
+            <button onClick={() => {
+              // 変更を承認 → 現在値を新しいベースラインとして確定（次回以降アラートを出さない）
+              if (selectedShopId && location) {
+                localStorage.setItem(`gbp-snapshot-${selectedShopId}`, JSON.stringify(buildGbpSnapshot(location)));
+              }
+              setChangeAlerts([]);
+              setAlertDismissed(true);
+            }}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200">
               この変更を承認
             </button>

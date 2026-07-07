@@ -330,9 +330,13 @@ export default function PostsPage() {
   }, [apiConnected, shops]);
 
   const handleCreate = async () => {
-    if (!selectedShopId || !newPost.summary.trim()) { setMsg("本文を入力してください"); return; }
+    if (!newPost.summary.trim()) { setMsg("本文を入力してください"); return; }
 
-    // 重複チェック（文章：過去投稿と30文字以上一致 / 写真：同一URL）
+    // 投稿先店舗を決定: 「系列店にも同時投稿」ON時は選択された系列店、そうでなければ現在の店舗
+    const targetIds = bulkPostMode ? bulkPostShopIds : (selectedShopId ? [selectedShopId] : []);
+    if (targetIds.length === 0) { setMsg("投稿先の店舗が選択されていません"); return; }
+
+    // 重複チェック（文章：過去投稿と30文字以上一致 / 写真：同一URL）※現在表示中の投稿と比較する注意喚起
     const trimmed = newPost.summary.trim();
     const warnings: string[] = [];
     const textDup = localPosts.find((p) => {
@@ -355,36 +359,75 @@ export default function PostsPage() {
       if (!proceed) return;
     }
 
+    const action = newPost.scheduledAt ? "予約" : "投稿";
+    // 複数店舗への一括投稿は取り消しの難しい外部アクションのため、確認＋ログインPW再入力で保護
+    if (targetIds.length > 1) {
+      if (!confirm(`${targetIds.length}店舗のGBPに同じ内容を${action}します。よろしいですか？`)) return;
+      if (!(await gate(`${targetIds.length}店舗へのGBP一括${action}`))) return;
+    }
+
+    const nameOf = (id: string) => shops.find((s) => s.id === id)?.name || id;
     setCreating(true); setMsg("");
-    try {
-      if (newPost.scheduledAt) {
-        await api.post("/api/report/scheduled-posts", {
-          shopId: selectedShopId, summary: newPost.summary, topicType: newPost.topicType,
-          photoUrl: newPost.photoUrl.trim() || null, actionType: newPost.actionType || null,
-          actionUrl: newPost.actionUrl || null, scheduledAt: new Date(newPost.scheduledAt).toISOString(),
-        }, { timeout: 15000 });
-        setMsg(`投稿を${new Date(newPost.scheduledAt).toLocaleString("ja-JP")}に予約しました！`);
-        logAudit("GBP投稿予約", `${selectedShop?.name} — ${newPost.summary.slice(0, 50)} → ${new Date(newPost.scheduledAt).toLocaleString("ja-JP")}`);
-        const sRes = await api.get(`/api/report/scheduled-posts?shopId=${selectedShopId}`);
-        setScheduledPosts(Array.isArray(sRes.data) ? sRes.data : []);
-      } else {
-        const postData: any = { shopId: selectedShopId, summary: newPost.summary, topicType: newPost.topicType };
-        if (newPost.actionType && newPost.actionUrl) postData.callToAction = { actionType: newPost.actionType, url: newPost.actionUrl };
-        if (newPost.photoUrl.trim()) {
-          postData.photoUrl = newPost.photoUrl.trim();
-          postData.mediaType = newPost.mediaType || "PHOTO";
+    const results: { id: string; name: string; ok: boolean; error?: string; e?: any }[] = [];
+
+    for (const sid of targetIds) {
+      const shopName = nameOf(sid);
+      try {
+        if (newPost.scheduledAt) {
+          await api.post("/api/report/scheduled-posts", {
+            shopId: sid, summary: newPost.summary, topicType: newPost.topicType,
+            photoUrl: newPost.photoUrl.trim() || null, actionType: newPost.actionType || null,
+            actionUrl: newPost.actionUrl || null, scheduledAt: new Date(newPost.scheduledAt).toISOString(),
+          }, { timeout: 15000 });
+          logAudit("GBP投稿予約", `${shopName} — ${newPost.summary.slice(0, 50)} → ${new Date(newPost.scheduledAt).toLocaleString("ja-JP")}`);
+        } else {
+          const postData: any = { shopId: sid, summary: newPost.summary, topicType: newPost.topicType };
+          if (newPost.actionType && newPost.actionUrl) postData.callToAction = { actionType: newPost.actionType, url: newPost.actionUrl };
+          if (newPost.photoUrl.trim()) {
+            postData.photoUrl = newPost.photoUrl.trim();
+            postData.mediaType = newPost.mediaType || "PHOTO";
+          }
+          await api.post("/api/report/create-post", postData, { timeout: 30000 });
+          logAudit("GBP投稿作成", `${shopName} — ${newPost.summary.slice(0, 50)}${newPost.photoUrl ? "（写真付き）" : ""}`);
         }
-        await api.post("/api/report/create-post", postData, { timeout: 30000 });
-        setMsg("投稿を作成しました！");
-        logAudit("GBP投稿作成", `${selectedShop?.name} — ${newPost.summary.slice(0, 50)}${newPost.photoUrl ? "（写真付き）" : ""}`);
+        results.push({ id: sid, name: shopName, ok: true });
+      } catch (e: any) {
+        results.push({ id: sid, name: shopName, ok: false, error: e?.response?.data?.error || e?.message || "不明", e });
+      }
+    }
+
+    const okCount = results.filter((r) => r.ok).length;
+    const failed = results.filter((r) => !r.ok);
+
+    if (failed.length === 0) {
+      // 全件成功
+      if (targetIds.length === 1) {
+        setMsg(newPost.scheduledAt ? `投稿を${new Date(newPost.scheduledAt).toLocaleString("ja-JP")}に予約しました！` : "投稿を作成しました！");
+      } else {
+        setMsg(`${okCount}店舗すべてに${action}しました！`);
       }
       setShowCreate(false);
       setNewPost({ summary: "", topicType: "STANDARD", actionType: "", actionUrl: "", photoUrl: "", scheduledAt: "", mediaType: "PHOTO" });
-      await fetchData();
-    } catch (e: any) {
-      const diag = diagnosePostError(e);
-      setMsg(`投稿に失敗しました\n原因: ${diag.cause}\n対処法: ${diag.fix}\n\n詳細: ${e?.response?.data?.error || e?.message || "不明"}`);
-    } finally { setCreating(false); }
+      setBulkPostMode(false); setBulkPostShopIds([]);
+    } else if (targetIds.length === 1) {
+      // 単一店舗の失敗: 従来通り原因・対処を提示（フォームは開いたまま）
+      const diag = diagnosePostError(failed[0].e);
+      setMsg(`投稿に失敗しました\n原因: ${diag.cause}\n対処法: ${diag.fix}\n\n詳細: ${failed[0].error}`);
+    } else {
+      // 一括投稿の部分失敗: 失敗店舗のみ残して再試行できるようにする（成功分の二重投稿を防止）
+      setBulkPostShopIds(failed.map((f) => f.id));
+      setMsg(`${action}完了: 成功${okCount}件 / 失敗${failed.length}件\n失敗した店舗（再投稿対象として残しました）:\n${failed.map((f) => `・${f.name}: ${f.error}`).join("\n")}`);
+    }
+
+    // 予約投稿の場合は現在表示中店舗の予約一覧を再取得
+    if (newPost.scheduledAt && selectedShopId) {
+      try {
+        const sRes = await api.get(`/api/report/scheduled-posts?shopId=${selectedShopId}`);
+        setScheduledPosts(Array.isArray(sRes.data) ? sRes.data : []);
+      } catch {}
+    }
+    await fetchData();
+    setCreating(false);
   };
 
   const handleDelete = async (postName: string, allNames?: string[]) => {
@@ -1218,10 +1261,10 @@ export default function PostsPage() {
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
                   <button onClick={() => setShowCreate(false)} className="px-4 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">キャンセル</button>
-                  <button onClick={handleCreate} disabled={creating || !newPost.summary.trim()}
+                  <button onClick={handleCreate} disabled={creating || !newPost.summary.trim() || (bulkPostMode && bulkPostShopIds.length === 0)}
                     className={`px-6 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 ${newPost.scheduledAt ? "bg-purple-600 hover:bg-purple-700" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
                     style={{ color: "#fff" }}>
-                    {creating ? "処理中..." : bulkPostMode ? `${bulkPostShopIds.length}店舗に投稿` : newPost.scheduledAt ? "予約する" : "GBPに投稿"}
+                    {creating ? "処理中..." : bulkPostMode ? `${bulkPostShopIds.length}店舗に${newPost.scheduledAt ? "予約" : "投稿"}` : newPost.scheduledAt ? "予約する" : "GBPに投稿"}
                   </button>
                 </div>
               </div>

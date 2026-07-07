@@ -118,6 +118,56 @@ export function normShopName(s: string): string {
   return s.normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
 }
 
+/**
+ * Ads側店舗名を、GBPシート側の正規化済み店舗名候補に安全に照合する。
+ * backfill-gbp と sync で共有する唯一の照合ロジック（相互includesの誤マッチ防止）。
+ *
+ * 優先順位:
+ *  1. 完全一致（正規化後）
+ *  2. 相互部分一致の候補が「1件だけ」→ 採用
+ *  3. 候補が複数 → 「{key}店」への完全一致が1件だけなら採用、それ以外は ambiguous でスキップ
+ *
+ * @returns key: 採用するシート側正規化キー（無ければnull） / ambiguous: 複数候補で保留したか
+ */
+export function pickGbpMatch(
+  adsName: string,
+  candidateNormKeys: string[],
+): { key: string | null; ambiguous: boolean } {
+  const key = normShopName(adsName);
+  if (!key) return { key: null, ambiguous: false };
+  // 1. 完全一致
+  if (candidateNormKeys.includes(key)) return { key, ambiguous: false };
+  // 2/3. 相互部分一致
+  const cands = candidateNormKeys.filter((k) => k.length > 0 && (k.includes(key) || key.includes(k)));
+  if (cands.length === 1) return { key: cands[0], ambiguous: false };
+  if (cands.length > 1) {
+    const exactPlusTen = cands.filter((k) => k === `${key}店`);
+    if (exactPlusTen.length === 1) return { key: exactPlusTen[0], ambiguous: false };
+    return { key: null, ambiguous: true };
+  }
+  return { key: null, ambiguous: false };
+}
+
+/**
+ * 指定月について、Ads側店舗名に「安全に」対応するGBP行を1件解決する。
+ * 相互includesで複数候補にマッチする場合は誤った店舗の数値を書き込まず null(ambiguous) を返す。
+ * sync の GBP同期はこれを使い、gbpRows[0] の先頭採用による誤マッチを避ける。
+ */
+export async function getGbpRowStrict(
+  shopName: string,
+  targetMonth: string,
+): Promise<{ row: PmaxGbpRow | null; ambiguous: boolean }> {
+  const allRows = await fetchAllRows();
+  // 当月行を正規化キーでまとめる（同一店×月の重複はシート後方=最新行を採用）
+  const byNorm = new Map<string, PmaxGbpRow>();
+  for (const r of allRows) {
+    if (r.month !== targetMonth) continue;
+    byNorm.set(normShopName(r.shopName), r);
+  }
+  const { key, ambiguous } = pickGbpMatch(shopName, Array.from(byNorm.keys()));
+  return { row: key ? byNorm.get(key) || null : null, ambiguous };
+}
+
 export async function getGbpDataForShop(
   shopName: string,
   targetMonth?: string

@@ -99,16 +99,42 @@ A2: (回答)
     setPosting(false);
   };
 
-  // Q&Aを新規作成
+  // Q&Aを新規作成（回答が入力されていれば回答も投稿する）
   const createQA = async () => {
     if (!selectedShopId || !newQ.trim()) return;
     setPosting(true);
     try {
-      await api.post(`/api/shop/${selectedShopId}/question`, { text: newQ.trim() });
-      if (newA.trim()) {
-        await fetchQuestions(); // 作成後にリロードしてnameを取得する必要あり
+      const qText = newQ.trim();
+      const aText = newA.trim();
+      const createRes = await api.post(`/api/shop/${selectedShopId}/question`, { text: qText });
+
+      if (aText) {
+        // 作成した質問のリソース名(name)を特定して回答を投稿する。
+        // 1) 作成レスポンスにnameがあればそれを使う
+        let questionName: string = createRes.data?.name || createRes.data?.question?.name || "";
+        // 2) 無ければ一覧をリロードし、本文の完全一致で最新の質問を特定
+        if (!questionName) {
+          try {
+            const listRes = await api.get(`/api/shop/${selectedShopId}/question`);
+            const list: Question[] = listRes.data?.questions || [];
+            const matches = list
+              .filter((q) => (q.text || "").trim() === qText && q.name)
+              .sort((a, b) => new Date(b.createTime || 0).getTime() - new Date(a.createTime || 0).getTime());
+            questionName = matches[0]?.name || "";
+          } catch {}
+        }
+
+        if (questionName) {
+          await api.post(`/api/shop/${selectedShopId}/question/answer`, { name: questionName, text: aText });
+          setMsg("Q&A（質問と回答）を作成しました");
+        } else {
+          // 回答を黙って捨てない: 投稿先が特定できないことを明示する
+          setMsg("質問は作成しましたが、回答の投稿先を特定できませんでした。下の一覧から「回答する」で投稿してください。");
+        }
+      } else {
+        setMsg("質問を作成しました");
       }
-      setMsg("Q&Aを作成しました");
+
       setShowAddQA(false);
       setNewQ("");
       setNewA("");

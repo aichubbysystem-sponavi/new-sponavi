@@ -58,14 +58,12 @@ export default function GbpAccountsPage() {
       }
     } catch {}
 
-    // フォールバック: Supabaseから直接取得
+    // フォールバック: サーバーAPI経由で取得（トークンをクライアントへ露出させない / C-1対策）
     try {
-      const { data } = await supabase
-        .from("system_oauth_tokens")
-        .select("*")
-        .order("created_at", { ascending: true });
-      if (data && data.length > 0) {
-        setAccounts(data.map((d: any, i: number) => ({
+      const fb = await api.get("/api/report/oauth-accounts", { timeout: 15000 });
+      const list = fb.data?.accounts || [];
+      if (Array.isArray(list) && list.length > 0) {
+        setAccounts(list.map((d: any, i: number) => ({
           id: String(i),
           account_id: d.account_id || "",
           email: d.email || d.google_email || `接続済みアカウント${i + 1}`,

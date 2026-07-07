@@ -15,7 +15,7 @@ import {
   getCampaignMonthly,
   parseCampaignName,
 } from "@/lib/google-ads";
-import { getGbpDataForShop, type PmaxGbpRow } from "@/lib/pmax-sheet";
+import { getGbpRowStrict } from "@/lib/pmax-sheet";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -207,19 +207,23 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Step 5: GBP同期 ──
+  // 相互includesの先頭採用による誤マッチを防ぐため、backfillと同じ安全照合(getGbpRowStrict)を使う。
+  // 複数候補にマッチする曖昧な店舗は「別店舗の数値を書き込まない」ためスキップし、一覧で返す。
   const gbpMonthKey = `${year}/${String(mon).padStart(2, "0")}`;
   const shopNames = Array.from(new Set(allMonthly.map(r => r.shopName)));
   let gbpSynced = 0;
+  const gbpAmbiguous: string[] = [];
   for (const name of shopNames) {
     try {
-      const gbpRows: PmaxGbpRow[] = await getGbpDataForShop(name, gbpMonthKey);
-      if (gbpRows.length > 0) {
+      const { row, ambiguous } = await getGbpRowStrict(name, gbpMonthKey);
+      if (ambiguous) { gbpAmbiguous.push(name); continue; }
+      if (row) {
         await sb.from("pmax_gbp_data").upsert({
           shop_name: name, month: gbpMonthKey,
-          total_impressions: gbpRows[0].totalImpressions, total_visits: gbpRows[0].totalVisits,
-          phone: gbpRows[0].phone, directions: gbpRows[0].directions, website: gbpRows[0].website,
-          menu_clicks: gbpRows[0].menuClicks, save_share: gbpRows[0].saveShare,
-          reservation: gbpRows[0].reservation,
+          total_impressions: row.totalImpressions, total_visits: row.totalVisits,
+          phone: row.phone, directions: row.directions, website: row.website,
+          menu_clicks: row.menuClicks, save_share: row.saveShare,
+          reservation: row.reservation,
           synced_at: new Date().toISOString(),
         }, { onConflict: "shop_name,month" });
         gbpSynced++;
@@ -241,7 +245,9 @@ export async function POST(request: NextRequest) {
     success: insertErrors.length === 0,
     shops: shopNames.length,
     monthlyRows: allMonthly.length,
-    gbpSynced, dbCount: count,
+    gbpSynced,
+    gbpAmbiguous: gbpAmbiguous.length > 0 ? gbpAmbiguous.sort() : undefined,
+    dbCount: count,
     accountsQueried: targetAccountIds.length,
     isFullScan,
     insertErrors: insertErrors.length > 0 ? insertErrors : undefined,
