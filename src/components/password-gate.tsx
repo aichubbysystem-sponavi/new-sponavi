@@ -98,39 +98,42 @@ export function usePasswordGate() {
           <strong style={{ color: "#c0392b" }}>{label}</strong>を実行します。<br />
           続けるにはログインパスワードを入力してください。
         </p>
-        <input
-          type="password"
-          value={pw}
-          autoFocus
-          onChange={(e) => { setPw(e.target.value); setErr(""); }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") submit();
-            if (e.key === "Escape") finish(false);
-          }}
-          placeholder="ログインパスワード"
-          style={{
-            width: "100%", padding: "10px 12px", fontSize: 15, borderRadius: 8,
-            border: "1px solid #ccd", boxSizing: "border-box",
-          }}
-        />
-        {err && <p style={{ color: "#c0392b", fontSize: 13, margin: "8px 0 0" }}>{err}</p>}
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
-          <button
-            onClick={() => finish(false)}
+        {/* パスワード欄は form で囲む（Chromeの「form外パスワード」警告回避 + Enter送信） */}
+        <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+          <input
+            type="password"
+            name="password"
+            autoComplete="current-password"
+            value={pw}
+            autoFocus
+            onChange={(e) => { setPw(e.target.value); setErr(""); }}
+            onKeyDown={(e) => { if (e.key === "Escape") finish(false); }}
+            placeholder="ログインパスワード"
             style={{
-              padding: "8px 16px", fontSize: 14, borderRadius: 8, border: "1px solid #ccd",
-              background: "#fff", color: "#555", cursor: "pointer",
+              width: "100%", padding: "10px 12px", fontSize: 15, borderRadius: 8,
+              border: "1px solid #ccd", boxSizing: "border-box",
             }}
-          >キャンセル</button>
-          <button
-            onClick={submit}
-            disabled={busy}
-            style={{
-              padding: "8px 18px", fontSize: 14, fontWeight: 700, borderRadius: 8, border: "none",
-              background: busy ? "#999" : "#0f3460", color: "#fff", cursor: busy ? "wait" : "pointer",
-            }}
-          >{busy ? "確認中..." : "実行"}</button>
-        </div>
+          />
+          {err && <p style={{ color: "#c0392b", fontSize: 13, margin: "8px 0 0" }}>{err}</p>}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+            <button
+              type="button"
+              onClick={() => finish(false)}
+              style={{
+                padding: "8px 16px", fontSize: 14, borderRadius: 8, border: "1px solid #ccd",
+                background: "#fff", color: "#555", cursor: "pointer",
+              }}
+            >キャンセル</button>
+            <button
+              type="submit"
+              disabled={busy}
+              style={{
+                padding: "8px 18px", fontSize: 14, fontWeight: 700, borderRadius: 8, border: "none",
+                background: busy ? "#999" : "#0f3460", color: "#fff", cursor: busy ? "wait" : "pointer",
+              }}
+            >{busy ? "確認中..." : "実行"}</button>
+          </div>
+        </form>
       </div>
     </div>
   ) : null;

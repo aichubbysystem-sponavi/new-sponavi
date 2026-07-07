@@ -158,6 +158,7 @@ export default function PostsPage() {
   const [bulkGenResult, setBulkGenResult] = useState<any>(null);
   const [bulkPostMode, setBulkPostMode] = useState(false);
   const [bulkPostShopIds, setBulkPostShopIds] = useState<string[]>([]);
+  const [bulkPostSearch, setBulkPostSearch] = useState("");
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
   const [editingSummary, setEditingSummary] = useState("");
   const [retrying, setRetrying] = useState<string | null>(null);
@@ -408,7 +409,7 @@ export default function PostsPage() {
       }
       setShowCreate(false);
       setNewPost({ summary: "", topicType: "STANDARD", actionType: "", actionUrl: "", photoUrl: "", scheduledAt: "", mediaType: "PHOTO" });
-      setBulkPostMode(false); setBulkPostShopIds([]);
+      setBulkPostMode(false); setBulkPostShopIds([]); setBulkPostSearch("");
     } else if (targetIds.length === 1) {
       // 単一店舗の失敗: 従来通り原因・対処を提示（フォームは開いたまま）
       const diag = diagnosePostError(failed[0].e);
@@ -1237,27 +1238,68 @@ export default function PostsPage() {
                     min={new Date().toISOString().slice(0, 16)} />
                   <p className="text-[10px] text-slate-400 mt-1">{newPost.scheduledAt ? "予約モード: 指定日時にGBPへ自動投稿されます" : "空欄の場合は即時投稿"}</p>
                 </div>
-                {/* 系列店一括投稿 */}
+                {/* 系列店一括投稿（検索して複数選択） */}
                 <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input type="checkbox" checked={bulkPostMode} onChange={(e) => {
                       setBulkPostMode(e.target.checked);
-                      if (e.target.checked) setBulkPostShopIds(shops.map(s => s.id));
-                      else setBulkPostShopIds([]);
+                      // ONにした時は「現在の店舗のみ」を初期選択（全513店を誤って一括投稿しないため）
+                      setBulkPostShopIds(e.target.checked && selectedShopId ? [selectedShopId] : []);
+                      setBulkPostSearch("");
                     }} className="rounded" />
-                    <span className="text-xs font-semibold text-slate-600">系列店にも同時投稿（{shops.length}店舗）</span>
+                    <span className="text-xs font-semibold text-slate-600">系列店にも同時投稿</span>
                   </label>
-                  {bulkPostMode && (
-                    <div className="mt-2 max-h-[100px] overflow-y-auto">
-                      {shops.map(s => (
-                        <label key={s.id} className="flex items-center gap-1.5 text-[10px] text-slate-500 py-0.5">
-                          <input type="checkbox" checked={bulkPostShopIds.includes(s.id)}
-                            onChange={(e) => setBulkPostShopIds(e.target.checked ? [...bulkPostShopIds, s.id] : bulkPostShopIds.filter(id => id !== s.id))} />
-                          {s.name}
-                        </label>
-                      ))}
-                    </div>
-                  )}
+                  {bulkPostMode && (() => {
+                    const norm = (x: string) => (x || "").normalize("NFKC").toLowerCase();
+                    const bulkFiltered = shops.filter(s => norm(s.name).includes(norm(bulkPostSearch)));
+                    const filteredIds = bulkFiltered.map(s => s.id);
+                    const allFilteredSelected = filteredIds.length > 0 && filteredIds.every(id => bulkPostShopIds.includes(id));
+                    return (
+                      <div className="mt-2">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <input
+                            type="text"
+                            value={bulkPostSearch}
+                            onChange={(e) => setBulkPostSearch(e.target.value)}
+                            placeholder="店舗名で検索..."
+                            className="flex-1 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20"
+                          />
+                          <span className="text-[10px] font-semibold text-[#003D6B] whitespace-nowrap">選択 {bulkPostShopIds.length}店舗</span>
+                        </div>
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <button type="button"
+                            onClick={() => {
+                              // 「表示中をすべて選択/解除」（検索で絞った結果に対してのみ作用）
+                              if (allFilteredSelected) {
+                                setBulkPostShopIds(bulkPostShopIds.filter(id => !filteredIds.includes(id)));
+                              } else {
+                                setBulkPostShopIds(Array.from(new Set([...bulkPostShopIds, ...filteredIds])));
+                              }
+                            }}
+                            className="text-[10px] px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-600 hover:bg-slate-100">
+                            {allFilteredSelected ? "表示中を解除" : `表示中を全選択（${filteredIds.length}）`}
+                          </button>
+                          {bulkPostShopIds.length > 0 && (
+                            <button type="button" onClick={() => setBulkPostShopIds([])}
+                              className="text-[10px] px-2 py-0.5 rounded bg-white border border-slate-200 text-red-500 hover:bg-red-50">
+                              すべて解除
+                            </button>
+                          )}
+                        </div>
+                        <div className="max-h-[160px] overflow-y-auto border border-slate-100 rounded-lg bg-white p-1">
+                          {bulkFiltered.length === 0 ? (
+                            <p className="text-[10px] text-slate-400 px-2 py-2">該当する店舗がありません</p>
+                          ) : bulkFiltered.map(s => (
+                            <label key={s.id} className="flex items-center gap-1.5 text-[11px] text-slate-600 py-0.5 px-1 hover:bg-blue-50 rounded cursor-pointer">
+                              <input type="checkbox" checked={bulkPostShopIds.includes(s.id)}
+                                onChange={(e) => setBulkPostShopIds(e.target.checked ? [...bulkPostShopIds, s.id] : bulkPostShopIds.filter(id => id !== s.id))} />
+                              <span className="truncate">{s.name}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
                   <button onClick={() => setShowCreate(false)} className="px-4 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">キャンセル</button>
