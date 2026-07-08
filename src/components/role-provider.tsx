@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import api from "@/lib/api";
 import { type Role, DEFAULT_ROLE, ROLE_LABELS } from "@/lib/roles";
 
 interface RoleContextType {
@@ -28,15 +29,24 @@ export default function RoleProvider({ children }: { children: React.ReactNode }
 
   useEffect(() => {
     const fetchRole = async () => {
+      // 1) DBの user_profiles.role を正とする（サーバー側の認可と判定源を一致させる）。
+      //    user_metadata.role は古いアカウントでズレることがあるため、まずDBを見る。
+      try {
+        const res = await api.get("/api/report/my-role");
+        const dbRole = res.data?.role as Role | undefined;
+        if (dbRole && dbRole in ROLE_LABELS) {
+          setRole(dbRole);
+          setLoading(false);
+          return;
+        }
+      } catch {
+        // API失敗時は下の user_metadata フォールバックへ
+      }
+      // 2) フォールバック: JWTの user_metadata.role
       try {
         const { data } = await supabase.auth.getUser();
         const userRole = data?.user?.user_metadata?.role as Role | undefined;
-        if (userRole && userRole in ROLE_LABELS) {
-          setRole(userRole);
-        } else {
-          // ロール未設定の場合、最小権限（part_time）をデフォルトに
-          setRole(DEFAULT_ROLE);
-        }
+        setRole(userRole && userRole in ROLE_LABELS ? userRole : DEFAULT_ROLE);
       } catch {
         setRole(DEFAULT_ROLE);
       }

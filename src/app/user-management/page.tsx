@@ -300,8 +300,11 @@ export default function UserManagementPage() {
 
       {/* 操作ログ */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-100">
-        <div className="p-4 border-b border-slate-100">
+        <div className="p-4 border-b border-slate-100 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-slate-500">操作ログ（直近50件）</h3>
+          <a href="/audit-log" className="text-xs font-semibold text-[#003D6B] hover:underline whitespace-nowrap">
+            すべての操作ログを見る（検索・期間絞り込み・CSV）→
+          </a>
         </div>
         {logs.length === 0 ? (
           <div className="p-8 text-center"><p className="text-slate-400 text-sm">操作ログがありません</p></div>
