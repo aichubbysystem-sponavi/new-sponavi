@@ -53,12 +53,17 @@ type ParsedRow = {
   costMicros: number;
 };
 
-export const POST = withAudit("P-MAX広告データ同期", "PAID_OP", async (request, ctx) => {
+// 選択店舗の更新は幹部以上(DATA_OP)。全店舗更新は課金インパクトが大きいため社長のみ（下でチェック）
+export const POST = withAudit("P-MAX広告データ同期", "DATA_OP", async (request, ctx) => {
   let body: { month?: string; forceFullScan?: boolean; shopNames?: string[] };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "不正なリクエスト" }, { status: 400 }); }
 
   const { month, forceFullScan, shopNames: selectedShops } = body;
   const isSelectiveSync = Array.isArray(selectedShops) && selectedShops.length > 0;
+  // 全店舗更新（店舗未選択）はGoogle Ads課金が最大になるため社長のみ許可
+  if (!isSelectiveSync && ctx.role !== "president") {
+    return NextResponse.json({ error: "全店舗の更新は社長のみ実行できます（店舗を選んで更新してください）" }, { status: 403 });
+  }
   if (!month || !/^\d{4}-\d{2}$/.test(month)) {
     return NextResponse.json({ error: "month は YYYY-MM 形式" }, { status: 400 });
   }

@@ -370,9 +370,10 @@ export default function PmaxTopPage() {
           </button>
           <button
             onClick={openSelector}
-            disabled={syncing}
-            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-              syncing
+            disabled={syncing || !canData}
+            title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+              syncing || !canData
                 ? "bg-slate-200 text-slate-400 cursor-not-allowed"
                 : "bg-white text-[#003D6B] border border-[#003D6B] hover:bg-[#003D6B]/5"
             }`}
@@ -432,10 +433,10 @@ export default function PmaxTopPage() {
               </button>
               <button
                 onClick={() => handleSync("selected")}
-                disabled={syncing || selectedShops.size === 0 || !canPaid}
-                title={!canPaid ? PERMISSION_DENIED_HINT.PAID_OP : undefined}
+                disabled={syncing || selectedShops.size === 0 || !canData}
+                title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
                 className={`px-4 py-1.5 rounded text-xs font-bold whitespace-nowrap transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
-                  syncing || selectedShops.size === 0 || !canPaid
+                  syncing || selectedShops.size === 0 || !canData
                     ? "bg-slate-200 text-slate-400 cursor-not-allowed"
                     : "bg-[#003D6B] text-white hover:bg-[#002a4d]"
                 }`}
