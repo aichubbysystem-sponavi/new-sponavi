@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useShop } from "@/components/shop-provider";
+import { useRole } from "@/components/role-provider";
+import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
 import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
 import DateRangePicker, { useDateRange } from "@/components/date-range-picker";
@@ -37,6 +39,9 @@ type SortKey = "view_count" | "create_time";
 
 export default function MediaPage() {
   const { selectedShopId, selectedShop, apiConnected } = useShop();
+  const { role } = useRole();
+  const canData = can(role, "DATA_OP"); // 写真同期（社長・幹部）
+  const canExt = can(role, "EXTERNAL_OP"); // GBPへの写真投稿（社長・幹部）
   const [media, setMedia] = useState<MediaRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -152,9 +157,10 @@ export default function MediaPage() {
               style={{ color: "#fff" }}>
               {showBulk ? "閉じる" : "写真一括投稿"}
             </button>
-            <button onClick={handleSync} disabled={syncing}
-              className={`px-4 py-2 rounded-lg text-sm font-semibold ${syncing ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
-              style={{ color: syncing ? undefined : "#fff" }}>
+            <button onClick={handleSync} disabled={syncing || !canData}
+              title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed ${syncing || !canData ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
+              style={{ color: syncing || !canData ? undefined : "#fff" }}>
               {syncing ? "同期中..." : "写真を同期"}
             </button>
           </div>
@@ -189,9 +195,10 @@ export default function MediaPage() {
                   setBulkResult(`${success}枚アップロード成功${errors > 0 ? `、${errors}枚エラー` : ""}`);
                   setBulkUploading(false);
                   if (success > 0) { handleSync(); }
-                }} disabled={bulkUploading || bulkUrls.split("\n").filter((u) => u.trim()).length === 0}
-                  className={`px-5 py-2 rounded-lg text-xs font-semibold ${bulkUploading ? "bg-slate-200 text-slate-400" : "bg-purple-600 hover:bg-purple-700"}`}
-                  style={{ color: bulkUploading ? undefined : "#fff" }}>
+                }} disabled={bulkUploading || bulkUrls.split("\n").filter((u) => u.trim()).length === 0 || !canExt}
+                  title={!canExt ? PERMISSION_DENIED_HINT.EXTERNAL_OP : undefined}
+                  className={`px-5 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed ${bulkUploading || !canExt ? "bg-slate-200 text-slate-400" : "bg-purple-600 hover:bg-purple-700"}`}
+                  style={{ color: bulkUploading || !canExt ? undefined : "#fff" }}>
                   {bulkUploading ? "アップロード中..." : "一括アップロード"}
                 </button>
               </div>

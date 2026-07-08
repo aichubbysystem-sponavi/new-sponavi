@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, requireShopAccessById } from "@/lib/supabase";
+import { withAudit, requireCtxShopAccessById } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +10,7 @@ export const dynamic = "force-dynamic";
  * POST /api/report/search-keywords
  * 検索語句をSupabaseに保存
  */
-export async function POST(request: NextRequest) {
+export const POST = withAudit("検索キーワード操作", "DATA_OP", async (request, ctx) => {
   const body = await request.json();
   const { shopId, keywords, periodStart, periodEnd } = body as {
     shopId: string;
@@ -23,8 +24,8 @@ export async function POST(request: NextRequest) {
   }
 
   // 認証 + 店舗アクセス権チェック（IDOR防止）
-  const access = await requireShopAccessById(request, shopId);
-  if (access.error) return access.error;
+  const shopRes = await requireCtxShopAccessById(ctx, shopId);
+  if (shopRes.error) return shopRes.error;
 
   const supabase = getSupabase();
   const periodLabel = new Date(periodStart).toISOString().slice(0, 7); // "2026-04"
@@ -57,8 +58,9 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  ctx.detail = `${shopRes.shopName}: ${periodLabel}の検索語句${rows.length}件を保存`;
   return NextResponse.json({ success: true, saved: rows.length, period: periodLabel });
-}
+});
 
 /**
  * GET /api/report/search-keywords?shopId=xxx

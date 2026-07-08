@@ -11,7 +11,7 @@ export const maxDuration = 60;
  */
 export async function GET(request: NextRequest) {
   // 全店舗の解約リスクスコアは経営情報 → 社長・マネージャーのみ
-  const r = await requireRole(request, ["president", "manager"]);
+  const r = await requireRole(request, ["president", "executive", "manager"]);
   if (r.error) return r.error;
 
   const supabase = getSupabase();

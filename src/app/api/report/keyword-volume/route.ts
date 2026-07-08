@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireRole } from "@/lib/supabase";
+import { NextResponse } from "next/server";
+import { withAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -10,10 +10,7 @@ const GCP_API_KEY = process.env.GCP_API_KEY || "";
  * POST /api/report/keyword-volume
  * キーワードの検索ボリューム推定（Places API結果件数ベース）
  */
-export async function POST(request: NextRequest) {
-  // Places API課金を伴うため社長のみ実行可
-  const roleCheck = await requireRole(request, ["president"]);
-  if (roleCheck.error) return roleCheck.error;
+export const POST = withAudit("KWボリューム取得", "PAID_OP", async (request, ctx) => {
   if (!GCP_API_KEY) return NextResponse.json({ error: "GCP_API_KEYが設定されていません" }, { status: 500 });
 
   const body = await request.json();
@@ -22,6 +19,8 @@ export async function POST(request: NextRequest) {
   if (!keywords || keywords.length === 0) {
     return NextResponse.json({ error: "keywordsが必要です" }, { status: 400 });
   }
+
+  ctx.detail = `KW${Math.min(keywords.length, 10)}件: ${keywords.slice(0, 10).join("、")}`;
 
   const results: { keyword: string; resultCount: number; level: string }[] = [];
 
@@ -66,4 +65,4 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({ results });
-}
+});

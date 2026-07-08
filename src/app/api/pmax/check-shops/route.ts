@@ -3,8 +3,9 @@
  * 指定した店舗名リストがDBの指定月に存在するか照合
  * body: { shopNames: string[], month: "YYYY-MM" }
  */
-import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, requireRole } from "@/lib/supabase";
+import { NextResponse } from "next/server";
+import { getSupabase } from "@/lib/supabase";
+import { withAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -12,10 +13,7 @@ function norm(s: string) {
   return s.toLowerCase().replace(/[\s\u3000]+/g, "").replace(/[（）()【】&＆]/g, "");
 }
 
-export async function POST(request: NextRequest) {
-  const r = await requireRole(request, ["president", "manager"]);
-  if (r.error) return r.error;
-
+export const POST = withAudit("P-MAX店舗突合", "DATA_OP", async (request, ctx) => {
   const { shopNames, month } = await request.json();
   if (!shopNames || !month) {
     return NextResponse.json({ error: "shopNames, month 必須" }, { status: 400 });
@@ -54,6 +52,7 @@ export async function POST(request: NextRequest) {
     if (!matched) notFound.push(name);
   }
 
+  ctx.detail = `${month}: ${shopNames.length}件を照合（一致${found.length}件 / 不一致${notFound.length}件）`;
   return NextResponse.json({
     month,
     totalDbShops: dbShops.length,
@@ -63,4 +62,4 @@ export async function POST(request: NextRequest) {
     notFoundList: notFound,
     foundList: found,
   });
-}
+});

@@ -4,6 +4,8 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import DOMPurify from "isomorphic-dompurify";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import { useRole } from "@/components/role-provider";
+import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
@@ -47,6 +49,11 @@ export default function ReportClient({
 }: {
   data: ReportData; shopId: string; dataSource?: "cache" | "spreadsheet" | "mock"; googleReviewUrl?: string | null; targetMonth?: string;
 }) {
+  const { role } = useRole();
+  const canData = can(role, "DATA_OP");   // コメント更新・表示設定保存・グリッド生成/保存
+  const canPaid = can(role, "PAID_OP");   // このファイル内では未使用（AI課金系ボタンなし）
+  const canMemo = can(role, "MEMO");      // メモ保存（社員も可）
+
   const [accessDenied, setAccessDenied] = useState(false);
 
   // アクセス権チェック
@@ -318,6 +325,7 @@ export default function ReportClient({
   // DB保存（種類ごとに独立したデバウンスタイマー）
   const saveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const saveToDb = useCallback((field: "sectionVisibility" | "kwVisibility" | "rwVisibility", value: Record<string, boolean>) => {
+    if (!canData) return; // 表示設定の保存は社長・幹部のみ（サーバー側でも403）
     if (saveTimersRef.current[field]) clearTimeout(saveTimersRef.current[field]);
     saveTimersRef.current[field] = setTimeout(async () => {
       const authH = await getAuthHeaders();
@@ -327,7 +335,7 @@ export default function ReportClient({
         body: JSON.stringify({ shopId, [field]: value }),
       }).catch(() => {});
     }, 500);
-  }, [shopId]);
+  }, [shopId, canData]);
 
   useEffect(() => {
     setMounted(true);
@@ -1159,8 +1167,9 @@ export default function ReportClient({
                       });
                       window.location.reload();
                     } catch {} finally { setGridGenerating(false); }
-                  }} disabled={gridGenerating}
-                  style={{ padding: "5px 12px", borderRadius: 6, border: "none", background: gridGenerating ? "#666" : "#0f3460", color: "#fff", fontSize: 16, fontWeight: 600, cursor: "pointer" }}>
+                  }} disabled={gridGenerating || !canData}
+                  title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                  style={{ padding: "5px 12px", borderRadius: 6, border: "none", background: gridGenerating || !canData ? "#666" : "#0f3460", color: "#fff", fontSize: 16, fontWeight: 600, cursor: gridGenerating ? "wait" : !canData ? "not-allowed" : "pointer" }}>
                     {gridGenerating ? "生成中..." : "この月を自動生成"}
                   </button>
                   <button onClick={async () => {
@@ -1185,8 +1194,9 @@ export default function ReportClient({
                         window.location.reload();
                       }
                     } catch {} finally { setGridGenerating(false); }
-                  }} disabled={gridGenerating}
-                  style={{ padding: "5px 12px", borderRadius: 6, border: "none", background: gridGenerating ? "#666" : "#e94560", color: "#fff", fontSize: 16, fontWeight: 600, cursor: "pointer" }}>
+                  }} disabled={gridGenerating || !canData}
+                  title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                  style={{ padding: "5px 12px", borderRadius: 6, border: "none", background: gridGenerating || !canData ? "#666" : "#e94560", color: "#fff", fontSize: 16, fontWeight: 600, cursor: gridGenerating ? "wait" : !canData ? "not-allowed" : "pointer" }}>
                     全月一括生成
                   </button>
                 </div>
@@ -1759,8 +1769,9 @@ export default function ReportClient({
                                   });
                                   window.location.reload();
                                 } catch {} finally { setGridGenerating(false); }
-                              }} disabled={gridGenerating}
-                              style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: gridGenerating ? "#999" : "#0f3460", color: "#fff", fontSize: 16, fontWeight: 600, cursor: gridGenerating ? "wait" : "pointer" }}>
+                              }} disabled={gridGenerating || !canData}
+                              title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                              style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: gridGenerating || !canData ? "#999" : "#0f3460", color: "#fff", fontSize: 16, fontWeight: 600, cursor: gridGenerating ? "wait" : !canData ? "not-allowed" : "pointer" }}>
                                 {gridGenerating ? "生成中..." : `「${loopKw}」${centerRank}位からグリッド自動生成`}
                               </button>
                             ) : <div style={{ color: "#bbb", fontSize: 16 }}>キーワード順位データがありません</div>;
@@ -2177,7 +2188,9 @@ export default function ReportClient({
                 <button onClick={() => { setCommentError(""); setEditingComments([...allComments]); }} style={{ fontSize: 14, padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.15)", color: "#fff", cursor: "pointer" }}>編集</button>
               ) : (
                 <>
-                  <button onClick={saveComments} disabled={commentSaving} style={{ fontSize: 14, padding: "3px 10px", borderRadius: 6, border: "none", background: commentSaving ? "#999" : "#0a8f3c", color: "#fff", cursor: commentSaving ? "wait" : "pointer" }}>{commentSaving ? "保存中..." : "保存"}</button>
+                  <button onClick={saveComments} disabled={commentSaving || !canData}
+                    title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                    style={{ fontSize: 14, padding: "3px 10px", borderRadius: 6, border: "none", background: commentSaving || !canData ? "#999" : "#0a8f3c", color: "#fff", cursor: commentSaving ? "wait" : !canData ? "not-allowed" : "pointer" }}>{commentSaving ? "保存中..." : "保存"}</button>
                   <button onClick={() => { setEditingComments(null); setCommentError(""); }} style={{ fontSize: 14, padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.15)", color: "#fff", cursor: "pointer" }}>キャンセル</button>
                 </>
               )}
@@ -2245,7 +2258,9 @@ export default function ReportClient({
                     </button>
                   ) : (
                     <>
-                      <button onClick={saveMemo} disabled={memoLoading} style={{ fontSize: 16, padding: "3px 10px", borderRadius: 6, border: "none", background: memoLoading ? "#999" : "#0f3460", color: "#fff", cursor: memoLoading ? "wait" : "pointer" }}>{memoLoading ? "保存中..." : "保存"}</button>
+                      <button onClick={saveMemo} disabled={memoLoading || !canMemo}
+                        title={!canMemo ? PERMISSION_DENIED_HINT.MEMO : undefined}
+                        style={{ fontSize: 16, padding: "3px 10px", borderRadius: 6, border: "none", background: memoLoading || !canMemo ? "#999" : "#0f3460", color: "#fff", cursor: memoLoading ? "wait" : !canMemo ? "not-allowed" : "pointer" }}>{memoLoading ? "保存中..." : "保存"}</button>
                       <button onClick={() => setMemoEditing(false)} style={{ fontSize: 16, padding: "3px 10px", borderRadius: 6, border: "1px solid #ccd", background: "#fff", cursor: "pointer", color: "#555" }}>キャンセル</button>
                     </>
                   )}

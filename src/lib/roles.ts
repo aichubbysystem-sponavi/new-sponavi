@@ -1,9 +1,14 @@
 // === 権限管理システム ===
+// ロール定義・アクション権限は src/lib/permissions.ts が単一情報源。
+// このファイルは「ページ単位のアクセス制御」を担当する。
 
-export type Role = "president" | "manager" | "part_time";
+import type { AppRole } from "./permissions";
+
+export type Role = AppRole;
 
 export const ROLE_LABELS: Record<Role, string> = {
   president: "社長",
+  executive: "幹部",
   manager: "社員",
   part_time: "バイト",
 };
@@ -40,6 +45,33 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
     "/review-language",
     "/group-management",
     "/gbp-accounts",
+    "/audit-log",
+  ],
+  // 幹部: 社員と同じページ集合（管理系ページは社長のみ）。ボタン操作の可否は permissions.ts の can() で制御
+  executive: [
+    "/",
+    "/diagnosis",
+    "/reviews",
+    "/posts",
+    "/aio",
+    "/shop-management",
+    "/search-keywords",
+    "/grid-ranking",
+    "/reports",
+    "/report",
+    "/basic-info",
+    "/setup",
+    "/citation",
+    "/pmax",
+    "/ads",
+    "/media",
+    "/organic",
+    "/ota",
+    "/lead",
+    "/chatbot",
+    "/ai-integration",
+    "/feature",
+    "/review-analysis",
   ],
   manager: [
     "/",

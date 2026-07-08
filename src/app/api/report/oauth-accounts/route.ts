@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
  * gbp-accounts 画面のアカウント一覧表示専用。president/manager のみ。
  */
 export async function GET(request: NextRequest) {
-  const r = await requireRole(request, ["president", "manager"]);
+  const r = await requireRole(request, ["president", "executive", "manager"]);
   if (r.error) return r.error;
 
   try {

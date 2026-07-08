@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, requireShopAccessById } from "@/lib/supabase";
+import { withAudit, requireCtxShopAccessById } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -42,20 +43,22 @@ export async function GET(request: NextRequest) {
  * POST /api/report/post-schedule
  * 投稿計画の保存（upsert）
  */
-export async function POST(request: NextRequest) {
+export const POST = withAudit("投稿スケジュール保存", "DATA_OP", async (request, ctx) => {
   const body = await request.json();
   const { action, shopId, date, postType, note, id } = body;
   const supabase = getSupabase();
 
   if (action === "delete") {
+    ctx.actionOverride = "投稿スケジュール削除";
     if (!id) return NextResponse.json({ error: "idが必要です" }, { status: 400 });
     // 認可: スケジュールのshop_idから店舗アクセス権を検証
     const { data: sched } = await supabase.from("post_schedule").select("shop_id").eq("id", id).maybeSingle();
     if (!sched?.shop_id) return NextResponse.json({ error: "スケジュールが見つかりません" }, { status: 404 });
-    const access = await requireShopAccessById(request, sched.shop_id);
-    if (access.error) return access.error;
+    const shopRes = await requireCtxShopAccessById(ctx, sched.shop_id);
+    if (shopRes.error) return shopRes.error;
     const { error } = await supabase.from("post_schedule").delete().eq("id", id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    ctx.detail = `${shopRes.shopName}: id=${id} を削除`;
     return NextResponse.json({ success: true });
   }
 
@@ -63,8 +66,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "shopId, date, postTypeが必要です" }, { status: 400 });
   }
 
-  const access = await requireShopAccessById(request, shopId);
-  if (access.error) return access.error;
+  const shopRes = await requireCtxShopAccessById(ctx, shopId);
+  if (shopRes.error) return shopRes.error;
+  ctx.detail = `${shopRes.shopName}: ${date} ${postType}${note ? `（${String(note).slice(0, 30)}）` : ""}`;
 
   const { data, error } = await supabase
     .from("post_schedule")
@@ -89,4 +93,4 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json(data);
-}
+});

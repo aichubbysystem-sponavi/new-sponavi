@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, requireRole } from "@/lib/supabase";
+import { NextResponse } from "next/server";
+import { getSupabase } from "@/lib/supabase";
+import { withAudit } from "@/lib/audit";
 import { getOAuthToken } from "@/lib/gbp-token";
 import { getLocationMap, resolveLocationName } from "@/lib/gbp-location";
 
@@ -64,14 +65,15 @@ function matchShopToLocation(
  * - Go APIのBusiness Information経由でlatlng取得
  * - shopId指定時はその店舗のみ
  */
-export async function POST(request: NextRequest) {
-  // Places APIフォールバック課金を伴うため、全モード社長のみ実行可
-  const roleCheck = await requireRole(request, ["president"]);
-  if (roleCheck.error) return roleCheck.error;
-
+export const POST = withAudit("座標一括同期", "PAID_OP", async (request, ctx) => {
   const body = await request.json().catch(() => ({}));
   const targetShopId = body?.shopId;
   const targetShopName = body?.shopName;
+
+  if (targetShopName) ctx.targetShop = targetShopName;
+  ctx.detail = targetShopId || targetShopName
+    ? `対象: ${targetShopName || targetShopId}`
+    : "座標未設定の全店舗";
 
   const supabase = getSupabase();
 
@@ -163,6 +165,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (!shops || shops.length === 0) {
+    ctx.detail = `${ctx.detail} — 対象店舗なし（自動紐付け${autoLinked}件）`;
     return NextResponse.json({
       message: targetShopName
         ? `店舗「${targetShopName}」がSupabase上に見つかりません。顧客マスタで店舗をインポートしてください。`
@@ -310,6 +313,8 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  ctx.detail = `${ctx.detail} — 更新${updated}件 / エラー${errors}件 / 自動紐付け${autoLinked}件（対象${shops.length}店舗）`;
+
   return NextResponse.json({
     success: true,
     updated,
@@ -319,4 +324,4 @@ export async function POST(request: NextRequest) {
     autoLinkDetails: autoLinkDetails.slice(0, 20),
     details: details.slice(0, 20),
   });
-}
+});

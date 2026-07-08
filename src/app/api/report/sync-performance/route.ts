@@ -2,8 +2,9 @@
  * POST /api/report/sync-performance
  * 指定店舗のパフォーマンスメトリクスをGBP APIから取得してキャッシュに保存
  */
-import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, requireShopAccessById } from "@/lib/supabase";
+import { NextResponse } from "next/server";
+import { getSupabase } from "@/lib/supabase";
+import { withAudit, requireCtxShopAccessById } from "@/lib/audit";
 import { syncShopPerformance } from "@/lib/gbp-performance";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +12,7 @@ export const maxDuration = 300;
 
 
 
-export async function POST(request: NextRequest) {
+export const POST = withAudit("パフォーマンス同期", "DATA_OP", async (request, ctx) => {
   const body = await request.json().catch(() => ({}));
   const shopId = body.shopId || "";
 
@@ -19,8 +20,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "shopId required" }, { status: 400 });
   }
 
-  const access = await requireShopAccessById(request, shopId);
-  if (access.error) return access.error;
+  const shopRes = await requireCtxShopAccessById(ctx, shopId);
+  if (shopRes.error) return shopRes.error;
 
   const supabase = getSupabase();
   const { data: shop } = await supabase
@@ -39,13 +40,15 @@ export async function POST(request: NextRequest) {
   const result = await syncShopPerformance(shop.id, shop.name, shop.gbp_location_name);
 
   if (!result.success) {
+    ctx.detail = `${shop.name}: 同期失敗（${result.error || "不明"}）`;
     return NextResponse.json({ success: false, error: result.error, shopName: shop.name });
   }
 
+  ctx.detail = `${shop.name}: パフォーマンス${result.totalMonths}ヶ月分同期`;
   return NextResponse.json({
     success: true,
     shopId: shop.id,
     shopName: shop.name,
     totalMonths: result.totalMonths,
   });
-}
+});

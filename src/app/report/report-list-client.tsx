@@ -5,6 +5,8 @@ import { useState, useMemo, useTransition, useEffect, useCallback } from "react"
 import type { ShopListItem } from "@/lib/report-data";
 import { syncAllData, syncShopData } from "./actions";
 import { supabase } from "@/lib/supabase";
+import { useRole } from "@/components/role-provider";
+import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
 import BackToTopLink from "@/components/back-to-top-link";
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
@@ -80,6 +82,7 @@ export default function ReportListClient({
   source: "cache" | "spreadsheet" | "mock";
   gbpAccountNames?: string[];
 }) {
+  const { role } = useRole();
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -444,12 +447,14 @@ export default function ReportListClient({
             {lastSync && <span className="text-xs text-slate-400">反映: {new Date(lastSync).toLocaleTimeString("ja-JP")}</span>}
             {selected.size > 0 && (
               <>
-                <button onClick={handleSyncSelected} disabled={syncing}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing ? "bg-slate-200 text-slate-400" : "bg-emerald-600 text-white hover:bg-emerald-700"}`}>
+                <button onClick={handleSyncSelected} disabled={!can(role, "DATA_OP") || syncing}
+                  title={!can(role, "DATA_OP") ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${syncing ? "bg-slate-200 text-slate-400" : "bg-emerald-600 text-white hover:bg-emerald-700"}`}>
                   {syncing ? "反映中..." : `${selected.size}店舗反映`}
                 </button>
-                <button onClick={() => setShowMemoModal(true)} disabled={memoAdding}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${memoAdding ? "bg-slate-200 text-slate-400" : "bg-orange-500 text-white hover:bg-orange-600"}`}>
+                <button onClick={() => setShowMemoModal(true)} disabled={!can(role, "MEMO") || memoAdding}
+                  title={!can(role, "MEMO") ? PERMISSION_DENIED_HINT.MEMO : undefined}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${memoAdding ? "bg-slate-200 text-slate-400" : "bg-orange-500 text-white hover:bg-orange-600"}`}>
                   {memoAdding ? "追加中..." : "メモ追加"}
                 </button>
                 <button
@@ -470,8 +475,9 @@ export default function ReportListClient({
                 </button>
               </>
             )}
-            <button onClick={handleSyncAll} disabled={syncing}
-              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] text-white hover:bg-[#002a4a]"}`}>
+            <button onClick={handleSyncAll} disabled={!can(role, "DATA_OP") || syncing}
+              title={!can(role, "DATA_OP") ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${syncing ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] text-white hover:bg-[#002a4a]"}`}>
               {syncing ? <><span className="inline-block w-3 h-3 border-2 border-slate-300 border-t-white rounded-full animate-spin" />取得中...</> : <>↻ 全店舗反映</>}
             </button>
           </div>
@@ -744,7 +750,9 @@ export default function ReportListClient({
               <div className="flex flex-col gap-3">
                 {MEMO_TEMPLATES.filter(t => t.label !== "カスタム").map((t, i) => (
                   <button key={i} onClick={() => handleAddMemo(t.text)}
-                    className="text-left p-4 rounded-xl border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50 transition-all">
+                    disabled={!can(role, "MEMO")}
+                    title={!can(role, "MEMO") ? PERMISSION_DENIED_HINT.MEMO : undefined}
+                    className="text-left p-4 rounded-xl border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
                     <div className="text-sm font-bold text-slate-700 mb-1">{t.label}</div>
                     <div className="text-xs text-slate-500 leading-relaxed">{t.text}</div>
                   </button>
@@ -755,7 +763,10 @@ export default function ReportListClient({
                   <button onClick={() => {
                     const el = document.getElementById("custom-memo-input") as HTMLTextAreaElement;
                     handleAddMemo(el?.value || "");
-                  }} className="mt-2 px-4 py-1.5 rounded-lg text-xs font-semibold bg-orange-500 text-white hover:bg-orange-600">
+                  }}
+                  disabled={!can(role, "MEMO")}
+                  title={!can(role, "MEMO") ? PERMISSION_DENIED_HINT.MEMO : undefined}
+                  className="mt-2 px-4 py-1.5 rounded-lg text-xs font-semibold bg-orange-500 text-white hover:bg-orange-600 disabled:opacity-40 disabled:cursor-not-allowed">
                     追加
                   </button>
                 </div>

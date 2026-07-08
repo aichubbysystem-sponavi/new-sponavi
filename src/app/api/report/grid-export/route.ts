@@ -10,7 +10,7 @@ export const maxDuration = 60;
  * ?month=YYYY-MM でフィルタ可能（省略時は今月）
  */
 export async function GET(request: NextRequest) {
-  const r = await requireRole(request, ["president", "manager"]);
+  const r = await requireRole(request, ["president", "executive", "manager"]);
   if (r.error) return r.error;
 
   const sb = getSupabase();

@@ -3,6 +3,8 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import DateRangePicker, { useDateRange } from "@/components/date-range-picker";
 import { useShop } from "@/components/shop-provider";
+import { useRole } from "@/components/role-provider";
+import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
 import { supabase } from "@/lib/supabase";
 
 interface ShopKeywordStatus {
@@ -51,6 +53,8 @@ async function getAuthToken(): Promise<string> {
 
 export default function SearchKeywordsClient() {
   const { favoriteShopIds, addToFavorites, removeFromFavorites } = useShop();
+  const { role } = useRole();
+  const canData = can(role, "DATA_OP"); // 検索語句/パフォーマンス同期（社長・幹部）
   const [shops, setShops] = useState<ShopKeywordStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -333,14 +337,16 @@ export default function SearchKeywordsClient() {
                 .map((s) => s.id);
               handleBulkSync(syncable);
             }}
-            disabled={syncing}
+            disabled={syncing || !canData}
+            title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
             className="px-4 py-2 rounded-lg text-sm font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-50 disabled:cursor-not-allowed transition"
           >
             {syncing ? "同期中..." : `未同期を一括同期 (${shops.filter((s) => s.gbp_location_name && (s.status === "never" || s.status === "stale")).length})`}
           </button>
           <button
             onClick={() => handleBulkSync(Array.from(selected))}
-            disabled={syncing || selected.size === 0}
+            disabled={syncing || selected.size === 0 || !canData}
+            title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
             className="px-4 py-2 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
           >
             {selected.size > 0 ? `${selected.size}件同期` : "選択同期"}
@@ -352,7 +358,8 @@ export default function SearchKeywordsClient() {
                 .map((s) => s.id);
               handleBulkSync(syncable, "/api/report/sync-performance");
             }}
-            disabled={syncing}
+            disabled={syncing || !canData}
+            title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
             className="px-4 py-2 rounded-lg text-sm font-semibold bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
           >
             {syncing ? "同期中..." : `パフォーマンス一括同期 (${shops.filter((s) => s.gbp_location_name).length})`}
@@ -460,7 +467,8 @@ export default function SearchKeywordsClient() {
                     const failedIds = syncResults.filter((r) => !r.success && r.error !== "API returned 0 months of data" && r.error !== "認証切れ" && r.error !== "中断").map((r) => r.shopId);
                     handleBulkSync(failedIds);
                   }}
-                  disabled={syncing}
+                  disabled={syncing || !canData}
+                  title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
                   className="px-3 py-1 rounded-lg text-xs font-semibold bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 transition"
                 >
                   失敗分を再実行 ({syncResults.filter((r) => !r.success && r.error !== "API returned 0 months of data" && r.error !== "認証切れ" && r.error !== "中断").length})
@@ -544,7 +552,8 @@ export default function SearchKeywordsClient() {
                     <td className="px-3 py-2.5 text-center">
                       <button
                         onClick={() => handleBulkSync([shop.id])}
-                        disabled={syncing || shop.status === "no_gbp"}
+                        disabled={syncing || shop.status === "no_gbp" || !canData}
+                        title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
                         className="px-2.5 py-1 rounded text-[11px] font-semibold bg-blue-50 text-blue-600 hover:bg-blue-100 disabled:opacity-40 disabled:cursor-not-allowed transition"
                       >
                         同期

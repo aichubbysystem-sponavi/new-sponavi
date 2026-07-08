@@ -2,8 +2,10 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useShop } from "@/components/shop-provider";
+import { useRole } from "@/components/role-provider";
 import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
+import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
 
 interface AnalysisResult {
   shopId: string;
@@ -38,6 +40,8 @@ function safeStr(val: unknown): string {
 
 export default function ReviewAnalysisPage() {
   const { shops, apiConnected, favoriteShopIds, addToFavorites, removeFromFavorites } = useShop();
+  const { role } = useRole();
+  const canPaid = can(role, "PAID_OP"); // AI分析実行（社長のみ・API課金）
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
@@ -90,7 +94,7 @@ export default function ReviewAnalysisPage() {
   };
 
   const runAnalysis = useCallback(async () => {
-    if (selected.size === 0) return;
+    if (selected.size === 0 || !canPaid) return;
     cancelRef.current = false;
     setRunning(true);
     setError(null);
@@ -170,7 +174,7 @@ export default function ReviewAnalysisPage() {
 
     setRunning(false);
     setProgress(null);
-  }, [selected, shops, forceReanalyze, persistedFailures, targetMonth]);
+  }, [selected, shops, forceReanalyze, persistedFailures, targetMonth, canPaid]);
 
   const successCount = results.filter((r) => r.status === "success").length;
   const failedResults = results.filter((r) => r.status === "error" || r.status === "analysis_failed" || r.status === "db_error");
@@ -271,9 +275,10 @@ export default function ReviewAnalysisPage() {
           <button
             data-run-analysis
             onClick={runAnalysis}
-            disabled={running || selected.size === 0 || !apiConnected}
-            className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-semibold transition-all ${
-              running || selected.size === 0 || !apiConnected
+            disabled={running || selected.size === 0 || !apiConnected || !canPaid}
+            title={!canPaid ? PERMISSION_DENIED_HINT.PAID_OP : undefined}
+            className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+              running || selected.size === 0 || !apiConnected || !canPaid
                 ? "bg-slate-200 text-slate-400 cursor-not-allowed"
                 : "bg-[#003D6B] text-white hover:bg-[#002a4a] shadow-sm"
             }`}

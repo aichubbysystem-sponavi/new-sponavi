@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
  * pmax_account_mappingから既知の店舗名一覧を返す（API呼び出しなし）
  */
 export async function GET(request: NextRequest) {
-  const r = await requireRole(request, ["president", "manager"]);
+  const r = await requireRole(request, ["president", "executive", "manager"]);
   if (r.error) return r.error;
 
   const sb = getSupabase();

@@ -2,8 +2,10 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useShop } from "@/components/shop-provider";
+import { useRole } from "@/components/role-provider";
 import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
+import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
 import KpiCard from "@/components/kpi-card";
 import DateRangePicker, { useDateRange } from "@/components/date-range-picker";
 
@@ -26,6 +28,8 @@ interface PerformanceLog {
 
 export default function Dashboard() {
   const { shops, selectedShop, selectedShopId, apiConnected, unrepliedCount } = useShop();
+  const { role } = useRole();
+  const canData = can(role, "DATA_OP"); // 売上予測設定保存・順位アラート既読化（社長・幹部）
   const storeName = selectedShop?.name || "未選択";
   const shopCount = shops.length;
   const [perf, setPerf] = useState<PerformanceLog[]>([]);
@@ -539,8 +543,9 @@ export default function Dashboard() {
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" />
                 </div>
               </div>
-              <button onClick={saveForecastSetting} disabled={forecastSaving}
-                className="mt-3 px-4 py-2 rounded-lg text-xs font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-50">
+              <button onClick={saveForecastSetting} disabled={forecastSaving || !canData}
+                title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                className="mt-3 px-4 py-2 rounded-lg text-xs font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-40 disabled:cursor-not-allowed">
                 {forecastSaving ? "保存中..." : "設定を保存"}
               </button>
             </div>
@@ -668,7 +673,9 @@ export default function Dashboard() {
                     await api.patch("/api/report/line-alerts", { id: alert.id });
                     setLineAlerts(lineAlerts.filter(a => a.id !== alert.id));
                   } catch { /* 失敗時はリストを維持 */ }
-                }} className="text-[10px] text-slate-400 hover:text-emerald-600 ml-2 flex-shrink-0">対応済み</button>
+                }} disabled={!canData}
+                  title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                  className="text-[10px] text-slate-400 hover:text-emerald-600 ml-2 flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed">対応済み</button>
               </div>
             ))}
           </div>

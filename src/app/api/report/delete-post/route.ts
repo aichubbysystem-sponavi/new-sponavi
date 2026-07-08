@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, requireRole } from "@/lib/supabase";
+import { NextResponse } from "next/server";
+import { getSupabase } from "@/lib/supabase";
+import { withAudit } from "@/lib/audit";
 import { getOAuthToken } from "@/lib/gbp-token";
 import { isValidGbpPostName } from "@/lib/gbp-validate";
 
@@ -14,11 +15,7 @@ const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
  * POST /api/report/delete-post
  * GBP投稿を削除 + post_logsからも削除
  */
-export async function POST(request: NextRequest) {
-  // GBP投稿の削除は取消不可のため社長・社員のみ（create-post/auto-postと同基準）
-  const r = await requireRole(request, ["president", "manager"]);
-  if (r.error) return r.error;
-
+export const POST = withAudit("GBP投稿削除", "EXTERNAL_OP", async (request, ctx) => {
   const { postName, logId } = await request.json();
   if (!postName) return NextResponse.json({ error: "postNameが必要です" }, { status: 400 });
   // 無検証で DELETE URL に連結するとパストラバーサル・クエリ混入で他リソースを操作され得る
@@ -70,5 +67,6 @@ export async function POST(request: NextRequest) {
     await supabase.from("post_logs").delete().eq("gbp_post_name", postName);
   }
 
+  ctx.detail = `${postName}${logId ? `（logId: ${logId}）` : ""} / GBP削除${gbpDeleted ? "成功" : "未実施・失敗"}`;
   return NextResponse.json({ success: true, gbpDeleted });
-}
+});

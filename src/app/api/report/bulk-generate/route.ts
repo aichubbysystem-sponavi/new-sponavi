@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, requireRole } from "@/lib/supabase";
+import { NextResponse } from "next/server";
+import { getSupabase } from "@/lib/supabase";
+import { withAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -9,11 +10,9 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 
 /**
  * POST /api/report/bulk-generate
- * 複数店舗の投稿文をAIで一括生成 → scheduled_postsに保存（社長・マネージャーのみ）
+ * 複数店舗の投稿文をAIで一括生成 → scheduled_postsに保存
  */
-export async function POST(request: NextRequest) {
-  const r = await requireRole(request, ["president", "manager"]);
-  if (r.error) return r.error;
+export const POST = withAudit("AI投稿文一括生成", "PAID_OP", async (request, ctx) => {
   if (!ANTHROPIC_API_KEY) return NextResponse.json({ error: "ANTHROPIC_API_KEYが設定されていません" }, { status: 500 });
 
   const body = await request.json();
@@ -33,6 +32,8 @@ export async function POST(request: NextRequest) {
   const results: { shopName: string; generated: number; error?: string }[] = [];
 
   const targetIds = shopIds.slice(0, 50);
+
+  ctx.detail = `${targetIds.length}店舗×${count}件を生成予定（開始日${startDate}）`;
 
   // バッチ取得（N+1→2クエリ）
   const { data: allShops } = await supabase
@@ -128,5 +129,6 @@ ${hearingInfo ? `【店舗情報】\n${hearingInfo}` : ""}
   }
 
   const totalGenerated = results.reduce((s, r) => s + r.generated, 0);
+  ctx.detail = `${results.length}店舗に投稿文${totalGenerated}件を生成・予約保存（開始日${startDate}）`;
   return NextResponse.json({ results, totalGenerated, totalShops: results.length });
-}
+});

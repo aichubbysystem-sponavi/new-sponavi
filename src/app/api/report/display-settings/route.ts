@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, verifyAuth, verifyShopAccess } from "@/lib/supabase";
+import { withAudit, requireCtxShopAccess } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -34,17 +35,13 @@ export async function GET(request: NextRequest) {
  * PUT /api/report/display-settings
  * { shopId, sectionVisibility?, kwVisibility?, rwVisibility? }
  */
-export async function PUT(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-
+export const PUT = withAudit("表示設定保存", "DATA_OP", async (request, ctx) => {
   const body = await request.json();
   const { shopId, sectionVisibility, kwVisibility, rwVisibility } = body;
   if (!shopId) return NextResponse.json({ error: "shopId必須" }, { status: 400 });
 
-  if (!(await verifyShopAccess(auth.sub, decodeURIComponent(shopId)))) {
-    return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
-  }
+  const shopErr = await requireCtxShopAccess(ctx, decodeURIComponent(shopId));
+  if (shopErr) return shopErr;
 
   const supabase = getSupabase();
 
@@ -61,5 +58,11 @@ export async function PUT(request: NextRequest) {
     .upsert(row, { onConflict: "shop_id" });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  const updatedKeys = [
+    sectionVisibility !== undefined ? "セクション表示" : null,
+    kwVisibility !== undefined ? "KW表示" : null,
+    rwVisibility !== undefined ? "口コミ表示" : null,
+  ].filter(Boolean).join("・");
+  ctx.detail = `${decodeURIComponent(shopId)}: 表示設定を保存（${updatedKeys || "変更なし"}）`;
   return NextResponse.json({ success: true });
-}
+});

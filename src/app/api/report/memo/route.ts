@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, verifyAuth, verifyShopAccess } from "@/lib/supabase";
+import { withAudit, requireCtxShopAccess } from "@/lib/audit";
 import { validateBody, memoSchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
@@ -52,17 +53,15 @@ export async function GET(request: NextRequest) {
  * POST /api/report/memo
  * { shopName, month, memo }
  */
-export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-
+export const POST = withAudit("レポートメモ保存", "MEMO", async (request, ctx) => {
   const { data: body, error: valErr } = await validateBody(request, memoSchema);
   if (valErr) return valErr;
   const { shopName, month, memo } = body;
 
-  if (!(await verifyShopAccess(auth.sub, shopName))) {
-    return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
-  }
+  const shopErr = await requireCtxShopAccess(ctx, shopName);
+  if (shopErr) return shopErr;
+
+  ctx.detail = `${shopName} ${month}: 「${String(memo || "").slice(0, 50)}」`;
 
   const supabase = getSupabase();
 
@@ -86,4 +85,4 @@ export async function POST(request: NextRequest) {
   } catch (e: any) {
     return NextResponse.json({ error: e?.message }, { status: 500 });
   }
-}
+});

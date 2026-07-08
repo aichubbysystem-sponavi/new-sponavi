@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, requireRole, verifyShopAccess } from "@/lib/supabase";
+import { getSupabase } from "@/lib/supabase";
+import { withAudit, requireCtxShopAccess, type AuditContext } from "@/lib/audit";
 import { getOAuthToken } from "@/lib/gbp-token";
 
 export const dynamic = "force-dynamic";
@@ -11,16 +12,13 @@ const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
  * POST /api/report/reply-review
  * GBP口コミに返信を投稿
  */
-export async function POST(_request: NextRequest) {
+export const POST = withAudit("口コミ返信送信", "EXTERNAL_OP", async (_request, ctx) => {
   // 一時無効化: 構造改善完了まで外部GBP操作を停止
+  ctx.detail = "機能一時停止中（503）";
   return NextResponse.json({ error: "口コミ返信機能は一時停止中です" }, { status: 503 });
-}
+});
 
-async function _POST_disabled(request: NextRequest) {
-  // 口コミ返信は社長・マネージャーのみ
-  const r = await requireRole(request, ["president", "manager"]);
-  if (r.error) return r.error;
-
+async function _POST_disabled(request: NextRequest, ctx: AuditContext) {
   const body = await request.json();
   const { shopId, reviewId, comment } = body as {
     shopId: string;
@@ -36,8 +34,8 @@ async function _POST_disabled(request: NextRequest) {
   const supabaseForAccess = getSupabase();
   const { data: shopForAccess } = await supabaseForAccess.from("shops").select("name").eq("id", shopId).maybeSingle();
   if (shopForAccess?.name) {
-    const hasAccess = await verifyShopAccess(r.sub, shopForAccess.name);
-    if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+    const shopErr = await requireCtxShopAccess(ctx, shopForAccess.name);
+    if (shopErr) return shopErr;
   }
 
   // OAuthトークン取得
@@ -61,6 +59,8 @@ async function _POST_disabled(request: NextRequest) {
   const { resolveLocationName } = await import("@/lib/gbp-location");
   const locationName = await resolveLocationName(shop.gbp_location_name);
   if (!locationName) return NextResponse.json({ error: "GBPロケーション解決失敗" }, { status: 400 });
+
+  ctx.detail = `${shop.name || shopId}: reviewId=${reviewId}「${comment.slice(0, 50)}」`;
 
   // GBP API v4: PUT {locationName}/reviews/{reviewId}/reply
   const replyUrl = `${GBP_API_BASE}/${locationName}/reviews/${reviewId}/reply`;

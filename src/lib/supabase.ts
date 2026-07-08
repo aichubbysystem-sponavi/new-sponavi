@@ -98,7 +98,9 @@ export async function requireAuth(request: NextRequest): Promise<{ auth: { valid
 
 // ── ロール別アクセス制御 ──
 
-export type AppRole = "president" | "manager" | "part_time";
+// ロール定義・権限表は src/lib/permissions.ts が単一情報源
+export type { AppRole } from "./permissions";
+import type { AppRole } from "./permissions";
 
 /**
  * ユーザーIDからロールを取得
@@ -157,14 +159,14 @@ export async function requireRole(
 
 /**
  * ユーザーがアクセス可能な店舗名一覧を取得
- * - president / manager: "all"（全店舗）
+ * - president / executive / manager: "all"（全店舗）
  * - part_time: user_shop_access テーブルに登録された店舗名のみ
  */
 export async function getUserAllowedShops(authUid: string): Promise<string[] | "all"> {
   const role = await getUserRole(authUid);
-  // 社長・社員は全店舗を閲覧可能（信頼された社内スタッフ）。
+  // 社長・幹部・社員は全店舗を閲覧可能（信頼された社内スタッフ）。
   // バイト(part_time)のみ user_shop_access で割り当てられた店舗に限定する。
-  if (role === "president" || role === "manager") return "all";
+  if (role === "president" || role === "executive" || role === "manager") return "all";
 
   const sb = getSupabase();
   const { data } = await sb

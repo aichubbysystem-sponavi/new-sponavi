@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth, verifyShopAccess } from "@/lib/supabase";
+import { NextResponse } from "next/server";
+import { getSupabase } from "@/lib/supabase";
+import { withAudit, requireCtxShopAccess } from "@/lib/audit";
 import { getOAuthToken } from "@/lib/gbp-token";
 import { getLocationMap, normName } from "@/lib/gbp-location";
 
@@ -80,13 +81,8 @@ async function fetchReviews(
 // メインAPI
 // ============================================================
 
-export async function POST(request: NextRequest) {
+export const POST = withAudit("口コミ同期", "DATA_OP", async (request, ctx) => {
   try {
-    const auth = await verifyAuth(request.headers.get("authorization"));
-    if (!auth.valid || !auth.sub) {
-      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-    }
-
     const body = await request.json().catch(() => ({}));
     const shopIds: string[] = body.shopIds || [];
 
@@ -95,8 +91,8 @@ export async function POST(request: NextRequest) {
       const sbAccess = getSupabase();
       const { data: shops } = await sbAccess.from("shops").select("name").in("id", shopIds);
       for (const shop of shops || []) {
-        const hasAccess = await verifyShopAccess(auth.sub, shop.name);
-        if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+        const shopErr = await requireCtxShopAccess(ctx, shop.name);
+        if (shopErr) return shopErr;
       }
     }
 
@@ -323,6 +319,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    ctx.detail = `対象${shops.length}店舗: 同期${totalSynced}件, エラー${totalErrors}件`;
     return NextResponse.json({
       success: true,
       shops: shops.length,
@@ -334,4 +331,4 @@ export async function POST(request: NextRequest) {
     console.error("[sync-reviews] Unhandled error:", e);
     return NextResponse.json({ error: `サーバーエラー: ${e?.message || "不明"}` }, { status: 500 });
   }
-}
+});

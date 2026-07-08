@@ -3,18 +3,14 @@
  * AIコメントの編集内容を保存
  * body: { shopName: string, comments: string[] }
  */
-import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth, verifyShopAccess } from "@/lib/supabase";
+import { NextResponse } from "next/server";
+import { getSupabase } from "@/lib/supabase";
+import { withAudit, requireCtxShopAccess } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
 
-export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid || !auth.sub) {
-    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-  }
-
+export const POST = withAudit("レポートコメント更新", "DATA_OP", async (request, ctx) => {
   const body = await request.json().catch(() => ({}));
   const shopName: string = body.shopName || "";
   const comments: string[] = body.comments;
@@ -25,8 +21,8 @@ export async function POST(request: NextRequest) {
   }
 
   // 認可チェック
-  const hasAccess = await verifyShopAccess(auth.sub, shopName);
-  if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+  const shopErr = await requireCtxShopAccess(ctx, shopName);
+  if (shopErr) return shopErr;
 
   const supabase = getSupabase();
 
@@ -41,5 +37,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  ctx.detail = `${shopName}（${targetMonth}）: AIコメント${comments.length}件を更新`;
   return NextResponse.json({ success: true });
-}
+});

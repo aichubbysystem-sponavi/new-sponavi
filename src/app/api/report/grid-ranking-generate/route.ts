@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, verifyAuth, verifyShopAccess } from "@/lib/supabase";
+import { withAudit, requireCtxShopAccess } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -82,10 +83,7 @@ function generateGridFrom3x3(centerPoints: { row: number; col: number; rank: num
  * 単月生成: { shopName, keyword, month, centerRank }
  * 一括生成: { shopName, batch: [{ keyword, month, centerRank }] }
  */
-export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-
+export const POST = withAudit("グリッド推定生成", "DATA_OP", async (request, ctx) => {
   const body = await request.json();
   const supabase = getSupabase();
 
@@ -96,8 +94,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "shopName, keyword, month が必要です" }, { status: 400 });
     }
     // 認可チェック
-    const hasAccess = await verifyShopAccess(auth.sub, shopName);
-    if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+    const shopErr = await requireCtxShopAccess(ctx, shopName);
+    if (shopErr) return shopErr;
     const results = generateGridFrom3x3(centerPoints);
     // overridesにも保存
     await supabase.from("grid_ranking_overrides")
@@ -112,6 +110,7 @@ export async function POST(request: NextRequest) {
       results,
       updated_at: new Date().toISOString(),
     });
+    ctx.detail = `${shopName}: 「${keyword}」${month} 3×3実測→7×7推定を生成`;
     return NextResponse.json({ success: true, results });
   }
 
@@ -120,6 +119,10 @@ export async function POST(request: NextRequest) {
     const shopName = body.shopName as string;
     const shopId = body.shopId as string || "";
     if (!shopName) return NextResponse.json({ error: "shopName が必要です" }, { status: 400 });
+
+    // 認可チェック
+    const shopErr = await requireCtxShopAccess(ctx, shopName);
+    if (shopErr) return shopErr;
 
     // 既存overridesを取得（手動編集済みのものは保持する）
     const { data: existing } = await supabase.from("grid_ranking_overrides")
@@ -155,6 +158,7 @@ export async function POST(request: NextRequest) {
       }
     }
     const skipped = body.batch.length - newRows.length;
+    ctx.detail = `${shopName}: 一括生成 ${inserted}件（スキップ${skipped}件, エラー${errors.length}件）`;
     return NextResponse.json({ success: true, count: inserted, skipped, errors: errors.length > 0 ? errors : undefined });
   }
 
@@ -163,6 +167,10 @@ export async function POST(request: NextRequest) {
   if (!shopName || !keyword || !month || centerRank == null) {
     return NextResponse.json({ error: "shopName, keyword, month, centerRank が必要です" }, { status: 400 });
   }
+
+  // 認可チェック
+  const shopErr = await requireCtxShopAccess(ctx, shopName);
+  if (shopErr) return shopErr;
 
   const results = generateGrid(centerRank);
   await supabase.from("grid_ranking_overrides")
@@ -178,8 +186,9 @@ export async function POST(request: NextRequest) {
     updated_at: new Date().toISOString(),
   });
   if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  ctx.detail = `${shopName}: 「${keyword}」${month} centerRank=${centerRank}で生成`;
   return NextResponse.json({ success: true, results });
-}
+});
 
 /**
  * GET /api/report/grid-ranking-generate?shopName=xxx
@@ -210,18 +219,15 @@ export async function GET(request: NextRequest) {
  * PUT /api/report/grid-ranking-generate
  * 単一セルの順位を更新: { shopName, keyword, month, row, col, newRank }
  */
-export async function PUT(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-
+export const PUT = withAudit("グリッド推定保存", "DATA_OP", async (request, ctx) => {
   const body = await request.json();
   const { shopName, keyword, month, row, col, newRank } = body;
   if (!shopName || !keyword || !month || row == null || col == null || newRank == null) {
     return NextResponse.json({ error: "shopName, keyword, month, row, col, newRank が必要です" }, { status: 400 });
   }
 
-  const hasAccess = await verifyShopAccess(auth.sub, shopName);
-  if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+  const shopErr = await requireCtxShopAccess(ctx, shopName);
+  if (shopErr) return shopErr;
 
   const supabase = getSupabase();
   const { data: existing, error: fetchErr } = await (supabase
@@ -239,23 +245,21 @@ export async function PUT(request: NextRequest) {
   const { error } = await supabase.from("grid_ranking_overrides")
     .update({ results, updated_at: new Date().toISOString() }).eq("id", existing.id);
   if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  ctx.detail = `${shopName}: 「${keyword}」${month} セル(${row},${col})を${newRank}位に更新`;
   return NextResponse.json({ success: true, results });
-}
+});
 
 /**
  * DELETE /api/report/grid-ranking-generate
  * { shopName, keyword, month } or { shopName } (全削除)
  */
-export async function DELETE(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-
+export const DELETE = withAudit("グリッド推定削除", "DATA_OP", async (request, ctx) => {
   const body = await request.json();
   const { shopName, keyword, month } = body;
   if (!shopName) return NextResponse.json({ error: "shopName が必要です" }, { status: 400 });
 
-  const hasAccess = await verifyShopAccess(auth.sub, shopName);
-  if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+  const shopErr = await requireCtxShopAccess(ctx, shopName);
+  if (shopErr) return shopErr;
 
   const supabase = getSupabase();
   let query = supabase.from("grid_ranking_overrides").delete().eq("shop_name", shopName);
@@ -263,5 +267,6 @@ export async function DELETE(request: NextRequest) {
   if (month) query = query.eq("month", month);
   const { error } = await query;
   if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  ctx.detail = `${shopName}: ${keyword ? `「${keyword}」` : "全キーワード"} ${month || "全月"}の推定データを削除`;
   return NextResponse.json({ success: true });
-}
+});

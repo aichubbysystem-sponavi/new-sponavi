@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth, requireRole, requireShopAccessById, verifyShopAccess } from "@/lib/supabase";
+import { getSupabase, verifyAuth, requireShopAccessById } from "@/lib/supabase";
+import { withAudit, requireCtxShopAccessById } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -77,7 +78,7 @@ function findRank(places: string[], targetName: string): number {
  * 1地点×1キーワードの順位計測（最大100位まで5ページ検索）
  * 検索結果は grid_search_cache に月次保存し、同月の再計測はAPIを呼ばない
  */
-export async function POST(request: NextRequest) {
+export const POST = withAudit("多地点順位実測", "PAID_OP", async (request, ctx) => {
   const body = await request.json();
   const { shopId, keyword, lat, lng, interval, center } = body as {
     shopId: string;
@@ -92,12 +93,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "shopId, keyword, lat, lngが必要です" }, { status: 400 });
   }
 
-  // Places API課金を伴う計測の実行は社長のみ（閲覧系のGETは全ロール可のまま）
-  const roleCheck = await requireRole(request, ["president"]);
-  if (roleCheck.error) return roleCheck.error;
+  const shopRes = await requireCtxShopAccessById(ctx, shopId);
+  if (shopRes.error) return shopRes.error;
 
-  const access = await requireShopAccessById(request, shopId);
-  if (access.error) return access.error;
+  ctx.detail = `${shopRes.shopName}: KW「${keyword}」${center ? "（中心地点）" : ""}`;
 
   if (!GCP_API_KEY) {
     return NextResponse.json({ error: "GCP_API_KEYが設定されていません" }, { status: 500 });
@@ -316,13 +315,13 @@ export async function POST(request: NextRequest) {
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || "検索エラー" }, { status: 500 });
   }
-}
+});
 
 /**
  * PUT /api/report/grid-ranking
  * グリッド計測結果を一括保存
  */
-export async function PUT(request: NextRequest) {
+export const PUT = withAudit("順位実測値保存", "DATA_OP", async (request, ctx) => {
   const body = await request.json();
   const { shopId, keyword, gridResults, gridSize, interval } = body as {
     shopId: string;
@@ -333,11 +332,10 @@ export async function PUT(request: NextRequest) {
   };
 
   if (!shopId) return NextResponse.json({ error: "shopIdが必要です" }, { status: 400 });
-  // 計測結果の保存は計測フロー(社長のみ)の一部。偽データ書込み防止のため同権限に統一
-  const rolePut = await requireRole(request, ["president"]);
-  if (rolePut.error) return rolePut.error;
-  const accessPut = await requireShopAccessById(request, shopId);
-  if (accessPut.error) return accessPut.error;
+  const shopResPut = await requireCtxShopAccessById(ctx, shopId);
+  if (shopResPut.error) return shopResPut.error;
+
+  ctx.detail = `${shopResPut.shopName}: 「${keyword}」${gridSize}×${gridSize}グリッド ${Array.isArray(gridResults) ? gridResults.length : 0}地点を保存`;
 
   const supabase = getSupabase();
   const { error: insertErr } = await supabase.from("grid_ranking_logs").insert({
@@ -355,7 +353,7 @@ export async function PUT(request: NextRequest) {
   }
 
   return NextResponse.json({ success: true });
-}
+});
 
 /**
  * GET /api/report/grid-ranking - 過去のグリッド計測結果を取得
@@ -401,11 +399,7 @@ export async function GET(request: NextRequest) {
  * DELETE /api/report/grid-ranking
  * 計測履歴を削除
  */
-export async function DELETE(request: NextRequest) {
-  // 履歴削除はデータ破壊操作のため社長・社員のみ（requireRoleが認証も兼ねる）
-  const roleDel = await requireRole(request, ["president", "manager"]);
-  if (roleDel.error) return roleDel.error;
-
+export const DELETE = withAudit("順位計測履歴削除", "DATA_OP", async (request, ctx) => {
   const body = await request.json();
   const { id, shopId, keyword } = body as { id?: string; shopId?: string; keyword?: string };
 
@@ -415,8 +409,11 @@ export async function DELETE(request: NextRequest) {
     // idで削除する場合、ログからshop_idを取得して認可チェック
     const { data: log } = await supabase.from("grid_ranking_logs").select("shop_id").eq("id", id).maybeSingle();
     if (log?.shop_id) {
-      const accessDel = await requireShopAccessById(request, log.shop_id);
-      if (accessDel.error) return accessDel.error;
+      const shopResDel = await requireCtxShopAccessById(ctx, log.shop_id);
+      if (shopResDel.error) return shopResDel.error;
+      ctx.detail = `${shopResDel.shopName}: 計測履歴1件を削除（ID: ${id}）`;
+    } else {
+      ctx.detail = `計測履歴1件を削除（ID: ${id}）`;
     }
     const { error } = await supabase.from("grid_ranking_logs").delete().eq("id", id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -424,12 +421,13 @@ export async function DELETE(request: NextRequest) {
   }
 
   if (shopId && keyword) {
-    const accessDel2 = await requireShopAccessById(request, shopId);
-    if (accessDel2.error) return accessDel2.error;
+    const shopResDel2 = await requireCtxShopAccessById(ctx, shopId);
+    if (shopResDel2.error) return shopResDel2.error;
     const { error, count } = await supabase.from("grid_ranking_logs").delete().eq("shop_id", shopId).eq("keyword", keyword);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    ctx.detail = `${shopResDel2.shopName}: 「${keyword}」の計測履歴を削除（${count ?? 0}件）`;
     return NextResponse.json({ success: true, deleted: count });
   }
 
   return NextResponse.json({ error: "idまたはshopId+keywordが必要です" }, { status: 400 });
-}
+});

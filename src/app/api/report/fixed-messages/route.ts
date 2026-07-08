@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth, requireShopAccessById } from "@/lib/supabase";
+import { getSupabase, requireShopAccessById } from "@/lib/supabase";
+import { withAudit, requireCtxShopAccessById } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -33,17 +34,14 @@ export async function GET(request: NextRequest) {
  * PUT /api/report/fixed-messages — 指定店舗の差し込み文字列を全置換（upsert的動作）。
  * body: { shopId, fields: [{ id?, title, message }] }
  */
-export async function PUT(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-
+export const PUT = withAudit("固定メッセージ保存", "DATA_OP", async (request, ctx) => {
   const body = await request.json();
   const { shopId, fields } = body as { shopId?: string; fields?: { id?: string; title?: string; message?: string }[] };
   if (!shopId) return NextResponse.json({ error: "shopIdが必要です" }, { status: 400 });
   if (!Array.isArray(fields)) return NextResponse.json({ error: "fieldsが不正です" }, { status: 400 });
 
-  const access = await requireShopAccessById(request, shopId);
-  if (access.error) return access.error;
+  const shopRes = await requireCtxShopAccessById(ctx, shopId);
+  if (shopRes.error) return shopRes.error;
 
   const supabase = getSupabase();
 
@@ -68,5 +66,6 @@ export async function PUT(request: NextRequest) {
     if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
   }
 
+  ctx.detail = `${shopRes.shopName}: 差し込み文字列${rows.length}件を全置換保存`;
   return NextResponse.json({ success: true, count: rows.length });
-}
+});

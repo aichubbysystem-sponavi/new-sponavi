@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useShop } from "@/components/shop-provider";
+import { useRole } from "@/components/role-provider";
+import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
 import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
 
@@ -26,6 +28,8 @@ type FilterType = "all" | "ng" | "name" | "address" | "phone";
 
 export default function CitationPage() {
   const { apiConnected, shops } = useShop();
+  const { role } = useRole();
+  const canData = can(role, "DATA_OP"); // NAP一括チェック実行（社長・幹部）
   const [results, setResults] = useState<NAPResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -143,9 +147,10 @@ export default function CitationPage() {
             <div className="text-xs text-slate-400">
               {lastChecked && `最終チェック: ${new Date(lastChecked).toLocaleString("ja-JP")}`}
             </div>
-            <button onClick={handleCheck} disabled={checking}
-              className={`px-5 py-2.5 rounded-lg text-sm font-semibold ${checking ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
-              style={{ color: checking ? undefined : "#fff" }}>
+            <button onClick={handleCheck} disabled={checking || !canData}
+              title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+              className={`px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed ${checking || !canData ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
+              style={{ color: checking || !canData ? undefined : "#fff" }}>
               {checking ? "チェック中..." : "NAP一括チェック実行"}
             </button>
           </div>

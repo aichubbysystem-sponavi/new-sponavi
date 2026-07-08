@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth, verifyShopAccess } from "@/lib/supabase";
+import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { withAudit, requireCtxShopAccess } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -97,10 +98,7 @@ export async function GET(request: NextRequest) {
  * POST /api/report/grid-ranking-presets
  * いつも計測する店舗を追加
  */
-export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-
+export const POST = withAudit("計測プリセット追加", "DATA_OP", async (request, ctx) => {
   const body = await request.json();
   const { shops } = body as { shops: { shopId: string; shopName: string; keyword?: string; gridSize?: number }[] };
 
@@ -110,8 +108,8 @@ export async function POST(request: NextRequest) {
 
   // 認可: 全店舗のアクセス権を検証
   for (const s of shops) {
-    const hasAccess = await verifyShopAccess(auth.sub, s.shopName);
-    if (!hasAccess) return NextResponse.json({ error: `${s.shopName}へのアクセス権がありません` }, { status: 403 });
+    const shopErr = await requireCtxShopAccess(ctx, s.shopName);
+    if (shopErr) return shopErr;
   }
 
   const supabase = getSupabase();
@@ -127,17 +125,15 @@ export async function POST(request: NextRequest) {
     .upsert(rows, { onConflict: "shop_id" });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  ctx.detail = `計測プリセット${rows.length}店舗を追加（${shops.map(s => s.shopName).slice(0, 5).join("、")}${shops.length > 5 ? " 他" : ""}）`;
   return NextResponse.json({ success: true, count: rows.length });
-}
+});
 
 /**
  * DELETE /api/report/grid-ranking-presets
  * いつも計測する店舗を削除
  */
-export async function DELETE(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-
+export const DELETE = withAudit("計測プリセット削除", "DATA_OP", async (request, ctx) => {
   const body = await request.json();
   const { shopIds } = body as { shopIds: string[] };
 
@@ -149,8 +145,8 @@ export async function DELETE(request: NextRequest) {
   const supabase = getSupabase();
   const { data: shopData } = await supabase.from("shops").select("id, name").in("id", shopIds);
   for (const s of (shopData || [])) {
-    const hasAccess = await verifyShopAccess(auth.sub, s.name);
-    if (!hasAccess) return NextResponse.json({ error: `${s.name}へのアクセス権がありません` }, { status: 403 });
+    const shopErr = await requireCtxShopAccess(ctx, s.name);
+    if (shopErr) return shopErr;
   }
   const { error } = await supabase
     .from("grid_ranking_presets")
@@ -158,5 +154,7 @@ export async function DELETE(request: NextRequest) {
     .in("shop_id", shopIds);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  const names = (shopData || []).map((s) => s.name);
+  ctx.detail = `計測プリセット${shopIds.length}店舗を削除（${names.slice(0, 5).join("、")}${names.length > 5 ? " 他" : ""}）`;
   return NextResponse.json({ success: true });
-}
+});

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth, requireRole } from "@/lib/supabase";
+import { getSupabase, requireRole } from "@/lib/supabase";
+import { withAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -13,8 +14,8 @@ const DIFY_DATASET_ID = process.env.DIFY_DATASET_ID || "";
  * 全機能から未完了タスクを集約して返す
  */
 export async function GET(request: NextRequest) {
-  // 全店舗横断の未対応タスク集計は社長・社員のみ
-  const r = await requireRole(request, ["president", "manager"]);
+  // 全店舗横断の未対応タスク集計は社長・幹部・社員のみ
+  const r = await requireRole(request, ["president", "executive", "manager"]);
   if (r.error) return r.error;
   const supabase = getSupabase();
   const tasks: { category: string; label: string; count: number; priority: "high" | "medium" | "low"; detail?: string }[] = [];
@@ -76,10 +77,7 @@ export async function GET(request: NextRequest) {
  * POST /api/report/tasks
  * 完了した業務をDifyナレッジベースに記録
  */
-export async function POST(request: Request) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-
+export const POST = withAudit("タスク作成", "DATA_OP", async (request, ctx) => {
   const { action, detail } = await request.json();
   if (!action) return NextResponse.json({ error: "actionが必要です" }, { status: 400 });
 
@@ -111,8 +109,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: `Dify API ${res.status}: ${err.slice(0, 100)}` }, { status: 500 });
     }
 
+    ctx.detail = `業務ログをDifyナレッジに記録: ${action}${detail ? `（${String(detail).slice(0, 100)}）` : ""}`;
     return NextResponse.json({ success: true, title });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "ナレッジ保存失敗" }, { status: 500 });
   }
-}
+});

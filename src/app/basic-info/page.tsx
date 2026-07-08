@@ -2,11 +2,15 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useShop } from "@/components/shop-provider";
+import { useRole } from "@/components/role-provider";
 import api from "@/lib/api";
+import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
 import { buildGbpSnapshot, detectGbpChanges, type ChangeAlert } from "@/lib/gbp-snapshot";
 
 export default function BasicInfoPage() {
   const { apiConnected, selectedShopId, selectedShop } = useShop();
+  const { role } = useRole();
+  const canExt = can(role, "EXTERNAL_OP"); // GBP基本情報の保存/更新（社長・幹部）
   const [location, setLocation] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -224,8 +228,9 @@ export default function BasicInfoPage() {
                 setSaveMsg(`復旧失敗: ${e?.response?.data?.message || e?.message || "エラー"}`);
               }
               setSaving(false);
-            }} disabled={saving}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50">
+            }} disabled={saving || !canExt}
+              title={!canExt ? PERMISSION_DENIED_HINT.EXTERNAL_OP : undefined}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed">
               {saving ? "復旧中..." : "元に戻す（自動復旧）"}
             </button>
             <button onClick={() => {
@@ -358,8 +363,9 @@ export default function BasicInfoPage() {
                       rows={4} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20" />
                   </div>
                   <div className="flex items-center gap-2">
-                    <button onClick={handleSave} disabled={saving}
-                      className="px-4 py-2 rounded-lg text-xs font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-50">
+                    <button onClick={handleSave} disabled={saving || !canExt}
+                      title={!canExt ? PERMISSION_DENIED_HINT.EXTERNAL_OP : undefined}
+                      className="px-4 py-2 rounded-lg text-xs font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-40 disabled:cursor-not-allowed">
                       {saving ? "保存中..." : "GBPに保存"}
                     </button>
                     <button onClick={() => setEditing(false)}
@@ -401,8 +407,9 @@ export default function BasicInfoPage() {
                     <div className="flex gap-2">
                       <input type="number" value={newMenu.price} onChange={(e) => setNewMenu({ ...newMenu, price: e.target.value })}
                         placeholder="1000" className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm" />
-                      <button onClick={saveMenu} disabled={menuSaving || !newMenu.name.trim()}
-                        className="px-4 py-2 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">
+                      <button onClick={saveMenu} disabled={menuSaving || !newMenu.name.trim() || !canExt}
+                        title={!canExt ? PERMISSION_DENIED_HINT.EXTERNAL_OP : undefined}
+                        className="px-4 py-2 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed">
                         {menuSaving ? "追加中..." : "追加"}
                       </button>
                     </div>
@@ -457,8 +464,9 @@ export default function BasicInfoPage() {
                       }
                       setServices(items);
                     } catch {}
-                  }} disabled={menuSaving}
-                    className="mt-2 px-4 py-2 rounded-lg text-xs font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-50">
+                  }} disabled={menuSaving || !canExt}
+                    title={!canExt ? PERMISSION_DENIED_HINT.EXTERNAL_OP : undefined}
+                    className="mt-2 px-4 py-2 rounded-lg text-xs font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-40 disabled:cursor-not-allowed">
                     {menuSaving ? "追加中..." : "CSV一括追加"}
                   </button>
                 </div>

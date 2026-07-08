@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, requireRole } from "@/lib/supabase";
+import { NextResponse } from "next/server";
+import { getSupabase } from "@/lib/supabase";
+import { withAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -564,10 +565,7 @@ function parseCSV(text: string): string[][] {
  * スプレッドシートから自動投稿
  * body: { sheetId, targetDate (YYYY-MM-DD), dryRun? }
  */
-export async function POST(request: NextRequest) {
-  const r = await requireRole(request, ["president", "manager"]);
-  if (r.error) return r.error;
-
+export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (request, ctx) => {
   const body = await request.json();
   const { sheetId, targetDate, dryRun, topicType, batchOffset, batchSize, filterShopName, filterShopNames, scheduleMode, scheduleAt } = body as {
     sheetId: string;
@@ -582,6 +580,10 @@ export async function POST(request: NextRequest) {
     scheduleAt?: string; // 予約日時 "2026-04-12T09:00:00"（scheduleMode時）
   };
   const isPhotoOnly = topicType === "PHOTO";
+
+  // 監査ログ: プレビュー / 予約登録 / 即時実行を操作名で区別
+  if (dryRun) ctx.actionOverride = "シート自動投稿プレビュー";
+  else if (scheduleMode) ctx.actionOverride = "シート自動投稿予約登録";
 
   // リクエストごとにDropboxサブフォルダキャッシュをリセット
   cachedRootSubfolders = null;
@@ -755,6 +757,7 @@ export async function POST(request: NextRequest) {
         tabResults.push(`${tab}: ${rows.length}行, B列例:[${shopNames.join(",")}], F列例:[${photoCells.join(",")}]`);
       } catch (e: any) { tabResults.push(`${tab}: エラー ${e?.message}`); }
     }
+    ctx.detail = `${targetDate}: 該当データ0件`;
     return NextResponse.json({
       matches: 0,
       message: `${targetDate}に該当する投稿データがありません`,
@@ -763,6 +766,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (dryRun) {
+    ctx.detail = `${targetDate}: プレビュー${allMatches.length}件${isPhotoOnly ? "（写真投稿）" : ""}`;
     // プレビュー時はバッチ情報も返す
     const bs = batchSize || 10;
     const totalBatches = Math.ceil(allMatches.length / bs);
@@ -951,6 +955,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    ctx.detail = `${targetDate}: 予約登録${scheduled}件/エラー${schedErrors}件（マッチ${allMatches.length}件、予約時刻: ${scheduledTime}）`;
     return NextResponse.json({
       matches: allMatches.length,
       posted: scheduled, errors: schedErrors, results: schedResults,
@@ -1169,6 +1174,7 @@ export async function POST(request: NextRequest) {
     ? `写真投稿${String(dateObj.getFullYear()).slice(2)}-${dateObj.getMonth() + 1}-${photoPostNumber}`
     : undefined;
 
+  ctx.detail = `${targetDate}: 投稿${posted}件/エラー${errors}件（マッチ${allMatches.length}件、バッチ${offset}〜${offset + batchMatches.length}）`;
   return NextResponse.json({
     matches: allMatches.length,
     posted, errors, results,
@@ -1180,4 +1186,4 @@ export async function POST(request: NextRequest) {
     photoPostNumber: isPhotoOnly ? photoPostNumber : undefined,
     photoFilePattern,
   });
-}
+});

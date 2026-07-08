@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
  * refresh=1 でシートを再読込（「グループを更新」ボタン用）
  */
 export async function GET(request: NextRequest) {
-  const r = await requireRole(request, ["president", "manager"]);
+  const r = await requireRole(request, ["president", "executive", "manager"]);
   if (r.error) return r.error;
 
   const refresh = request.nextUrl.searchParams.get("refresh") === "1";

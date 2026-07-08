@@ -2,7 +2,9 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useShop } from "@/components/shop-provider";
+import { useRole } from "@/components/role-provider";
 import api from "@/lib/api";
+import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
 
 interface Message {
   role: "user" | "assistant";
@@ -21,6 +23,8 @@ const QUICK_QUESTIONS = [
 
 export default function ChatbotPage() {
   const { selectedShop } = useShop();
+  const { role } = useRole();
+  const canPaid = can(role, "PAID_OP"); // AI社長への送信（社長のみ・API課金）
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -45,7 +49,7 @@ export default function ChatbotPage() {
 
   const sendMessage = async (text?: string) => {
     const query = text || input.trim();
-    if (!query || loading) return;
+    if (!query || loading || !canPaid) return;
 
     setInput("");
     setError("");
@@ -145,7 +149,9 @@ export default function ChatbotPage() {
                 <button
                   key={i}
                   onClick={() => sendMessage(q)}
-                  className="text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 hover:border-[#003D6B]/30 transition-all"
+                  disabled={!canPaid}
+                  title={!canPaid ? PERMISSION_DENIED_HINT.PAID_OP : undefined}
+                  className="text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 hover:border-[#003D6B]/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {q}
                 </button>
@@ -209,26 +215,27 @@ export default function ChatbotPage() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="AI社長に質問する...（Enterで送信、Shift+Enterで改行）"
-            className="flex-1 border border-slate-200 rounded-xl px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20"
+            placeholder={canPaid ? "AI社長に質問する...（Enterで送信、Shift+Enterで改行）" : "AI社長は社長のみ利用できます"}
+            className="flex-1 border border-slate-200 rounded-xl px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20 disabled:opacity-40 disabled:cursor-not-allowed"
             rows={1}
-            disabled={loading}
+            disabled={loading || !canPaid}
           />
           <button
             onClick={() => sendMessage()}
-            disabled={loading || !input.trim()}
-            className={`px-5 py-3 rounded-xl text-sm font-semibold transition-all flex-shrink-0 ${
-              loading || !input.trim()
+            disabled={loading || !input.trim() || !canPaid}
+            title={!canPaid ? PERMISSION_DENIED_HINT.PAID_OP : undefined}
+            className={`px-5 py-3 rounded-xl text-sm font-semibold transition-all flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed ${
+              loading || !input.trim() || !canPaid
                 ? "bg-slate-200 text-slate-400"
                 : "bg-[#003D6B] hover:bg-[#002a4a]"
             }`}
-            style={{ color: loading || !input.trim() ? undefined : "#fff" }}
+            style={{ color: loading || !input.trim() || !canPaid ? undefined : "#fff" }}
           >
             {loading ? "回答中..." : "送信"}
           </button>
         </div>
         <p className="text-[10px] text-slate-400 mt-1.5 text-center">
-          AI社長はSPOTLIGHT NAVIGATORの使い方とMEO対策の知識をもとに回答します
+          {canPaid ? "AI社長はSPOTLIGHT NAVIGATORの使い方とMEO対策の知識をもとに回答します" : "AI社長は社長のみ利用できます"}
         </p>
       </div>
     </div>

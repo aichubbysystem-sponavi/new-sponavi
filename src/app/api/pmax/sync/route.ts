@@ -8,8 +8,9 @@
  * 2回目以降: マッピング済みアカウントのみ（~50回）
  * forceFullScan=true で全アカウント再スキャン
  */
-import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, requireRole } from "@/lib/supabase";
+import { NextResponse } from "next/server";
+import { getSupabase } from "@/lib/supabase";
+import { withAudit } from "@/lib/audit";
 import {
   listAccounts,
   getCampaignMonthly,
@@ -52,10 +53,7 @@ type ParsedRow = {
   costMicros: number;
 };
 
-export async function POST(request: NextRequest) {
-  const r = await requireRole(request, ["president", "manager"]);
-  if (r.error) return r.error;
-
+export const POST = withAudit("P-MAX広告データ同期", "PAID_OP", async (request, ctx) => {
   let body: { month?: string; forceFullScan?: boolean; shopNames?: string[] };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "不正なリクエスト" }, { status: 400 }); }
 
@@ -64,6 +62,8 @@ export async function POST(request: NextRequest) {
   if (!month || !/^\d{4}-\d{2}$/.test(month)) {
     return NextResponse.json({ error: "month は YYYY-MM 形式" }, { status: 400 });
   }
+
+  ctx.detail = `対象月${month}${isSelectiveSync ? `、選択${selectedShops.length}店舗` : forceFullScan ? "、フルスキャン" : ""}`;
 
   const [, monthStr] = month.split("-");
   const year = Number(month.split("-")[0]);
@@ -233,13 +233,15 @@ export async function POST(request: NextRequest) {
 
   // ── Step 6: ログ ──
   await sb.from("pmax_sync_log").upsert({
-    shop_name: "__all__", month, synced_by: r.sub || null,
+    shop_name: "__all__", month, synced_by: ctx.sub || null,
     synced_at: new Date().toISOString(),
     status: insertErrors.length === 0 ? "success" : "partial",
     message: insertErrors.length > 0 ? insertErrors.slice(0, 3).join("; ") : null,
   }, { onConflict: "shop_name,month" });
 
   const { count } = await sb.from("pmax_store_data").select("*", { count: "exact", head: true }).eq("month", month);
+
+  ctx.detail = `対象月${month}: ${shopNames.length}店舗 / 広告${allMonthly.length}行 / GBP同期${gbpSynced}件${isFullScan ? "（フルスキャン）" : ""}${isSelectiveSync ? "（選択同期）" : ""}${insertErrors.length > 0 ? ` / 保存エラー${insertErrors.length}件` : ""}`;
 
   return NextResponse.json({
     success: insertErrors.length === 0,
@@ -261,4 +263,4 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({ error: `同期失敗: ${msg.slice(0, 300)}` }, { status: 500 });
   }
-}
+});

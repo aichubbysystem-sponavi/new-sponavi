@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import api from "@/lib/api";
-import { supabase } from "@/lib/supabase";
+import { ROLE_LABELS } from "@/lib/roles";
 
 interface UserProfile {
   id: string;
@@ -22,11 +22,10 @@ interface AuditLog {
   created_at: string;
 }
 
-const ROLE_OPTIONS = [
-  { value: "president", label: "社長" },
-  { value: "manager", label: "社員" },
-  { value: "part_time", label: "バイト" },
-];
+// ロール一覧は roles.ts の ROLE_LABELS から生成（定義のズレを防ぐ）
+const ROLE_OPTIONS = (Object.entries(ROLE_LABELS) as [string, string][]).map(
+  ([value, label]) => ({ value, label })
+);
 
 export default function UserManagementPage() {
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -47,12 +46,11 @@ export default function UserManagementPage() {
   }, []);
 
   const fetchLogs = useCallback(async () => {
-    const { data } = await supabase
-      .from("audit_logs")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(50);
-    setLogs(data || []);
+    // audit_logsはRLSでクライアント直読み不可（サーバーAPI経由・社長のみ）
+    try {
+      const res = await api.get("/api/report/audit-log", { params: { pageSize: 50 } });
+      setLogs(res.data?.rows || []);
+    } catch { setLogs([]); }
   }, []);
 
   useEffect(() => { fetchUsers(); fetchLogs(); }, [fetchUsers, fetchLogs]);
@@ -280,6 +278,7 @@ export default function UserManagementPage() {
                       }}
                       className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border-0 cursor-pointer ${
                         user.role === "president" ? "bg-amber-50 text-amber-600" :
+                        user.role === "executive" ? "bg-purple-50 text-purple-600" :
                         user.role === "manager" ? "bg-blue-50 text-blue-600" :
                         "bg-slate-50 text-slate-600"
                       }`}

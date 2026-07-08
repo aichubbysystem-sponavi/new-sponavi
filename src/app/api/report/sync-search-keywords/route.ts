@@ -5,6 +5,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, verifyAuth, requireShopAccessById, verifyShopAccess } from "@/lib/supabase";
+import { withAudit, requireCtxShopAccessById } from "@/lib/audit";
 import { syncShopSearchKeywords } from "@/lib/gbp-search-keywords";
 
 export const dynamic = "force-dynamic";
@@ -52,17 +53,18 @@ async function handleSync(shopId: string) {
 }
 
 // POST: 認証付き（検索語句管理ページから呼び出し）
-export async function POST(request: NextRequest) {
+export const POST = withAudit("検索語句同期", "DATA_OP", async (request, ctx) => {
   const body = await request.json().catch(() => ({}));
   const shopId = body.shopId || "";
 
   if (!shopId) return NextResponse.json({ error: "shopId required" }, { status: 400 });
 
-  const access = await requireShopAccessById(request, shopId);
-  if (access.error) return access.error;
+  const shopRes = await requireCtxShopAccessById(ctx, shopId);
+  if (shopRes.error) return shopRes.error;
 
+  ctx.detail = `${shopRes.shopName}: 検索語句を同期`;
   return handleSync(shopId);
-}
+});
 
 // GET: 後方互換（shopId or name）— 認証付き
 export async function GET(request: NextRequest) {

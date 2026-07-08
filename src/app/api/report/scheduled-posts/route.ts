@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth, requireShopAccessById, getUserAllowedShops, requireRole, safeEqual } from "@/lib/supabase";
+import { getSupabase, verifyAuth, requireShopAccessById, getUserAllowedShops, safeEqual } from "@/lib/supabase";
+import { withAudit, requireCtxShopAccess, requireCtxShopAccessById, type AuditContext } from "@/lib/audit";
 import { getAllOAuthTokens } from "@/lib/gbp-token";
 
 export const dynamic = "force-dynamic";
@@ -42,7 +43,7 @@ export async function GET(request: NextRequest) {
  * POST /api/report/scheduled-posts
  * 予約投稿を登録
  */
-export async function POST(request: NextRequest) {
+export const POST = withAudit("予約投稿作成", "DATA_OP", async (request, ctx) => {
   const body = await request.json();
   const { shopId, summary, topicType, photoUrl, actionType, actionUrl, scheduledAt } = body;
 
@@ -50,16 +51,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "shopId, summary, scheduledAtが必要です" }, { status: 400 });
   }
 
-  const access = await requireShopAccessById(request, shopId);
-  if (access.error) return access.error;
+  const shopRes = await requireCtxShopAccessById(ctx, shopId);
+  if (shopRes.error) return shopRes.error;
 
   const supabase = getSupabase();
-  const { data: shop } = await supabase.from("shops").select("name").eq("id", shopId).single();
 
   const { error } = await supabase.from("scheduled_posts").insert({
     id: crypto.randomUUID(),
     shop_id: shopId,
-    shop_name: shop?.name || "",
+    shop_name: shopRes.shopName,
     summary,
     topic_type: topicType || "STANDARD",
     photo_url: photoUrl || null,
@@ -70,17 +70,15 @@ export async function POST(request: NextRequest) {
   });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  ctx.detail = `${shopRes.shopName}: ${scheduledAt}に予約「${String(summary).slice(0, 50)}」`;
   return NextResponse.json({ success: true });
-}
+});
 
 /**
  * DELETE /api/report/scheduled-posts
  * 予約投稿を削除
  */
-export async function DELETE(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-
+export const DELETE = withAudit("予約投稿削除", "DATA_OP", async (request, ctx) => {
   const { id } = await request.json();
   if (!id) return NextResponse.json({ error: "idが必要です" }, { status: 400 });
 
@@ -88,23 +86,20 @@ export async function DELETE(request: NextRequest) {
   // 認可: 投稿のshop_nameから店舗アクセス権を検証
   const { data: post } = await supabase.from("scheduled_posts").select("shop_name").eq("id", id).maybeSingle();
   if (post?.shop_name) {
-    const { verifyShopAccess } = await import("@/lib/supabase");
-    const hasAccess = await verifyShopAccess(auth.sub, post.shop_name);
-    if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+    const shopErr = await requireCtxShopAccess(ctx, post.shop_name);
+    if (shopErr) return shopErr;
   }
 
   await supabase.from("scheduled_posts").delete().eq("id", id);
+  ctx.detail = `${post?.shop_name || "店舗不明"}: id=${id} を削除`;
   return NextResponse.json({ success: true });
-}
+});
 
 /**
  * PATCH /api/report/scheduled-posts
  * 予約投稿を更新（編集・リトライ）
  */
-export async function PATCH(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-
+export const PATCH = withAudit("予約投稿更新", "DATA_OP", async (request, ctx) => {
   const body = await request.json();
   const { id, summary, scheduledAt, status, approvalStatus } = body;
   if (!id) return NextResponse.json({ error: "idが必要です" }, { status: 400 });
@@ -124,10 +119,14 @@ export async function PATCH(request: NextRequest) {
   // 認可: 投稿のshop_nameから店舗アクセス権を検証
   const { data: post } = await supabase.from("scheduled_posts").select("shop_name").eq("id", id).maybeSingle();
   if (post?.shop_name) {
-    const { verifyShopAccess } = await import("@/lib/supabase");
-    const hasAccess = await verifyShopAccess(auth.sub, post.shop_name);
-    if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+    const shopErr = await requireCtxShopAccess(ctx, post.shop_name);
+    if (shopErr) return shopErr;
   }
+
+  // 監査ログ: 承認・差戻しは操作名で区別
+  if (approvalStatus === "approved") ctx.actionOverride = "予約投稿承認";
+  else if (approvalStatus === "rejected") ctx.actionOverride = "予約投稿差戻し";
+
   const update: Record<string, any> = {};
   if (summary !== undefined) update.summary = summary;
   if (scheduledAt !== undefined) update.scheduled_at = scheduledAt;
@@ -143,25 +142,36 @@ export async function PATCH(request: NextRequest) {
 
   const { error } = await supabase.from("scheduled_posts").update(update).eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  ctx.detail = `${post?.shop_name || "店舗不明"}: id=${id} 更新項目[${Object.keys(update).join(", ")}]`;
   return NextResponse.json({ success: true });
-}
+});
 
 /**
  * PUT /api/report/scheduled-posts
  * 予約投稿を実行（cronから呼ばれる or 手動実行）
+ * - cron: x-cron-secret 認証（JWT無し）のため withAudit を通さない
+ * - 手動: withAudit("予約投稿一括実行", EXTERNAL_OP) で認可+監査
  */
+const PUT_MANUAL = withAudit("予約投稿一括実行", "EXTERNAL_OP", async (request, ctx) => {
+  // 手動実行はアクセス権のある店舗の投稿だけを対象にする
+  const allowedShops = await getUserAllowedShops(ctx.sub);
+  return executeScheduledPosts(request, allowedShops, false, ctx);
+});
+
 export async function PUT(request: NextRequest) {
-  // 認証: JWT or Cron Secret（定数時間比較）
+  // 認証: Cron Secret（定数時間比較） or JWT
   const cronSecret = process.env.CRON_SECRET;
   const isCron = !!cronSecret && safeEqual(request.headers.get("x-cron-secret") || "", cronSecret);
-  let allowedShops: string[] | "all" = "all";
-  if (!isCron) {
-    // 手動実行は社長・社員のみ。かつ許可店舗の投稿だけを対象にする
-    const r = await requireRole(request, ["president", "manager"]);
-    if (r.error) return r.error;
-    allowedShops = await getUserAllowedShops(r.sub);
-  }
+  if (isCron) return executeScheduledPosts(request, "all", true, null);
+  return PUT_MANUAL(request);
+}
 
+async function executeScheduledPosts(
+  request: NextRequest,
+  allowedShops: string[] | "all",
+  isCron: boolean,
+  ctx: AuditContext | null,
+): Promise<NextResponse> {
   const supabase = getSupabase();
   const now = new Date().toISOString();
 
@@ -180,7 +190,10 @@ export async function PUT(request: NextRequest) {
   }
   // 手動実行時はアクセス権のある店舗に限定（全店舗一斉公開を防止）
   if (!isCron && allowedShops !== "all") {
-    if (allowedShops.length === 0) return NextResponse.json({ message: "実行対象なし", executed: 0 });
+    if (allowedShops.length === 0) {
+      if (ctx) ctx.detail = "実行対象なし（許可店舗0件）";
+      return NextResponse.json({ message: "実行対象なし", executed: 0 });
+    }
     query = query.in("shop_name", allowedShops);
   }
   const { data: rawPosts } = await query;
@@ -190,6 +203,7 @@ export async function PUT(request: NextRequest) {
   const posts = (rawPosts || []).filter((p) => p.approval_status !== "rejected");
 
   if (posts.length === 0) {
+    if (ctx) ctx.detail = force ? "実行対象なし（今すぐ実行）" : "実行対象なし";
     return NextResponse.json({ message: "実行対象なし", executed: 0 });
   }
 
@@ -339,5 +353,6 @@ export async function PUT(request: NextRequest) {
     }
   }
 
+  if (ctx) ctx.detail = `${force ? "今すぐ実行: " : ""}実行${executed}件/エラー${errors}件（対象${posts.length}件）`;
   return NextResponse.json({ executed, errors, total: posts.length });
 }

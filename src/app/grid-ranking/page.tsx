@@ -5,6 +5,7 @@ import api from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import { useShop } from "@/components/shop-provider";
 import { useRole } from "@/components/role-provider";
+import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
 import { usePasswordGate } from "@/components/password-gate";
 import DateRangePicker, { useDateRange } from "@/components/date-range-picker";
 import { jstToday } from "@/lib/jst-date";
@@ -711,7 +712,9 @@ export default function GridRankingPage() {
                               await api.post("/api/report/grid-ranking-presets", { shops: [{ shopId: p.shop_id, shopName: p.shop_name, keyword: newKw, gridSize: p.grid_size }] });
                               await refreshPresets();
                             }}
-                            className="w-full text-xs border rounded px-1.5 py-1 text-indigo-600"
+                            disabled={!can(role, "DATA_OP")}
+                            title={!can(role, "DATA_OP") ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                            className="w-full text-xs border rounded px-1.5 py-1 text-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             {allKws.map(kw => (
                               <option key={kw} value={kw}>{kw}</option>
@@ -742,7 +745,9 @@ export default function GridRankingPage() {
                     </div>
                     {/* 削除 */}
                     <button onClick={() => removeFromPreset(p.shop_id)}
-                      className="w-8 text-center text-xs text-red-400 hover:text-red-600">✕</button>
+                      disabled={!can(role, "DATA_OP")}
+                      title={!can(role, "DATA_OP") ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                      className="w-8 text-center text-xs text-red-400 hover:text-red-600 disabled:opacity-40 disabled:cursor-not-allowed">✕</button>
                   </div>
                 );
               })}
@@ -792,8 +797,9 @@ export default function GridRankingPage() {
                       setCoordSyncResult("エラー: " + (e?.message || "不明"));
                     } finally { setCoordSyncing(false); }
                   }}
-                  disabled={coordSyncing || batchRunning}
-                  className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all ${coordSyncing ? "bg-slate-100 text-slate-400" : "bg-slate-100 text-blue-600 hover:bg-blue-50 border border-blue-200"}`}
+                  disabled={!can(role, "PAID_OP") || coordSyncing || batchRunning}
+                  title={!can(role, "PAID_OP") ? PERMISSION_DENIED_HINT.PAID_OP : undefined}
+                  className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${coordSyncing ? "bg-slate-100 text-slate-400" : "bg-slate-100 text-blue-600 hover:bg-blue-50 border border-blue-200"}`}
                 >
                   {coordSyncing ? "座標取得中..." : "座標一括取得"}
                 </button>
@@ -823,8 +829,9 @@ export default function GridRankingPage() {
                     setKwSyncResult(`${updated}件更新${failed > 0 ? `（${failed}件見つからず）` : ""}`);
                     setKwSyncing(false);
                   }}
-                  disabled={kwSyncing || batchRunning}
-                  className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all ${kwSyncing ? "bg-slate-100 text-slate-400" : "bg-slate-100 text-purple-600 hover:bg-purple-50 border border-purple-200"}`}
+                  disabled={!can(role, "DATA_OP") || kwSyncing || batchRunning}
+                  title={!can(role, "DATA_OP") ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                  className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${kwSyncing ? "bg-slate-100 text-slate-400" : "bg-slate-100 text-purple-600 hover:bg-purple-50 border border-purple-200"}`}
                 >
                   {kwSyncing ? "KW取得中..." : "KW一括取得"}
                 </button>
@@ -1042,8 +1049,9 @@ export default function GridRankingPage() {
                   if (skipped > 0) skipMsg.push(`座標/KWなし${skipped}件`);
                   setBatchProgress(`✓ ${completed}店舗 × ${totalKws}KWの計測完了${skipMsg.length > 0 ? `（${skipMsg.join("・")}スキップ）` : ""}`);
                 }}
-                disabled={batchRunning || presets.filter(p => !isMeasuredThisMonth(p.last_measurement?.measured_at)).length === 0}
-                className={`w-full py-3.5 rounded-lg text-sm font-bold transition-all ${batchRunning ? "bg-slate-200 text-slate-500" : presets.filter(p => !isMeasuredThisMonth(p.last_measurement?.measured_at)).length === 0 ? "bg-slate-200 text-slate-500 cursor-not-allowed" : "bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm"}`}
+                disabled={!can(role, "PAID_OP") || batchRunning || presets.filter(p => !isMeasuredThisMonth(p.last_measurement?.measured_at)).length === 0}
+                title={!can(role, "PAID_OP") ? PERMISSION_DENIED_HINT.PAID_OP : undefined}
+                className={`w-full py-3.5 rounded-lg text-sm font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${batchRunning ? "bg-slate-200 text-slate-500" : presets.filter(p => !isMeasuredThisMonth(p.last_measurement?.measured_at)).length === 0 ? "bg-slate-200 text-slate-500 cursor-not-allowed" : "bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm"}`}
               >
                 {batchRunning ? batchProgress : (() => {
                   const noCoord = presets.filter(p => !p.has_coordinates).length;
@@ -1109,8 +1117,9 @@ export default function GridRankingPage() {
                       setAllShopsCoordResult("エラー: " + (e?.message || "不明"));
                     } finally { setAllShopsCoordSyncing(false); }
                   }}
-                  disabled={allShopsCoordSyncing || allShopsBatchRunning}
-                  className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all ${allShopsCoordSyncing ? "bg-slate-100 text-slate-400" : "bg-slate-100 text-blue-600 hover:bg-blue-50 border border-blue-200"}`}
+                  disabled={!can(role, "PAID_OP") || allShopsCoordSyncing || allShopsBatchRunning}
+                  title={!can(role, "PAID_OP") ? PERMISSION_DENIED_HINT.PAID_OP : undefined}
+                  className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${allShopsCoordSyncing ? "bg-slate-100 text-slate-400" : "bg-slate-100 text-blue-600 hover:bg-blue-50 border border-blue-200"}`}
                 >
                   {allShopsCoordSyncing ? "座標取得中..." : `座標一括取得（${allShopsFiltered.length}店舗）`}
                 </button>
@@ -1138,8 +1147,9 @@ export default function GridRankingPage() {
                     setAllShopsKwResult(`${updated}件更新${failed > 0 ? `（${failed}件見つからず）` : ""}`);
                     setAllShopsKwSyncing(false);
                   }}
-                  disabled={allShopsKwSyncing || allShopsBatchRunning}
-                  className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all ${allShopsKwSyncing ? "bg-slate-100 text-slate-400" : "bg-slate-100 text-purple-600 hover:bg-purple-50 border border-purple-200"}`}
+                  disabled={!can(role, "DATA_OP") || allShopsKwSyncing || allShopsBatchRunning}
+                  title={!can(role, "DATA_OP") ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                  className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${allShopsKwSyncing ? "bg-slate-100 text-slate-400" : "bg-slate-100 text-purple-600 hover:bg-purple-50 border border-purple-200"}`}
                 >
                   {allShopsKwSyncing ? "KW取得中..." : `KW一括取得（${allShopsFiltered.length}店舗）`}
                 </button>
@@ -1393,8 +1403,9 @@ export default function GridRankingPage() {
                   refreshKwMissing();
                   refreshGridStats();
                 }}
-                disabled={allShopsBatchRunning}
-                className={`w-full py-3.5 rounded-lg text-sm font-bold transition-all ${allShopsBatchRunning ? "bg-slate-200 text-slate-500" : "bg-orange-500 text-white hover:bg-orange-600 shadow-sm"}`}
+                disabled={!can(role, "PAID_OP") || allShopsBatchRunning}
+                title={!can(role, "PAID_OP") ? PERMISSION_DENIED_HINT.PAID_OP : undefined}
+                className={`w-full py-3.5 rounded-lg text-sm font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${allShopsBatchRunning ? "bg-slate-200 text-slate-500" : "bg-orange-500 text-white hover:bg-orange-600 shadow-sm"}`}
               >
                 {allShopsBatchRunning ? allShopsBatchProgress : `未計測のみ一括計測（${allShopsFiltered.length}店舗 — いつもの店舗を除く）`}
               </button>
@@ -1467,8 +1478,9 @@ export default function GridRankingPage() {
             )}
             <button
               onClick={fetchFromSheet}
-              disabled={sheetLoading || measuring}
-              className="mt-2 px-3 py-1.5 rounded-lg text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white disabled:opacity-50 transition"
+              disabled={!can(role, "DATA_OP") || sheetLoading || measuring}
+              title={!can(role, "DATA_OP") ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+              className="mt-2 px-3 py-1.5 rounded-lg text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white disabled:opacity-50 disabled:cursor-not-allowed transition"
             >
               {sheetLoading ? "取得中..." : "シートから反映"}
             </button>
@@ -1550,7 +1562,9 @@ export default function GridRankingPage() {
                     alert("座標取得エラー: " + msg);
                   }
                 }}
-                className="text-xs bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 transition"
+                disabled={!can(role, "PAID_OP")}
+                title={!can(role, "PAID_OP") ? PERMISSION_DENIED_HINT.PAID_OP : undefined}
+                className="text-xs bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 transition disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 GBPから自動取得
               </button>
@@ -1575,7 +1589,8 @@ export default function GridRankingPage() {
         <div className="flex gap-3 items-center">
           <button
             onClick={startMeasure}
-            disabled={measuring || !keyword.trim() || !shopLat || !isPresident}
+            disabled={!can(role, "PAID_OP") || measuring || !keyword.trim() || !shopLat}
+            title={!can(role, "PAID_OP") ? PERMISSION_DENIED_HINT.PAID_OP : undefined}
             className="bg-[#003D6B] text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-[#00507A] disabled:opacity-50 disabled:cursor-not-allowed transition"
           >
             {measuring ? "計測中..." : "計測開始"}
@@ -1593,8 +1608,9 @@ export default function GridRankingPage() {
           {selectedShopId && selectedShop && (
             <button
               onClick={() => addToPreset(selectedShopId, (selectedShop as any).name || "", gridSize)}
-              disabled={addingPreset}
-              className="bg-indigo-500 text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-indigo-600 transition disabled:opacity-50"
+              disabled={!can(role, "DATA_OP") || addingPreset}
+              title={!can(role, "DATA_OP") ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+              className="bg-indigo-500 text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-indigo-600 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {addingPreset ? "追加中（KW取得中）..." : "いつもの店舗に追加"}
             </button>
@@ -1808,7 +1824,9 @@ export default function GridRankingPage() {
                               fetchHistory();
                             } catch {}
                           }}
-                          className="text-xs text-red-400 hover:text-red-600"
+                          disabled={!can(role, "DATA_OP")}
+                          title={!can(role, "DATA_OP") ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                          className="text-xs text-red-400 hover:text-red-600 disabled:opacity-40 disabled:cursor-not-allowed"
                         >削除</button>
                       </td>
                     </tr>

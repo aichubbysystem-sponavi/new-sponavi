@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth, verifyShopAccess } from "@/lib/supabase";
+import { NextResponse } from "next/server";
+import { getSupabase } from "@/lib/supabase";
+import { withAudit, requireCtxShopAccess } from "@/lib/audit";
 import { getOAuthToken } from "@/lib/gbp-token";
 
 export const dynamic = "force-dynamic";
@@ -47,12 +48,7 @@ async function fetchMedia(locationName: string, accessToken: string): Promise<Me
   return allMedia;
 }
 
-export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid || !auth.sub) {
-    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-  }
-
+export const POST = withAudit("メディア同期", "DATA_OP", async (request, ctx) => {
   const body = await request.json().catch(() => ({}));
   const shopIds: string[] = body.shopIds || [];
 
@@ -61,8 +57,8 @@ export async function POST(request: NextRequest) {
     const sb = getSupabase();
     const { data: shops } = await sb.from("shops").select("name").in("id", shopIds);
     for (const shop of shops || []) {
-      const hasAccess = await verifyShopAccess(auth.sub, shop.name);
-      if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+      const shopErr = await requireCtxShopAccess(ctx, shop.name);
+      if (shopErr) return shopErr;
     }
   }
 
@@ -110,5 +106,6 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  ctx.detail = `対象${shops.length}店舗: メディア${totalSynced}件同期`;
   return NextResponse.json({ success: true, shops: shops.length, totalSynced });
-}
+});

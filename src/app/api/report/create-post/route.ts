@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, requireRole, verifyShopAccess } from "@/lib/supabase";
+import { NextResponse } from "next/server";
+import { getSupabase } from "@/lib/supabase";
+import { withAudit, requireCtxShopAccess } from "@/lib/audit";
 import { getOAuthToken } from "@/lib/gbp-token";
 
 export const dynamic = "force-dynamic";
@@ -10,11 +11,7 @@ const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
  * POST /api/report/create-post
  * GBP投稿を作成（写真対応）
  */
-export async function POST(request: NextRequest) {
-  // 投稿作成は社長・マネージャーのみ
-  const r = await requireRole(request, ["president", "manager"]);
-  if (r.error) return r.error;
-
+export const POST = withAudit("GBP投稿作成", "EXTERNAL_OP", async (request, ctx) => {
   const body = await request.json();
   const { shopId, summary, topicType, callToAction, photoUrl } = body as {
     shopId: string;
@@ -32,8 +29,8 @@ export async function POST(request: NextRequest) {
   const sbAccess = getSupabase();
   const { data: shopAccess } = await sbAccess.from("shops").select("name").eq("id", shopId).maybeSingle();
   if (shopAccess?.name) {
-    const hasAccess = await verifyShopAccess(r.sub, shopAccess.name);
-    if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+    const shopErr = await requireCtxShopAccess(ctx, shopAccess.name);
+    if (shopErr) return shopErr;
   }
 
   const accessToken = await getOAuthToken();
@@ -51,6 +48,8 @@ export async function POST(request: NextRequest) {
   if (!shop?.gbp_location_name) {
     return NextResponse.json({ error: "店舗のGBP情報が見つかりません" }, { status: 404 });
   }
+
+  ctx.detail = `${shop.name || shopId}: 「${summary.slice(0, 50)}」${photoUrl ? "（写真あり）" : ""}`;
 
   const { resolveLocationName } = await import("@/lib/gbp-location");
   const locationName = await resolveLocationName(shop.gbp_location_name);
@@ -127,4 +126,4 @@ export async function POST(request: NextRequest) {
   } catch {
     return NextResponse.json({ error: "投稿に失敗しました" }, { status: 500 });
   }
-}
+});

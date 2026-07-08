@@ -7,7 +7,8 @@
  * 解約店舗IDリストを返す
  */
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth, requireRole } from "@/lib/supabase";
+import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { withAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -27,11 +28,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({ cancelled: data || [] });
 }
 
-export async function POST(request: NextRequest) {
-  // 店舗解約は社長・マネージャーのみ
-  const r = await requireRole(request, ["president", "manager"]);
-  if (r.error) return r.error;
-
+export const POST = withAudit("店舗解約フラグ切替", "DATA_OP", async (request, ctx) => {
   const body = await request.json();
   const { shopId, cancel } = body;
   if (!shopId) return NextResponse.json({ error: "shopId is required" }, { status: 400 });
@@ -41,7 +38,7 @@ export async function POST(request: NextRequest) {
     .from("shops")
     .update({ cancelled_at: cancel ? new Date().toISOString() : null })
     .eq("id", shopId)
-    .select("id");
+    .select("id, name");
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
@@ -53,5 +50,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  ctx.targetShop = updated[0].name;
+  ctx.detail = `${updated[0].name}: 解約フラグを${cancel ? "ON（解約）" : "OFF（解約解除）"}`;
   return NextResponse.json({ ok: true, shopId, cancelled: !!cancel });
-}
+});

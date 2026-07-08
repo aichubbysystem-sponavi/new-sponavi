@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireRole, verifyShopAccess } from "@/lib/supabase";
+import { NextResponse } from "next/server";
+import { withAudit, requireCtxShopAccess } from "@/lib/audit";
 import { validateBody, generatePostSchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
@@ -9,11 +9,9 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 
 /**
  * POST /api/report/generate-post
- * 投稿文章をAIで自動生成（社長・マネージャーのみ）
+ * 投稿文章をAIで自動生成
  */
-export async function POST(request: NextRequest) {
-  const r = await requireRole(request, ["president", "manager"]);
-  if (r.error) return r.error;
+export const POST = withAudit("AI投稿文生成", "PAID_OP", async (request, ctx) => {
   if (!ANTHROPIC_API_KEY) return NextResponse.json({ error: "ANTHROPIC_API_KEYが設定されていません" }, { status: 500 });
 
   const { data: body, error: valErr } = await validateBody(request, generatePostSchema);
@@ -22,9 +20,10 @@ export async function POST(request: NextRequest) {
 
   // 認可チェック
   if (shopName) {
-    const hasAccess = await verifyShopAccess(r.sub, shopName);
-    if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+    const shopErr = await requireCtxShopAccess(ctx, shopName);
+    if (shopErr) return shopErr;
   }
+  ctx.detail = `${shopName || "店舗未指定"}: タイプ${topicType || "STANDARD"}${keywords ? `、KW: ${String(keywords).slice(0, 50)}` : ""}`;
   const category = "";
 
   const topicLabel: Record<string, string> = {
@@ -171,4 +170,4 @@ ${n >= 5 ? "\n5.\n(投稿文)" : ""}`;
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || "生成に失敗しました" }, { status: 500 });
   }
-}
+});

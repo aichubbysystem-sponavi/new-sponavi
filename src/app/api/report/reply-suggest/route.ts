@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireRole, verifyShopAccess } from "@/lib/supabase";
+import { NextResponse } from "next/server";
+import { withAudit, requireCtxShopAccess } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -9,11 +9,7 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
  * POST /api/report/reply-suggest
  * 口コミに対するAI返信案を生成
  */
-export async function POST(request: NextRequest) {
-  // Claude API課金を伴うため社長・社員のみ（バイトは不可）
-  const r = await requireRole(request, ["president", "manager"]);
-  if (r.error) return r.error;
-
+export const POST = withAudit("AI返信文提案", "PAID_OP", async (request, ctx) => {
   if (!ANTHROPIC_API_KEY) {
     return NextResponse.json({ error: "ANTHROPIC_API_KEYが設定されていません" }, { status: 500 });
   }
@@ -28,8 +24,8 @@ export async function POST(request: NextRequest) {
 
   // 認可チェック
   if (shopName) {
-    const hasAccess = await verifyShopAccess(r.sub, shopName);
-    if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+    const shopErr = await requireCtxShopAccess(ctx, shopName);
+    if (shopErr) return shopErr;
   }
 
   if (!comment && starRating === 0) {
@@ -43,6 +39,8 @@ export async function POST(request: NextRequest) {
     : "真摯にお詫びし、具体的な改善策を示す誠実なトーン";
 
   const count = body.count || 1; // 候補数（1 or 5）
+
+  ctx.detail = `${shopName || "店舗未指定"}: ★${starRating}の口コミへの返信案${count >= 5 ? 5 : 1}件生成`;
 
   const prompt = count >= 5
     ? `あなたは「${shopName}」の店舗オーナーです。以下のGoogleの口コミに対する返信文を5パターン生成してください。
@@ -126,4 +124,4 @@ ${reviewerName ? `投稿者: ${reviewerName}` : ""}
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || "返信生成に失敗しました" }, { status: 500 });
   }
-}
+});

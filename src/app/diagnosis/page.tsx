@@ -5,6 +5,7 @@ import { useShop } from "@/components/shop-provider";
 import { useRole } from "@/components/role-provider";
 import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
+import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
 
 interface DiagnosisItem {
   label: string;
@@ -24,6 +25,7 @@ interface Competitor {
 export default function DiagnosisPage() {
   const { selectedShopId, selectedShop, apiConnected } = useShop();
   const { role } = useRole();
+  const canPaid = can(role, "PAID_OP"); // 競合検索（社長のみ・Places API課金）
   const [items, setItems] = useState<DiagnosisItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [competitors, setCompetitors] = useState<Competitor[]>([]);
@@ -221,7 +223,7 @@ export default function DiagnosisPage() {
                 <p className="text-[10px] text-slate-400 mt-0.5">半径2km以内の同業種店舗と比較</p>
               </div>
               <button onClick={async () => {
-                if (role !== "president") { alert("競合分析の実行は社長アカウントのみ可能です（Places API課金のため）"); return; }
+                if (!canPaid) return;
                 setCompLoading(true);
                 try {
                   const token = (await (await import("@/lib/supabase")).supabase.auth.getSession()).data.session?.access_token;
@@ -240,9 +242,10 @@ export default function DiagnosisPage() {
                   setMyShopData(null);
                 }
                 setCompLoading(false);
-              }} disabled={compLoading}
-                className={`px-4 py-2 rounded-lg text-xs font-semibold ${compLoading ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
-                style={{ color: compLoading ? undefined : "#fff" }}>
+              }} disabled={compLoading || !canPaid}
+                title={!canPaid ? PERMISSION_DENIED_HINT.PAID_OP : undefined}
+                className={`px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed ${compLoading || !canPaid ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
+                style={{ color: compLoading || !canPaid ? undefined : "#fff" }}>
                 {compLoading ? "分析中..." : "競合を分析"}
               </button>
             </div>

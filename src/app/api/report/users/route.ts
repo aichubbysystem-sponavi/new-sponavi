@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, requireRole } from "@/lib/supabase";
+import { withAudit } from "@/lib/audit";
+import { isAppRole } from "@/lib/permissions";
 import { validateBody, userCreateSchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
@@ -19,20 +21,12 @@ export async function GET(request: NextRequest) {
 /**
  * POST /api/report/users — ユーザー作成（社長のみ）
  */
-export async function POST(request: NextRequest) {
-  const r = await requireRole(request, ["president"]);
-  if (r.error) return r.error;
-
+export const POST = withAudit("ユーザー作成", "ADMIN", async (request, ctx) => {
   const { data: body, error: valErr } = await validateBody(request, userCreateSchema);
   if (valErr) return valErr;
   const { name, username, password, role } = body;
 
   const supabase = getSupabase();
-
-  // 操作者のプロフィールを取得（監査ログ用）
-  const { data: operator } = await supabase.from("user_profiles").select("name").eq("id", r.sub).single();
-  const operatorName = operator?.name || "不明";
-
   const email = `${username.replace(/[^a-zA-Z0-9._-]/g, "_")}@sponavi.internal`;
 
   // Supabase Authにユーザー作成
@@ -58,16 +52,9 @@ export async function POST(request: NextRequest) {
     role: role || "manager",
   });
 
-  // 操作ログ
-  await supabase.from("audit_logs").insert({
-    id: crypto.randomUUID(),
-    user_name: operatorName,
-    action: "ユーザー作成",
-    detail: `${name}（${username}）をロール「${role || "manager"}」で作成`,
-  });
-
+  ctx.detail = `${name}（${username}）をロール「${role || "manager"}」で作成`;
   return NextResponse.json({ success: true, userId: authUser.user.id });
-}
+});
 
 /**
  * PUT /api/report/users — 登録申請（認証不要）
@@ -113,12 +100,15 @@ export async function PUT(request: NextRequest) {
     role: "pending",
   });
 
-  // 操作ログ
+  // 操作ログ（未認証の登録申請なので直接insert）
   await supabase.from("audit_logs").insert({
     id: crypto.randomUUID(),
     user_name: name,
     action: "登録申請",
+    action_type: "ADMIN",
     detail: `${name}（${username}）が登録申請`,
+    method: "PUT",
+    path: "/api/report/users",
   });
 
   return NextResponse.json({ success: true });
@@ -127,10 +117,7 @@ export async function PUT(request: NextRequest) {
 /**
  * PATCH /api/report/users — 承認・ロール変更（社長のみ）
  */
-export async function PATCH(request: NextRequest) {
-  const r = await requireRole(request, ["president"]);
-  if (r.error) return r.error;
-
+export const PATCH = withAudit("ユーザー管理", "ADMIN", async (request, ctx) => {
   const { userId, action, role, name } = await request.json() as {
     userId: string;
     action: "approve" | "reject" | "change_role";
@@ -141,12 +128,12 @@ export async function PATCH(request: NextRequest) {
   if (!userId || !action) {
     return NextResponse.json({ error: "userId と action は必須です" }, { status: 400 });
   }
+  // ロール指定がある場合は許可リストで検証（未知の値の保存を防ぐ）
+  if ((action === "approve" || action === "change_role") && role !== undefined && !isAppRole(role)) {
+    return NextResponse.json({ error: "不正なロールです" }, { status: 400 });
+  }
 
   const supabase = getSupabase();
-
-  // 操作者名
-  const { data: operator } = await supabase.from("user_profiles").select("name").eq("id", r.sub).single();
-  const operatorName = operator?.name || "不明";
 
   // 対象ユーザー
   const { data: target } = await supabase.from("user_profiles").select("name, username, role").eq("id", userId).single();
@@ -163,12 +150,8 @@ export async function PATCH(request: NextRequest) {
     await supabase.auth.admin.updateUserById(userId, {
       user_metadata: { name: newName, role: newRole },
     });
-    await supabase.from("audit_logs").insert({
-      id: crypto.randomUUID(),
-      user_name: operatorName,
-      action: "登録承認",
-      detail: `${newName}（${target.username}）をロール「${newRole}」で承認`,
-    });
+    ctx.actionOverride = "登録承認";
+    ctx.detail = `${newName}（${target.username}）をロール「${newRole}」で承認`;
     return NextResponse.json({ success: true });
   }
 
@@ -176,12 +159,8 @@ export async function PATCH(request: NextRequest) {
     // Supabase Authから削除
     await supabase.auth.admin.deleteUser(userId);
     await supabase.from("user_profiles").delete().eq("id", userId);
-    await supabase.from("audit_logs").insert({
-      id: crypto.randomUUID(),
-      user_name: operatorName,
-      action: "登録却下",
-      detail: `${target.name}（${target.username}）の登録申請を却下`,
-    });
+    ctx.actionOverride = "登録却下";
+    ctx.detail = `${target.name}（${target.username}）の登録申請を却下`;
     return NextResponse.json({ success: true });
   }
 
@@ -192,33 +171,22 @@ export async function PATCH(request: NextRequest) {
     await supabase.auth.admin.updateUserById(userId, {
       user_metadata: { role },
     });
-    await supabase.from("audit_logs").insert({
-      id: crypto.randomUUID(),
-      user_name: operatorName,
-      action: "ロール変更",
-      detail: `${target.name}（${target.username}）のロールを「${oldRole}」→「${role}」に変更`,
-    });
+    ctx.actionOverride = "ロール変更";
+    ctx.detail = `${target.name}（${target.username}）のロールを「${oldRole}」→「${role}」に変更`;
     return NextResponse.json({ success: true });
   }
 
   return NextResponse.json({ error: "不正なaction" }, { status: 400 });
-}
+});
 
 /**
  * DELETE /api/report/users — ユーザー削除
  */
-export async function DELETE(request: NextRequest) {
-  const r = await requireRole(request, ["president"]);
-  if (r.error) return r.error;
-
+export const DELETE = withAudit("ユーザー削除", "ADMIN", async (request, ctx) => {
   const { userId } = await request.json();
   if (!userId) return NextResponse.json({ error: "userIdが必要です" }, { status: 400 });
 
   const supabase = getSupabase();
-
-  // 操作者のプロフィールを取得（監査ログ用）
-  const { data: operator } = await supabase.from("user_profiles").select("name").eq("id", r.sub).single();
-  const operatorName = operator?.name || "不明";
 
   // 削除対象のプロフィール取得（ログ用）
   const { data: profile } = await supabase.from("user_profiles").select("name, username").eq("id", userId).single();
@@ -229,13 +197,6 @@ export async function DELETE(request: NextRequest) {
   // プロフィールも削除
   await supabase.from("user_profiles").delete().eq("id", userId);
 
-  // 操作ログ
-  await supabase.from("audit_logs").insert({
-    id: crypto.randomUUID(),
-    user_name: operatorName,
-    action: "ユーザー削除",
-    detail: `${profile?.name || "不明"}（${profile?.username || ""}）を削除`,
-  });
-
+  ctx.detail = `${profile?.name || "不明"}（${profile?.username || ""}）を削除`;
   return NextResponse.json({ success: true });
-}
+});

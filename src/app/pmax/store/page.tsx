@@ -3,6 +3,8 @@
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { useRole } from "@/components/role-provider";
+import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
 import PmaxReportView, { type CampaignRow, type GbpRow } from "@/components/pmax-report-view";
 
 // ── メインコンポーネント ──
@@ -23,6 +25,8 @@ export default function PmaxStoreDetailPage() {
 }
 
 function StoreDetailContent() {
+  const { role } = useRole();
+  const canData = can(role, "DATA_OP"); // 共有URL発行/停止（社長・幹部）
   const searchParams = useSearchParams();
   const shopName = searchParams.get("name") || "";
   const paramYear = searchParams.get("year");
@@ -168,7 +172,9 @@ function StoreDetailContent() {
                 alert("共有URLをコピーしました");
               } catch { alert("共有URL発行に失敗しました"); }
             }}
-            style={{ color: "#fff", background: "rgba(79,195,247,0.2)", border: "1px solid rgba(79,195,247,0.4)", padding: "5px 14px", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600 }}
+            disabled={!canData}
+            title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+            style={{ color: "#fff", background: "rgba(79,195,247,0.2)", border: "1px solid rgba(79,195,247,0.4)", padding: "5px 14px", borderRadius: 8, cursor: canData ? "pointer" : "not-allowed", fontSize: 12, fontWeight: 600, opacity: canData ? 1 : 0.4 }}
           >
             共有URLを発行
           </button>
@@ -186,7 +192,9 @@ function StoreDetailContent() {
                 alert("共有URLを停止しました");
               } catch { alert("共有URLの停止に失敗しました"); }
             }}
-            style={{ color: "rgba(255,255,255,0.85)", background: "rgba(244,67,54,0.15)", border: "1px solid rgba(244,67,54,0.4)", padding: "5px 14px", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600 }}
+            disabled={!canData}
+            title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+            style={{ color: "rgba(255,255,255,0.85)", background: "rgba(244,67,54,0.15)", border: "1px solid rgba(244,67,54,0.4)", padding: "5px 14px", borderRadius: 8, cursor: canData ? "pointer" : "not-allowed", fontSize: 12, fontWeight: 600, opacity: canData ? 1 : 0.4 }}
           >
             共有を停止
           </button>

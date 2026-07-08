@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useShop } from "@/components/shop-provider";
+import { useRole } from "@/components/role-provider";
 import api from "@/lib/api";
+import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
 
 interface FieldEntry {
   id?: string;
@@ -12,6 +14,8 @@ interface FieldEntry {
 
 export default function FixedMessagePage() {
   const { apiConnected, selectedShopId, selectedShop } = useShop();
+  const { role } = useRole();
+  const canData = can(role, "DATA_OP"); // 差し込み文字列保存（社長・幹部）
   const [fields, setFields] = useState<FieldEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -147,7 +151,9 @@ export default function FixedMessagePage() {
 
           <div className="flex items-center gap-3">
             <button onClick={handleAddField} className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition">+ 設定追加</button>
-            <button onClick={handleSave} disabled={saving} className="px-6 py-2.5 rounded-lg text-sm font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-50 transition">
+            <button onClick={handleSave} disabled={saving || !canData}
+              title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+              className="px-6 py-2.5 rounded-lg text-sm font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-40 disabled:cursor-not-allowed transition">
               {saving ? "保存中..." : "保存する"}
             </button>
             <button onClick={fetchData} disabled={loading} className="px-4 py-2.5 rounded-lg text-sm font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-50 transition">リセット</button>

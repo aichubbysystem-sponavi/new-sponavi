@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth, verifyShopAccess, requireRole } from "@/lib/supabase";
+import { getSupabase, requireRole } from "@/lib/supabase";
+import { withAudit, requireCtxShopAccess } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -27,12 +28,7 @@ function normalizePhone(text: string): string {
  * POST /api/report/nap-check
  * Go API経由でGBP location情報を取得し、DB情報と比較
  */
-export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid || !auth.sub) {
-    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-  }
-
+export const POST = withAudit("NAPチェック実行", "DATA_OP", async (request, ctx) => {
   const authHeader = request.headers.get("authorization") || "";
   const body = await request.json().catch(() => ({}));
   const shopIds: string[] = body.shopIds || [];
@@ -42,8 +38,8 @@ export async function POST(request: NextRequest) {
     const sbAccess = getSupabase();
     const { data: shops } = await sbAccess.from("shops").select("name").in("id", shopIds);
     for (const shop of shops || []) {
-      const hasAccess = await verifyShopAccess(auth.sub, shop.name);
-      if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+      const shopErr = await requireCtxShopAccess(ctx, shop.name);
+      if (shopErr) return shopErr;
     }
   }
 
@@ -150,23 +146,26 @@ export async function POST(request: NextRequest) {
     await supabase.from("nap_check_results").insert(rows.slice(i, i + 50));
   }
 
+  const okCount = results.filter((r) => r.status === "OK").length;
+  const ngCount = results.filter((r) => r.status !== "OK" && r.status !== "エラー" && r.status !== "GBP取得エラー").length;
+  ctx.detail = `対象${shops.length}店舗: チェック${checked}件, OK${okCount}件, NG${ngCount}件, エラー${errors}件`;
   return NextResponse.json({
     success: true,
     total: shops.length,
     checked,
     errors,
-    ok: results.filter((r) => r.status === "OK").length,
-    ng: results.filter((r) => r.status !== "OK" && r.status !== "エラー" && r.status !== "GBP取得エラー").length,
+    ok: okCount,
+    ng: ngCount,
     results,
   });
-}
+});
 
 /**
  * GET /api/report/nap-check
  */
 export async function GET(request: NextRequest) {
-  // NAPチェック結果（全店舗横断）は社長・社員のみ
-  const r = await requireRole(request, ["president", "manager"]);
+  // NAPチェック結果（全店舗横断）は社長・幹部・社員のみ
+  const r = await requireRole(request, ["president", "executive", "manager"]);
   if (r.error) return r.error;
 
   const supabase = getSupabase();

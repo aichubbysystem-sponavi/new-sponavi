@@ -4,6 +4,8 @@ import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import api from "@/lib/api";
 import BackToTopLink from "@/components/back-to-top-link";
+import { useRole } from "@/components/role-provider";
+import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
 
 type StoreSummary = {
   shopName: string;
@@ -41,6 +43,9 @@ function extractErrorDetail(err: unknown): string {
 }
 
 export default function PmaxTopPage() {
+  const { role } = useRole();
+  const canPaid = can(role, "PAID_OP"); // P-MAX同期（社長のみ）
+  const canData = can(role, "DATA_OP"); // 共有リンク発行/削除（社長・幹部）
   const [stores, setStores] = useState<StoreSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -353,9 +358,10 @@ export default function PmaxTopPage() {
         <div className="flex flex-wrap items-center gap-3 mb-5 bg-white border border-slate-200 rounded-lg px-4 py-3">
           <button
             onClick={() => handleSync("all")}
-            disabled={syncing}
-            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-              syncing
+            disabled={syncing || !canPaid}
+            title={!canPaid ? PERMISSION_DENIED_HINT.PAID_OP : undefined}
+            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+              syncing || !canPaid
                 ? "bg-slate-200 text-slate-400 cursor-not-allowed"
                 : "bg-[#003D6B] text-white hover:bg-[#002a4d] shadow-sm"
             }`}
@@ -426,9 +432,10 @@ export default function PmaxTopPage() {
               </button>
               <button
                 onClick={() => handleSync("selected")}
-                disabled={syncing || selectedShops.size === 0}
-                className={`px-4 py-1.5 rounded text-xs font-bold whitespace-nowrap transition-all ${
-                  syncing || selectedShops.size === 0
+                disabled={syncing || selectedShops.size === 0 || !canPaid}
+                title={!canPaid ? PERMISSION_DENIED_HINT.PAID_OP : undefined}
+                className={`px-4 py-1.5 rounded text-xs font-bold whitespace-nowrap transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                  syncing || selectedShops.size === 0 || !canPaid
                     ? "bg-slate-200 text-slate-400 cursor-not-allowed"
                     : "bg-[#003D6B] text-white hover:bg-[#002a4d]"
                 }`}
@@ -521,10 +528,10 @@ export default function PmaxTopPage() {
                       {!section.isUngrouped && (
                         <button
                           onClick={() => handleShareGroup(section.name)}
-                          disabled={sharingGroup === section.name}
-                          title="このグループの共有リンク（ログイン不要）を発行します"
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap transition-all ${
-                            sharingGroup === section.name
+                          disabled={sharingGroup === section.name || !canData}
+                          title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : "このグループの共有リンク（ログイン不要）を発行します"}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                            sharingGroup === section.name || !canData
                               ? "bg-slate-200 text-slate-400 cursor-not-allowed"
                               : "bg-[#003D6B] text-white hover:bg-[#002a4d]"
                           }`}
@@ -645,7 +652,9 @@ export default function PmaxTopPage() {
                     setTimeout(() => setSyncProgress(""), 6000);
                   }
                 }}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-50 text-red-600 border border-red-200 hover:bg-red-100"
+                disabled={!canData}
+                title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 この共有を停止
               </button>

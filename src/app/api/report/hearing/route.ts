@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth, requireShopAccessById } from "@/lib/supabase";
+import { getSupabase, requireShopAccessById } from "@/lib/supabase";
+import { withAudit, requireCtxShopAccessById } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ export async function GET(request: NextRequest) {
  * POST /api/report/hearing
  * ヒアリングシート保存（upsert）
  */
-export async function POST(request: NextRequest) {
+export const POST = withAudit("ヒアリング保存", "DATA_OP", async (request, ctx) => {
   const body = await request.json();
   const { shopId, data: hearingData } = body;
 
@@ -38,8 +39,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "shopIdとdataが必要です" }, { status: 400 });
   }
 
-  const access = await requireShopAccessById(request, shopId);
-  if (access.error) return access.error;
+  const shopRes = await requireCtxShopAccessById(ctx, shopId);
+  if (shopRes.error) return shopRes.error;
 
   const supabase = getSupabase();
 
@@ -63,5 +64,6 @@ export async function POST(request: NextRequest) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  ctx.detail = `${shopRes.shopName}: ヒアリングシートを${existing ? "更新" : "新規作成"}`;
   return NextResponse.json({ success: true });
-}
+});

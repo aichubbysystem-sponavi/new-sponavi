@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireRole, verifyShopAccess } from "@/lib/supabase";
+import { NextResponse } from "next/server";
+import { withAudit, requireCtxShopAccess } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -10,10 +10,7 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
  * POST /api/report/generate-description
  * GBP説明文/カテゴリ提案をAIで生成
  */
-export async function POST(request: NextRequest) {
-  // Claude API課金を伴うため社長・社員のみ
-  const r = await requireRole(request, ["president", "manager"]);
-  if (r.error) return r.error;
+export const POST = withAudit("AI説明文生成", "PAID_OP", async (request, ctx) => {
   if (!ANTHROPIC_API_KEY) return NextResponse.json({ error: "ANTHROPIC_API_KEYが設定されていません" }, { status: 500 });
 
   const body = await request.json();
@@ -21,9 +18,10 @@ export async function POST(request: NextRequest) {
 
   // 認可チェック
   if (shopName) {
-    const hasAccess = await verifyShopAccess(r.sub, shopName);
-    if (!hasAccess) return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
+    const shopErr = await requireCtxShopAccess(ctx, shopName);
+    if (shopErr) return shopErr;
   }
+  ctx.detail = `${shopName || "店舗未指定"}: mode=${mode}`;
 
   let prompt = "";
 
@@ -104,4 +102,4 @@ ${address ? `【所在地】${address}` : ""}
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || "生成に失敗しました" }, { status: 500 });
   }
-}
+});

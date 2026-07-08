@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
  * 多地点順位チェックのステータスサマリーを返す
  */
 export async function GET(request: NextRequest) {
-  const r = await requireRole(request, ["president", "manager"]);
+  const r = await requireRole(request, ["president", "executive", "manager"]);
   if (r.error) return r.error;
 
   const sb = getSupabase();

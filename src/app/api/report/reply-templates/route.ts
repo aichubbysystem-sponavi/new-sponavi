@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth, requireRole } from "@/lib/supabase";
+import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { withAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -32,18 +33,15 @@ export async function GET(request: NextRequest) {
  * POST /api/report/reply-templates
  * テンプレート保存 or 使用回数カウントアップ
  */
-export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) {
-    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
-  }
-
+export const POST = withAudit("返信テンプレ保存", "DATA_OP", async (request, ctx) => {
   const body = await request.json();
   const { action, id, name, content, star_category, tags } = body;
   const supabase = getSupabase();
 
   if (action === "increment") {
+    ctx.actionOverride = "返信テンプレ更新";
     if (!id) return NextResponse.json({ error: "idが必要です" }, { status: 400 });
+    ctx.detail = `id=${id} 使用回数+1`;
     // 原子的にカウントアップ（TOCTOU回避）
     const { error } = await supabase.rpc("increment_use_count", { template_id: id });
     if (error) {
@@ -62,12 +60,11 @@ export async function POST(request: NextRequest) {
   }
 
   if (action === "delete") {
+    ctx.actionOverride = "返信テンプレ削除";
     if (!id) return NextResponse.json({ error: "idが必要です" }, { status: 400 });
-    // 削除は管理者（president, manager）のみ許可
-    const r = await requireRole(request, ["president", "manager"]);
-    if (r.error) return r.error;
     const { error } = await supabase.from("reply_templates").delete().eq("id", id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    ctx.detail = `id=${id} を削除`;
     return NextResponse.json({ success: true });
   }
 
@@ -75,6 +72,7 @@ export async function POST(request: NextRequest) {
   if (!name || !content) {
     return NextResponse.json({ error: "nameとcontentが必要です" }, { status: 400 });
   }
+  ctx.detail = `「${String(name).slice(0, 50)}」を保存（星カテゴリ: ${star_category || "all"}）`;
 
   const { data, error } = await supabase
     .from("reply_templates")
@@ -93,4 +91,4 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json(data);
-}
+});

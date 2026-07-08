@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireRole, getSupabase } from "@/lib/supabase";
+import { withAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -21,10 +22,7 @@ export async function GET(request: NextRequest) {
 }
 
 /** 店舗アクセス権の付与（社長のみ） */
-export async function POST(request: NextRequest) {
-  const r = await requireRole(request, ["president"]);
-  if ("error" in r) return r.error;
-
+export const POST = withAudit("店舗アクセス付与", "ADMIN", async (request, ctx) => {
   const body = await request.json();
   const { auth_uid, shop_names } = body as { auth_uid: string; shop_names: string[] };
 
@@ -42,14 +40,12 @@ export async function POST(request: NextRequest) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+  ctx.detail = `ユーザー ${auth_uid} に店舗アクセスを付与: ${shop_names.join(", ")}`.slice(0, 500);
   return NextResponse.json({ added: data?.length || 0 });
-}
+});
 
 /** 店舗アクセス権の削除（社長のみ） */
-export async function DELETE(request: NextRequest) {
-  const r = await requireRole(request, ["president"]);
-  if ("error" in r) return r.error;
-
+export const DELETE = withAudit("店舗アクセス剥奪", "ADMIN", async (request, ctx) => {
   const { searchParams } = request.nextUrl;
   const id = searchParams.get("id");
   const auth_uid = searchParams.get("auth_uid");
@@ -59,6 +55,7 @@ export async function DELETE(request: NextRequest) {
   if (id) {
     const { error } = await sb.from("user_shop_access").delete().eq("id", id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    ctx.detail = `店舗アクセス権を削除（id=${id}）`;
     return NextResponse.json({ deleted: true });
   }
 
@@ -68,8 +65,12 @@ export async function DELETE(request: NextRequest) {
     if (shop_name) query = query.eq("shop_name", shop_name);
     const { error } = await query;
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    ctx.detail = shop_name
+      ? `ユーザー ${auth_uid} の店舗「${shop_name}」アクセス権を削除`
+      : `ユーザー ${auth_uid} の全店舗アクセス権を削除`;
+    if (shop_name) ctx.targetShop = shop_name;
     return NextResponse.json({ deleted: true });
   }
 
   return NextResponse.json({ error: "id または auth_uid が必要です" }, { status: 400 });
-}
+});

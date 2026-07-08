@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, requireShopAccessById } from "@/lib/supabase";
+import { NextResponse } from "next/server";
+import { getSupabase } from "@/lib/supabase";
+import { withAudit, requireCtxShopAccessById } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -11,7 +12,7 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
  * POST /api/report/survey
  * アンケート回答からAI口コミ文を生成
  */
-export async function POST(request: NextRequest) {
+export const POST = withAudit("アンケート回答保存", "DATA_OP", async (request, ctx) => {
   const body = await request.json();
   const { shopId, shopName, rating, answers } = body as {
     shopId: string;
@@ -24,8 +25,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "必須項目が不足しています" }, { status: 400 });
   }
 
-  const access = await requireShopAccessById(request, shopId);
-  if (access.error) return access.error;
+  const shopRes = await requireCtxShopAccessById(ctx, shopId);
+  if (shopRes.error) return shopRes.error;
 
   // AI口コミ文生成
   let reviewText = "";
@@ -69,6 +70,7 @@ ${answersText}
       generated_review: reviewText,
       redirected_to_google: false,
     });
+    ctx.detail = `${shopName}: ★${rating} 回答${answers.length}件を社内保存（Google誘導なし）`;
     return NextResponse.json({
       action: "internal",
       reviewText,
@@ -101,10 +103,11 @@ ${answersText}
     redirected_to_google: true,
   });
 
+  ctx.detail = `${shopName}: ★${rating} 回答${answers.length}件を保存しGoogle口コミへ誘導`;
   return NextResponse.json({
     action: "google",
     reviewText,
     googleReviewUrl,
     message: "ありがとうございます！Googleマップに口コミを投稿いただけると嬉しいです。",
   });
-}
+});

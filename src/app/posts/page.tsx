@@ -5,10 +5,10 @@ import { useShop } from "@/components/shop-provider";
 import { supabase } from "@/lib/supabase";
 import { jstToday } from "@/lib/jst-date";
 import api from "@/lib/api";
-import { logAudit } from "@/lib/audit-log";
 import DateRangePicker, { useDateRange } from "@/components/date-range-picker";
 import { usePasswordGate } from "@/components/password-gate";
 import { useRole } from "@/components/role-provider";
+import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
 
 interface LocalPost {
   name?: string;
@@ -382,7 +382,6 @@ export default function PostsPage() {
             photoUrl: newPost.photoUrl.trim() || null, actionType: newPost.actionType || null,
             actionUrl: newPost.actionUrl || null, scheduledAt: new Date(newPost.scheduledAt).toISOString(),
           }, { timeout: 15000 });
-          logAudit("GBP投稿予約", `${shopName} — ${newPost.summary.slice(0, 50)} → ${new Date(newPost.scheduledAt).toLocaleString("ja-JP")}`);
         } else {
           const postData: any = { shopId: sid, summary: newPost.summary, topicType: newPost.topicType };
           if (newPost.actionType && newPost.actionUrl) postData.callToAction = { actionType: newPost.actionType, url: newPost.actionUrl };
@@ -391,7 +390,6 @@ export default function PostsPage() {
             postData.mediaType = newPost.mediaType || "PHOTO";
           }
           await api.post("/api/report/create-post", postData, { timeout: 30000 });
-          logAudit("GBP投稿作成", `${shopName} — ${newPost.summary.slice(0, 50)}${newPost.photoUrl ? "（写真付き）" : ""}`);
         }
         results.push({ id: sid, name: shopName, ok: true });
       } catch (e: any) {
@@ -447,7 +445,6 @@ export default function PostsPage() {
         } catch {}
       }
       setMsg(`${deleted}件削除しました`);
-      logAudit("GBP投稿削除", `${deleted}件削除`);
       await fetchData();
     } catch (e: any) {
       setMsg(`削除失敗: ${e?.response?.data?.error || e?.message}`);
@@ -785,13 +782,13 @@ export default function PostsPage() {
                         setAutoPostFailedShops(uniqueFailed);
                         setAutoPostResult({ mode: "executed", posted: totalPosted, errors: totalErrors, results: allResults, matches: total, attempt: currentAttempt, failedShops: uniqueFailed });
                         setAutoPostAttempt(currentAttempt + 1);
-                        logAudit("シート自動投稿", `${currentAttempt}回目 ${autoPostDate} — ${totalPosted}件投稿 / ${totalErrors}件エラー`);
                         setMsg(`${currentAttempt}回目完了: ${totalPosted}件投稿 / ${totalErrors}件エラー`);
                         await fetchData();
                       } catch (e: any) { setAutoPostResult({ error: e?.response?.data?.error || e?.message }); }
                       finally { setAutoPosting(false); }
-                    }} disabled={autoPosting}
-                      className="px-4 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700" style={{ color: "#fff" }}>
+                    }} disabled={!can(role, "EXTERNAL_OP") || autoPosting}
+                      title={!can(role, "EXTERNAL_OP") ? PERMISSION_DENIED_HINT.EXTERNAL_OP : undefined}
+                      className="px-4 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed" style={{ color: "#fff" }}>
                       {autoPosting ? "投稿中..." : autoPostAttempt > 1 ? `${autoPostAttempt}回目: 未完了${autoPostFailedShops.length}件を実行` : "自動投稿を実行"}
                     </button>
                   </div>
@@ -858,12 +855,12 @@ export default function PostsPage() {
                       setAutoPostFailedShops(uniqueFailed);
                       setAutoPostResult({ mode: "executed", posted: totalPosted, errors: totalErrors, results: allResults, matches: total, attempt: autoPostAttempt, failedShops: uniqueFailed });
                       setAutoPostAttempt(autoPostAttempt + 1);
-                      logAudit("シート予約投稿", `${scheduleDate} ${scheduleHour}時 — ${totalPosted}件予約`);
                       setMsg(`完了: ${totalPosted}件予約登録 / ${totalErrors}件エラー`);
                     } catch (e: any) { setAutoPostResult({ error: e?.response?.data?.error || e?.message }); }
                     finally { setAutoPosting(false); }
-                  }} disabled={autoPosting}
-                    className="px-4 py-2 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700" style={{ color: "#fff" }}>
+                  }} disabled={!can(role, "EXTERNAL_OP") || autoPosting}
+                    title={!can(role, "EXTERNAL_OP") ? PERMISSION_DENIED_HINT.EXTERNAL_OP : undefined}
+                    className="px-4 py-2 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed" style={{ color: "#fff" }}>
                     {autoPosting ? "予約中..." : "予約投稿として登録"}
                   </button>
                 </div>
@@ -1013,8 +1010,9 @@ export default function PostsPage() {
                         setBulkGenResult(await res.json());
                       } catch (e: any) { setBulkGenResult({ error: e.message }); }
                       setBulkGenning(false);
-                    }} disabled={bulkGenning}
-                      className={`px-5 py-2 rounded-lg text-xs font-semibold w-full ${bulkGenning ? "bg-slate-200 text-slate-400" : "bg-purple-600 hover:bg-purple-700"}`}
+                    }} disabled={!can(role, "PAID_OP") || bulkGenning}
+                      title={!can(role, "PAID_OP") ? PERMISSION_DENIED_HINT.PAID_OP : undefined}
+                      className={`px-5 py-2 rounded-lg text-xs font-semibold w-full disabled:opacity-40 disabled:cursor-not-allowed ${bulkGenning ? "bg-slate-200 text-slate-400" : "bg-purple-600 hover:bg-purple-700"}`}
                       style={{ color: bulkGenning ? undefined : "#fff" }}>
                       {bulkGenning ? "生成中..." : `${isAllMode ? "全店舗" : "この店舗"}で一括生成`}
                     </button>
@@ -1115,8 +1113,9 @@ export default function PostsPage() {
                             setProofResult(data.posts?.[0] || "修正なし");
                           } catch { setProofResult("校正に失敗しました"); }
                           setProofing(false);
-                        }} disabled={proofing}
-                          className="text-[10px] px-2 py-1 rounded bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100 font-semibold">
+                        }} disabled={!can(role, "PAID_OP") || proofing}
+                          title={!can(role, "PAID_OP") ? PERMISSION_DENIED_HINT.PAID_OP : undefined}
+                          className="text-[10px] px-2 py-1 rounded bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100 font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
                           {proofing ? "校正中..." : "AI校正"}
                         </button>
                       )}
@@ -1138,7 +1137,9 @@ export default function PostsPage() {
                             setProofResult(data.posts?.[0] || "翻訳に失敗しました");
                           } catch { setProofResult("翻訳に失敗しました"); }
                           setProofing(false);
-                        }} className="text-[10px] px-1 py-1 rounded bg-blue-50 text-blue-600 border border-blue-200 font-semibold">
+                        }} disabled={!can(role, "PAID_OP")}
+                          title={!can(role, "PAID_OP") ? PERMISSION_DENIED_HINT.PAID_OP : undefined}
+                          className="text-[10px] px-1 py-1 rounded bg-blue-50 text-blue-600 border border-blue-200 font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
                           <option value="">翻訳...</option>
                           <option value="英語">英語</option>
                           <option value="韓国語">韓国語</option>
@@ -1164,8 +1165,9 @@ export default function PostsPage() {
                           setAiPosts(data.posts || []);
                         } catch { setMsg("AI生成に失敗しました"); }
                         setAiGenerating(false);
-                      }} disabled={aiGenerating}
-                        className="text-[10px] px-2 py-1 rounded bg-purple-50 text-purple-600 border border-purple-200 hover:bg-purple-100 font-semibold">
+                      }} disabled={!can(role, "PAID_OP") || aiGenerating}
+                        title={!can(role, "PAID_OP") ? PERMISSION_DENIED_HINT.PAID_OP : undefined}
+                        className="text-[10px] px-2 py-1 rounded bg-purple-50 text-purple-600 border border-purple-200 hover:bg-purple-100 font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
                         {aiGenerating ? "生成中..." : "AI文章生成"}
                       </button>
                     </div>
@@ -1305,8 +1307,9 @@ export default function PostsPage() {
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
                   <button onClick={() => setShowCreate(false)} className="px-4 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">キャンセル</button>
-                  <button onClick={handleCreate} disabled={creating || !newPost.summary.trim() || (bulkPostMode && bulkPostShopIds.length === 0)}
-                    className={`px-6 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 ${newPost.scheduledAt ? "bg-purple-600 hover:bg-purple-700" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
+                  <button onClick={handleCreate} disabled={!can(role, "EXTERNAL_OP") || creating || !newPost.summary.trim() || (bulkPostMode && bulkPostShopIds.length === 0)}
+                    title={!can(role, "EXTERNAL_OP") ? PERMISSION_DENIED_HINT.EXTERNAL_OP : undefined}
+                    className={`px-6 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed ${newPost.scheduledAt ? "bg-purple-600 hover:bg-purple-700" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
                     style={{ color: "#fff" }}>
                     {creating ? "処理中..." : bulkPostMode ? `${bulkPostShopIds.length}店舗に${newPost.scheduledAt ? "予約" : "投稿"}` : newPost.scheduledAt ? "予約する" : "GBPに投稿"}
                   </button>
@@ -1349,8 +1352,9 @@ export default function PostsPage() {
                             <textarea value={editingSummary} onChange={(e) => setEditingSummary(e.target.value)}
                               className="w-full border border-purple-200 rounded-lg px-3 py-2 text-sm min-h-[80px] resize-y focus:outline-none focus:ring-2 focus:ring-purple-300" />
                             <div className="flex items-center gap-2">
-                              <button onClick={() => handleSaveEdit(sp.id)} disabled={savingEdit || !editingSummary.trim()}
-                                className="text-[10px] font-semibold px-3 py-1 rounded bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-50">
+                              <button onClick={() => handleSaveEdit(sp.id)} disabled={!can(role, "DATA_OP") || savingEdit || !editingSummary.trim()}
+                                title={!can(role, "DATA_OP") ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                                className="text-[10px] font-semibold px-3 py-1 rounded bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-50 disabled:cursor-not-allowed">
                                 {savingEdit ? "保存中..." : "保存"}
                               </button>
                               <button onClick={() => { setEditingPostId(null); setEditingSummary(""); }}
@@ -1378,7 +1382,9 @@ export default function PostsPage() {
                                 setScheduledPosts(scheduledPosts.map(p => p.id === sp.id ? { ...p, approval_status: "approved" } : p));
                                 setMsg("承認しました");
                               } catch (e: any) { setMsg(`承認失敗: ${e?.response?.data?.error || e?.message || "エラー"}`); }
-                            }} className="text-[10px] text-emerald-600 hover:text-emerald-800 font-semibold bg-emerald-50 px-2 py-0.5 rounded">承認</button>
+                            }} disabled={!can(role, "DATA_OP")}
+                              title={!can(role, "DATA_OP") ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                              className="text-[10px] text-emerald-600 hover:text-emerald-800 font-semibold bg-emerald-50 px-2 py-0.5 rounded disabled:opacity-40 disabled:cursor-not-allowed">承認</button>
                           )}
                           {sp.approval_status === "approved" && (
                             <span className="text-[10px] text-emerald-600 font-semibold bg-emerald-50 px-2 py-0.5 rounded">承認済</span>
@@ -1389,13 +1395,17 @@ export default function PostsPage() {
                               setScheduledPosts(scheduledPosts.filter(p => p.id !== sp.id));
                               setMsg("差戻ししました");
                             } catch (e: any) { setMsg(`差戻し失敗: ${e?.response?.data?.error || e?.message || "エラー"}`); }
-                          }} className="text-[10px] text-amber-600 hover:text-amber-800 font-semibold bg-amber-50 px-2 py-0.5 rounded">差戻し</button>
+                          }} disabled={!can(role, "DATA_OP")}
+                            title={!can(role, "DATA_OP") ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                            className="text-[10px] text-amber-600 hover:text-amber-800 font-semibold bg-amber-50 px-2 py-0.5 rounded disabled:opacity-40 disabled:cursor-not-allowed">差戻し</button>
                           <button onClick={async () => {
                             if (!confirm("この予約を取り消しますか？")) return;
                             await api.delete("/api/report/scheduled-posts", { data: { id: sp.id } });
                             setScheduledPosts(scheduledPosts.filter((p) => p.id !== sp.id));
                             setMsg("予約を取り消しました");
-                          }} className="text-[10px] text-red-500 hover:text-red-700 font-semibold">取消</button>
+                          }} disabled={!can(role, "DATA_OP")}
+                            title={!can(role, "DATA_OP") ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                            className="text-[10px] text-red-500 hover:text-red-700 font-semibold disabled:opacity-40 disabled:cursor-not-allowed">取消</button>
                         </div>
                       )}
                     </div>
@@ -1403,7 +1413,8 @@ export default function PostsPage() {
                 ))}
               </div>
               <button
-                disabled={executeLoading}
+                disabled={!can(role, "EXTERNAL_OP") || executeLoading}
+                title={!can(role, "EXTERNAL_OP") ? PERMISSION_DENIED_HINT.EXTERNAL_OP : undefined}
                 onClick={async () => {
                   if (executeLoading) return;
                   const pendingCount = scheduledPosts.filter(p => p.status === "pending").length;
@@ -1456,7 +1467,9 @@ export default function PostsPage() {
                             setScheduledPosts(scheduledPosts.map(p => p.id === sp.id ? { ...p, status: "pending" } : p));
                             setMsg("承認して予約に変更しました");
                           } catch (e: any) { setMsg(`変更失敗: ${e?.response?.data?.error || e?.message || "エラー"}`); }
-                        }} className="text-[10px] text-emerald-600 hover:text-emerald-800 font-semibold bg-emerald-50 px-2 py-1 rounded">承認→予約</button>
+                        }} disabled={!can(role, "DATA_OP")}
+                          title={!can(role, "DATA_OP") ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                          className="text-[10px] text-emerald-600 hover:text-emerald-800 font-semibold bg-emerald-50 px-2 py-1 rounded disabled:opacity-40 disabled:cursor-not-allowed">承認→予約</button>
                         <button onClick={() => { setEditingPostId(sp.id); setEditingSummary(sp.summary); }}
                           className="text-[10px] text-blue-600 hover:text-blue-800 font-semibold bg-blue-50 px-2 py-1 rounded">編集</button>
                         <button onClick={async () => {
@@ -1464,7 +1477,9 @@ export default function PostsPage() {
                           await api.delete("/api/report/scheduled-posts", { data: { id: sp.id } });
                           setScheduledPosts(scheduledPosts.filter((p) => p.id !== sp.id));
                           setMsg("削除しました");
-                        }} className="text-[10px] text-red-500 hover:text-red-700 font-semibold">削除</button>
+                        }} disabled={!can(role, "DATA_OP")}
+                          title={!can(role, "DATA_OP") ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                          className="text-[10px] text-red-500 hover:text-red-700 font-semibold disabled:opacity-40 disabled:cursor-not-allowed">削除</button>
                       </div>
                     </div>
                     {editingPostId === sp.id && (
@@ -1472,8 +1487,9 @@ export default function PostsPage() {
                         <textarea value={editingSummary} onChange={(e) => setEditingSummary(e.target.value)}
                           className="w-full border border-amber-200 rounded-lg px-3 py-2 text-sm min-h-[80px] resize-y" />
                         <div className="flex gap-2">
-                          <button onClick={() => handleSaveEdit(sp.id)} disabled={savingEdit}
-                            className="text-[10px] font-semibold px-3 py-1 rounded bg-[#003D6B] text-white">
+                          <button onClick={() => handleSaveEdit(sp.id)} disabled={!can(role, "DATA_OP") || savingEdit}
+                            title={!can(role, "DATA_OP") ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                            className="text-[10px] font-semibold px-3 py-1 rounded bg-[#003D6B] text-white disabled:opacity-40 disabled:cursor-not-allowed">
                             {savingEdit ? "保存中..." : "保存"}
                           </button>
                           <button onClick={() => { setEditingPostId(null); setEditingSummary(""); }}
@@ -1503,8 +1519,9 @@ export default function PostsPage() {
                         </p>
                       </div>
                       <div className="flex items-center gap-1.5 ml-3 flex-shrink-0">
-                        <button onClick={() => handleRetry(sp.id)} disabled={retrying === sp.id}
-                          className="text-[10px] text-blue-600 hover:text-blue-800 font-semibold bg-blue-50 px-2 py-0.5 rounded disabled:opacity-50">
+                        <button onClick={() => handleRetry(sp.id)} disabled={!can(role, "DATA_OP") || retrying === sp.id}
+                          title={!can(role, "DATA_OP") ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                          className="text-[10px] text-blue-600 hover:text-blue-800 font-semibold bg-blue-50 px-2 py-0.5 rounded disabled:opacity-50 disabled:cursor-not-allowed">
                           {retrying === sp.id ? "処理中..." : "再実行"}
                         </button>
                         <button onClick={async () => {
@@ -1512,7 +1529,9 @@ export default function PostsPage() {
                           await api.delete("/api/report/scheduled-posts", { data: { id: sp.id } });
                           setScheduledPosts(scheduledPosts.filter((p) => p.id !== sp.id));
                           setMsg("削除しました");
-                        }} className="text-[10px] text-red-500 hover:text-red-700 font-semibold">削除</button>
+                        }} disabled={!can(role, "DATA_OP")}
+                          title={!can(role, "DATA_OP") ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                          className="text-[10px] text-red-500 hover:text-red-700 font-semibold disabled:opacity-40 disabled:cursor-not-allowed">削除</button>
                       </div>
                     </div>
                   </div>

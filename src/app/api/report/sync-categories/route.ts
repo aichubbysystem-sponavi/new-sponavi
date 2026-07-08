@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, requireRole } from "@/lib/supabase";
+import { NextResponse } from "next/server";
+import { getSupabase } from "@/lib/supabase";
+import { withAudit } from "@/lib/audit";
 import { getOAuthToken } from "@/lib/gbp-token";
 
 export const dynamic = "force-dynamic";
@@ -11,10 +12,7 @@ const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
  * POST /api/report/sync-categories
  * 全店舗のGBPカテゴリを一括取得・保存
  */
-export async function POST(request: NextRequest) {
-  const r = await requireRole(request, ["president", "manager"]);
-  if (r.error) return r.error;
-
+export const POST = withAudit("カテゴリ同期", "DATA_OP", async (request, ctx) => {
   const supabase = getSupabase();
   const accessToken = await getOAuthToken();
   if (!accessToken) {
@@ -29,6 +27,7 @@ export async function POST(request: NextRequest) {
     .not("gbp_location_name", "is", null);
 
   if (!shops || shops.length === 0) {
+    ctx.detail = "全店舗のカテゴリが設定済み（更新0件）";
     return NextResponse.json({ success: true, message: "全店舗のカテゴリが設定済みです", updated: 0 });
   }
 
@@ -108,6 +107,7 @@ export async function POST(request: NextRequest) {
     await new Promise(r => setTimeout(r, 200));
   }
 
+  ctx.detail = `カテゴリ未設定${shops.length}店舗中 ${updated}件更新, スキップ${skippedNoPath}件, エラー${errors.length}件`;
   return NextResponse.json({
     success: true,
     total: shops.length,
@@ -118,4 +118,4 @@ export async function POST(request: NextRequest) {
     debug,
     locMapSize: locAccountMap.size,
   });
-}
+});

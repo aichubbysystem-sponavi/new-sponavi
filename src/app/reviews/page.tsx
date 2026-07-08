@@ -6,7 +6,7 @@ import { useShop } from "@/components/shop-provider";
 import { useRole } from "@/components/role-provider";
 import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
-import { logAudit } from "@/lib/audit-log";
+import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 import DateRangePicker, { useDateRange } from "@/components/date-range-picker";
 
@@ -29,7 +29,9 @@ const PER_PAGE = 20;
 export default function ReviewsPage() {
   const { selectedShopId, selectedShop, apiConnected, shops, shopFilterMode, favoriteShopIds } = useShop();
   const { role } = useRole();
-  const canUseAi = role !== "part_time"; // Claude課金機能は社長・社員のみ
+  const canData = can(role, "DATA_OP");   // 同期・設定変更（社長・幹部）
+  const canPaid = can(role, "PAID_OP");   // AI返信提案（社長のみ）
+  const canExt = can(role, "EXTERNAL_OP"); // GBP返信送信（社長・幹部）
   const [reviews, setReviews] = useState<ReviewRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(1);
@@ -563,7 +565,6 @@ export default function ReviewsPage() {
       } else {
         setSyncMsg(`${res.data.totalSynced}件の口コミを同期しました`);
       }
-      logAudit("口コミ同期", `${res.data.totalSynced}件同期`);
       await fetchReviews();
       await fetchUnrepliedCount();
     } catch (e: any) {
@@ -818,20 +819,23 @@ export default function ReviewsPage() {
         <div className="flex items-center justify-between mt-2">
           <p className="text-sm text-slate-500">口コミ一覧・返信・分析</p>
           <div className="flex items-center gap-2">
-            <button onClick={handleSync} disabled={syncing || !selectedShopId}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing ? "bg-slate-200 text-slate-400" : "bg-emerald-600 hover:bg-emerald-700"}`}
-              style={{ color: syncing ? undefined : "#fff" }}>
+            <button onClick={handleSync} disabled={syncing || !selectedShopId || !canData}
+              title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing || !canData ? "bg-slate-200 text-slate-400" : "bg-emerald-600 hover:bg-emerald-700"}`}
+              style={{ color: syncing || !canData ? undefined : "#fff" }}>
               {syncing ? "同期中..." : "この店舗を同期"}
             </button>
-            <button onClick={() => setShowRangeSync(!showRangeSync)} disabled={syncing}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
-              style={{ color: syncing ? undefined : "#fff" }}>
+            <button onClick={() => setShowRangeSync(!showRangeSync)} disabled={syncing || !canData}
+              title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing || !canData ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
+              style={{ color: syncing || !canData ? undefined : "#fff" }}>
               {syncing ? "同期中..." : "範囲同期"}
             </button>
             {favoriteShopIds.size > 0 && (
-              <button onClick={() => handleSyncAll(Array.from(favoriteShopIds))} disabled={syncing}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing ? "bg-slate-200 text-slate-400" : "bg-emerald-600 hover:bg-emerald-700"}`}
-                style={{ color: syncing ? undefined : "#fff" }}>
+              <button onClick={() => handleSyncAll(Array.from(favoriteShopIds))} disabled={syncing || !canData}
+                title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing || !canData ? "bg-slate-200 text-slate-400" : "bg-emerald-600 hover:bg-emerald-700"}`}
+                style={{ color: syncing || !canData ? undefined : "#fff" }}>
                 {syncing ? "同期中..." : `いつもの店舗同期 (${favoriteShopIds.size})`}
               </button>
             )}
@@ -846,9 +850,10 @@ export default function ReviewsPage() {
                 続きから再開（残り{syncResumeState.shopIds.length - syncResumeState.startIndex}店舗）
               </button>
             ) : null}
-            <button onClick={() => handleSyncAll()} disabled={syncing}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing ? "bg-slate-200 text-slate-400" : "bg-slate-600 hover:bg-slate-700"}`}
-              style={{ color: syncing ? undefined : "#fff" }}>
+            <button onClick={() => handleSyncAll()} disabled={syncing || !canData}
+              title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing || !canData ? "bg-slate-200 text-slate-400" : "bg-slate-600 hover:bg-slate-700"}`}
+              style={{ color: syncing || !canData ? undefined : "#fff" }}>
               {syncing ? "同期中..." : "全店舗同期"}
             </button>
             <button onClick={fetchUnsyncedShops} disabled={syncing || loadingUnsynced}
@@ -856,9 +861,10 @@ export default function ReviewsPage() {
               style={{ color: syncing || loadingUnsynced ? undefined : "#fff" }}>
               {loadingUnsynced ? "確認中..." : "今月未同期"}
             </button>
-            <button onClick={handleSyncMedia} disabled={syncing}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing ? "bg-slate-200 text-slate-400" : "bg-purple-600 hover:bg-purple-700"}`}
-              style={{ color: syncing ? undefined : "#fff" }}>
+            <button onClick={handleSyncMedia} disabled={syncing || !canData}
+              title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing || !canData ? "bg-slate-200 text-slate-400" : "bg-purple-600 hover:bg-purple-700"}`}
+              style={{ color: syncing || !canData ? undefined : "#fff" }}>
               {syncing ? "同期中..." : "写真同期"}
             </button>
             <button onClick={fetchNoReviewShops} disabled={syncing || loadingNoReview}
@@ -1252,14 +1258,16 @@ export default function ReviewsPage() {
                             const el = document.getElementById(`auto-reply-${rule.min}-${rule.max}`) as HTMLTextAreaElement;
                             saveAutoReplySetting(rule.min, rule.max, el?.value || rule.template, true);
                           }}
-                          disabled={autoReplySaving}
-                          className="px-3 py-1 rounded text-[10px] font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">
+                          disabled={autoReplySaving || !canData}
+                          title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                          className="px-3 py-1 rounded text-[10px] font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed">
                           有効にして保存
                         </button>
                         <button
                           onClick={() => saveAutoReplySetting(rule.min, rule.max, "", false)}
-                          disabled={autoReplySaving}
-                          className="px-3 py-1 rounded text-[10px] font-semibold bg-slate-200 text-slate-600 hover:bg-slate-300 disabled:opacity-50">
+                          disabled={autoReplySaving || !canData}
+                          title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                          className="px-3 py-1 rounded text-[10px] font-semibold bg-slate-200 text-slate-600 hover:bg-slate-300 disabled:opacity-50 disabled:cursor-not-allowed">
                           無効にする
                         </button>
                       </div>
@@ -1370,7 +1378,7 @@ export default function ReviewsPage() {
                   </div>
                 )}
                 <div className="flex items-center gap-2 flex-wrap">
-                  {canUseAi && (
+                  {canPaid && (
                   <button
                     onClick={() => handleAiReply(review)}
                     disabled={aiLoading && aiReplyId === review.id}
@@ -1433,20 +1441,21 @@ export default function ReviewsPage() {
                                   className="text-[10px] text-amber-600 hover:text-amber-700 px-2 py-0.5 rounded bg-amber-50 border border-amber-200">
                                   {savingTemplate ? "保存中..." : "テンプレ保存"}</button>
                                 {review.shop_id && !review.reply_comment && (
-                                  <button onClick={async (e) => {
+                                  <button disabled={!canExt}
+                                    title={!canExt ? PERMISSION_DENIED_HINT.EXTERNAL_OP : undefined}
+                                    onClick={async (e) => {
                                     e.stopPropagation();
                                     try {
                                       await api.post("/api/report/reply-review", {
                                         shopId: review.shop_id, reviewId: review.review_id, comment: reply,
                                       }, { timeout: 30000 });
                                       setSyncMsg("GBPに返信を投稿しました！");
-                                      logAudit("口コミ返信", `${review.shop_name} — ${review.reviewer_name}への返信「${reply.slice(0, 50)}...」`);
                                       await fetchReviews(); await fetchUnrepliedCount();
                                       setAiReplyId(null); setAiReply(""); setAiReplies([]);
                                     } catch (e: any) {
                                       setSyncMsg(`返信投稿に失敗: ${e?.response?.data?.message || e?.message || "不明なエラー"}`);
                                     }
-                                  }} className="text-[10px] text-white px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-700 font-semibold">
+                                  }} className="text-[10px] text-white px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-700 font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
                                     GBPに返信</button>
                                 )}
                               </div>

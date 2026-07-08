@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { createHash } from "crypto";
-import { requireRole, getSupabase } from "@/lib/supabase";
+import { getSupabase } from "@/lib/supabase";
+import { withAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -126,11 +127,7 @@ function buildUserPrompt(data: KpiData): string {
 ・保存・共有：${fmtNum(data.saveShare.current)}件（先月比 ${formatPct(data.saveShare.current, data.saveShare.prev)}）`;
 }
 
-export async function POST(request: NextRequest) {
-  // Claude API課金を伴うため社長・社員のみ
-  const r = await requireRole(request, ["president", "manager"]);
-  if (r.error) return r.error;
-
+export const POST = withAudit("P-MAX AI総評生成", "PAID_OP", async (request, ctx) => {
   if (!ANTHROPIC_API_KEY) {
     return NextResponse.json({ error: "ANTHROPIC_API_KEY not configured" }, { status: 500 });
   }
@@ -146,6 +143,9 @@ export async function POST(request: NextRequest) {
     const shopKey = typeof rawBody.shopName === "string" ? rawBody.shopName.trim() : "";
     const monthKey = typeof rawBody.monthKey === "string" ? rawBody.monthKey.trim() : "";
     const cacheable = !!(shopKey && monthKey);
+
+    if (shopKey) ctx.targetShop = shopKey;
+    ctx.detail = `${shopKey || "店舗不明"} / ${monthKey || body.currentMonth}`;
 
     // KPIデータ+プロンプト版のハッシュ。数値が1つでも変われば別ハッシュ＝自動再生成
     const kpiHash = createHash("sha256")
@@ -163,6 +163,7 @@ export async function POST(request: NextRequest) {
           .eq("month", monthKey)
           .maybeSingle();
         if (cached?.summary_text && cached.kpi_hash === kpiHash) {
+          ctx.detail = `${ctx.detail}（キャッシュ返却・API課金なし）`;
           return NextResponse.json({ text: cached.summary_text, cached: true });
         }
         // ハッシュ不一致 = データが更新された → 下で再生成してキャッシュを更新
@@ -228,4 +229,4 @@ export async function POST(request: NextRequest) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: msg }, { status: 500 });
   }
-}
+});

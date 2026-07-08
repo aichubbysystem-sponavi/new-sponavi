@@ -57,6 +57,7 @@ const navSections = [
     title: "システム管理",
     children: [
       { href: "/user-management", label: "ユーザー・権限管理" },
+      { href: "/audit-log", label: "操作ログ" },
       { href: "/group-management", label: "グループ管理" },
       { href: "/gbp-accounts", label: "GBPアカウント管理" },
     ],

@@ -2,8 +2,10 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useShop } from "@/components/shop-provider";
+import { useRole } from "@/components/role-provider";
 import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
+import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
 
 interface CheckItem {
   label: string;
@@ -13,6 +15,9 @@ interface CheckItem {
 
 export default function SetupPage() {
   const { apiConnected, selectedShopId, selectedShop } = useShop();
+  const { role } = useRole();
+  const canPaid = can(role, "PAID_OP"); // AI説明文生成・カテゴリ提案（社長のみ）
+  const canData = can(role, "DATA_OP"); // ヒアリング保存・構造化データ生成（社長・幹部）
   const [checks, setChecks] = useState<CheckItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [gbpData, setGbpData] = useState<any>(null);
@@ -288,9 +293,10 @@ export default function SetupPage() {
                   setDescResult(data.result || "生成に失敗しました");
                 } catch { setDescResult("エラーが発生しました"); }
                 setDescLoading(false);
-              }} disabled={descLoading}
-                className={`px-4 py-2 rounded-lg text-xs font-semibold w-full ${descLoading ? "bg-slate-200 text-slate-400" : "bg-purple-600 hover:bg-purple-700"}`}
-                style={{ color: descLoading ? undefined : "#fff" }}>
+              }} disabled={descLoading || !canPaid}
+                title={!canPaid ? PERMISSION_DENIED_HINT.PAID_OP : undefined}
+                className={`px-4 py-2 rounded-lg text-xs font-semibold w-full disabled:opacity-40 disabled:cursor-not-allowed ${descLoading || !canPaid ? "bg-slate-200 text-slate-400" : "bg-purple-600 hover:bg-purple-700"}`}
+                style={{ color: descLoading || !canPaid ? undefined : "#fff" }}>
                 {descLoading ? "生成中..." : "説明文を3候補生成"}
               </button>
               {descResult && (
@@ -333,9 +339,10 @@ export default function SetupPage() {
                   setCatResult(data.result || "生成に失敗しました");
                 } catch { setCatResult("エラーが発生しました"); }
                 setCatLoading(false);
-              }} disabled={catLoading}
-                className={`px-4 py-2 rounded-lg text-xs font-semibold w-full ${catLoading ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
-                style={{ color: catLoading ? undefined : "#fff" }}>
+              }} disabled={catLoading || !canPaid}
+                title={!canPaid ? PERMISSION_DENIED_HINT.PAID_OP : undefined}
+                className={`px-4 py-2 rounded-lg text-xs font-semibold w-full disabled:opacity-40 disabled:cursor-not-allowed ${catLoading || !canPaid ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
+                style={{ color: catLoading || !canPaid ? undefined : "#fff" }}>
                 {catLoading ? "分析中..." : "最適カテゴリを提案"}
               </button>
               {catResult && (
@@ -398,9 +405,10 @@ export default function SetupPage() {
                       setHearingMsg("保存しました");
                     } catch { setHearingMsg("保存に失敗しました"); }
                     setHearingSaving(false);
-                  }} disabled={hearingSaving}
-                    className={`px-5 py-2 rounded-lg text-xs font-semibold ${hearingSaving ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
-                    style={{ color: hearingSaving ? undefined : "#fff" }}>
+                  }} disabled={hearingSaving || !canData}
+                    title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                    className={`px-5 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed ${hearingSaving || !canData ? "bg-slate-200 text-slate-400" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
+                    style={{ color: hearingSaving || !canData ? undefined : "#fff" }}>
                     {hearingSaving ? "保存中..." : "ヒアリングシートを保存"}
                   </button>
                 </div>
@@ -415,8 +423,9 @@ export default function SetupPage() {
                 <h3 className="text-sm font-semibold text-slate-500">構造化データ（Schema.org JSON-LD）</h3>
                 <p className="text-[10px] text-slate-400 mt-0.5">AIO/LLMO対策: AI検索エンジンに認識されやすい構造化データを自動生成</p>
               </div>
-              <button onClick={fetchStructuredData} disabled={sdLoading}
-                className="px-4 py-2 rounded-lg text-xs font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-50">
+              <button onClick={fetchStructuredData} disabled={sdLoading || !canData}
+                title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                className="px-4 py-2 rounded-lg text-xs font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-40 disabled:cursor-not-allowed">
                 {sdLoading ? "生成中..." : "生成"}
               </button>
             </div>

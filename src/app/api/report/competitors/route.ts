@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, requireRole, verifyShopAccess } from "@/lib/supabase";
+import { NextResponse } from "next/server";
+import { getSupabase } from "@/lib/supabase";
+import { withAudit, requireCtxShopAccessById } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -11,11 +12,7 @@ const GCP_API_KEY = process.env.GCP_API_KEY || "";
  * POST /api/report/competitors
  * 指定店舗の周辺競合店舗をGoogle Places API (New)で検索
  */
-export async function POST(request: NextRequest) {
-  // Places API課金を伴うため社長のみ実行可
-  const roleCheck = await requireRole(request, ["president"]);
-  if (roleCheck.error) return roleCheck.error;
-
+export const POST = withAudit("競合店検索", "PAID_OP", async (request, ctx) => {
   const body = await request.json();
   const { shopId } = body as { shopId: string };
 
@@ -23,12 +20,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "shopIdが必要です" }, { status: 400 });
   }
 
-  // shopIdからshop名を取得してアクセスチェック
-  const sb = getSupabase();
-  const { data: shopCheck } = await sb.from("shops").select("name").eq("id", shopId).maybeSingle();
-  if (shopCheck && !(await verifyShopAccess(roleCheck.sub, shopCheck.name))) {
-    return NextResponse.json({ error: "この店舗へのアクセス権がありません" }, { status: 403 });
-  }
+  // shopIdからshop名を解決してアクセスチェック
+  const shopRes = await requireCtxShopAccessById(ctx, shopId);
+  if (shopRes.error) return shopRes.error;
   if (!GCP_API_KEY) {
     return NextResponse.json({ error: "GCP_API_KEYが設定されていません" }, { status: 500 });
   }
@@ -64,6 +58,8 @@ export async function POST(request: NextRequest) {
 
   // 店舗名のキーワード部分 or カテゴリで検索
   const searchQuery = category || shop.name.replace(/[\s　]+/g, " ").split(" ").slice(-1)[0] || "店舗";
+
+  ctx.detail = `${shopRes.shopName}: 「${searchQuery}」で周辺2kmの競合店を検索`;
 
   try {
     const placesRes = await fetch(
@@ -125,4 +121,4 @@ export async function POST(request: NextRequest) {
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
-}
+});

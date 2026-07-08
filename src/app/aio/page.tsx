@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useShop } from "@/components/shop-provider";
+import { useRole } from "@/components/role-provider";
 import api from "@/lib/api";
+import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
 
 interface Question {
   name?: string;
@@ -14,6 +16,9 @@ interface Question {
 
 export default function AioPage() {
   const { apiConnected, selectedShopId, selectedShop } = useShop();
+  const { role } = useRole();
+  const canExt = can(role, "EXTERNAL_OP"); // Q&Aの作成/更新/削除（社長・幹部）
+  const canPaid = can(role, "PAID_OP"); // AI Q&A生成（社長のみ）
   const [questions, setQuestions] = useState<Question[]>([]);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -195,9 +200,10 @@ A2: (回答)
                 <h3 className="text-sm font-semibold text-purple-700">AIO対策 Q&A自動生成</h3>
                 <p className="text-xs text-purple-500 mt-0.5">AI Overviewに引用されやすいQ&Aをクロードが生成します</p>
               </div>
-              <button onClick={generateQA} disabled={generating}
-                className={`px-5 py-2.5 rounded-lg text-sm font-semibold ${generating ? "bg-slate-200 text-slate-400" : "bg-purple-600 hover:bg-purple-700"}`}
-                style={{ color: generating ? undefined : "#fff" }}>
+              <button onClick={generateQA} disabled={generating || !canPaid}
+                title={!canPaid ? PERMISSION_DENIED_HINT.PAID_OP : undefined}
+                className={`px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed ${generating || !canPaid ? "bg-slate-200 text-slate-400" : "bg-purple-600 hover:bg-purple-700"}`}
+                style={{ color: generating || !canPaid ? undefined : "#fff" }}>
                 {generating ? "生成中..." : "Q&Aを生成"}
               </button>
             </div>
@@ -240,8 +246,9 @@ A2: (回答)
                     rows={2} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20" />
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={createQA} disabled={posting || !newQ.trim()}
-                    className="px-4 py-2 rounded-lg text-xs font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-50">
+                  <button onClick={createQA} disabled={posting || !newQ.trim() || !canExt}
+                    title={!canExt ? PERMISSION_DENIED_HINT.EXTERNAL_OP : undefined}
+                    className="px-4 py-2 rounded-lg text-xs font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-40 disabled:cursor-not-allowed">
                     {posting ? "追加中..." : "GBPに追加"}
                   </button>
                   <button onClick={() => setShowAddQA(false)}
@@ -297,8 +304,9 @@ A2: (回答)
                                   placeholder="回答を入力..." rows={2}
                                   className="w-full px-3 py-2 border border-blue-200 rounded-lg text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-blue-200" />
                                 <div className="flex gap-2">
-                                  <button onClick={() => postAnswer(q.name || "")} disabled={posting || !answerText.trim()}
-                                    className="px-3 py-1 rounded text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+                                  <button onClick={() => postAnswer(q.name || "")} disabled={posting || !answerText.trim() || !canExt}
+                                    title={!canExt ? PERMISSION_DENIED_HINT.EXTERNAL_OP : undefined}
+                                    className="px-3 py-1 rounded text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed">
                                     {posting ? "投稿中..." : "回答を投稿"}
                                   </button>
                                   <button onClick={() => { setAnsweringId(null); setAnswerText(""); }}
@@ -314,8 +322,9 @@ A2: (回答)
                           </div>
                         )}
                         {q.name && (
-                          <button onClick={() => deleteQA(q.name!)}
-                            className="mt-2 text-[10px] text-red-400 hover:text-red-600">削除</button>
+                          <button onClick={() => deleteQA(q.name!)} disabled={!canExt}
+                            title={!canExt ? PERMISSION_DENIED_HINT.EXTERNAL_OP : undefined}
+                            className="mt-2 text-[10px] text-red-400 hover:text-red-600 disabled:opacity-40 disabled:cursor-not-allowed">削除</button>
                         )}
                       </div>
                     </div>

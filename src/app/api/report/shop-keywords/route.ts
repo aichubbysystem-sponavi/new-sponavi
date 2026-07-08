@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth, requireShopAccessById } from "@/lib/supabase";
+import { getSupabase, requireShopAccessById } from "@/lib/supabase";
+import { withAudit, requireCtxShopAccessById } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +33,7 @@ export async function GET(request: NextRequest) {
  * PUT /api/report/shop-keywords
  * キーワードを保存（upsert）
  */
-export async function PUT(request: NextRequest) {
+export const PUT = withAudit("店舗キーワード保存", "DATA_OP", async (request, ctx) => {
   const body = await request.json();
   const { shopId, keywords, source } = body as {
     shopId: string;
@@ -44,8 +45,8 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "shopIdとkeywordsが必要です" }, { status: 400 });
   }
 
-  const access = await requireShopAccessById(request, shopId);
-  if (access.error) return access.error;
+  const shopRes = await requireCtxShopAccessById(ctx, shopId);
+  if (shopRes.error) return shopRes.error;
 
   const supabase = getSupabase();
 
@@ -64,5 +65,6 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 
+  ctx.detail = `${shopRes.shopName}: キーワード${keywords.length}件を保存（source: ${source || "manual"}）`;
   return NextResponse.json({ success: true });
-}
+});

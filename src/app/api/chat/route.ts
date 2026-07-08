@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireRole } from "@/lib/supabase";
+import { NextResponse } from "next/server";
+import { withAudit } from "@/lib/audit";
 import { featureDetails } from "@/lib/feature-details";
 
 export const dynamic = "force-dynamic";
@@ -57,10 +57,7 @@ interface ChatMessage {
  * POST /api/chat
  * AI社長チャット（Claude API直結。以前はDify連携だったが、VPS障害を避けるためClaude APIへ移行）
  */
-export async function POST(request: NextRequest) {
-  const r = await requireRole(request, ["president", "manager"]);
-  if (r.error) return r.error;
-
+export const POST = withAudit("AIチャット実行", "PAID_OP", async (request, ctx) => {
   if (!ANTHROPIC_API_KEY) {
     return NextResponse.json({ error: "ANTHROPIC_API_KEYが設定されていません" }, { status: 500 });
   }
@@ -74,6 +71,8 @@ export async function POST(request: NextRequest) {
   if (!query || !query.trim()) {
     return NextResponse.json({ error: "質問を入力してください" }, { status: 400 });
   }
+
+  ctx.detail = `質問: ${query.trim().slice(0, 100)}`;
 
   // 会話履歴を組み立て（直近10往復まで。role/contentのみ採用し、user始まり・交互を担保）
   const past: ChatMessage[] = Array.isArray(history)
@@ -127,4 +126,4 @@ export async function POST(request: NextRequest) {
     console.error("[chat] error:", err?.message);
     return NextResponse.json({ error: err?.message || "チャットエラー" }, { status: 500 });
   }
-}
+});

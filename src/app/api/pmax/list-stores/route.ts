@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 export async function GET(request: NextRequest) {
-  const r = await requireRole(request, ["president", "manager"]);
+  const r = await requireRole(request, ["president", "executive", "manager"]);
   if (r.error) return r.error;
 
   const { searchParams } = request.nextUrl;
