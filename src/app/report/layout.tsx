@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import RoleProvider from "@/components/role-provider";
 
 export const metadata: Metadata = {
   title: "レポート | SPOTLIGHT NAVIGATOR",
@@ -63,7 +64,8 @@ export default function ReportLayout({
           `,
         }}
       />
-      {children}
+      {/* レポート管理画面のボタン権限判定用（社内スタッフのロールを供給） */}
+      <RoleProvider>{children}</RoleProvider>
     </>
   );
 }
