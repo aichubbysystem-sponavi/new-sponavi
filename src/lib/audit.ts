@@ -17,6 +17,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, verifyAuth, verifyShopAccess } from "./supabase";
 import type { AppRole, ActionType } from "./permissions";
 import { can, isAppRole } from "./permissions";
+import { notifySlackPaidOp } from "./slack-notify";
 
 export interface AuditContext {
   sub: string;
@@ -131,6 +132,19 @@ export async function writeAudit(
     if (error) console.error("[writeAudit] insert failed:", error.message);
   } catch (e) {
     console.error("[writeAudit] unexpected:", e);
+  }
+
+  // 課金操作(PAID_OP)が成功したらSlackに即通知（不正利用の早期検知）。
+  // fire-and-forget。SLACK_WEBHOOK_URL 未設定なら通知側で何もしない。
+  if (entry.actionType === "PAID_OP" && (entry.status ?? 200) < 400) {
+    void notifySlackPaidOp({
+      action: entry.action,
+      userName: ctx.userName,
+      role: ctx.role,
+      detail: entry.detail ?? ctx.detail,
+      targetShop: ctx.targetShop,
+      ip: ctx.ip,
+    });
   }
 }
 
