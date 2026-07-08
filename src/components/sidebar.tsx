@@ -130,7 +130,7 @@ function AccordionSection({
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const { role, roleLabel } = useRole();
+  const { role, roleLabel, userName } = useRole();
   const { unrepliedCount } = useShop();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -186,6 +186,9 @@ export default function Sidebar() {
       {/* ロール表示 */}
       <div className="px-4 pt-4 pb-2">
         <div className="bg-white/20 rounded-lg px-3 py-2.5 border border-white/10">
+          {userName && (
+            <p className="text-sm font-bold text-white drop-shadow-sm mb-1 truncate" title={userName}>{userName}</p>
+          )}
           <p className="text-[10px] text-white/70">ログイン中のロール</p>
           <p className="text-sm font-bold text-white drop-shadow-sm">{roleLabel}</p>
         </div>
