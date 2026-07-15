@@ -384,9 +384,9 @@ export default function ReportClient({
     });
   };
 
-  const toggleKeyword = (word: string) => {
+  const toggleKeyword = (word: string, current: boolean) => {
     setKwVisibility(prev => {
-      const next = { ...prev, [word]: prev[word] === false ? true : false };
+      const next = { ...prev, [word]: !current };
       localStorage.setItem(kwVisKey, JSON.stringify(next));
       saveToDb("kwVisibility", next);
       return next;
@@ -478,16 +478,23 @@ export default function ReportClient({
     return result.length > 0 ? result : null;
   }, [gridRanking, curLabel]);
 
-  // gridRankingの中心点があればそちらを使用、なければスプレッドシートのkeywords
-  const effectiveKeywords = gridKeywords || keywords;
+  // gridRankingの中心点を優先しつつ、グリッドにないKWはシート順位で補完。
+  // どちらにも順位がないKW（シート列のみ存在）は圏外(0)として末尾に追加
+  const effectiveKeywords = useMemo(() => {
+    const merged = new Map<string, { word: string; rank: number; prevRank: number }>();
+    for (const kw of gridKeywords || []) merged.set(kw.word, kw);
+    for (const kw of keywords) if (!merged.has(kw.word)) merged.set(kw.word, kw);
+    for (const ds of rankingHistory?.datasets || []) if (!merged.has(ds.word)) merged.set(ds.word, { word: ds.word, rank: 0, prevRank: 0 });
+    return Array.from(merged.values());
+  }, [gridKeywords, keywords, rankingHistory]);
 
   // 表示するキーワードのみフィルタ
-  const visibleKeywords = effectiveKeywords.filter(kw => kwVisibility[kw.word] !== false && (kw.rank > 0 || kw.prevRank > 0));
+  // 順位が一度も付いていないKWは初期OFF（チェックを入れると圏外として表示）、順位ありKWは初期ON
+  const visibleKeywords = effectiveKeywords.filter(kw => kwVisibility[kw.word] ?? (kw.rank > 0 || kw.prevRank > 0));
   const visibleRankingDatasets = (rankingHistory?.datasets?.filter(ds => {
-    if (kwVisibility[ds.word] === false) return false;
-    // 全期間データなし（全て null）のキーワードを非表示
+    // 全期間データなし（全て null）のキーワードは初期OFF、チェックONで表示
     const hasAnyData = ds.ranks.some((r: number | null) => r !== null);
-    return hasAnyData;
+    return kwVisibility[ds.word] ?? hasAnyData;
   }) || []);
 
   const showKeywords = mounted && sectionVisibility.keywords !== false && hasKeywords;
@@ -1076,14 +1083,18 @@ export default function ReportClient({
               <div style={{ marginBottom: 20 }}>
                 <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 16, fontWeight: 600, display: "block", marginBottom: 10 }}>個別キーワード</span>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                  {keywords.map(kw => (
+                  {effectiveKeywords.map(kw => {
+                    const checked = kwVisibility[kw.word] ?? (kw.rank > 0 || kw.prevRank > 0);
+                    const noRank = kw.rank <= 0 && kw.prevRank <= 0;
+                    return (
                     <label key={kw.word} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
-                      <input type="checkbox" checked={kwVisibility[kw.word] !== false}
-                        onChange={() => toggleKeyword(kw.word)}
+                      <input type="checkbox" checked={checked}
+                        onChange={() => toggleKeyword(kw.word, checked)}
                         style={{ width: 14, height: 14, cursor: "pointer" }} />
-                      <span style={{ color: "#fff", fontSize: 16 }}>{kw.word}</span>
+                      <span style={{ color: noRank ? "rgba(255,255,255,0.5)" : "#fff", fontSize: 16 }}>{kw.word}{noRank ? "（圏外）" : ""}</span>
                     </label>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -1501,17 +1512,23 @@ export default function ReportClient({
             <div style={stitleStyle}>キーワード順位変動（{curLabel}）</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16, flex: 1 }}>
               {visibleKeywords.map((kw, i) => {
-                const diff = kw.prevRank - kw.rank;
+                const hasRank = kw.rank > 0;
+                const hasPrev = kw.prevRank > 0;
+                const diff = hasRank && hasPrev ? kw.prevRank - kw.rank : 0;
                 const arrow = diff > 0 ? "↑" : diff < 0 ? "↓" : "→";
                 const arrowColor = diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888";
                 return (
                   <div key={i} style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     <div style={{ fontSize: 16, fontWeight: 600 }}>{kw.word}</div>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <span style={{ fontSize: 16, color: "#999" }}>前月{kw.prevRank}位</span>
+                      <span style={{ fontSize: 16, color: "#999" }}>前月{hasPrev ? `${kw.prevRank}位` : "圏外"}</span>
                       <span style={{ fontSize: 22, color: arrowColor }}>{arrow}</span>
-                      <span style={{ fontSize: 36, fontWeight: 900, color: "#e94560" }}>{kw.rank}</span>
-                      <span style={{ fontSize: 16, color: "#666" }}>位</span>
+                      {hasRank ? (
+                        <><span style={{ fontSize: 36, fontWeight: 900, color: "#e94560" }}>{kw.rank}</span>
+                        <span style={{ fontSize: 16, color: "#666" }}>位</span></>
+                      ) : (
+                        <span style={{ fontSize: 26, fontWeight: 900, color: "#94a3b8" }}>圏外</span>
+                      )}
                     </div>
                   </div>
                 );
