@@ -497,18 +497,32 @@ export default function ReportClient({
     return kwVisibility[ds.word] ?? hasAnyData;
   }) || []);
 
+  // 個別キーワードの表示設定を多地点順位計測スライドにも連動させる
+  // （チェックOFFのKWはチップ・比較テーブル・KW別スライド・PDFから除外）
+  const visibleGridRanking = useMemo(() => {
+    if (!gridRanking) return gridRanking;
+    const effVisible = (word: string) => {
+      const entry = effectiveKeywords.find(k => k.word === word);
+      return kwVisibility[word] ?? (entry ? entry.rank > 0 || entry.prevRank > 0 : true);
+    };
+    return {
+      keywords: gridRanking.keywords.filter(effVisible),
+      history: gridRanking.history.map(h => ({ ...h, snapshots: h.snapshots.filter(s => effVisible(s.keyword)) })),
+    };
+  }, [gridRanking, effectiveKeywords, kwVisibility]);
+
   const showKeywords = mounted && sectionVisibility.keywords !== false && hasKeywords;
   const showRankingHistory = mounted && sectionVisibility.rankingHistory !== false && hasRankingHistory;
   const showSearchQueries = mounted && sectionVisibility.searchQueries !== false && hasSearchQueries;
-  const showGridRanking = mounted && sectionVisibility.gridRanking !== false && hasGridRanking;
+  const showGridRanking = mounted && sectionVisibility.gridRanking !== false && hasGridRanking && (visibleGridRanking?.keywords.length ?? 0) > 0;
 
   // グリッドマップ用: 現在表示中のスナップショットを取得
-  const activeGridKw = gridRanking?.keywords[gridKwIdx] || gridRanking?.keywords[0] || "";
+  const activeGridKw = visibleGridRanking?.keywords[gridKwIdx] || visibleGridRanking?.keywords[0] || "";
   // マップ描画用: レポート対象月以前の直近6ヶ月（グリッドセクション描画と同じ基準）
   const gridRecentHistory = useMemo(() => {
-    if (!gridRanking) return [];
-    return gridRanking.history.filter(h => monthToNum(h.month) <= monthToNum(curLabel)).slice(-6);
-  }, [gridRanking, curLabel]);
+    if (!visibleGridRanking) return [];
+    return visibleGridRanking.history.filter(h => monthToNum(h.month) <= monthToNum(curLabel)).slice(-6);
+  }, [visibleGridRanking, curLabel]);
   const activeGridMonthI = gridMonthIdx >= 0 && gridMonthIdx < gridRecentHistory.length ? gridMonthIdx : gridRecentHistory.length - 1;
   const activeGridSnapshot = gridRecentHistory[activeGridMonthI]?.snapshots.find(s => s.keyword === activeGridKw);
 
@@ -700,14 +714,14 @@ export default function ReportClient({
     setPdfGenerating(true);
     const insertedEls: HTMLElement[] = [];
     try {
-      if (!gridRanking || gridRanking.keywords.length === 0) {
+      if (!visibleGridRanking || visibleGridRanking.keywords.length === 0) {
         // グリッドランキングなし → そのままprint
         window.print();
         setPdfGenerating(false);
         return;
       }
 
-      const gr = gridRanking;
+      const gr = visibleGridRanking;
       const pdfMapPairCount = Math.ceil(gr.keywords.length / 2);
       // PDF基準: サマリー1 + マップceil(KW/2) vs web基準: サマリー1 + KW切替1
       const pageShift = pdfMapPairCount - 1; // PDF追加ページ数
@@ -1185,12 +1199,18 @@ export default function ReportClient({
                     if (centerRank <= 0) { alert("この月のキーワード順位データがありません。中心順位を手入力してから生成してください"); return; }
                     setGridGenerating(true);
                     try {
-                      await fetch("/api/report/grid-ranking-generate", {
-                        method: "POST", headers: { "Content-Type": "application/json" },
+                      const authH = await getAuthHeaders();
+                      const res = await fetch("/api/report/grid-ranking-generate", {
+                        method: "POST", headers: { "Content-Type": "application/json", ...authH },
                         body: JSON.stringify({ shopId, shopName: shop.name, keyword: selectedKw, month: selectedMonth, centerRank }),
                       });
+                      if (!res.ok) {
+                        const err = await res.json().catch(() => null);
+                        alert(`生成に失敗しました: ${err?.error || `HTTP ${res.status}`}`);
+                        return;
+                      }
                       window.location.reload();
-                    } catch {} finally { setGridGenerating(false); }
+                    } catch (e: any) { alert(`生成に失敗しました: ${e?.message || "通信エラー"}`); } finally { setGridGenerating(false); }
                   }} disabled={gridGenerating || !canData}
                   title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
                   style={{ padding: "5px 12px", borderRadius: 6, border: "none", background: gridGenerating || !canData ? "#666" : "#0f3460", color: "#fff", fontSize: 16, fontWeight: 600, cursor: gridGenerating ? "wait" : !canData ? "not-allowed" : "pointer" }}>
@@ -1209,15 +1229,21 @@ export default function ReportClient({
                         }
                       }
                       if (batch.length > 0) {
+                        const authH = await getAuthHeaders();
                         const res = await fetch("/api/report/grid-ranking-generate", {
-                          method: "POST", headers: { "Content-Type": "application/json" },
+                          method: "POST", headers: { "Content-Type": "application/json", ...authH },
                           body: JSON.stringify({ shopName: shop.name, shopId, batch }),
                         });
+                        if (!res.ok) {
+                          const err = await res.json().catch(() => null);
+                          alert(`一括生成に失敗しました: ${err?.error || `HTTP ${res.status}`}`);
+                          return;
+                        }
                         const result = await res.json();
                         alert(`${result.count || 0}件生成（${result.skipped || 0}件は既存データ保持）`);
                         window.location.reload();
                       }
-                    } catch {} finally { setGridGenerating(false); }
+                    } catch (e: any) { alert(`一括生成に失敗しました: ${e?.message || "通信エラー"}`); } finally { setGridGenerating(false); }
                   }} disabled={gridGenerating || !canData}
                   title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
                   style={{ padding: "5px 12px", borderRadius: 6, border: "none", background: gridGenerating || !canData ? "#666" : "#e94560", color: "#fff", fontSize: 16, fontWeight: 600, cursor: gridGenerating ? "wait" : !canData ? "not-allowed" : "pointer" }}>
@@ -1248,10 +1274,12 @@ export default function ReportClient({
                                       const newRank = parseInt(editingGridValue) || 0;
                                       setEditingGridCell(null);
                                       if (newRank === rank) return;
-                                      await fetch("/api/report/grid-ranking-generate", {
-                                        method: "PUT", headers: { "Content-Type": "application/json" },
+                                      const authH = await getAuthHeaders();
+                                      const res = await fetch("/api/report/grid-ranking-generate", {
+                                        method: "PUT", headers: { "Content-Type": "application/json", ...authH },
                                         body: JSON.stringify({ shopName: shop.name, keyword: selectedKw, month: selectedMonth, row, col, newRank }),
-                                      });
+                                      }).catch(() => null);
+                                      if (!res || !res.ok) alert("セルの保存に失敗しました");
                                     }}
                                     onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
                                     style={{ width: 32, fontSize: 16, textAlign: "center", border: "1px solid #e94560", borderRadius: 3, padding: 1, outline: "none", background: "#1a1a2e", color: "#fff" }} />
@@ -1597,7 +1625,9 @@ export default function ReportClient({
 
       {/* ════ 多地点順位計測（画面:1ページタブ切替 / PDF:全KW展開 2KW/ページ） ════ */}
       {showGridRanking && (() => {
-        const gr = gridRanking!;
+        const gr = visibleGridRanking!;
+        // KW非表示化でリストが縮んだ場合に選択インデックスが範囲外にならないようクランプ
+        const activeKwI = Math.min(gridKwIdx, Math.max(gr.keywords.length - 1, 0));
         const filteredHistory = gr.history.filter(h => monthToNum(h.month) <= monthToNum(curLabel));
         const recentHistory = filteredHistory.slice(-6);
         const defaultMonthI = (() => {
@@ -1720,7 +1750,7 @@ export default function ReportClient({
           <div key={`grid-pair-${pairI}`} className="grid-kw-pair">
             {pair.map((loopKw, kwInPair) => {
               const kwI = pairI * 2 + kwInPair;
-              const isActive = kwI === gridKwIdx;
+              const isActive = kwI === activeKwI;
               const snapshot = monthData?.snapshots.find(s => s.keyword === loopKw);
               const prevSnapshot = prevMonthData?.snapshots.find(s => s.keyword === loopKw);
               const trendLabels = recentHistory.map(h => h.month.replace(/^\d{4}\//, "") + "月");
@@ -1741,8 +1771,8 @@ export default function ReportClient({
                     {gr.keywords.map((kw, i) => (
                       <button key={kw} onClick={() => setGridKwIdx(i)}
                         style={{ padding: "5px 14px", borderRadius: 20, fontSize: 16, fontWeight: 600, border: "none", cursor: "pointer",
-                          background: i === gridKwIdx ? "#0f3460" : "#e8edf3",
-                          color: i === gridKwIdx ? "#fff" : "#555" }}>
+                          background: i === activeKwI ? "#0f3460" : "#e8edf3",
+                          color: i === activeKwI ? "#fff" : "#555" }}>
                         {kw}
                       </button>
                     ))}
@@ -1793,12 +1823,18 @@ export default function ReportClient({
                               <button className="no-print" onClick={async () => {
                                 setGridGenerating(true);
                                 try {
-                                  await fetch("/api/report/grid-ranking-generate", {
-                                    method: "POST", headers: { "Content-Type": "application/json" },
+                                  const authH = await getAuthHeaders();
+                                  const res = await fetch("/api/report/grid-ranking-generate", {
+                                    method: "POST", headers: { "Content-Type": "application/json", ...authH },
                                     body: JSON.stringify({ shopId: shopId, shopName: shop.name, keyword: loopKw, month: monthData?.month || curLabel, centerRank }),
                                   });
+                                  if (!res.ok) {
+                                    const err = await res.json().catch(() => null);
+                                    alert(`生成に失敗しました: ${err?.error || `HTTP ${res.status}`}`);
+                                    return;
+                                  }
                                   window.location.reload();
-                                } catch {} finally { setGridGenerating(false); }
+                                } catch (e: any) { alert(`生成に失敗しました: ${e?.message || "通信エラー"}`); } finally { setGridGenerating(false); }
                               }} disabled={gridGenerating || !canData}
                               title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
                               style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: gridGenerating || !canData ? "#999" : "#0f3460", color: "#fff", fontSize: 16, fontWeight: 600, cursor: gridGenerating ? "wait" : !canData ? "not-allowed" : "pointer" }}>
