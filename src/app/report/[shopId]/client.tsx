@@ -6,6 +6,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { useRole } from "@/components/role-provider";
 import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
+import { normalizeKw } from "@/lib/keyword-normalize";
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
@@ -480,11 +481,18 @@ export default function ReportClient({
 
   // gridRankingの中心点を優先しつつ、グリッドにないKWはシート順位で補完。
   // どちらにも順位がないKW（シート列のみ存在）は圏外(0)として末尾に追加
+  // キーは正規化（全角/半角スペースの表記ゆれで同一KWが重複カード化するのを防ぐ）
   const effectiveKeywords = useMemo(() => {
     const merged = new Map<string, { word: string; rank: number; prevRank: number }>();
-    for (const kw of gridKeywords || []) merged.set(kw.word, kw);
-    for (const kw of keywords) if (!merged.has(kw.word)) merged.set(kw.word, kw);
-    for (const ds of rankingHistory?.datasets || []) if (!merged.has(ds.word)) merged.set(ds.word, { word: ds.word, rank: 0, prevRank: 0 });
+    for (const kw of gridKeywords || []) merged.set(normalizeKw(kw.word), { ...kw, word: normalizeKw(kw.word) });
+    for (const kw of keywords) {
+      const w = normalizeKw(kw.word);
+      if (!merged.has(w)) merged.set(w, { ...kw, word: w });
+    }
+    for (const ds of rankingHistory?.datasets || []) {
+      const w = normalizeKw(ds.word);
+      if (!merged.has(w)) merged.set(w, { word: w, rank: 0, prevRank: 0 });
+    }
     return Array.from(merged.values());
   }, [gridKeywords, keywords, rankingHistory]);
 
@@ -494,7 +502,7 @@ export default function ReportClient({
   const visibleRankingDatasets = (rankingHistory?.datasets?.filter(ds => {
     // 全期間データなし（全て null）のキーワードは初期OFF、チェックONで表示
     const hasAnyData = ds.ranks.some((r: number | null) => r !== null);
-    return kwVisibility[ds.word] ?? hasAnyData;
+    return kwVisibility[normalizeKw(ds.word)] ?? kwVisibility[ds.word] ?? hasAnyData;
   }) || []);
 
   // 個別キーワードの表示設定を多地点順位計測スライドにも連動させる
@@ -502,8 +510,9 @@ export default function ReportClient({
   const visibleGridRanking = useMemo(() => {
     if (!gridRanking) return gridRanking;
     const effVisible = (word: string) => {
-      const entry = effectiveKeywords.find(k => k.word === word);
-      return kwVisibility[word] ?? (entry ? entry.rank > 0 || entry.prevRank > 0 : true);
+      const w = normalizeKw(word);
+      const entry = effectiveKeywords.find(k => k.word === w);
+      return kwVisibility[w] ?? kwVisibility[word] ?? (entry ? entry.rank > 0 || entry.prevRank > 0 : true);
     };
     return {
       keywords: gridRanking.keywords.filter(effVisible),
@@ -1150,17 +1159,18 @@ export default function ReportClient({
             {/* 多地点順位グリッド編集 */}
             {hasKeywords && (() => {
               const allMonths = rankingHistory?.labels || [];
-              const allKws = rankingHistory?.datasets?.map(d => d.word) || [];
+              // 表記ゆれ（全角/半角スペース）を正規化して重複排除
+              const allKws = Array.from(new Set(rankingHistory?.datasets?.map(d => normalizeKw(d.word)) || []));
               const [editMonth, setEditMonth] = [gridEditMonth, setGridEditMonth];
               const [editKw, setEditKw] = [gridEditKw, setGridEditKw];
               const selectedMonth = editMonth || allMonths[allMonths.length - 1] || "";
               const selectedKw = editKw || allKws[0] || "";
-              // 現在選択中の月+KWのoverridesグリッドを取得
-              const overrideData = gridRanking?.history.find(h => h.month === selectedMonth)?.snapshots.find(s => s.keyword === selectedKw);
+              // 現在選択中の月+KWのoverridesグリッドを取得（表記ゆれ込みで照合）
+              const overrideData = gridRanking?.history.find(h => h.month === selectedMonth)?.snapshots.find(s => normalizeKw(s.keyword) === normalizeKw(selectedKw));
               const gridCells = overrideData?.results || [];
               const gridRankColorModal = rankColorModal;
               // 選択中月+KWのcenterRank（P7データから）
-              const dsData = rankingHistory?.datasets?.find(d => d.word === selectedKw);
+              const dsData = rankingHistory?.datasets?.find(d => normalizeKw(d.word) === normalizeKw(selectedKw));
               const monthIdx = allMonths.indexOf(selectedMonth);
               const sheetRank = dsData && monthIdx >= 0 ? (dsData.ranks[monthIdx] ?? 0) : 0;
               // シートに順位がない月は手入力欄の値を採用（1〜100位）
@@ -1815,33 +1825,8 @@ export default function ReportClient({
                         </>
                       ) : (
                         <div style={{ padding: 40, textAlign: "center" }}>
-                          <div style={{ color: "#999", fontSize: 16, marginBottom: 12 }}>この月のデータなし</div>
-                          {(() => {
-                            const kwData = keywords.find(k => k.word === loopKw);
-                            const centerRank = kwData?.rank || 0;
-                            return centerRank > 0 ? (
-                              <button className="no-print" onClick={async () => {
-                                setGridGenerating(true);
-                                try {
-                                  const authH = await getAuthHeaders();
-                                  const res = await fetch("/api/report/grid-ranking-generate", {
-                                    method: "POST", headers: { "Content-Type": "application/json", ...authH },
-                                    body: JSON.stringify({ shopId: shopId, shopName: shop.name, keyword: loopKw, month: monthData?.month || curLabel, centerRank }),
-                                  });
-                                  if (!res.ok) {
-                                    const err = await res.json().catch(() => null);
-                                    alert(`生成に失敗しました: ${err?.error || `HTTP ${res.status}`}`);
-                                    return;
-                                  }
-                                  window.location.reload();
-                                } catch (e: any) { alert(`生成に失敗しました: ${e?.message || "通信エラー"}`); } finally { setGridGenerating(false); }
-                              }} disabled={gridGenerating || !canData}
-                              title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
-                              style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: gridGenerating || !canData ? "#999" : "#0f3460", color: "#fff", fontSize: 16, fontWeight: 600, cursor: gridGenerating ? "wait" : !canData ? "not-allowed" : "pointer" }}>
-                                {gridGenerating ? "生成中..." : `「${loopKw}」${centerRank}位からグリッド自動生成`}
-                              </button>
-                            ) : <div style={{ color: "#bbb", fontSize: 16 }}>キーワード順位データがありません</div>;
-                          })()}
+                          {/* 生成ボタンはクライアントに見える画面のため置かない（生成は表示設定モーダルから） */}
+                          <div style={{ color: "#999", fontSize: 16 }}>この月のデータなし</div>
                         </div>
                       )}
                     </div>

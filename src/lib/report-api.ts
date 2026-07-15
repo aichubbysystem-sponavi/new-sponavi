@@ -5,6 +5,7 @@
 
 import type { ReportData, ShopListItem, GridRankingReport, GridRankingMonthData } from "./report-data";
 import { readShopListFromCache, readReportDataFromCache, writeReportDataToCache } from "./report-cache";
+import { normalizeKw } from "./keyword-normalize";
 import { getShopsFromSpreadsheet, getReportFromSpreadsheet } from "./spreadsheet";
 import { getSupabase } from "@/lib/supabase";
 
@@ -107,14 +108,16 @@ export async function fetchGridRankingLive(shopIds: string[], shopName?: string)
         .order("month", { ascending: true });
       if (overrides && overrides.length > 0) {
         for (const o of overrides) {
-          keywordSet.add(o.keyword);
+          // キーワードの表記ゆれ（全角/半角スペース）を吸収して同一KWに統合
+          const kw = normalizeKw(o.keyword);
+          keywordSet.add(kw);
           // 月フォーマット統一: "2026/04"→"2026/4", "2026-04"→"2026/4"
           const month = (o.month || "unknown").replace(/-/g, "/").replace(/\/0(\d)$/, "/$1");
           if (!monthMap.has(month)) monthMap.set(month, []);
           const ranked = (o.results || []).filter((r: any) => r.rank > 0);
           const avg = ranked.length > 0 ? ranked.reduce((s: number, r: any) => s + r.rank, 0) / ranked.length : 0;
           monthMap.get(month)!.push({
-            keyword: o.keyword, gridSize: o.grid_size || 7, intervalM: 1000,
+            keyword: kw, gridSize: o.grid_size || 7, intervalM: 1000,
             results: o.results || [], measuredAt: o.updated_at, avgRank: Math.round(avg * 10) / 10,
           });
         }
@@ -133,13 +136,14 @@ export async function fetchGridRankingLive(shopIds: string[], shopName?: string)
         const monthKey = `${d.getFullYear()}/${d.getMonth() + 1}`;
         // overridesに同月のデータがあればスキップ
         if (monthMap.has(monthKey)) continue;
-        keywordSet.add(log.keyword);
+        const kw = normalizeKw(log.keyword);
+        keywordSet.add(kw);
         if (!monthMap.has(monthKey)) monthMap.set(monthKey, []);
         const results = log.results || [];
         const ranked = results.filter((r: any) => r.rank > 0);
         const avg = ranked.length > 0 ? ranked.reduce((s: number, r: any) => s + r.rank, 0) / ranked.length : 0;
         monthMap.get(monthKey)!.push({
-          keyword: log.keyword, gridSize: log.grid_size, intervalM: log.interval_m,
+          keyword: kw, gridSize: log.grid_size, intervalM: log.interval_m,
           results, measuredAt: log.measured_at, avgRank: Math.round(avg * 10) / 10,
         });
       }
@@ -224,12 +228,13 @@ export function supplementGridFromRanking(
     for (const ds of rankingHistory.datasets) {
       const rank = ds.ranks[i];
       if (rank === null || rank <= 0) continue;
-      allKeywords.add(ds.word);
-      const results = generateSimpleGrid(rank, ds.word, month);
+      const word = normalizeKw(ds.word);
+      allKeywords.add(word);
+      const results = generateSimpleGrid(rank, word, month);
       const ranked = results.filter(r => r.rank > 0);
       const avg = ranked.length > 0 ? ranked.reduce((s, r) => s + r.rank, 0) / ranked.length : 0;
       snapshots.push({
-        keyword: ds.word,
+        keyword: word,
         gridSize: 7,
         intervalM: 1000,
         results,

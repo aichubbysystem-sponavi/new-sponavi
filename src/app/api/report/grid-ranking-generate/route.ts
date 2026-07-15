@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, verifyAuth, verifyShopAccess } from "@/lib/supabase";
 import { withAudit, requireCtxShopAccess } from "@/lib/audit";
+import { normalizeKw } from "@/lib/keyword-normalize";
 
 export const dynamic = "force-dynamic";
 
@@ -83,13 +84,29 @@ function generateGridFrom3x3(centerPoints: { row: number; col: number; rank: num
  * 単月生成: { shopName, keyword, month, centerRank }
  * 一括生成: { shopName, batch: [{ keyword, month, centerRank }] }
  */
+/**
+ * 同一店舗・同一月のoverridesから、表記ゆれ（全角/半角スペース）込みで
+ * 同じキーワードの既存行を削除する（DBには正規化前のKWが混在しているため）
+ */
+async function deleteOverrideRows(supabase: ReturnType<typeof getSupabase>, shopName: string, keyword: string, month: string) {
+  const { data } = await supabase.from("grid_ranking_overrides")
+    .select("id, keyword").eq("shop_name", shopName).eq("month", month);
+  const ids = (data || [])
+    .filter((r: any) => normalizeKw(r.keyword) === normalizeKw(keyword))
+    .map((r: any) => r.id);
+  if (ids.length > 0) {
+    await supabase.from("grid_ranking_overrides").delete().in("id", ids);
+  }
+}
+
 export const POST = withAudit("グリッド推定生成", "DATA_OP", async (request, ctx) => {
   const body = await request.json();
   const supabase = getSupabase();
 
   // 3×3実測→7×7推定モード
   if (body.useFrom3x3 && body.centerPoints) {
-    const { shopId, shopName, keyword, month, centerPoints } = body;
+    const { shopId, shopName, month, centerPoints } = body;
+    const keyword = typeof body.keyword === "string" ? normalizeKw(body.keyword) : "";
     if (!shopName || !keyword || !month) {
       return NextResponse.json({ error: "shopName, keyword, month が必要です" }, { status: 400 });
     }
@@ -97,9 +114,8 @@ export const POST = withAudit("グリッド推定生成", "DATA_OP", async (requ
     const shopErr = await requireCtxShopAccess(ctx, shopName);
     if (shopErr) return shopErr;
     const results = generateGridFrom3x3(centerPoints);
-    // overridesにも保存
-    await supabase.from("grid_ranking_overrides")
-      .delete().eq("shop_name", shopName).eq("keyword", keyword).eq("month", month);
+    // overridesにも保存（表記ゆれ込みで既存行を置き換え）
+    await deleteOverrideRows(supabase, shopName, keyword, month);
     await supabase.from("grid_ranking_overrides").insert({
       id: crypto.randomUUID(),
       shop_id: shopId || "",
@@ -128,16 +144,17 @@ export const POST = withAudit("グリッド推定生成", "DATA_OP", async (requ
     const { data: existing } = await supabase.from("grid_ranking_overrides")
       .select("keyword, month")
       .eq("shop_name", shopName);
-    const existingKeys = new Set((existing || []).map((e: any) => `${e.keyword}::${e.month}`));
+    // 表記ゆれ（全角/半角スペース）を正規化して既存判定
+    const existingKeys = new Set((existing || []).map((e: any) => `${normalizeKw(e.keyword)}::${e.month}`));
 
     // 既存にないもののみ新規生成（手動編集済みデータを保護）
     const newRows = body.batch
-      .filter((item: { keyword: string; month: string; centerRank: number }) => !existingKeys.has(`${item.keyword}::${item.month}`))
+      .filter((item: { keyword: string; month: string; centerRank: number }) => !existingKeys.has(`${normalizeKw(item.keyword)}::${item.month}`))
       .map((item: { keyword: string; month: string; centerRank: number }) => ({
         id: crypto.randomUUID(),
         shop_id: shopId,
         shop_name: shopName,
-        keyword: item.keyword,
+        keyword: normalizeKw(item.keyword),
         month: item.month,
         grid_size: 7,
         results: generateGrid(item.centerRank),
@@ -163,7 +180,8 @@ export const POST = withAudit("グリッド推定生成", "DATA_OP", async (requ
   }
 
   // 単月生成モード
-  const { shopId, shopName, keyword, month, centerRank } = body;
+  const { shopId, shopName, month, centerRank } = body;
+  const keyword = typeof body.keyword === "string" ? normalizeKw(body.keyword) : "";
   if (!shopName || !keyword || !month || centerRank == null) {
     return NextResponse.json({ error: "shopName, keyword, month, centerRank が必要です" }, { status: 400 });
   }
@@ -173,8 +191,8 @@ export const POST = withAudit("グリッド推定生成", "DATA_OP", async (requ
   if (shopErr) return shopErr;
 
   const results = generateGrid(centerRank);
-  await supabase.from("grid_ranking_overrides")
-    .delete().eq("shop_name", shopName).eq("keyword", keyword).eq("month", month);
+  // 表記ゆれ込みで既存行を置き換え
+  await deleteOverrideRows(supabase, shopName, keyword, month);
   const { error } = await supabase.from("grid_ranking_overrides").insert({
     id: crypto.randomUUID(),
     shop_id: shopId || "",
@@ -230,11 +248,12 @@ export const PUT = withAudit("グリッド推定保存", "DATA_OP", async (reque
   if (shopErr) return shopErr;
 
   const supabase = getSupabase();
-  const { data: existing, error: fetchErr } = await (supabase
+  // 表記ゆれ（全角/半角スペース）込みで該当行を検索
+  const { data: candidates, error: fetchErr } = await (supabase
     .from("grid_ranking_overrides") as any)
-    .select("id, results")
-    .eq("shop_name", shopName).eq("keyword", keyword).eq("month", month)
-    .single();
+    .select("id, keyword, results")
+    .eq("shop_name", shopName).eq("month", month);
+  const existing = (candidates || []).find((r: any) => normalizeKw(r.keyword) === normalizeKw(keyword));
   if (fetchErr || !existing) return NextResponse.json({ error: "グリッドが見つかりません" }, { status: 404 });
 
   const results: GridPoint[] = existing.results as GridPoint[];
@@ -262,10 +281,21 @@ export const DELETE = withAudit("グリッド推定削除", "DATA_OP", async (re
   if (shopErr) return shopErr;
 
   const supabase = getSupabase();
-  let query = supabase.from("grid_ranking_overrides").delete().eq("shop_name", shopName);
-  if (keyword) query = query.eq("keyword", keyword);
-  if (month) query = query.eq("month", month);
-  const { error } = await query;
+  let error = null as { message: string } | null;
+  if (keyword) {
+    // 表記ゆれ（全角/半角スペース）込みで該当行を検索して削除
+    let sel = supabase.from("grid_ranking_overrides").select("id, keyword").eq("shop_name", shopName);
+    if (month) sel = sel.eq("month", month);
+    const { data } = await sel;
+    const ids = (data || []).filter((r: any) => normalizeKw(r.keyword) === normalizeKw(keyword)).map((r: any) => r.id);
+    if (ids.length > 0) {
+      ({ error } = await supabase.from("grid_ranking_overrides").delete().in("id", ids));
+    }
+  } else {
+    let query = supabase.from("grid_ranking_overrides").delete().eq("shop_name", shopName);
+    if (month) query = query.eq("month", month);
+    ({ error } = await query);
+  }
   if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   ctx.detail = `${shopName}: ${keyword ? `「${keyword}」` : "全キーワード"} ${month || "全月"}の推定データを削除`;
   return NextResponse.json({ success: true });
