@@ -48,9 +48,13 @@ export default function ReportDataLoader({
         const qs = new URLSearchParams({ shopId: encodeURIComponent(shopId) });
         if (targetMonth) qs.set("month", targetMonth);
 
-        const res = await fetch(`/api/report/data?${qs.toString()}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const fetchReport = (fast: boolean) =>
+          fetch(`/api/report/data?${qs.toString()}${fast ? "&fast=1" : ""}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+
+        // 1段階目: fast=1（シートのリアルタイム順位取得を省略）で即表示
+        const res = await fetchReport(true);
         if (cancelled) return;
 
         if (res.status === 401) { redirectToLogin(); return; }
@@ -63,6 +67,21 @@ export default function ReportDataLoader({
 
         setPayload({ data: json.data as ReportData, source: (json.source as Source) || "mock", googleReviewUrl: json.googleReviewUrl ?? null });
         setState("ready");
+
+        // 2段階目: キャッシュ表示だった場合のみ、裏で最新順位込みのデータを取得して差し替え
+        // （fast側がスプレッドシート直読みだった場合は既に最新なので不要）
+        if (json.source === "cache") {
+          try {
+            const res2 = await fetchReport(false);
+            if (cancelled || !res2.ok) return;
+            const json2 = await res2.json();
+            if (cancelled || !json2?.data) return;
+            // 内容が変わったときだけ差し替え（無駄な再描画を避ける）
+            if (JSON.stringify(json2.data) !== JSON.stringify(json.data)) {
+              setPayload({ data: json2.data as ReportData, source: (json2.source as Source) || "mock", googleReviewUrl: json2.googleReviewUrl ?? null });
+            }
+          } catch {}
+        }
       } catch {
         if (!cancelled) setState("notfound");
       }

@@ -15,6 +15,155 @@ export interface RankHistoryData {
   datasets: { word: string; ranks: (number | null)[] }[];
 }
 
+export interface RankingSheetsResult {
+  ranks: RankEntry[];
+  history: RankHistoryData;
+}
+
+/** 発見済みタブ位置のメモリキャッシュ（ウォームなインスタンスで再探索を省く。ミス時は全探索にフォールバック） */
+/** key: s1name/s3name はタブ名、s2gid/s3gid は gid */
+type TabLocation = { kind: "s1name" | "s2gid" | "s3name" | "s3gid"; key: string };
+const tabLocationCache = new Map<string, { loc: TabLocation; ts: number }>();
+const TAB_LOCATION_TTL = 24 * 60 * 60 * 1000;
+
+/** header(A1:AZ1) + データ本体を1組だけ取得する共通ヘルパー。HTMLが返る/失敗時は null */
+async function fetchSheetCsv(sheetId: string, param: string): Promise<{ headerText: string; dataText: string } | null> {
+  try {
+    const headerRes = await fetch(
+      `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&${param}&range=A1:AZ1`,
+      { headers: { "User-Agent": UA }, redirect: "follow" }
+    );
+    if (!headerRes.ok) return null;
+    const headerText = await headerRes.text();
+    if (headerText.includes("<!DOCTYPE") || headerText.includes("<html")) return null;
+    const dataRes = await fetch(
+      `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&${param}`,
+      { headers: { "User-Agent": UA }, redirect: "follow" }
+    );
+    if (!dataRes.ok) return null;
+    return { headerText, dataText: await dataRes.text() };
+  } catch { return null; }
+}
+
+/** trySheetByName / trySheetHistoryByName と同じA1検証（Sheet1/2系の汎用） */
+function validateA1ByName(headerText: string, tabName: string): boolean {
+  const headerRow = parseCSVRow(headerText.split("\n")[0] || "");
+  const a1 = (headerRow[0] || "").trim();
+  if (a1 !== tabName && a1 !== tabName.replace(/\s+/g, " ").trim()) {
+    if (["最終", "店舗名", "ビジネスプロフィール"].includes(a1)) return false;
+  }
+  return true;
+}
+
+/** trySheetByGid / trySheetHistoryByGid と同じA1検証（店舗名の包含チェック） */
+function validateA1ByGid(headerText: string, shopName: string): boolean {
+  const a1Row = parseCSVRow(headerText.split("\n")[0] || "");
+  const a1 = (a1Row[0] || "").trim();
+  return !(a1 && !shopName.includes(a1) && !a1.includes(shopName));
+}
+
+/** trySheet3HistoryByName と同じA1検証（Sheet3の履歴用） */
+function validateA1Sheet3Name(headerText: string, tabName: string): boolean {
+  const headerRow = parseCSVRow(headerText.split("\n")[0] || "");
+  const a1 = (headerRow[0] || "").trim();
+  if (a1 !== tabName && a1 !== tabName.replace(/\s+/g, " ").trim()) {
+    if (!tabName.includes(a1) && !a1.includes(tabName)) return false;
+  }
+  return true;
+}
+
+/**
+ * キーワード順位（最新+前月）と順位推移を、同じタブのCSVを1回だけ取得して両方パースする。
+ * fetchRankingFromSheets + fetchRankingHistoryFromSheets を別々に呼ぶと同じ探索・同じCSV取得が
+ * 2系統走って遅いため、その統合版。探索順・検証・パースは既存関数と同一。
+ */
+export async function fetchRankingAndHistoryFromSheets(shopName: string): Promise<RankingSheetsResult> {
+  const result: RankingSheetsResult = { ranks: [], history: { labels: [], datasets: [] } };
+  const done = () => result.ranks.length > 0 && result.history.labels.length > 0;
+  const variants = generateNameVariants(shopName);
+
+  // タブのCSVを1回取得して ranks / history をそれぞれの検証・パーサで埋める
+  const tryTab = async (loc: TabLocation): Promise<boolean> => {
+    if (loc.kind === "s1name") {
+      const csv = await fetchSheetCsv(SHEETS[0].id, `sheet=${encodeURIComponent(loc.key)}`);
+      if (!csv || !validateA1ByName(csv.headerText, loc.key)) return false;
+      if (result.ranks.length === 0) result.ranks = parseRanks(csv.headerText, csv.dataText);
+      if (result.history.labels.length === 0) result.history = parseRanksHistory(csv.headerText, csv.dataText);
+    } else if (loc.kind === "s2gid") {
+      const csv = await fetchSheetCsv(SHEETS[1].id, `gid=${loc.key}`);
+      if (!csv || !validateA1ByGid(csv.headerText, shopName)) return false;
+      if (result.ranks.length === 0) result.ranks = parseRanks(csv.headerText, csv.dataText);
+      if (result.history.labels.length === 0) result.history = parseRanksHistory(csv.headerText, csv.dataText);
+    } else if (loc.kind === "s3name") {
+      const csv = await fetchSheetCsv(SHEETS[2].id, `sheet=${encodeURIComponent(loc.key)}`);
+      if (!csv) return false;
+      // 順位は汎用検証+汎用パーサ、履歴はSheet3検証+Sheet3パーサ（既存の trySheetByName / trySheet3HistoryByName と同じ）
+      if (result.ranks.length === 0 && validateA1ByName(csv.headerText, loc.key)) {
+        result.ranks = parseRanks(csv.headerText, csv.dataText);
+      }
+      if (result.history.labels.length === 0 && validateA1Sheet3Name(csv.headerText, loc.key)) {
+        result.history = parseRanksHistorySheet3(csv.headerText, csv.dataText);
+      }
+    } else {
+      const csv = await fetchSheetCsv(SHEETS[2].id, `gid=${loc.key}`);
+      if (!csv) return false;
+      if (result.ranks.length === 0) result.ranks = parseRanksSheet3(csv.headerText, csv.dataText);
+      if (result.history.labels.length === 0) result.history = parseRanksHistorySheet3(csv.headerText, csv.dataText);
+    }
+    return result.ranks.length > 0 || result.history.labels.length > 0;
+  };
+
+  // 0. 前回発見したタブ位置があれば最初に試す（外れたら通常探索へ）
+  const remembered = tabLocationCache.get(shopName);
+  if (remembered && Date.now() - remembered.ts < TAB_LOCATION_TTL) {
+    if (await tryTab(remembered.loc)) {
+      if (done()) return result;
+    } else {
+      tabLocationCache.delete(shopName);
+    }
+  }
+
+  const remember = (loc: TabLocation) => tabLocationCache.set(shopName, { loc, ts: Date.now() });
+
+  // 1. Sheet1: タブ名=店舗名で直接アクセス
+  for (const tabName of variants) {
+    if (done()) return result;
+    if (await tryTab({ kind: "s1name", key: tabName })) remember({ kind: "s1name", key: tabName });
+  }
+
+  // 2. Sheet2: タブ名→gidマッピングで検索
+  if (!done()) {
+    try {
+      const tabMap = await fetchTabGidMap(SHEETS[1].id);
+      const matchedTabs = findMatchingTabs(shopName, tabMap);
+      for (const tab of matchedTabs) {
+        if (done()) return result;
+        if (await tryTab({ kind: "s2gid", key: tab.gid })) remember({ kind: "s2gid", key: tab.gid });
+      }
+    } catch {}
+  }
+
+  // 3. Sheet3: タブ名=店舗名で直接アクセス → gidフォールバック
+  if (!done()) {
+    for (const tabName of variants) {
+      if (done()) return result;
+      if (await tryTab({ kind: "s3name", key: tabName })) remember({ kind: "s3name", key: tabName });
+    }
+  }
+  if (!done()) {
+    try {
+      const tabMap3 = await fetchTabGidMap(SHEETS[2].id);
+      const matched3 = findMatchingTabs(shopName, tabMap3);
+      for (const tab of matched3) {
+        if (done()) return result;
+        if (await tryTab({ kind: "s3gid", key: tab.gid })) remember({ kind: "s3gid", key: tab.gid });
+      }
+    } catch {}
+  }
+
+  return result;
+}
+
 export async function fetchRankingFromSheets(shopName: string): Promise<RankEntry[]> {
   const variants = generateNameVariants(shopName);
 

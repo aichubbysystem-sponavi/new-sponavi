@@ -38,6 +38,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "shopIdが必要です" }, { status: 400 });
   }
   const targetMonth = request.nextUrl.searchParams.get("month") || undefined;
+  // fast=1: シートへのリアルタイム順位取得を省略して即返す（初期表示用。最新値は後続の通常リクエストで差し替え）
+  const fast = request.nextUrl.searchParams.get("fast") === "1";
   const shopName = decodeURIComponent(shopId);
 
   // 店舗アクセス権チェック（president以外は許可店舗のみ）
@@ -46,7 +48,7 @@ export async function GET(request: NextRequest) {
   }
 
   const [{ data, source }, googleReviewUrl] = await Promise.all([
-    getReportData(shopId, targetMonth),
+    getReportData(shopId, targetMonth, { skipSheets: fast }),
     getGoogleReviewUrl(shopName),
   ]);
 

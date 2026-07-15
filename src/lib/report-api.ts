@@ -252,7 +252,14 @@ export function supplementGridFromRanking(
  * 特定店舗のレポートデータを取得（キャッシュ優先）
  * gridRankingは常にリアルタイム取得（計測結果は頻繁に更新されるため）
  */
-export async function getReportData(shopId: string, targetMonth?: string): Promise<{
+export async function getReportData(
+  shopId: string,
+  targetMonth?: string,
+  opts?: {
+    /** true: シートへのリアルタイム順位取得を省略してキャッシュ値をそのまま使う（高速表示用）。 */
+    skipSheets?: boolean;
+  },
+): Promise<{
   data: ReportData | null;
   source: "cache" | "spreadsheet" | "mock";
 }> {
@@ -267,62 +274,58 @@ export async function getReportData(shopId: string, targetMonth?: string): Promi
   try {
     const cached = await readReportDataFromCache(shopName);
     if (cached) {
-      // rankingHistory + keywords をシートからリアルタイム取得（キャッシュは古い値のままになるため）
-      try {
-        const { fetchRankingFromSheets, fetchRankingHistoryFromSheets } = await import("./ranking-fetch");
-        const [freshRanks, freshHistory] = await Promise.all([
-          fetchRankingFromSheets(shopName),
-          fetchRankingHistoryFromSheets(shopName),
-        ]);
-        if (freshHistory.labels.length > 0) {
-          cached.rankingHistory = freshHistory;
-        }
-        if (freshRanks.length > 0) {
-          cached.keywords = freshRanks.map(r => ({ word: r.word, rank: r.rank, prevRank: r.prevRank }));
-        }
-      } catch {}
-      // gridRankingはリアルタイムで上書き（overrides + 実測データ + rankingHistoryから補完）
-      let gridRanking: GridRankingReport | undefined = cached.gridRanking;
-      try {
-        const dbIds = await getShopDbIds(shopName);
-        gridRanking = await fetchGridRankingLive(dbIds.length > 0 ? dbIds : ["_"], shopName);
-      } catch (gErr: any) {
-        console.error("[report-api] fetchGridRankingLive error (continuing with cached):", gErr?.message?.slice(0, 100));
-      }
-      // rankingHistoryから補完（fetchGridRankingLiveが失敗しても実行）
-      try {
-        if (cached.rankingHistory) {
-          gridRanking = supplementGridFromRanking(gridRanking, cached.rankingHistory);
-        }
-        if (gridRanking) cached.gridRanking = gridRanking;
-      } catch (sErr: any) {
-        console.error("[report-api] supplementGrid error:", sErr?.message);
-      }
-      // searchQueries + パフォーマンスメトリクスをDBキャッシュからリアルタイム取得
-      try {
-        const sb = getSupabase();
-        const { data: shopRow } = await sb.from("shops").select("id, gbp_location_name").eq("name", shopName).limit(1).maybeSingle();
-        if (shopRow?.id) {
-          // 検索語句
-          try {
-            const { getCachedSearchKeywords } = await import("./gbp-search-keywords");
-            const cachedKw = await getCachedSearchKeywords(shopRow.id);
-            if (cachedKw.length > 0) {
-              const latest = cachedKw[cachedKw.length - 1];
-              cached.searchQueries = {
-                latest: latest.keywords.slice(0, 30),
-                latestMonth: latest.month,
-                history: cachedKw,
-              };
-            }
-          } catch (kwErr: any) {
-            console.error(`[report-api] searchKw error:`, kwErr?.message);
-          }
+      // ── 外部取得・DB照会を並列実行（従来は直列で待ち時間が積み上がっていた）──
 
-          // パフォーマンスメトリクス（performance_metrics_cache → 月次推移・KPIを上書き）
-          try {
-            const { getCachedPerformance } = await import("./gbp-performance");
-            const rawPerfData = await getCachedPerformance(shopRow.id, shopName);
+      // A. rankingHistory + keywords をシートからリアルタイム取得（skipSheets時は省略しキャッシュ値のまま）
+      const sheetsPromise = opts?.skipSheets
+        ? Promise.resolve(null)
+        : (async () => {
+            try {
+              const { fetchRankingAndHistoryFromSheets } = await import("./ranking-fetch");
+              return await fetchRankingAndHistoryFromSheets(shopName);
+            } catch { return null; }
+          })();
+
+      // B. gridRankingはリアルタイムで上書き（overrides + 実測データ）
+      const gridPromise = (async (): Promise<GridRankingReport | undefined> => {
+        try {
+          const dbIds = await getShopDbIds(shopName);
+          return await fetchGridRankingLive(dbIds.length > 0 ? dbIds : ["_"], shopName);
+        } catch (gErr: any) {
+          console.error("[report-api] fetchGridRankingLive error (continuing with cached):", gErr?.message?.slice(0, 100));
+          return cached.gridRanking;
+        }
+      })();
+
+      // C. searchQueries + パフォーマンスメトリクスをDBキャッシュからリアルタイム取得
+      const overlayPromise = (async () => {
+        try {
+          const sb = getSupabase();
+          const { data: shopRow } = await sb.from("shops").select("id, gbp_location_name").eq("name", shopName).limit(1).maybeSingle();
+          if (!shopRow?.id) return;
+          await Promise.all([
+            // 検索語句
+            (async () => {
+              try {
+                const { getCachedSearchKeywords } = await import("./gbp-search-keywords");
+                const cachedKw = await getCachedSearchKeywords(shopRow.id);
+                if (cachedKw.length > 0) {
+                  const latest = cachedKw[cachedKw.length - 1];
+                  cached.searchQueries = {
+                    latest: latest.keywords.slice(0, 30),
+                    latestMonth: latest.month,
+                    history: cachedKw,
+                  };
+                }
+              } catch (kwErr: any) {
+                console.error(`[report-api] searchKw error:`, kwErr?.message);
+              }
+            })(),
+            // パフォーマンスメトリクス（performance_metrics_cache → 月次推移・KPIを上書き）
+            (async () => {
+              try {
+                const { getCachedPerformance } = await import("./gbp-performance");
+                const rawPerfData = await getCachedPerformance(shopRow.id, shopName);
             const perfData = rawPerfData.slice(-13);
             if (perfData.length > 0) {
               const labels = perfData.map(p => p.month);
@@ -373,22 +376,51 @@ export async function getReportData(shopId: string, targetMonth?: string): Promi
                   end: `${curParts[0]}/${String(curParts[1]).padStart(2, "0")}/${lastDay}`,
                 },
               };
-            }
-          } catch (e: any) {
-            console.error("[report-api] perf overlay error (cache path):", e?.message || e);
-          }
-        }
-      } catch {}
-      // カテゴリをshopsテーブルから付与
-      if (!cached.shop.category) {
+                }
+              } catch (e: any) {
+                console.error("[report-api] perf overlay error (cache path):", e?.message || e);
+              }
+            })(),
+          ]);
+        } catch {}
+      })();
+
+      // D. カテゴリをshopsテーブルから付与
+      const categoryPromise = (async () => {
+        if (cached.shop.category) return;
         try {
           const sb = getSupabase();
           const { data: catRow } = await sb.from("shops").select("gbp_main_category").eq("name", shopName).not("gbp_main_category", "is", null).limit(1).maybeSingle();
           if (catRow?.gbp_main_category) cached.shop.category = catRow.gbp_main_category;
         } catch {}
+      })();
+
+      const [freshSheets, liveGrid] = await Promise.all([sheetsPromise, gridPromise, overlayPromise, categoryPromise]);
+
+      // シート取得結果を反映（キャッシュは古い値のままになるため）
+      if (freshSheets) {
+        if (freshSheets.history.labels.length > 0) {
+          cached.rankingHistory = freshSheets.history;
+        }
+        if (freshSheets.ranks.length > 0) {
+          cached.keywords = freshSheets.ranks.map(r => ({ word: r.word, rank: r.rank, prevRank: r.prevRank }));
+        }
       }
+
+      // gridRanking: rankingHistoryから補完（fetchGridRankingLiveが失敗しても実行）
+      let gridRanking: GridRankingReport | undefined = liveGrid;
+      try {
+        if (cached.rankingHistory) {
+          gridRanking = supplementGridFromRanking(gridRanking, cached.rankingHistory);
+        }
+        if (gridRanking) cached.gridRanking = gridRanking;
+      } catch (sErr: any) {
+        console.error("[report-api] supplementGrid error:", sErr?.message);
+      }
+
       // reviewAnalysisもDBからリアルタイム取得（再分析反映のため）
       // 表示月が指定されていればその月の分析を優先取得、なければ最新
+      // （表示月はperfオーバーレイ後のmonthlyLabelsに依存するため、並列フェーズの後に実行）
       try {
         const { getStoredAnalysis } = await import("./review-analyzer");
         const displayMonth = normalizedMonth || (cached.monthlyLabels?.length ? cached.monthlyLabels[cached.monthlyLabels.length - 1] : undefined);
