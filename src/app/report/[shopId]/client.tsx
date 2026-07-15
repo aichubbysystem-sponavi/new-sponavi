@@ -1740,33 +1740,43 @@ export default function ReportClient({
                     </>
                   )}
                 </div>
-                {/* 右: 各KWの月別平均順位 */}
-                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10, overflow: "hidden" }}>
+                {/* 右: 各KWの月別平均順位（KW数が増えても見切れないよう余白・行高を自動調整） */}
+                {(() => {
+                const kwCount = gr.keywords.length;
+                // KWが多いほど詰める（都度調整: 6件までは従来、7件以上は段階的に圧縮）
+                const dense = kwCount >= 8 ? 2 : kwCount >= 7 ? 1 : 0;
+                const blockGap = dense === 2 ? 4 : dense === 1 ? 7 : 10;
+                const headMB = dense === 2 ? 2 : dense === 1 ? 4 : 6;
+                const titleFS = dense === 2 ? 11 : dense === 1 ? 12 : 13;
+                const cellPad = dense === 2 ? "2px 4px" : dense === 1 ? "4px 4px" : "5px 4px";
+                const cellFS = dense === 2 ? 11 : 12;
+                return (
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: blockGap, overflow: "hidden" }}>
                   {gr.keywords.map(kw => {
                     const data = recentHistory.map(h => { const s = h.snapshots.find(s => s.keyword === kw); return s ? s.avgRank : null; });
                     const valid = data.filter((v): v is number => v !== null);
                     const diff = valid.length >= 2 ? valid[valid.length - 2] - valid[valid.length - 1] : 0;
                     return (
                       <div key={kw}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: "#0f3460", marginBottom: 6 }}>「{kw}」</div>
+                        <div style={{ fontSize: titleFS, fontWeight: 700, color: "#0f3460", marginBottom: headMB }}>「{kw}」</div>
                         <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", borderRadius: 6, overflow: "hidden" }}>
                           <thead>
                             <tr>
                               {trendMonthLabels.map((l, li) => (
-                                <th key={li} style={{ background: li === trendMonthLabels.length - 1 ? "#e94560" : "#0f3460", color: "#fff", padding: "5px 4px", textAlign: "center", fontWeight: 600, fontSize: 12, whiteSpace: "nowrap" }}>{l}</th>
+                                <th key={li} style={{ background: li === trendMonthLabels.length - 1 ? "#e94560" : "#0f3460", color: "#fff", padding: cellPad, textAlign: "center", fontWeight: 600, fontSize: cellFS, whiteSpace: "nowrap" }}>{l}</th>
                               ))}
-                              <th style={{ background: "#0f3460", color: "#fff", padding: "5px 4px", textAlign: "center", fontWeight: 600, fontSize: 12 }}>変動</th>
+                              <th style={{ background: "#0f3460", color: "#fff", padding: cellPad, textAlign: "center", fontWeight: 600, fontSize: cellFS }}>変動</th>
                             </tr>
                           </thead>
                           <tbody>
                             <tr>
                               {data.map((v, i) => (
-                                <td key={i} style={{ padding: "5px 4px", textAlign: "center", fontSize: 12, fontWeight: v !== null && v <= 5 ? 900 : 600,
+                                <td key={i} style={{ padding: cellPad, textAlign: "center", fontSize: cellFS, fontWeight: v !== null && v <= 5 ? 900 : 600,
                                   color: v === null ? "#ddd" : v <= 3 ? "#1d4ed8" : v <= 10 ? "#15803d" : v <= 20 ? "#b45309" : "#999", borderBottom: "1px solid #eee" }}>
                                   {v !== null ? v : "-"}
                                 </td>
                               ))}
-                              <td style={{ padding: "5px 4px", textAlign: "center", fontSize: 12, fontWeight: 700, borderBottom: "1px solid #eee",
+                              <td style={{ padding: cellPad, textAlign: "center", fontSize: cellFS, fontWeight: 700, borderBottom: "1px solid #eee",
                                 color: diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
                                 {valid.length >= 2 ? (diff > 0 ? `↑${diff.toFixed(1)}` : diff < 0 ? `↓${Math.abs(diff).toFixed(1)}` : "→") : "→"}
                               </td>
@@ -1777,6 +1787,8 @@ export default function ReportClient({
                     );
                   })}
                 </div>
+                );
+                })()}
                 </div>
               </div>
             </div>
