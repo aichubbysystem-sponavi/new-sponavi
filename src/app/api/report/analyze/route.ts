@@ -37,9 +37,11 @@ async function fetchReviews(shopName: string): Promise<ReviewListResponse | null
     oneYearAgo.setDate(1);
     oneYearAgo.setHours(0, 0, 0, 0);
 
-    const { data: reviews, count, error: reviewErr } = await supabase
+    // count:"exact"は別途カウントクエリが走り負荷が倍になるため使わない
+    // （totalReviewCountはreviews.lengthで代替。idx_reviews_shop_name_time で高速）
+    const { data: reviews, error: reviewErr } = await supabase
       .from("reviews")
-      .select("review_id, reviewer_name, star_rating, comment, create_time", { count: "exact" })
+      .select("review_id, reviewer_name, star_rating, comment, create_time")
       .eq("shop_name", normalizedName)
       .gte("create_time", oneYearAgo.toISOString())
       .not("comment", "is", null)
@@ -75,7 +77,7 @@ async function fetchReviews(shopName: string): Promise<ReviewListResponse | null
         };
       }),
       averageRating: avgRating,
-      totalReviewCount: count || reviews.length,
+      totalReviewCount: reviews.length,
     };
   } catch (err) {
     console.error(`[analyze] fetchReviews error for shopName=${shopName}:`, err instanceof Error ? err.message : err);
