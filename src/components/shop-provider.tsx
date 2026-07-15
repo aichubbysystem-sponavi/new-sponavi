@@ -105,7 +105,11 @@ export default function ShopProvider({ children }: { children: React.ReactNode }
         api.get("/api/shop"),
         api.get("/api/report/shop-cancel").then(r => r.data?.cancelled || []).catch(() => []),
       ]);
-      const allData: Shop[] = Array.isArray(res.data) ? res.data : [];
+      // 店名をNFCに正規化（Go APIがNFD＝濁点分解形で返すと、NFC保存のDB各テーブル
+      // (reviews/report_data_cache/shops等)と店名一致せず「口コミなし」等の誤判定になる。
+      // 全画面がこの shops を起点にAPIへ店名を送るため、ここで一括正規化して波及を防ぐ）
+      const rawData: Shop[] = Array.isArray(res.data) ? res.data : [];
+      const allData: Shop[] = rawData.map(s => (typeof s.name === "string" ? { ...s, name: s.name.normalize("NFC") } : s));
       // 解約店舗をサイドバーの店舗一覧から除外
       const cancelledIds = new Set((cancelRes as { id: string }[]).map(c => c.id));
       const data = allData.filter(s => !cancelledIds.has(s.id));
