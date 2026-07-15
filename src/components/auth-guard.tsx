@@ -4,7 +4,6 @@ import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter, usePathname } from "next/navigation";
 import api from "@/lib/api";
-import MfaGate from "@/components/mfa-gate";
 
 // === 壁9追加: セッション自動タイムアウト ===
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30分
@@ -13,7 +12,6 @@ export default function AuthGuard({ children, skipAuth }: { children: React.Reac
   const [loading, setLoading] = useState(true);
   const [authenticated, setAuthenticated] = useState(false);
   const [isPending, setIsPending] = useState(false);
-  const [mfaRequired, setMfaRequired] = useState(false); // 社長でMFA未通過なら true
   const router = useRouter();
   const pathname = usePathname();
   // セッションタイムアウト: 操作がなければ自動ログアウト
@@ -57,10 +55,6 @@ export default function AuthGuard({ children, skipAuth }: { children: React.Reac
           const res = await api.get("/api/report/my-role");
           if (res.data.role === "pending") {
             setIsPending(true);
-          } else if (res.data.role === "president") {
-            // 社長はAAL2(2段階認証通過)必須。未通過ならMFAゲートを表示
-            const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-            setMfaRequired(aal?.currentLevel !== "aal2");
           }
         } catch {}
       } else if (pathname !== "/login") {
@@ -141,11 +135,6 @@ export default function AuthGuard({ children, skipAuth }: { children: React.Reac
         </div>
       </div>
     );
-  }
-
-  // 社長でMFA未通過: 管理画面を一切見せず、MFA登録/認証ゲートを表示
-  if (mfaRequired) {
-    return <MfaGate onVerified={() => setMfaRequired(false)} />;
   }
 
   return <>{children}</>;

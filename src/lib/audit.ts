@@ -34,19 +34,6 @@ export interface AuditContext {
   actionOverride?: string;
 }
 
-/** Bearerトークンの aal クレーム（"aal1"/"aal2"）を取り出す。署名検証は verifyAuth 済み前提 */
-function decodeJwtAal(authHeader: string | null): string | null {
-  if (!authHeader?.startsWith("Bearer ")) return null;
-  const token = authHeader.slice(7);
-  try {
-    const payload = token.split(".")[1];
-    const json = JSON.parse(Buffer.from(payload, "base64").toString("utf8"));
-    return typeof json?.aal === "string" ? json.aal : null;
-  } catch {
-    return null;
-  }
-}
-
 /** user_profiles から role と name を1クエリで取得（auth_uid → id フォールバック） */
 async function getRoleAndName(sub: string): Promise<{ role: AppRole; name: string } | null> {
   const sb = getSupabase();
@@ -76,14 +63,6 @@ export async function requirePermission(
   const profile = await getRoleAndName(auth.sub);
   if (!profile || !can(profile.role, action)) {
     return { error: NextResponse.json({ error: "この操作を行う権限がありません" }, { status: 403 }) };
-  }
-  // 課金操作(PAID_OP)は2段階認証(AAL2)通過トークン必須（env で段階有効化）。
-  // 画面ゲートをJS改ざんで迂回されても、課金APIはここで止める。
-  if (action === "PAID_OP" && process.env.MFA_ENFORCE_PAID_OP === "on") {
-    const aal = decodeJwtAal(request.headers.get("authorization"));
-    if (aal !== "aal2") {
-      return { error: NextResponse.json({ error: "この操作には2段階認証が必要です" }, { status: 403 }) };
-    }
   }
   const ctx: AuditContext = {
     sub: auth.sub,
