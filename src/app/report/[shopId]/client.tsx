@@ -1283,16 +1283,16 @@ export default function ReportClient({
           <div style={{ fontSize: 16, opacity: 0.5, marginTop: 6 }}>{shop.address}</div>
           <div style={{ position: "absolute", top: 28, right: 36, background: "rgba(255,255,255,.12)", padding: "7px 18px", borderRadius: 8, fontSize: 16, fontWeight: 600 }}>{shop.period.start} - {shop.period.end}</div>
         </div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", padding: "10px 9px", background: "#e8eaf0", flexShrink: 0 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", padding: "5px 9px", background: "#e8eaf0", flexShrink: 0 }}>
           {[{ lb: "対策開始日", vl: shop.startDate }, { lb: "レポート対象", vl: curLabel }, ...(shop.category ? [{ lb: "業種", vl: shop.category }] : []), { lb: "口コミ合計", vl: `${displayTotalReviews.toLocaleString()}件` }, { lb: "評価", vl: String(shop.rating) }].map((b, i) => (
-            <div key={i} style={{ background: "#fff", borderRadius: 10, padding: "7px 14px", fontSize: 16, display: "flex", alignItems: "center", gap: 5, boxShadow: "0 1px 3px rgba(0,0,0,.05)" }}>
+            <div key={i} style={{ background: "#fff", borderRadius: 10, padding: "0px 14px", fontSize: 16, display: "flex", alignItems: "center", gap: 5, boxShadow: "0 1px 3px rgba(0,0,0,.05)" }}>
               <span style={{ color: "#888" }}>{b.lb}</span><span style={{ fontWeight: 700 }}>{b.vl}</span>
             </div>
           ))}
         </div>
         <div style={{ flex: 1, padding: "16px 9px 20px", display: "flex", flexDirection: "column", justifyContent: "stretch", overflow: "hidden" }}>
           <div style={{ ...stitleStyle, marginBottom: 14 }}>主要指標サマリー（{curLabel}）</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, flex: 1 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6, flex: 1 }}>
             {kpis.map((kpi, i) => {
               const isLastKpi = i === kpis.length - 1;
               const mom = kpi.momValue != null ? pctChange(kpi.value, kpi.momValue) : null;
