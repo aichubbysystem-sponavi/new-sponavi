@@ -479,19 +479,39 @@ export default function ReportClient({
     return result.length > 0 ? result : null;
   }, [gridRanking, curLabel]);
 
-  // gridRankingの中心点を優先しつつ、グリッドにないKWはシート順位で補完。
-  // どちらにも順位がないKW（シート列のみ存在）は圏外(0)として末尾に追加
+  // P6順位変動カード用: シート実測（選択月＝P7順位推移の最新列）を最優先し、
+  // その月のシート順位がないKWはグリッド中心点で補完。どちらもないKWは圏外(0)。
   // キーは正規化（全角/半角スペースの表記ゆれで同一KWが重複カード化するのを防ぐ）
   const effectiveKeywords = useMemo(() => {
+    const gridMap = new Map<string, { word: string; rank: number; prevRank: number }>();
+    for (const kw of gridKeywords || []) gridMap.set(normalizeKw(kw.word), { ...kw, word: normalizeKw(kw.word) });
+
     const merged = new Map<string, { word: string; rank: number; prevRank: number }>();
-    for (const kw of gridKeywords || []) merged.set(normalizeKw(kw.word), { ...kw, word: normalizeKw(kw.word) });
+    // 1. シート実測（選択月）— P7順位推移テーブルと同じ値になる
+    if (rankingHistory && rankingHistory.labels.length > 0) {
+      const lastIdx = rankingHistory.labels.length - 1;
+      for (const ds of rankingHistory.datasets) {
+        const w = normalizeKw(ds.word);
+        const rank = ds.ranks[lastIdx] ?? 0;
+        // 前月表示用: 直近でデータがある月の順位
+        let prevRank = 0;
+        for (let i = lastIdx - 1; i >= 0; i--) {
+          const r = ds.ranks[i];
+          if (r !== null && r > 0) { prevRank = r; break; }
+        }
+        const sheetEntry = { word: w, rank: rank || 0, prevRank: prevRank || rank || 0 };
+        // 選択月のシート順位がないKWはグリッド中心点にフォールバック
+        merged.set(w, sheetEntry.rank > 0 ? sheetEntry : (gridMap.get(w) ?? sheetEntry));
+      }
+    }
+    // 2. グリッドのみのKW（シート列に存在しない）
+    for (const [w, g] of Array.from(gridMap.entries())) {
+      if (!merged.has(w)) merged.set(w, g);
+    }
+    // 3. シート履歴が取得できない店舗向けフォールバック（シート最新行の順位）
     for (const kw of keywords) {
       const w = normalizeKw(kw.word);
       if (!merged.has(w)) merged.set(w, { ...kw, word: w });
-    }
-    for (const ds of rankingHistory?.datasets || []) {
-      const w = normalizeKw(ds.word);
-      if (!merged.has(w)) merged.set(w, { word: w, rank: 0, prevRank: 0 });
     }
     return Array.from(merged.values());
   }, [gridKeywords, keywords, rankingHistory]);

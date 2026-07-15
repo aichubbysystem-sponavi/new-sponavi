@@ -98,6 +98,9 @@ export async function fetchGridRankingLive(shopIds: string[], shopName?: string)
 
     const keywordSet = new Set<string>();
     const monthMap = new Map<string, any[]>();
+    // 手動/生成データ(overrides)が存在する「KW×月」。同じKW×月の実測だけを抑止する
+    // （以前は月単位スキップだったため、1件でも手動データがある月は全KWの実測が隠れていた）
+    const overrideKeys = new Set<string>();
 
     // 1. overrides（手動編集データ）を優先読み込み
     if (shopName) {
@@ -113,6 +116,7 @@ export async function fetchGridRankingLive(shopIds: string[], shopName?: string)
           keywordSet.add(kw);
           // 月フォーマット統一: "2026/04"→"2026/4", "2026-04"→"2026/4"
           const month = (o.month || "unknown").replace(/-/g, "/").replace(/\/0(\d)$/, "/$1");
+          overrideKeys.add(`${month}::${kw}`);
           if (!monthMap.has(month)) monthMap.set(month, []);
           const ranked = (o.results || []).filter((r: any) => r.rank > 0);
           const avg = ranked.length > 0 ? ranked.reduce((s: number, r: any) => s + r.rank, 0) / ranked.length : 0;
@@ -124,7 +128,7 @@ export async function fetchGridRankingLive(shopIds: string[], shopName?: string)
       }
     }
 
-    // 2. 実測データ（overridesにない月のみ補完）
+    // 2. 実測データ（同じKW×月に手動データがある場合のみスキップ）
     const { data: logs } = await sb
       .from("grid_ranking_logs")
       .select("keyword, grid_size, interval_m, results, measured_at")
@@ -134,9 +138,9 @@ export async function fetchGridRankingLive(shopIds: string[], shopName?: string)
       for (const log of logs) {
         const d = new Date(log.measured_at);
         const monthKey = `${d.getFullYear()}/${d.getMonth() + 1}`;
-        // overridesに同月のデータがあればスキップ
-        if (monthMap.has(monthKey)) continue;
         const kw = normalizeKw(log.keyword);
+        // 同一KW×同一月に手動/生成データがあれば実測はスキップ（手動を優先）
+        if (overrideKeys.has(`${monthKey}::${kw}`)) continue;
         keywordSet.add(kw);
         if (!monthMap.has(monthKey)) monthMap.set(monthKey, []);
         const results = log.results || [];
@@ -183,9 +187,10 @@ export function supplementGridFromRanking(
 ): GridRankingReport | undefined {
   if (!rankingHistory || rankingHistory.labels.length === 0) return gridRanking;
 
-  const existingMonths = new Set(gridRanking?.history.map(h => h.month) || []);
-  const existingKeywords = new Set(gridRanking?.keywords || []);
-  const newHistory: GridRankingMonthData[] = [...(gridRanking?.history || [])];
+  // 実測/手動データをコピーし、不足分（KW×月単位）だけ推定で補完する
+  // （以前は月単位だったため、実測がある月のシートのみKWが欠けていた）
+  const newHistory: GridRankingMonthData[] = (gridRanking?.history || []).map(h => ({ ...h, snapshots: [...h.snapshots] }));
+  const monthIndex = new Map<string, number>(newHistory.map((h, i) => [h.month, i]));
   const allKeywords = new Set(gridRanking?.keywords || []);
 
   // 簡易グリッド推定（centerRankから7×7を生成、決定論的ハッシュ使用）
@@ -221,14 +226,19 @@ export function supplementGridFromRanking(
 
   for (let i = 0; i < rankingHistory.labels.length; i++) {
     const month = rankingHistory.labels[i];
-    if (existingMonths.has(month)) continue;
+    const mi = monthIndex.get(month);
+    // この月に既にデータがあるKW（実測/手動）は推定で上書きしない
+    const existingKws = mi !== undefined
+      ? new Set(newHistory[mi].snapshots.map(s => normalizeKw(s.keyword)))
+      : new Set<string>();
 
-    // この月のキーワード順位を取得してグリッド推定
+    // この月のキーワード順位を取得してグリッド推定（不足KWのみ）
     const snapshots: any[] = [];
     for (const ds of rankingHistory.datasets) {
       const rank = ds.ranks[i];
       if (rank === null || rank <= 0) continue;
       const word = normalizeKw(ds.word);
+      if (existingKws.has(word)) continue;
       allKeywords.add(word);
       const results = generateSimpleGrid(rank, word, month);
       const ranked = results.filter(r => r.rank > 0);
@@ -243,7 +253,12 @@ export function supplementGridFromRanking(
       });
     }
     if (snapshots.length > 0) {
-      newHistory.push({ month, snapshots });
+      if (mi !== undefined) {
+        newHistory[mi].snapshots.push(...snapshots);
+      } else {
+        newHistory.push({ month, snapshots });
+        monthIndex.set(month, newHistory.length - 1);
+      }
     }
   }
 
