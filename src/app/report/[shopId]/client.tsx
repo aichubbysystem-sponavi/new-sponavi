@@ -1716,19 +1716,21 @@ export default function ReportClient({
                             </tr>
                           </thead>
                           <tbody>
-                            {latestMonth.snapshots.map((s, si) => {
-                              const ps = prevMonth?.snapshots.find(p => p.keyword === s.keyword);
-                              const diff = ps ? ps.avgRank - s.avgRank : 0;
+                            {/* 右の月別表と同じ全KWを表示（この月のデータがないKWは「-」） */}
+                            {gr.keywords.map((kw, si) => {
+                              const s = latestMonth.snapshots.find(sn => sn.keyword === kw);
+                              const ps = prevMonth?.snapshots.find(p => p.keyword === kw);
+                              const diff = s && ps ? ps.avgRank - s.avgRank : 0;
                               return (
                                 <tr key={si} style={{ background: si % 2 === 0 ? "#fff" : "#f8f9fb" }}>
-                                  <td style={{ padding: "8px 12px", fontSize: 15, borderBottom: "1px solid #eee" }}>{s.keyword}</td>
+                                  <td style={{ padding: "8px 12px", fontSize: 15, borderBottom: "1px solid #eee" }}>{kw}</td>
                                   <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 15, fontWeight: 800, borderBottom: "1px solid #eee",
-                                    color: s.avgRank <= 3 ? "#1d4ed8" : s.avgRank <= 10 ? "#15803d" : s.avgRank <= 20 ? "#b45309" : "#999" }}>{s.avgRank}</td>
+                                    color: !s ? "#ccc" : s.avgRank <= 3 ? "#1d4ed8" : s.avgRank <= 10 ? "#15803d" : s.avgRank <= 20 ? "#b45309" : "#999" }}>{s ? s.avgRank : "-"}</td>
                                   <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 15, fontWeight: 700, borderBottom: "1px solid #eee",
                                     color: diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
-                                    {ps ? (diff > 0 ? `↑${diff.toFixed(1)}` : diff < 0 ? `↓${Math.abs(diff).toFixed(1)}` : "→") : "-"}
+                                    {s && ps ? (diff > 0 ? `↑${diff.toFixed(1)}` : diff < 0 ? `↓${Math.abs(diff).toFixed(1)}` : "→") : "-"}
                                   </td>
-                                  <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 15, color: "#888", borderBottom: "1px solid #eee" }}>{s.gridSize}×{s.gridSize}</td>
+                                  <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 15, color: "#888", borderBottom: "1px solid #eee" }}>{s ? `${s.gridSize}×${s.gridSize}` : "-"}</td>
                                 </tr>
                               );
                             })}
