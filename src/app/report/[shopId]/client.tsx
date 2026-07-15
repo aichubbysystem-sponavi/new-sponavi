@@ -267,7 +267,6 @@ export default function ReportClient({
   const displayTotalReviews = reviewCounts.length > 0 ? reviewCounts[reviewCounts.length - 1] : shop.totalReviews;
 
   const hasKeywords = keywords.length > 0 || !!(gridRanking && gridRanking.history.length > 0);
-  const hasRankingHistory = rankingHistory && rankingHistory.labels.length > 0;
   const hasReviews = reviewCounts.length > 0;
   const hasSearchQueries = searchQueries && searchQueries.latest.length > 0;
   const hasGridRanking = !!(gridRanking && gridRanking.keywords.length > 0 && gridRanking.history.length > 0);
@@ -450,80 +449,89 @@ export default function ReportClient({
     return true;
   }));
 
-  // gridRankingの中心点順位をキーワード順位として使用（あればスプレッドシートより優先）
-  const gridKeywords = useMemo(() => {
-    if (!gridRanking || gridRanking.history.length === 0) return null;
-    // 対象月（curLabel）以前のデータのみ使用
-    const filtered = curLabel
-      ? gridRanking.history.filter(h => monthToNum(h.month) <= monthToNum(curLabel))
-      : gridRanking.history;
-    if (filtered.length === 0) return null;
-    const latest = filtered[filtered.length - 1];
-    const prev = filtered.length >= 2 ? filtered[filtered.length - 2] : null;
-    if (!latest?.snapshots) return null;
-
-    const result: { word: string; rank: number; prevRank: number }[] = [];
-    for (const snap of latest.snapshots) {
-      const center = snap.results.find(r => r.row === Math.floor(snap.gridSize / 2) && r.col === Math.floor(snap.gridSize / 2));
-      const rank = center?.rank || 0;
-      let prevRank = rank;
-      if (prev?.snapshots) {
-        const prevSnap = prev.snapshots.find(s => s.keyword === snap.keyword);
-        if (prevSnap) {
-          const prevCenter = prevSnap.results.find(r => r.row === Math.floor(prevSnap.gridSize / 2) && r.col === Math.floor(prevSnap.gridSize / 2));
-          prevRank = prevCenter?.rank || 0;
+  // ── 統一順位系列（P6順位変動・P7順位推移の共通ソース）──
+  // 多地点計測の「中心地点（店舗所在地）の順位」を正とし、
+  // 計測がない月・KWはシート順位で補完する。
+  // グリッド側は 手動生成(overrides) > 実測(logs) > シート推定 の合成済みなので、
+  // 実質の優先順位は 手動 > 実測 > シート。KWは正規化して表記ゆれを統合。
+  const unifiedRankingHistory = useMemo(() => {
+    // グリッドの中心順位を「月::KW」で索引化
+    const centerByMonthKw = new Map<string, number>();
+    const gridMonths = new Set<string>();
+    for (const h of gridRanking?.history || []) {
+      if (curLabel && monthToNum(h.month) > monthToNum(curLabel)) continue;
+      for (const s of h.snapshots) {
+        const c = Math.floor(s.gridSize / 2);
+        const cell = s.results.find(r => r.row === c && r.col === c);
+        if (cell && cell.rank > 0) {
+          centerByMonthKw.set(`${h.month}::${normalizeKw(s.keyword)}`, cell.rank);
+          gridMonths.add(h.month);
         }
       }
-      if (rank > 0) result.push({ word: snap.keyword, rank, prevRank: prevRank || rank });
     }
-    return result.length > 0 ? result : null;
-  }, [gridRanking, curLabel]);
+    const sheetLabels = rankingHistory?.labels || [];
+    // 月ラベル: シート ∪ グリッド を時系列ソートし直近13ヶ月
+    const labels = Array.from(new Set([...sheetLabels, ...Array.from(gridMonths)]))
+      .sort((a, b) => monthToNum(a) - monthToNum(b))
+      .slice(-13);
+    // KW: シート ∪ グリッド（正規化で統合、シート順を優先）
+    const words: string[] = [];
+    const seen = new Set<string>();
+    for (const ds of rankingHistory?.datasets || []) {
+      const w = normalizeKw(ds.word);
+      if (!seen.has(w)) { seen.add(w); words.push(w); }
+    }
+    for (const kw of gridRanking?.keywords || []) {
+      const w = normalizeKw(kw);
+      if (!seen.has(w)) { seen.add(w); words.push(w); }
+    }
+    const sheetByWord = new Map((rankingHistory?.datasets || []).map(ds => [normalizeKw(ds.word), ds]));
+    const datasets = words.map(w => ({
+      word: w,
+      ranks: labels.map(m => {
+        // 1. グリッド中心点（手動 > 実測 > シート推定 の合成結果）
+        const g = centerByMonthKw.get(`${m}::${w}`);
+        if (g && g > 0) return g;
+        // 2. シート順位
+        const ds = sheetByWord.get(w);
+        if (ds) {
+          const i = sheetLabels.indexOf(m);
+          const r = i >= 0 ? ds.ranks[i] : null;
+          return r && r > 0 ? r : null;
+        }
+        return null;
+      }),
+    }));
+    return { labels, datasets };
+  }, [gridRanking, rankingHistory, curLabel]);
 
-  // P6順位変動カード用: シート実測（選択月＝P7順位推移の最新列）を最優先し、
-  // その月のシート順位がないKWはグリッド中心点で補完。どちらもないKWは圏外(0)。
-  // キーは正規化（全角/半角スペースの表記ゆれで同一KWが重複カード化するのを防ぐ）
+  // P6順位変動カード用: 統一系列の選択月の値（P7順位推移テーブルの最新列と一致）
   const effectiveKeywords = useMemo(() => {
-    const gridMap = new Map<string, { word: string; rank: number; prevRank: number }>();
-    for (const kw of gridKeywords || []) gridMap.set(normalizeKw(kw.word), { ...kw, word: normalizeKw(kw.word) });
-
-    const merged = new Map<string, { word: string; rank: number; prevRank: number }>();
-    // 1. シート実測（選択月）— P7順位推移テーブルと同じ値になる
-    if (rankingHistory && rankingHistory.labels.length > 0) {
-      const lastIdx = rankingHistory.labels.length - 1;
-      for (const ds of rankingHistory.datasets) {
-        const w = normalizeKw(ds.word);
-        const rank = ds.ranks[lastIdx] ?? 0;
-        // 前月表示用: 直近でデータがある月の順位
-        let prevRank = 0;
-        for (let i = lastIdx - 1; i >= 0; i--) {
-          const r = ds.ranks[i];
-          if (r !== null && r > 0) { prevRank = r; break; }
-        }
-        const sheetEntry = { word: w, rank: rank || 0, prevRank: prevRank || rank || 0 };
-        // 選択月のシート順位がないKWはグリッド中心点にフォールバック
-        merged.set(w, sheetEntry.rank > 0 ? sheetEntry : (gridMap.get(w) ?? sheetEntry));
+    const lastIdx = unifiedRankingHistory.labels.length - 1;
+    if (lastIdx < 0) {
+      // シート履歴もグリッドも無い店舗向けフォールバック（シート最新行の順位）
+      return keywords.map(kw => ({ ...kw, word: normalizeKw(kw.word) }));
+    }
+    return unifiedRankingHistory.datasets.map(ds => {
+      const rank = ds.ranks[lastIdx] ?? 0;
+      // 前月表示用: 直近でデータがある月の順位
+      let prevRank = 0;
+      for (let i = lastIdx - 1; i >= 0; i--) {
+        const r = ds.ranks[i];
+        if (r !== null && r > 0) { prevRank = r; break; }
       }
-    }
-    // 2. グリッドのみのKW（シート列に存在しない）
-    for (const [w, g] of Array.from(gridMap.entries())) {
-      if (!merged.has(w)) merged.set(w, g);
-    }
-    // 3. シート履歴が取得できない店舗向けフォールバック（シート最新行の順位）
-    for (const kw of keywords) {
-      const w = normalizeKw(kw.word);
-      if (!merged.has(w)) merged.set(w, { ...kw, word: w });
-    }
-    return Array.from(merged.values());
-  }, [gridKeywords, keywords, rankingHistory]);
+      return { word: ds.word, rank: rank || 0, prevRank: prevRank || rank || 0 };
+    });
+  }, [unifiedRankingHistory, keywords]);
 
   // 表示するキーワードのみフィルタ
   // 順位が一度も付いていないKWは初期OFF（チェックを入れると圏外として表示）、順位ありKWは初期ON
   const visibleKeywords = effectiveKeywords.filter(kw => kwVisibility[kw.word] ?? (kw.rank > 0 || kw.prevRank > 0));
-  const visibleRankingDatasets = (rankingHistory?.datasets?.filter(ds => {
+  const visibleRankingDatasets = unifiedRankingHistory.datasets.filter(ds => {
     // 全期間データなし（全て null）のキーワードは初期OFF、チェックONで表示
     const hasAnyData = ds.ranks.some((r: number | null) => r !== null);
-    return kwVisibility[normalizeKw(ds.word)] ?? kwVisibility[ds.word] ?? hasAnyData;
-  }) || []);
+    return kwVisibility[ds.word] ?? hasAnyData; // wordは正規化済み
+  });
 
   // 個別キーワードの表示設定を多地点順位計測スライドにも連動させる
   // （チェックOFFのKWはチップ・比較テーブル・KW別スライド・PDFから除外）
@@ -541,7 +549,7 @@ export default function ReportClient({
   }, [gridRanking, effectiveKeywords, kwVisibility]);
 
   const showKeywords = mounted && sectionVisibility.keywords !== false && hasKeywords;
-  const showRankingHistory = mounted && sectionVisibility.rankingHistory !== false && hasRankingHistory;
+  const showRankingHistory = mounted && sectionVisibility.rankingHistory !== false && unifiedRankingHistory.labels.length > 0;
   const showSearchQueries = mounted && sectionVisibility.searchQueries !== false && hasSearchQueries;
   const showGridRanking = mounted && sectionVisibility.gridRanking !== false && hasGridRanking && (visibleGridRanking?.keywords.length ?? 0) > 0;
 
@@ -1091,7 +1099,7 @@ export default function ReportClient({
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {[
                   { key: "keywords", label: "キーワード順位", hasData: hasKeywords },
-                  { key: "rankingHistory", label: "順位推移テーブル", hasData: hasRankingHistory },
+                  { key: "rankingHistory", label: "順位推移テーブル", hasData: unifiedRankingHistory.labels.length > 0 },
                   { key: "gridRanking", label: "多地点順位", hasData: hasGridRanking },
                   { key: "searchQueries", label: "検索語句", hasData: hasSearchQueries },
                 ].map(item => (
@@ -1178,9 +1186,9 @@ export default function ReportClient({
             )}
             {/* 多地点順位グリッド編集 */}
             {hasKeywords && (() => {
-              const allMonths = rankingHistory?.labels || [];
-              // 表記ゆれ（全角/半角スペース）を正規化して重複排除
-              const allKws = Array.from(new Set(rankingHistory?.datasets?.map(d => normalizeKw(d.word)) || []));
+              const allMonths = unifiedRankingHistory.labels;
+              // 統一系列のKW（グリッドのみのKWも編集対象に含める。正規化済み）
+              const allKws = unifiedRankingHistory.datasets.map(d => d.word);
               const [editMonth, setEditMonth] = [gridEditMonth, setGridEditMonth];
               const [editKw, setEditKw] = [gridEditKw, setGridEditKw];
               const selectedMonth = editMonth || allMonths[allMonths.length - 1] || "";
@@ -1189,10 +1197,10 @@ export default function ReportClient({
               const overrideData = gridRanking?.history.find(h => h.month === selectedMonth)?.snapshots.find(s => normalizeKw(s.keyword) === normalizeKw(selectedKw));
               const gridCells = overrideData?.results || [];
               const gridRankColorModal = rankColorModal;
-              // 選択中月+KWのcenterRank（P7データから）
+              // 選択中月+KWのcenterRank（シート実測から。月indexはシート側ラベルで引く）
               const dsData = rankingHistory?.datasets?.find(d => normalizeKw(d.word) === normalizeKw(selectedKw));
-              const monthIdx = allMonths.indexOf(selectedMonth);
-              const sheetRank = dsData && monthIdx >= 0 ? (dsData.ranks[monthIdx] ?? 0) : 0;
+              const sheetMonthIdx = rankingHistory?.labels?.indexOf(selectedMonth) ?? -1;
+              const sheetRank = dsData && sheetMonthIdx >= 0 ? (dsData.ranks[sheetMonthIdx] ?? 0) : 0;
               // シートに順位がない月は手入力欄の値を採用（1〜100位）
               const manualRank = parseInt(gridManualRank) || 0;
               const centerRank = sheetRank > 0 ? sheetRank : (manualRank >= 1 && manualRank <= 100 ? manualRank : 0);
@@ -1601,14 +1609,14 @@ export default function ReportClient({
         <div style={slideStyle} className="slide">
           <div style={slideBarStyle}><span>{shop.name} — キーワード順位推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={{ ...slideBodyStyle, display: "flex", flexDirection: "column", justifyContent: "center" }}>
-            <div style={stitleStyle}>キーワード順位推移（直近{rankingHistory.labels.length}ヶ月）</div>
+            <div style={stitleStyle}>キーワード順位推移（直近{unifiedRankingHistory.labels.length}ヶ月）</div>
             <div style={{ overflowX: "auto", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", flex: 1, minWidth: 700 }}>
                 <thead>
                   <tr>
                     <th style={{ background: "#0f3460", color: "#fff", padding: "8px 6px", textAlign: "left", fontWeight: 600, whiteSpace: "nowrap", fontSize: 16, position: "sticky", left: 0 }}>キーワード</th>
-                    {rankingHistory.labels.map((l, i) => (
-                      <th key={i} style={{ background: i === rankingHistory.labels.length - 1 ? "#e94560" : "#0f3460", color: "#fff", padding: "8px 4px", textAlign: "center", fontWeight: 600, whiteSpace: "nowrap", fontSize: 16 }}>
+                    {unifiedRankingHistory.labels.map((l, i) => (
+                      <th key={i} style={{ background: i === unifiedRankingHistory.labels.length - 1 ? "#e94560" : "#0f3460", color: "#fff", padding: "8px 4px", textAlign: "center", fontWeight: 600, whiteSpace: "nowrap", fontSize: 16 }}>
                         {l}
                       </th>
                     ))}
@@ -1625,7 +1633,7 @@ export default function ReportClient({
                       <tr key={di} style={{ background: di % 2 === 0 ? "#fff" : "#f8f9fb" }}>
                         <td style={{ padding: "6px 6px", fontWeight: 700, color: "#333", whiteSpace: "nowrap", borderBottom: "1px solid #eee", fontSize: 16 }}>{ds.word}</td>
                         {ds.ranks.map((r, ri) => {
-                          const isLatest = ri === rankingHistory.labels.length - 1;
+                          const isLatest = ri === unifiedRankingHistory.labels.length - 1;
                           return (
                             <td key={ri} style={{
                               padding: "6px 4px", textAlign: "center", borderBottom: "1px solid #eee", fontSize: 16,

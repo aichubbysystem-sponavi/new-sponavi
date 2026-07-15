@@ -146,6 +146,16 @@ export const POST = withAudit("グリッド推定生成", "DATA_OP", async (requ
       .eq("shop_name", shopName);
     // 表記ゆれ（全角/半角スペース）を正規化して既存判定
     const existingKeys = new Set((existing || []).map((e: any) => `${normalizeKw(e.keyword)}::${e.month}`));
+    // 実測ログがあるKW×月にも推定を作らない（実測を正とし、推定で隠さない）
+    if (shopId) {
+      const { data: logRows } = await supabase.from("grid_ranking_logs")
+        .select("keyword, measured_at")
+        .eq("shop_id", shopId);
+      for (const l of (logRows || []) as { keyword: string; measured_at: string }[]) {
+        const d = new Date(l.measured_at);
+        existingKeys.add(`${normalizeKw(l.keyword)}::${d.getFullYear()}/${d.getMonth() + 1}`);
+      }
+    }
 
     // 既存にないもののみ新規生成（手動編集済みデータを保護）
     const newRows = body.batch
