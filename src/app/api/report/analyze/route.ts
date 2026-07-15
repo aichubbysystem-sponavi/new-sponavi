@@ -37,7 +37,7 @@ async function fetchReviews(shopName: string): Promise<ReviewListResponse | null
     oneYearAgo.setDate(1);
     oneYearAgo.setHours(0, 0, 0, 0);
 
-    const { data: reviews, count } = await supabase
+    const { data: reviews, count, error: reviewErr } = await supabase
       .from("reviews")
       .select("review_id, reviewer_name, star_rating, comment, create_time", { count: "exact" })
       .eq("shop_name", normalizedName)
@@ -45,6 +45,11 @@ async function fetchReviews(shopName: string): Promise<ReviewListResponse | null
       .not("comment", "is", null)
       .order("create_time", { ascending: false });
 
+    if (reviewErr) {
+      // 握り潰さず可視化（RLS/タイムアウト等の切り分け用）
+      console.error(`[analyze] reviews query error for "${normalizedName}":`, JSON.stringify(reviewErr));
+      throw new Error(`reviews-query: ${reviewErr.message || reviewErr.code || "unknown"}`);
+    }
     if (!reviews || reviews.length === 0) return null;
 
     // 評価別集計
@@ -74,7 +79,8 @@ async function fetchReviews(shopName: string): Promise<ReviewListResponse | null
     };
   } catch (err) {
     console.error(`[analyze] fetchReviews error for shopName=${shopName}:`, err instanceof Error ? err.message : err);
-    return null;
+    // 診断用: エラー内容を呼び出し元に伝える（no_reviewsとエラーを区別するため）
+    throw err instanceof Error ? err : new Error(String(err));
   }
 }
 
