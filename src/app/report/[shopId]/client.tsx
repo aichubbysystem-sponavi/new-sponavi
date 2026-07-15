@@ -1741,9 +1741,15 @@ export default function ReportClient({
                   )}
                 </div>
                 {/* 右: 各KWの月別平均順位。
-                    7件までは以前の見た目（gap10・上詰め）、8件以上は縦いっぱいに均等配置して下余白を埋める */}
+                    7件までは以前の見た目（gap10・上詰め）。
+                    8件以上は行を詰めて確実にスライド内に収めた上で space-between で縦いっぱいに均等配置し下余白を埋める */}
                 {(() => {
                 const many = gr.keywords.length >= 8;
+                // 8件以上は詰める（そのままだと固定高スライドをはみ出して最終行が見切れるため）
+                const titleFS = many ? 11 : 13;
+                const headMB = many ? 2 : 6;
+                const cellPad = many ? "2px 4px" : "5px 4px";
+                const cellFS = many ? 11 : 12;
                 return (
                 <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: many ? 0 : 10, justifyContent: many ? "space-between" : "flex-start", overflow: "hidden" }}>
                   {gr.keywords.map(kw => {
@@ -1752,25 +1758,25 @@ export default function ReportClient({
                     const diff = valid.length >= 2 ? valid[valid.length - 2] - valid[valid.length - 1] : 0;
                     return (
                       <div key={kw}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: "#0f3460", marginBottom: 6 }}>「{kw}」</div>
+                        <div style={{ fontSize: titleFS, fontWeight: 700, color: "#0f3460", marginBottom: headMB }}>「{kw}」</div>
                         <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", borderRadius: 6, overflow: "hidden" }}>
                           <thead>
                             <tr>
                               {trendMonthLabels.map((l, li) => (
-                                <th key={li} style={{ background: li === trendMonthLabels.length - 1 ? "#e94560" : "#0f3460", color: "#fff", padding: "5px 4px", textAlign: "center", fontWeight: 600, fontSize: 12, whiteSpace: "nowrap" }}>{l}</th>
+                                <th key={li} style={{ background: li === trendMonthLabels.length - 1 ? "#e94560" : "#0f3460", color: "#fff", padding: cellPad, textAlign: "center", fontWeight: 600, fontSize: cellFS, whiteSpace: "nowrap" }}>{l}</th>
                               ))}
-                              <th style={{ background: "#0f3460", color: "#fff", padding: "5px 4px", textAlign: "center", fontWeight: 600, fontSize: 12 }}>変動</th>
+                              <th style={{ background: "#0f3460", color: "#fff", padding: cellPad, textAlign: "center", fontWeight: 600, fontSize: cellFS }}>変動</th>
                             </tr>
                           </thead>
                           <tbody>
                             <tr>
                               {data.map((v, i) => (
-                                <td key={i} style={{ padding: "5px 4px", textAlign: "center", fontSize: 12, fontWeight: v !== null && v <= 5 ? 900 : 600,
+                                <td key={i} style={{ padding: cellPad, textAlign: "center", fontSize: cellFS, fontWeight: v !== null && v <= 5 ? 900 : 600,
                                   color: v === null ? "#ddd" : v <= 3 ? "#1d4ed8" : v <= 10 ? "#15803d" : v <= 20 ? "#b45309" : "#999", borderBottom: "1px solid #eee" }}>
                                   {v !== null ? v : "-"}
                                 </td>
                               ))}
-                              <td style={{ padding: "5px 4px", textAlign: "center", fontSize: 12, fontWeight: 700, borderBottom: "1px solid #eee",
+                              <td style={{ padding: cellPad, textAlign: "center", fontSize: cellFS, fontWeight: 700, borderBottom: "1px solid #eee",
                                 color: diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
                                 {valid.length >= 2 ? (diff > 0 ? `↑${diff.toFixed(1)}` : diff < 0 ? `↓${Math.abs(diff).toFixed(1)}` : "→") : "→"}
                               </td>
