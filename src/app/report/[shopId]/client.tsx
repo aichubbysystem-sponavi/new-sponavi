@@ -299,6 +299,7 @@ export default function ReportClient({
   const [gridGenerating, setGridGenerating] = useState(false);
   const [gridEditMonth, setGridEditMonth] = useState("");
   const [gridEditKw, setGridEditKw] = useState("");
+  const [gridManualRank, setGridManualRank] = useState(""); // シートに順位がない月用の中心順位手入力
 
   // セクション表示ON/OFF（店舗ごとにDB保存、localStorageはフォールバック）
   const visKey = `report-visibility-${shopId}`;
@@ -1136,7 +1137,10 @@ export default function ReportClient({
               // 選択中月+KWのcenterRank（P7データから）
               const dsData = rankingHistory?.datasets?.find(d => d.word === selectedKw);
               const monthIdx = allMonths.indexOf(selectedMonth);
-              const centerRank = dsData && monthIdx >= 0 ? (dsData.ranks[monthIdx] ?? 0) : 0;
+              const sheetRank = dsData && monthIdx >= 0 ? (dsData.ranks[monthIdx] ?? 0) : 0;
+              // シートに順位がない月は手入力欄の値を採用（1〜100位）
+              const manualRank = parseInt(gridManualRank) || 0;
+              const centerRank = sheetRank > 0 ? sheetRank : (manualRank >= 1 && manualRank <= 100 ? manualRank : 0);
 
               return (
               <div style={{ marginTop: 16, borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 16 }}>
@@ -1152,13 +1156,22 @@ export default function ReportClient({
                     {allKws.map(k => <option key={k} value={k}>{k}</option>)}
                   </select>
                   <span style={{ color: "rgba(255,255,255,0.4)", fontSize: 16, alignSelf: "center" }}>
-                    中心順位: {centerRank > 0 ? `${centerRank}位` : "データなし"}
+                    中心順位: {sheetRank > 0 ? `${sheetRank}位` : "データなし"}
                   </span>
+                  {sheetRank <= 0 && (
+                    <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                      <input type="number" min={1} max={100} value={gridManualRank}
+                        onChange={e => setGridManualRank(e.target.value)}
+                        placeholder="手入力"
+                        style={{ width: 74, padding: "4px 8px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.2)", background: "#2a2a4e", color: "#fff", fontSize: 16 }} />
+                      <span style={{ color: "rgba(255,255,255,0.4)", fontSize: 16 }}>位で生成</span>
+                    </span>
+                  )}
                 </div>
                 {/* 生成ボタン */}
                 <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
                   <button onClick={async () => {
-                    if (centerRank <= 0) { alert("この月のキーワード順位データがありません"); return; }
+                    if (centerRank <= 0) { alert("この月のキーワード順位データがありません。中心順位を手入力してから生成してください"); return; }
                     setGridGenerating(true);
                     try {
                       await fetch("/api/report/grid-ranking-generate", {
@@ -1241,7 +1254,7 @@ export default function ReportClient({
                   </table>
                 ) : (
                   <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 16, textAlign: "center", padding: 16 }}>
-                    {centerRank > 0 ? "「この月を自動生成」でグリッドを作成してください" : "この月/KWのデータなし"}
+                    {centerRank > 0 ? "「この月を自動生成」でグリッドを作成してください" : "この月/KWの順位データがありません。中心順位を手入力して「この月を自動生成」を押してください"}
                   </div>
                 )}
               </div>
