@@ -59,6 +59,7 @@ function GroupStoreReportInner() {
           monthly: d.monthly || [],
           daily: d.daily || [],
           gbp: d.gbp || [],
+          channels: d.channels || [],
           shopName: d.shopName,
           year: d.year,
           month: d.month,

@@ -384,6 +384,51 @@ export async function getCampaignMonthly(
   }));
 }
 
+/**
+ * キャンペーン別・広告ネットワーク別データ（媒体別配信内訳用）
+ * segments.ad_network_type はP-MAXでもv23からチャネル別に返る
+ * （MAPS / SEARCH / YOUTUBE / GMAIL / DISCOVER / CONTENT / SEARCH_PARTNERS 等。
+ *   チャネル別データは2025-06-01以降の日付のみ集計される）
+ */
+export async function getCampaignChannelMonthly(
+  customerId: string,
+  startDate: string,
+  endDate: string
+): Promise<
+  {
+    campaignName: string;
+    campaignId: string;
+    network: string;
+    impressions: number;
+    clicks: number;
+    costMicros: number;
+  }[]
+> {
+  const query = `
+    SELECT
+      campaign.id,
+      campaign.name,
+      segments.ad_network_type,
+      metrics.impressions,
+      metrics.clicks,
+      metrics.cost_micros
+    FROM campaign
+    WHERE segments.date BETWEEN '${startDate}' AND '${endDate}'
+      AND campaign.status != 'REMOVED'
+  `;
+
+  const results = await executeGaql(customerId, query);
+
+  return results.map((r: any) => ({
+    campaignName: r.campaign?.name || "",
+    campaignId: String(r.campaign?.id || ""),
+    network: r.segments?.adNetworkType || "UNKNOWN",
+    impressions: Number(r.metrics?.impressions || 0),
+    clicks: Number(r.metrics?.clicks || 0),
+    costMicros: Number(r.metrics?.costMicros || 0),
+  }));
+}
+
 /** キャンペーン別の日次データ */
 export async function getCampaignDaily(
   customerId: string,

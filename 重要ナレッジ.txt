@@ -13,6 +13,14 @@ SPOTLIGHT NAVIGATOR 超重要ナレッジ
 
 ## アーキテクチャの罠（最重要）
 
+### getSupabase()の3大設定（2026-07-01修正）
+- `autoRefreshToken: false` — service role keyのリフレッシュでanon roleに降格するのを防止
+- `persistSession: false` — サーバー環境でセッション永続化しない
+- `global.fetch: cache: "no-store"` — Next.js 14の内部fetchキャッシュを無効化
+- 以前の「PostgREST .eq()不安定」は、これらの設定不備によるRLSブロックが真因だった
+- PostgRESTのデフォルト最大行数は1000行（.limit(50000)を指定しても無視される）
+- 全件取得+JSフィルタは避けて、.eq()でDB側フィルタを使うこと
+
 ### Go API と Supabase は別世界
 - 店舗データは2箇所に存在する:
   - Go API（Cloud Run）の PostgreSQL → /api/shop で返る店舗一覧
@@ -109,3 +117,83 @@ SPOTLIGHT NAVIGATOR 超重要ナレッジ
 - 本番: aichubbysystem-6689s-projects/new-sponavi（正）
 - 環境変数変更は必ずVercelダッシュボード(aichubbysystem-6689s-projects)から行うこと
 - Vercel Sensitive環境変数は編集時にValueが空に見える仕様。必ず値を貼り直してSave
+
+## P-MAXの店舗名は「Ads側が主キー」（2026-07-06）
+- レポート/DB(pmax_store_data, pmax_gbp_data)/共有リンクの店舗キーは広告キャンペーン名由来
+- GBPシート(1wludlpnMw7.../gid=372148068)はAds名に照合されるだけ。表記を直すのは必ずシート側
+  （キャンペーン名を変えると過去データが別店舗に分断される）
+- 照合は normShopName（NFKC+空白除去+lower）+相互includes。「大通り/大通」等は吸収不能
+  → 不一致店舗の洗い出しと全月一括反映は POST /api/pmax/backfill-gbp（CRON_SECRET認証）
+- P-MAXの「予約」= GBPシートM列「注文」の値（ラベルだけ予約。2026-07-06ユーザー確定）
+
+## 長時間バッチ中のログアウト抑止は batch-activity イベント（2026-07-05）
+- auth-guard.tsx の30分無操作タイマーは window.dispatchEvent(new Event("batch-activity")) でリセット
+- ブラウザループの一括処理を新設したら必ずループ内に入れること
+  （適用済: grid-ranking/reviews/review-analysis/report全店舗反映/検索語句一括同期）
+
+## 投稿機能の状態（2026-07-06 復活）
+- create/auto/delete-post + execute-posts cron(5分毎) は稼働中。口コミ返信2種のみ停止継続
+- 危険操作4つ（多地点一括計測/一括自動投稿/GBP削除/予約今すぐ実行）は
+  usePasswordGate（ログインPW再入力、components/password-gate.tsx）で保護
+
+## anon直アクセスとRLS（2026-07-07 セキュリティ監査で全数判明）
+- クライアント(anonキー)から直接読み書きしていたのは15テーブル:
+  shops/reviews/report_analysis/scheduled_posts/post_logs/fixed_messages/line_alerts/
+  bad_review_alerts/media/ranking_search_logs/owners/shop_keywords/grid_ranking_logs/
+  audit_logs/user_profiles。RLSがあるのはpmax系・cache系(=サーバー専用)だけだった。
+- 【対応済コード】クライアント直書き5系統をサーバーAPI化(認可付き):
+  scheduled_posts承認/差戻し→PATCH /api/report/scheduled-posts(approvalStatus対応)
+  fixed_messages全置換→PUT /api/report/fixed-messages(requireShopAccessById)
+  audit_logs記録→POST /api/report/audit-log(user_nameはJWTからサーバー解決)
+  line_alerts対応済み→PATCH /api/report/line-alerts(president/manager限定)
+- 【対応済コード】サーバー側の匿名read(survey/report一覧/actions)をgetSupabase()=service_role化
+  → これによりshops等をRLSでanon遮断してもアプリが壊れない前提を整えた
+- 【本番適用済 2026-07-07】RLSを2段階で有効化（ダッシュボードSQL Editorで実行完了）:
+  ① sql/2026-07-07_enable_rls_client_tables.sql … rowsecurity=falseだったGroupA14表に
+     RLS+authenticated SELECTのみ、GroupB(pmax_share_tokens/pmax_group_shares)はRLSのみ。
+  ② sql/2026-07-07_fix_public_policies.sql … 【重要な罠】RLS=trueでも roles={public} の
+     ALL/SELECT USING(true) ポリシーが多数残存し実質無防備だった（media/reviews/line_alerts/
+     shop_keywords/survey_responses/hearing_sheets等19表）。performance_metrics_cache/pmax_cache/
+     report_memos/sync_progressは名前service_roleだが実体{public}の設定ミス。既存ポリシー全削除→
+     authenticated SELECTのみに再付与。
+  ※教訓: 「rowsecurity=true」だけでは安全と判断してはいけない。pg_policiesで roles を必ず確認する。
+     {public} は anon を含む。SupabaseはpublicテーブルにanonフルGRANTが既定なのでRLS/ポリシーが唯一の防御。
+  ※サンドボックスから本番Supabaseに到達不可。実RLS状態確認とSQL実行はダッシュボードで行う。
+- 【Group C 本番適用済 2026-07-07】sql/2026-07-07_enable_rls_group_c.sql。
+  pg_stat_user_tables実測で、未参照23表のうち22表が「行0・INSERT/UPDATE/DELETE全0」=死んだ表と確定
+  （admins/facebook_accounts/users/agents/owner_user等、別SaaSの名残）。RLS+authenticated SELECTで
+  anon遮断。ranking_search_settings(行1・更新5)のみ使用中で除外=残調査。
+  → これでアプリ用publicテーブルの「anon読み書き穴」は事実上ゼロ。
+- 【残・軽微】ranking_search_settings の使用元特定（Go APIか手動処理か）。本アプリのコード参照なし。
+- 【別件】Supabase(kxxwspavskhhjtiixcep)のSTATUSがUnhealthy・COMPUTE=NANO(最小)。DBリソース不足の兆候。
+  同Org内に別プロジェクト「AIO-tool」あり(別DB=無関係)。監視/アップグレード検討。
+- 【次フェーズ】authenticatedはUSING(true)で全店舗読める状態。part_time店舗単位の行フィルタRLSは未実装
+  （現状アプリ層getUserAllowedShopsで担保）。
+- API 84ルートは認証漏れゼロ（監査確認済）。middlewareのCSRFはBearer認証前提で妥当。
+- pmax共有トークン(pmax/share, group-share)はUUIDで推測不可だが expires_at/失効機構が無い（未対応）。
+
+## ローカル平文シークレット（2026-07-07 監査、git未追跡だがOneDrive同期に注意）
+- メモ.txt に GitHub PAT(ghp_)/LINEトークン/DBパスワード/Maps APIキーが平文 → 要ローテーション
+- .env.local に Google Ads Refresh Token、get-ads-token.js/client_secret*.json に OAuth secret
+- いずれもgit履歴には無い（公開流出なし）が、フォルダがOneDrive配下=クラウド平文同期される
+
+━━━ 2026-07-15 追加（詳細: ログ/2026-07/2026-07-15_セッション総括.txt）━━━
+■ 変更系fetchは必ずres.okを確認して失敗をユーザーに見せる
+  grid-ranking-generate呼び出し4箇所が認証ヘッダー無し+レスポンス未確認reloadで、
+  7/8の全API認可必須化以降サイレント失敗していた（修正済み。同パターン禁止）
+■ supabase-jsのerrorを握り潰さない
+  「口コミなし」誤判定の真因は reviews クエリの statement timeout(8s)だった。
+  errorをnull扱いすると「0件」と区別不能。切り分け順: ①直DBで実在確認→②error/timeout→③キー不一致
+■ reviewsは14.7万件。shop_name検索は idx_reviews_shop_name_time 必須（2026-07-15追加済み）
+  大きいテーブルに新しい検索条件を足すときはEXPLAINでインデックス確認
+■ 店名のNFC/NFD: DBはNFC保存。shop-provider読込時にNFC正規化済み。URL直経路は未対応
+■ KW名は全角/半角スペース混在 → lib/keyword-normalize.ts の normalizeKw を必ず通す
+■ 順位の正は「多地点計測の中心順位」（unifiedRankingHistory）。手動>実測>シート補完。
+  P6=P7（中心順位）/ P8=P9（49地点平均）は別指標
+■ report_display_settingsのshop_idは店舗名（誤FKは2026-07-15に削除済み）
+■ DB直結調査: aws-1-ap-northeast-1.pooler.supabase.com / postgres.kxxwspavskhhjtiixcep
+  （直ホストはIPv6のみ不可。パスワードはメモ.txt）。Vercel CLIは誤チームで本番env取得不可
+■ P-MAX媒体別配信比率（2026-07-15追加、詳細: ログ/2026-07/2026-07-15_PMAX媒体別配信比率円グラフ.txt）
+  Ads API v23の segments.ad_network_type でP-MAXもチャネル別(MAPS/SEARCH/CONTENT/YOUTUBE/GMAIL/
+  DISCOVER/SEARCH_PARTNERS)に取れる（2025-06-01以降の日付のみ）。pmax_channel_dataにキャッシュ
+  （表示時オンデマンド取得、sync時に対象月削除）。impが全0の行はセグメント付きGAQLでは返らない

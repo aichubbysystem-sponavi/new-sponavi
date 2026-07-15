@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, requireRole } from "@/lib/supabase";
-import { getCampaignDaily, parseCampaignName } from "@/lib/google-ads";
+import { getCampaignDaily, getCampaignChannelMonthly, parseCampaignName } from "@/lib/google-ads";
 
 export const dynamic = "force-dynamic";
 
@@ -102,6 +102,59 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // チャネル別（媒体別）データ取得（対象月のみ）— DBになければAPIからオンデマンド取得（日次と同方式）
+  let channelRows: { network: string; impressions: number; clicks: number; cost_micros: number }[] = [];
+  const { data: dbChannels } = await sb
+    .from("pmax_channel_data")
+    .select("network, impressions, clicks, cost_micros")
+    .eq("shop_name", shopName)
+    .eq("month", month);
+
+  if (dbChannels && dbChannels.length > 0) {
+    channelRows = dbChannels;
+  } else {
+    try {
+      const accountIds = Array.from(new Set((monthlyRows || []).map((r) => r.account_id).filter(Boolean)));
+      if (accountIds.length > 0) {
+        // ネットワーク別に集計（同一店舗の全キャンペーン・全言語を合算）
+        const agg = new Map<string, { impressions: number; clicks: number; cost_micros: number }>();
+        for (const accId of accountIds) {
+          const rows = await getCampaignChannelMonthly(accId, startDate, endDate).catch(() => []);
+          for (const c of rows) {
+            const parsed = parseCampaignName(c.campaignName);
+            if (parsed.shopName !== shopName) continue;
+            const cur = agg.get(c.network) || { impressions: 0, clicks: 0, cost_micros: 0 };
+            cur.impressions += c.impressions;
+            cur.clicks += c.clicks;
+            cur.cost_micros += c.costMicros;
+            agg.set(c.network, cur);
+          }
+        }
+        channelRows = Array.from(agg.entries()).map(([network, v]) => ({ network, ...v }));
+        if (channelRows.length > 0) {
+          const insertRows = channelRows.map((r) => ({
+            shop_name: shopName,
+            month,
+            ...r,
+            synced_at: new Date().toISOString(),
+          }));
+          await sb.from("pmax_channel_data").upsert(insertRows, { onConflict: "shop_name,month,network" });
+        }
+      }
+    } catch (e) {
+      console.error("[pmax/store-detail] channel API fetch:", e instanceof Error ? e.message : e);
+    }
+  }
+
+  const channels = channelRows
+    .map((r) => ({
+      network: r.network,
+      impressions: Number(r.impressions),
+      clicks: Number(r.clicks),
+      costMicros: Number(r.cost_micros),
+    }))
+    .sort((a, b) => b.impressions - a.impressions);
+
   // フロントの既存形式に合わせる
   const monthly = (monthlyRows || []).map((r) => ({
     language: r.language,
@@ -162,6 +215,7 @@ export async function GET(request: NextRequest) {
     monthly,
     daily,
     gbp,
+    channels,
     lastSyncedAt: syncLog?.synced_at || null,
     syncStatus: syncLog?.status || "not_synced",
   });

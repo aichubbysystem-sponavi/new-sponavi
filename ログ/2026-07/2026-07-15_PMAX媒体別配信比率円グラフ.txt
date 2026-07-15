@@ -1,0 +1,51 @@
+## 【2026-07-15】P-MAXレポートに媒体別配信比率の円グラフページを追加
+
+### 要望
+- まとめページの前に、どの媒体にどれぐらい配信されているかを円グラフで表示
+- 対象6媒体: Googleマップ / Google検索 / YouTube / Gmail / Discover / ディスプレイ
+- %が多い順に表示
+
+### 実装内容
+- Google Ads API v23 の segments.ad_network_type でP-MAXのチャネル別レポートが取得可能
+  （v23の新機能。返る値: MAPS / SEARCH / CONTENT / YOUTUBE / GMAIL / DISCOVER / SEARCH_PARTNERS 等。
+    チャネル別データは2025-06-01以降の日付のみGoogle側で集計）
+- lib/google-ads.ts: getCampaignChannelMonthly() 新設（キャンペーン×ネットワーク別の月次metrics）
+- 新テーブル pmax_channel_data（shop_name, month, network, impressions, clicks, cost_micros。
+  UNIQUE(shop_name, month, network)。RLS+service_role_allのみ=サーバー専用、pmax系の既存方針）
+  → sql/2026-07-15_pmax_channel_data.sql。本番適用済み（プーラー経由、roles={service_role}確認済み）
+- api/pmax/store-detail: 対象月のチャネルデータをDBから返す。無ければAPIからオンデマンド取得→DB保存
+  （pmax_store_dailyと同方式。accountIdはpmax_store_dataのaccount_idを使用）
+- api/pmax/share/[token]・api/pmax/group-share/[token]/store: DBからchannelsを返す（共有はDB読みのみ。
+  管理画面で一度表示された時点でキャッシュされる=日次と同じ性質）
+- api/pmax/sync: 同期時に対象月のpmax_channel_dataを削除（次回表示で再取得、鮮度維持）
+- components/pmax-report-view.tsx: 「媒体別配信比率」スライドを言語別ページの後・まとめの前に追加
+  - 円グラフ（Chart.js Pie、ArcElement登録追加）+ 右側にランキング表（順位/色/配信先/表示回数/割合）
+  - %は対象月の表示回数ベース。多い順ソート。0%媒体も表に薄表示（opacity 0.45）
+  - 6媒体以外（SEARCH_PARTNERS等）は「その他」に集約（>0の時のみ表示）
+  - 色は媒体に固定（順位で塗り替えない）: マップ#2a78d6/検索#008300/ディスプレイ#e87ba4/
+    YouTube#eda100/Gmail#1baf7a/Discover#eb6834/その他#898781
+    （datavizスキルのバリデータで主要4色は全ペアCVD検証パス、7色は隣接ペアパス）
+  - ページ番号: channelOffsetをtotalPagesと各ページ番号に反映
+- 呼び出し3ページ（pmax/store・pmax/share/[token]・pmax/group/[token]/store）にchannelsを配線
+
+### 検証（実データ）
+- MCC配下97アカウント中、2026-06にP-MAX配信実績があるのは10アカウント（店舗グループ1〜5等）
+- 店舗グループ1全体: MAPS 93.8% / SEARCH 4.5% / CONTENT 1.6% / YOUTUBE 0.1% / SEARCH_PARTNERS 0.0%
+- SONEKA(2026-06): CONTENT 95.4% / MAPS 4.3% / YOUTUBE 0.2% / SEARCH 0.1%
+  → チャネル合計imp=1,437,609 は pmax_store_data の月次合計と100.0%一致（KPIページと整合）
+- 店舗によって配信構成が全く違う（マップ優勢 vs ディスプレイ優勢）ことが判明
+- モックHTML+Playwrightでレイアウト目視確認済み（崩れ・ラベル衝突なし）
+- next build 成功
+
+### 注意点・ハマったこと
+- 「P-MAX」という名前のアカウント(2046463835)は全キャンペーンPAUSEDで6月imp=0
+  → セグメント付きクエリは0行になる（metricsが全0の行はセグメントクエリで返らない）
+- GMAIL / DISCOVER は今回の実データでは出現せず（0%表示）。enumとしては存在する想定で
+  「その他」ではなく固定6媒体として扱う
+- psql未インストール。本番DBへのDDLはscratchpadに pg を npm i して
+  プーラー(aws-1-ap-northeast-1.pooler.supabase.com / postgres.kxxwspavskhhjtiixcep)経由で実行
+
+### 未解決・次回
+- 過去月（管理画面で未表示の月）の共有リンクにはチャネルページが出ない
+  （管理画面でその月を一度表示すればDBに入り、以後共有にも出る）
+- 2025-05以前の月はGoogle側にチャネル別データが無い → ページ自体が非表示（正常動作）

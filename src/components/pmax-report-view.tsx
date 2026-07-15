@@ -5,13 +5,14 @@ import {
   CategoryScale,
   LinearScale,
   BarElement,
+  ArcElement,
   Title,
   Tooltip,
   Legend,
 } from "chart.js";
-import { Bar } from "react-chartjs-2";
+import { Bar, Pie } from "react-chartjs-2";
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
+ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend);
 
 export type CampaignRow = {
   language: string;
@@ -39,15 +40,34 @@ export type GbpRow = {
   reservation: number; // 予約（GBPシートM列「注文」由来）
 };
 
+export type ChannelRow = {
+  network: string; // segments.ad_network_type の値（MAPS / SEARCH / YOUTUBE / GMAIL / DISCOVER / CONTENT 等）
+  impressions: number;
+  clicks: number;
+  costMicros: number;
+};
+
 export type PmaxReportData = {
   monthly: CampaignRow[];
   daily: CampaignRow[];
   gbp: GbpRow[];
+  channels?: ChannelRow[];
   shopName: string;
   year: number;
   month: number;
   summaryText?: string;
 };
+
+// 媒体別配信比率の表示定義（色はチャネルに固定。順位で塗り替えない）
+const CHANNEL_DEFS = [
+  { key: "MAPS", label: "Googleマップ", color: "#2a78d6" },
+  { key: "SEARCH", label: "Google検索", color: "#008300" },
+  { key: "CONTENT", label: "ディスプレイ", color: "#e87ba4" },
+  { key: "YOUTUBE", label: "YouTube", color: "#eda100" },
+  { key: "GMAIL", label: "Gmail", color: "#1baf7a" },
+  { key: "DISCOVER", label: "Discover", color: "#eb6834" },
+] as const;
+const CHANNEL_OTHER = { label: "その他", color: "#898781" };
 
 const SLIDE_W = 1123;
 const SLIDE_H = 794;
@@ -118,7 +138,7 @@ function KpiCard({ kpi, colorIdx }: { kpi: { label: string; value: number; forma
  * @param backHref 指定すると左上に「戻る」リンクを表示（グループページから遷移した場合など）
  */
 export default function PmaxReportView({ data, backHref }: { data: PmaxReportData; backHref?: string }) {
-  const { monthly, daily, gbp: gbpRows, shopName, year: targetYear, month: targetMonthNum, summaryText = "" } = data;
+  const { monthly, daily, gbp: gbpRows, channels = [], shopName, year: targetYear, month: targetMonthNum, summaryText = "" } = data;
 
   // ── データ集計 ──
   const currentMonthKey = `${targetYear}-${String(targetMonthNum).padStart(2, "0")}`;
@@ -202,7 +222,28 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
   const hasConversion = convRows.length > 0;
   const convOffset = hasConversion ? 1 : 0;
 
-  const totalPages = 1 + convOffset + languages.length + (hasSummary ? 1 : 0);
+  // 媒体別配信比率（対象月の表示回数ベース）: 6チャネル＋その他に集計し、多い順に並べる
+  const channelAgg = (() => {
+    const byKey = new Map<string, number>();
+    let otherImp = 0;
+    const knownKeys = new Set<string>(CHANNEL_DEFS.map((d) => d.key));
+    for (const r of channels) {
+      if (knownKeys.has(r.network)) byKey.set(r.network, (byKey.get(r.network) || 0) + r.impressions);
+      else otherImp += r.impressions;
+    }
+    const items: { label: string; color: string; impressions: number }[] = CHANNEL_DEFS.map((d) => ({
+      label: d.label, color: d.color, impressions: byKey.get(d.key) || 0,
+    }));
+    if (otherImp > 0) items.push({ label: CHANNEL_OTHER.label, color: CHANNEL_OTHER.color, impressions: otherImp });
+    items.sort((a, b) => b.impressions - a.impressions);
+    const total = items.reduce((s, i) => s + i.impressions, 0);
+    return { items, total };
+  })();
+  const hasChannels = channelAgg.total > 0;
+  const channelOffset = hasChannels ? 1 : 0;
+  const channelPct = (imp: number) => (channelAgg.total > 0 ? ((imp / channelAgg.total) * 100).toFixed(1) : "0.0");
+
+  const totalPages = 1 + convOffset + languages.length + channelOffset + (hasSummary ? 1 : 0);
 
   const kpiCards = [
     { label: "総表示回数", value: adsCurrent.impressions, format: formatNum, prev: adsPrev.impressions, lastYear: hasYearData ? adsLastYear.impressions : null },
@@ -370,6 +411,77 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
           </div>
         );
       })}
+
+      {/* 媒体別配信比率ページ（円グラフ） */}
+      {hasChannels && (
+        <div style={slideStyle}>
+          <div style={slideBarStyle}>
+            <span>{shopName} — 媒体別配信比率</span>
+            <span>{2 + convOffset + languages.length} / {totalPages}</span>
+          </div>
+          <div style={slideBodyStyle}>
+            <div style={stitleStyle}>媒体別配信比率（{currentMonth}）</div>
+            <div style={{ display: "flex", gap: 24, alignItems: "stretch" }}>
+              <div style={{ background: "#fff", borderRadius: 12, padding: 28, width: 440, flexShrink: 0, boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <div style={{ width: 370, height: 370 }}>
+                  <Pie
+                    data={{
+                      labels: channelAgg.items.filter((i) => i.impressions > 0).map((i) => i.label),
+                      datasets: [{
+                        data: channelAgg.items.filter((i) => i.impressions > 0).map((i) => i.impressions),
+                        backgroundColor: channelAgg.items.filter((i) => i.impressions > 0).map((i) => i.color),
+                        borderColor: "#fff",
+                        borderWidth: 2,
+                      }],
+                    }}
+                    options={{
+                      responsive: true,
+                      maintainAspectRatio: false,
+                      plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                          callbacks: {
+                            label: (ctx) => {
+                              const v = Number(ctx.parsed) || 0;
+                              return ` ${ctx.label}: ${channelPct(v)}%（${v.toLocaleString()}回）`;
+                            },
+                          },
+                        },
+                      },
+                    }}
+                  />
+                </div>
+              </div>
+              <div style={{ flex: 1, background: "#fff", borderRadius: 12, padding: "14px 26px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", padding: "6px 0 10px", borderBottom: "2px solid #0f3460", fontSize: 12, fontWeight: 700, color: "#888" }}>
+                  <span style={{ flex: 1 }}>配信先</span>
+                  <span style={{ width: 110, textAlign: "right" }}>表示回数</span>
+                  <span style={{ width: 80, textAlign: "right" }}>割合</span>
+                </div>
+                {channelAgg.items.map((it, i) => (
+                  <div key={it.label} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 0", borderBottom: "1px solid #eef0f4", opacity: it.impressions === 0 ? 0.45 : 1 }}>
+                    <span style={{ width: 20, fontSize: 13, fontWeight: 700, color: "#9aa3b2" }}>{i + 1}</span>
+                    <span style={{ width: 14, height: 14, borderRadius: 4, background: it.color, border: "1px solid rgba(11,11,11,.12)", flexShrink: 0 }} />
+                    <span style={{ fontSize: 15, fontWeight: 600, color: "#333", flex: 1 }}>{it.label}</span>
+                    <span style={{ width: 110, textAlign: "right", fontSize: 13, color: "#888", fontVariantNumeric: "tabular-nums" }}>{it.impressions.toLocaleString()}回</span>
+                    <span style={{ width: 80, textAlign: "right", fontSize: 18, fontWeight: 800, color: "#0f3460", fontVariantNumeric: "tabular-nums" }}>{channelPct(it.impressions)}%</span>
+                  </div>
+                ))}
+                <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0 4px" }}>
+                  <span style={{ width: 20 }} />
+                  <span style={{ width: 14 }} />
+                  <span style={{ fontSize: 14, fontWeight: 700, color: "#0f3460", flex: 1 }}>合計</span>
+                  <span style={{ width: 110, textAlign: "right", fontSize: 14, fontWeight: 700, color: "#0f3460", fontVariantNumeric: "tabular-nums" }}>{channelAgg.total.toLocaleString()}回</span>
+                  <span style={{ width: 80, textAlign: "right", fontSize: 14, fontWeight: 700, color: "#0f3460" }}>100%</span>
+                </div>
+              </div>
+            </div>
+            <div style={{ fontSize: 11, color: "#888", marginTop: 12, lineHeight: 1.6 }}>
+              ※ 対象月のGoogle広告の表示回数を配信先ネットワーク別に集計した割合です。P-MAX広告は成果が最大になるよう配信先を自動で最適化します。
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* まとめページ */}
       {hasSummary && (

@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useRole } from "@/components/role-provider";
 import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
-import PmaxReportView, { type CampaignRow, type GbpRow } from "@/components/pmax-report-view";
+import PmaxReportView, { type CampaignRow, type GbpRow, type ChannelRow } from "@/components/pmax-report-view";
 
 // ── メインコンポーネント ──
 export default function PmaxStoreDetailPage() {
@@ -36,6 +36,7 @@ function StoreDetailContent() {
   const [monthly, setMonthly] = useState<CampaignRow[]>([]);
   const [daily, setDaily] = useState<CampaignRow[]>([]);
   const [gbpRows, setGbpRows] = useState<GbpRow[]>([]);
+  const [channels, setChannels] = useState<ChannelRow[]>([]);
   const [summaryText, setSummaryText] = useState("");
   const [summaryRequested, setSummaryRequested] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -64,6 +65,7 @@ function StoreDetailContent() {
         setMonthly(adsData.monthly || []);
         setDaily(adsData.daily || []);
         setGbpRows(adsData.gbp || []);
+        setChannels(adsData.channels || []);
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : "取得に失敗しました");
       } finally { setLoading(false); }
@@ -204,7 +206,7 @@ function StoreDetailContent() {
 
       {/* レポート本体（共有ページと共通コンポーネント） */}
       <PmaxReportView
-        data={{ monthly, daily, gbp: gbpRows, shopName, year: targetYear, month: targetMonthNum, summaryText }}
+        data={{ monthly, daily, gbp: gbpRows, channels, shopName, year: targetYear, month: targetMonthNum, summaryText }}
       />
     </div>
   );

@@ -122,6 +122,22 @@ export async function GET(
       costMicros: Number(r.cost_micros),
     }));
 
+    // チャネル別（媒体別）データ（対象月のみ・DBのみ。管理画面で表示された時点でキャッシュされる）
+    const { data: channelRows } = await sb
+      .from("pmax_channel_data")
+      .select("network, impressions, clicks, cost_micros")
+      .eq("shop_name", dbShopName)
+      .eq("month", monthKey);
+
+    const channels = (channelRows || [])
+      .map((r) => ({
+        network: r.network,
+        impressions: Number(r.impressions),
+        clicks: Number(r.clicks),
+        costMicros: Number(r.cost_micros),
+      }))
+      .sort((a, b) => b.impressions - a.impressions);
+
     // GBPデータ
     const gbpMonths = months.map((m) => {
       const [yy, mm] = m.split("-");
@@ -165,6 +181,7 @@ export async function GET(
       monthly,
       daily,
       gbp,
+      channels,
       shopName: dbShopName,
       year,
       month,

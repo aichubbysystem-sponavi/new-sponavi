@@ -180,6 +180,8 @@ export const POST = withAudit("P-MAX広告データ同期", "DATA_OP", async (re
     const syncedShopNames = Array.from(new Set(allMonthly.map(r => r.shopName)));
     for (const name of syncedShopNames) {
       await sb.from("pmax_store_data").delete().eq("month", month).eq("shop_name", name);
+      // チャネル別キャッシュも消して次回レポート表示時に再取得させる（鮮度維持）
+      await sb.from("pmax_channel_data").delete().eq("month", month).eq("shop_name", name);
     }
     console.log(`[pmax/sync] Deleted data for ${syncedShopNames.length} shops in month=${month}`);
   } else {
@@ -187,6 +189,8 @@ export const POST = withAudit("P-MAX広告データ同期", "DATA_OP", async (re
       .from("pmax_store_data")
       .delete({ count: "exact" })
       .eq("month", month);
+    // チャネル別キャッシュも消して次回レポート表示時に再取得させる（鮮度維持）
+    await sb.from("pmax_channel_data").delete().eq("month", month);
     console.log(`[pmax/sync] Deleted ${deleteCount ?? "?"} rows for month=${month}`, deleteError ? `ERROR: ${deleteError.message}` : "OK");
   }
 
