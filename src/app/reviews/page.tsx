@@ -68,6 +68,7 @@ export default function ReviewsPage() {
   const [autoReplySaving, setAutoReplySaving] = useState(false);
   // 範囲選択同期
   const [showRangeSync, setShowRangeSync] = useState(false);
+  const [forceSync, setForceSync] = useState(false); // 7日以内同期済みもスキップせず強制同期
   const [rangeStart, setRangeStart] = useState(1);
   const [rangeEnd, setRangeEnd] = useState(50);
   // 口コミなし店舗
@@ -639,17 +640,19 @@ export default function ReviewsPage() {
       setSyncMsg(`全店舗同期中... ${i}/${allShopIds.length}店舗完了（スキップ${skippedCount}、${totalSynced}件取得）\n処理中: ${shopName}`);
       window.dispatchEvent(new Event("batch-activity"));
 
-      // 個別店舗の同期済みチェック（7日以内に同期済みならスキップ）
-      try {
-        const syncCheckResult = await Promise.race([
-          supabase.from("reviews").select("id").eq("shop_id", shopId).gte("synced_at", since).limit(1),
-          new Promise<{ data: null }>((resolve) => setTimeout(() => resolve({ data: null }), 10000)),
-        ]);
-        if (syncCheckResult.data && (syncCheckResult.data as any[]).length > 0) {
-          skippedCount++;
-          continue;
-        }
-      } catch {}
+      // 個別店舗の同期済みチェック（7日以内に同期済みならスキップ）。強制同期時はスキップしない
+      if (!forceSync) {
+        try {
+          const syncCheckResult = await Promise.race([
+            supabase.from("reviews").select("id").eq("shop_id", shopId).gte("synced_at", since).limit(1),
+            new Promise<{ data: null }>((resolve) => setTimeout(() => resolve({ data: null }), 10000)),
+          ]);
+          if (syncCheckResult.data && (syncCheckResult.data as any[]).length > 0) {
+            skippedCount++;
+            continue;
+          }
+        } catch {}
+      }
 
       try {
         // Promise.raceで確実に70秒でタイムアウト（Chromeバックグラウンドタブ対策）
@@ -819,6 +822,10 @@ export default function ReviewsPage() {
         <div className="flex items-center justify-between mt-2">
           <p className="text-sm text-slate-500">口コミ一覧・返信・分析</p>
           <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1 text-xs text-slate-600 cursor-pointer select-none mr-1" title="ONにすると「いつもの店舗同期」「全店舗同期」で7日以内に同期済みの店舗もスキップせず強制的に取り直します">
+              <input type="checkbox" checked={forceSync} onChange={(e) => setForceSync(e.target.checked)} disabled={syncing} className="w-3.5 h-3.5" />
+              同期済みも強制
+            </label>
             <button onClick={handleSync} disabled={syncing || !selectedShopId || !canData}
               title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${syncing || !canData ? "bg-slate-200 text-slate-400" : "bg-emerald-600 hover:bg-emerald-700"}`}
