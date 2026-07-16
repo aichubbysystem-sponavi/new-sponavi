@@ -511,7 +511,7 @@ export default function ReportClient({
     const lastIdx = unifiedRankingHistory.labels.length - 1;
     if (lastIdx < 0) {
       // シート履歴もグリッドも無い店舗向けフォールバック（シート最新行の順位）
-      return keywords.map(kw => ({ ...kw, word: normalizeKw(kw.word), prevMonth: "" }));
+      return keywords.map(kw => ({ ...kw, word: normalizeKw(kw.word), prevMonth: "", firstMeasure: false }));
     }
     return unifiedRankingHistory.datasets.map(ds => {
       const rank = ds.ranks[lastIdx] ?? 0;
@@ -522,7 +522,9 @@ export default function ReportClient({
         const r = ds.ranks[i];
         if (r !== null && r > 0) { prevRank = r; prevMonth = unifiedRankingHistory.labels[i]; break; }
       }
-      return { word: ds.word, rank: rank || 0, prevRank: prevRank || rank || 0, prevMonth };
+      // 過去に一度も順位が無い＝今回が初計測（prevRank=rankのフォールバック表示と区別する）
+      const firstMeasure = prevRank === 0 && (rank || 0) > 0;
+      return { word: ds.word, rank: rank || 0, prevRank: prevRank || rank || 0, prevMonth, firstMeasure };
     });
   }, [unifiedRankingHistory, keywords]);
 
@@ -1591,7 +1593,7 @@ export default function ReportClient({
                   <div key={i} style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     <div style={{ fontSize: 16, fontWeight: 600 }}>{kw.word}</div>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <span style={{ fontSize: 16, color: "#999" }}>{kw.prevMonth ? `${parseInt(kw.prevMonth.split("/")[1])}月` : "前月"}{hasPrev ? ` ${kw.prevRank}位` : " 圏外"}</span>
+                      <span style={{ fontSize: 16, color: "#999" }}>{kw.firstMeasure ? "初計測" : `${kw.prevMonth ? `${parseInt(kw.prevMonth.split("/")[1])}月` : "前月"}${hasPrev ? ` ${kw.prevRank}位` : " 圏外"}`}</span>
                       <span style={{ fontSize: 22, color: arrowColor }}>{arrow}</span>
                       {hasRank ? (
                         <><span style={{ fontSize: 36, fontWeight: 900, color: "#e94560" }}>{kw.rank}</span>
