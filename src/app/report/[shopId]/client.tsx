@@ -1031,8 +1031,33 @@ export default function ReportClient({
     }
   };
 
+  // ── AIコメントのページ分割 ──
+  // 初期値は推定分割。レンダリング後に実際のDOM高さを計測し、カードから溢れていたら
+  // 最後の項目を次ページへ送る（文字数推定では箇条書きの折り返し行数を正確に予測できず、
+  // スライドからはみ出すケースがあったため実測方式: 2026-07-16 新橋店P15）
+  const baseCommentPages = useMemo(() => splitCommentPages(displayComments, AI_CHARS_PER_PAGE), [displayComments]);
+  const [commentPages, setCommentPages] = useState(baseCommentPages);
+  useEffect(() => { setCommentPages(baseCommentPages); }, [baseCommentPages]);
+  const commentCardRefs = useRef<(HTMLDivElement | null)[]>([]);
+  useEffect(() => {
+    if (isEditingComments) return; // 編集中はtextareaで高さが変わるため調整しない
+    for (let i = 0; i < commentPages.length; i++) {
+      const el = commentCardRefs.current[i];
+      if (!el) continue;
+      if (el.scrollHeight > el.clientHeight + 4 && commentPages[i].end - commentPages[i].start > 1) {
+        // 溢れたページの最後の項目を次ページへ（1レンダリングにつき1項目ずつ、収まるまで繰り返す）
+        const next = commentPages.map(p => ({ ...p }));
+        next[i] = { start: next[i].start, end: next[i].end - 1 };
+        if (i + 1 < next.length) next[i + 1] = { start: next[i].end, end: next[i + 1].end };
+        else next.push({ start: next[i].end, end: displayComments.length });
+        setCommentPages(next);
+        return;
+      }
+    }
+  });
+
   // ── Page count ──
-  const aiCommentPageCount = Math.max(1, splitCommentPages(displayComments, AI_CHARS_PER_PAGE).length);
+  const aiCommentPageCount = Math.max(1, commentPages.length);
   let totalPages = 6 + aiCommentPageCount; // P1,P2(月次),P3-P5(グラフ),口コミ分析 + AIコメント(動的)
   if (hasReviews) totalPages += 2; // 口コミ件数推移, 月間増加数
   if (showKeywords) totalPages++;
@@ -2273,7 +2298,7 @@ export default function ReportClient({
           );
         }
         const allComments = displayComments;
-        const commentPages = splitCommentPages(allComments, AI_CHARS_PER_PAGE);
+        // commentPages はコンポーネント上部で実測調整済みの state を使用
 
         return commentPages.map((page, pageIdx) => {
           pageNum++;
@@ -2305,7 +2330,7 @@ export default function ReportClient({
         </div>
         <div style={slideBodyStyle}>
           <div style={stitleStyle}>{isFirst ? "AIによるコメント" : "AIによるコメント（続き）"}</div>
-          <div style={{ background: "linear-gradient(135deg,#f0f4ff,#fff)", border: "2px solid #0f3460", borderRadius: 14, padding: "16px 20px", flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", wordBreak: "break-word" }}>
+          <div ref={el => { commentCardRefs.current[pageIdx] = el; }} style={{ background: "linear-gradient(135deg,#f0f4ff,#fff)", border: "2px solid #0f3460", borderRadius: 14, padding: "16px 20px", flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden", wordBreak: "break-word" }}>
             {isFirst && <h3 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", marginBottom: 16 }}>{curLabel} 総評</h3>}
             <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
               <thead>

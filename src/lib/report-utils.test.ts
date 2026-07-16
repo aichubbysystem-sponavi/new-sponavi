@@ -45,9 +45,9 @@ describe("pctChange", () => {
     expect(r.isFlat).toBe(true);
   });
 
-  it("前月0, 今月>0", () => {
+  it("前月0, 今月>0は%でなく実数表示（+∞は顧客向けに不適切）", () => {
     const r = pctChange(100, 0);
-    expect(r.text).toBe("+∞");
+    expect(r.text).toBe("+100");
     expect(r.isUp).toBe(true);
   });
 });

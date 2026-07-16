@@ -59,7 +59,8 @@ export const AI_COMMENT_HEADINGS = ["数値分析", "口コミ傾向と強み", 
 
 export const SEARCH_QUERIES_PER_PAGE = 20;
 
-export const AI_CHARS_PER_PAGE = 800;
+/** AIコメント1ページの収容量（推定19行 × 1行52文字の実効量。テーブル行余白込みでスライドに収まる上限） */
+export const AI_CHARS_PER_PAGE = 19 * 52;
 
 // ── 関数 ──
 
@@ -171,7 +172,28 @@ export function formatAIComment(comment: string, shopRating: number): string {
   return c;
 }
 
-/** AIコメントのページ分割 */
+/** AIコメント詳細セルの1行あたり文字数の目安（15pxフォント・実効幅約780px） */
+const AI_COMMENT_CHARS_PER_LINE = 52;
+
+/**
+ * 1コメント項目の推定表示行数。
+ * formatAIComment が「・」「a)」等で改行するのと同じ位置で分割し、折り返し行数も加算する。
+ * （純粋な文字数だと箇条書きの改行・折り返しを無視してしまい、
+ *   800字以下でもスライドから溢れるケースがあった: 2026-07-16 新橋店P15）
+ */
+function estimateCommentLines(comment: string): number {
+  const plain = (comment || "").replace(/<[^>]*>/g, "");
+  const segments = plain
+    .replace(/・/g, "\n・")
+    .replace(/\s*([a-z]\))/g, "\n$1")
+    .split("\n")
+    .map(s => s.trim())
+    .filter(Boolean);
+  if (segments.length === 0) return 1;
+  return segments.reduce((sum, s) => sum + Math.max(1, Math.ceil(s.length / AI_COMMENT_CHARS_PER_LINE)), 0);
+}
+
+/** AIコメントのページ分割（推定表示行数ベース。charsPerPage は「行数×1行文字数」の実効量） */
 export function splitCommentPages(
   comments: string[],
   charsPerPage: number = AI_CHARS_PER_PAGE
@@ -182,7 +204,7 @@ export function splitCommentPages(
     let charCount = 0;
     let end = ci;
     while (end < comments.length) {
-      const len = (comments[end] || "").replace(/<[^>]*>/g, "").length;
+      const len = estimateCommentLines(comments[end]) * AI_COMMENT_CHARS_PER_LINE;
       if (end > ci && charCount + len > charsPerPage) break;
       charCount += len;
       end++;

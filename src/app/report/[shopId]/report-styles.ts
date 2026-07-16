@@ -18,6 +18,9 @@ export const slideBarStyle: React.CSSProperties = {
 export const slideBodyStyle: React.CSSProperties = {
   flex: 1, padding: "28px 9px", display: "flex", flexDirection: "column",
   justifyContent: "center", overflow: "hidden",
+  // flexのmin-height:auto既定値だと中身が多いときbodyがスライドの外まで伸びて
+  // 枠線ごと切れる（ページからはみ出す）。0にして必ずスライド内でクリップする
+  minHeight: 0,
 };
 
 export const stitleStyle: React.CSSProperties = {
