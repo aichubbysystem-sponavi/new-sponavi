@@ -2374,12 +2374,13 @@ export default function ReportClient({
                 })}
               </tbody>
             </table>
-            {/* メモ欄（最終ページのみ、PDF非表示） */}
+            {/* メモ欄（最終ページのみ）。メモがある場合はPDFにも本文を出力し、
+                編集UI・「メモなし」表示は常にPDF非表示（no-print） */}
             {isLast && (
-            <div className="no-print" style={{ marginTop: "auto", borderTop: "1px solid #dde", paddingTop: 12 }}>
+            <div className={memo && !memoEditing ? undefined : "no-print"} style={{ marginTop: "auto", borderTop: "1px solid #dde", paddingTop: 12 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                <span style={{ fontSize: 16, fontWeight: 600, color: "#0f3460" }}>メモ（担当者用）</span>
-                <div style={{ display: "flex", gap: 6 }}>
+                <span style={{ fontSize: 16, fontWeight: 600, color: "#0f3460" }}>メモ<span className="no-print">（担当者用）</span></span>
+                <div className="no-print" style={{ display: "flex", gap: 6 }}>
                   {!memoEditing ? (
                     <button onClick={() => setMemoEditing(true)} style={{ fontSize: 16, padding: "3px 10px", borderRadius: 6, border: "1px solid #ccd", background: "#fff", cursor: "pointer", color: "#555" }}>
                       {memo ? "編集" : "追加"}
