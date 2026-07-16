@@ -452,11 +452,8 @@ async function fetchAllExternalData(
     // 順位 + 履歴を1モジュールで同時取得
     (async () => {
       try {
-        const { fetchRankingFromSheets, fetchRankingHistoryFromSheets } = await import("./ranking-fetch");
-        const [ranks, history] = await Promise.all([
-          fetchRankingFromSheets(shopName),
-          fetchRankingHistoryFromSheets(shopName),
-        ]);
+        const { fetchRankingAndHistoryFromSheets } = await import("./ranking-fetch");
+        const { ranks, history } = await fetchRankingAndHistoryFromSheets(shopName);
         return {
           keywords: ranks.map(r => ({ word: r.word, rank: r.rank, prevRank: r.prevRank })),
           history,

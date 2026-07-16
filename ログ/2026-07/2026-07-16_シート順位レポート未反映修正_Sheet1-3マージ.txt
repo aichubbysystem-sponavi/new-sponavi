@@ -1,0 +1,46 @@
+## 【2026-07-16】シート順位がレポートに反映されない問題の修正（Sheet1/2とSheet3の履歴マージ）
+
+### 症状（クインシーで発覚）
+- 順位自動計測用シート(Sheet3)に 2026/4/29 の順位（カフェ21/ビストロ10/フレンチ22）があるのに、
+  レポートP7には「表参道 ビストロ 2026/1=47」しか表示されない
+- カフェ・フレンチはKW行ごと表示されない
+
+### 原因（実行パストレース+本番シートへの再現テストで確定）
+- fetchRankingAndHistoryFromSheets の探索順は Sheet1 → Sheet2 → Sheet3 で、
+  **最初にヒットしたタブで履歴を確定して打ち切る**作りだった
+- クインシーは Sheet1（旧・手動シート）に同名タブがあり（2024/8〜の月次行、値は2026/01ビストロ47のみ）、
+  そこでヒットするため Sheet3（順位自動計測）が一切読まれなかった
+- 同様に両シートにタブがある店舗全てで、Sheet3の自動計測順位がレポートに出ていなかった
+  （Mr.ROAST CHICKEN / 西口酒場ホームラン 等で確認。タブ重複は Sheet1=125タブ・Sheet3=240タブ中に多数）
+
+### 変更内容
+■ src/lib/ranking-fetch.ts
+  - fetchRankingAndHistoryFromSheets: Sheet1/2探索とSheet3探索を Promise.all で並列実行し、
+    履歴を mergeHistories でマージする方式に変更
+  - mergeHistories 新設: KW×月単位で Sheet3（自動計測）の値を優先、無い月・KWは Sheet1/2 で補完。
+    KWは normalizeKw の正規化キーで同一視（全角/半角スペースゆれ吸収）。月ラベルは和集合の直近13ヶ月
+  - tabLocationCache: { main（Sheet1/2）, s3（Sheet3） } の2スロット記憶に変更
+  - ranks（P6用の最新順位）は従来同様 Sheet1/2 優先（無ければ Sheet3）
+  - 未使用になった fetchRankingHistoryFromSheets とその専用ヘルパー4つ
+    （trySheetHistoryByName/ByGid, trySheet3HistoryByName/ByGid）を削除
+■ src/lib/spreadsheet.ts
+  - フォールバック経路（キャッシュ無し時）も fetchRankingFromSheets + fetchRankingHistoryFromSheets の
+    2本呼びから fetchRankingAndHistoryFromSheets 1本に変更（マージが効くように）
+
+### 検証（本番シート相手に tsx で実関数を実行）
+- クインシー: カフェ 2026/4=21 / ビストロ 2026/1=47, 2026/2=47, 2026/4=10 / フレンチ 2026/4=22 → 全て出現
+- WINE RESTAURANT THE ATTACHMENT 横浜鶴屋町店（Sheet3のみ）: 従来どおり（マージは素通し）
+- Mr.ROAST CHICKEN / 西口酒場ホームラン（両シート）: 旧シートの長期履歴 + Sheet3の直近月（2026/7等）が合成
+- npx tsc --noEmit / next build 成功
+
+### 注意点・ハマったこと
+- Sheet3の「手動計測　1月」行（ビストロ26/フレンチ61）は gviz CSV出力だと**B列が空**で出てくる
+  （"","","","","","","26","61"）ため、月をプログラムから特定できず自動反映は不可能。
+  → 手動値は「表示設定モーダルの中心順位手入力（7/15 e38a2cc）」で入れるか、
+     B列に実日付（例 2026/1/31 0:00）を入れれば自動で拾われる（同月の自動計測より新しい日付なら上書き）
+- Sheet3探索が常時走るようになった分、Sheet1のみの店舗では初回数リクエスト増
+  （タブ位置キャッシュ24hで2回目以降は軽い。Sheet1/2側と並列なので体感遅延はほぼ無し）
+- fetchRankingFromSheets（analyze/route.ts のAI分析用・ranksのみ）は従来の first-hit のまま（表示バグとは無関係）
+
+### 未解決・次回
+- 過去分の残タスクは 2026-07-15_セッション総括.txt を参照
