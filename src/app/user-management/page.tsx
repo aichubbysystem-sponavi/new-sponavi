@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import api from "@/lib/api";
-import { ROLE_LABELS } from "@/lib/roles";
+import { ROLE_LABELS, type Role } from "@/lib/roles";
+import { can, ALL_ROLES, type ActionType } from "@/lib/permissions";
 
 interface UserProfile {
   id: string;
@@ -296,6 +297,79 @@ export default function UserManagementPage() {
             </tbody>
           </table>
         )}
+      </div>
+
+      {/* ロール別権限の早見表（できる操作は permissions.ts の定義から自動生成 = 実装とズレない） */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-100 mb-6">
+        <div className="p-4 border-b border-slate-100">
+          <h3 className="text-sm font-semibold text-slate-500">ロール別権限の早見表</h3>
+        </div>
+        <div className="p-4 grid gap-6 lg:grid-cols-2">
+          <div>
+            <p className="text-[11px] font-semibold text-slate-400 mb-2">できる操作</p>
+            <table className="w-full text-xs border border-slate-100 rounded-lg overflow-hidden">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-100">
+                  <th className="p-2 text-left font-semibold text-slate-500">操作</th>
+                  {ALL_ROLES.map(r => (
+                    <th key={r} className="p-2 text-center font-semibold text-slate-500 whitespace-nowrap">{ROLE_LABELS[r]}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {([
+                  ["PAID_OP", "課金操作", "AI分析・AI返信生成・座標取得などAPI費用が発生する操作"],
+                  ["EXTERNAL_OP", "GBP反映", "投稿・口コミ返信・基本情報更新など顧客のGBPに公開される操作"],
+                  ["DATA_OP", "データ操作", "同期・KW取得・設定保存など内部データの変更"],
+                  ["MEMO", "メモ追加", "レポートへのメモ追加"],
+                  ["STAFF_VIEW", "社内集計の閲覧", "P-MAX集計など社内向けデータの閲覧"],
+                  ["ADMIN", "ユーザー・権限管理", "このページ・店舗割当・操作ログ・グループ管理"],
+                ] as [ActionType, string, string][]).map(([action, label, desc]) => (
+                  <tr key={action} className="border-b border-slate-50 last:border-0">
+                    <td className="p-2">
+                      <span className="font-semibold text-slate-600">{label}</span>
+                      <span className="block text-[10px] text-slate-400">{desc}</span>
+                    </td>
+                    {ALL_ROLES.map(r => (
+                      <td key={r} className="p-2 text-center">
+                        {can(r, action)
+                          ? <span className="text-emerald-600 font-bold">✓</span>
+                          : <span className="text-slate-300">−</span>}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="text-[10px] text-slate-400 mt-2">※ 課金操作（✓が社長のみの行）は実行するとAPI費用が発生します</p>
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold text-slate-400 mb-2">見られるページ</p>
+            <table className="w-full text-xs border border-slate-100 rounded-lg overflow-hidden">
+              <tbody>
+                {/* ページ集合は src/lib/roles.ts の ROLE_PERMISSIONS を要約（変更時はここも更新） */}
+                {([
+                  ["president", "すべてのページ（ユーザー管理・顧客マスタ・グループ管理・GBPアカウント・監査ログの管理系を含む）"],
+                  ["executive", "管理系ページ（ユーザー管理・顧客マスタ・監査ログ等）以外のすべて"],
+                  ["manager", "幹部と同じページ（ただし操作は閲覧とメモ追加のみ）"],
+                  ["part_time", "ダッシュボード・店舗診断・口コミ管理・投稿管理のみ（割当店舗に限定）"],
+                ] as [Role, string][]).map(([r, desc]) => (
+                  <tr key={r} className="border-b border-slate-50 last:border-0">
+                    <td className="p-2 whitespace-nowrap align-top">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                        r === "president" ? "bg-amber-50 text-amber-600" :
+                        r === "executive" ? "bg-purple-50 text-purple-600" :
+                        r === "manager" ? "bg-blue-50 text-blue-600" :
+                        "bg-slate-50 text-slate-600"
+                      }`}>{ROLE_LABELS[r]}</span>
+                    </td>
+                    <td className="p-2 text-slate-600">{desc}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
 
       {/* 操作ログ */}

@@ -207,3 +207,11 @@ analyze/route.ts の店舗一括取得:
 ### 検証
 - 6店舗の実コメントで行数シミュレーション + vitest 42件パス + next build成功
 - 新橋店は再ダウンロードのみで反映（表示側修正のため再分析不要）
+
+## 【追記7】ユーザー管理ページにロール別権限の早見表を追加
+
+- ユーザー一覧の下・操作ログの上に「ロール別権限の早見表」カードを追加
+- 左: できる操作（PAID_OP/EXTERNAL_OP/DATA_OP/MEMO/STAFF_VIEW/ADMIN）×ロールの✓表
+  → permissions.ts の ACTION_ROLES から can() で自動生成（定義変更に自動追従）
+- 右: 見られるページのロール別要約（roles.ts の ROLE_PERMISSIONS の要約。変更時は手動更新が必要な旨コメント）
+- 補足: 課金操作(PAID_OP)=社長のみ（AI分析・AI返信生成・座標取得等）。KW一括取得はDATA_OP=幹部以上・無料
