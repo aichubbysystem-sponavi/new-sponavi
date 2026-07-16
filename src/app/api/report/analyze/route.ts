@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { withAudit, requireCtxShopAccess } from "@/lib/audit";
+import { normalizeKw } from "@/lib/keyword-normalize";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -714,9 +715,21 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
               if (filtered.length > 0) {
                 const latest = filtered[filtered.length - 1];
                 const prev = filtered.length >= 2 ? filtered[filtered.length - 2] : null;
+                // 統一系列(P6/P7)と同じ優先順位: グリッド中心が圏外(0)でもシート順位があればそちらを採用
+                // （これが無いとP6/P7は「47位」なのにAIコメントは「圏外へ転落」と書くレポート内矛盾が起きる）
+                const rh = report.rankingHistory;
+                const sheetRankAt = (kwWord: string, month: string): number => {
+                  if (!rh?.labels?.length) return 0;
+                  const mi = rh.labels.indexOf(month);
+                  if (mi < 0) return 0;
+                  const ds = (rh.datasets || []).find((d: any) => normalizeKw(d.word) === normalizeKw(kwWord));
+                  const r = ds ? ds.ranks[mi] : null;
+                  return r && r > 0 ? r : 0;
+                };
                 for (const snap of (latest.snapshots || [])) {
                   const center = snap.results?.find((r: any) => r.row === Math.floor(snap.gridSize / 2) && r.col === Math.floor(snap.gridSize / 2));
-                  const rank = center?.rank || 0;
+                  let rank = center?.rank || 0;
+                  if (rank === 0) rank = sheetRankAt(snap.keyword, latest.month);
                   let prevRank = rank;
                   let hasPrevSnap = false;
                   if (prev?.snapshots) {
@@ -725,6 +738,7 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
                       hasPrevSnap = true;
                       const prevCenter = prevSnap.results?.find((r: any) => r.row === Math.floor(prevSnap.gridSize / 2) && r.col === Math.floor(prevSnap.gridSize / 2));
                       prevRank = prevCenter?.rank || 0;
+                      if (prevRank === 0) prevRank = sheetRankAt(snap.keyword, prev.month);
                     }
                   }
                   // 圏外(rank=0)も含める: 圏外転落はAIコメントで言及すべき重要な変動のため
