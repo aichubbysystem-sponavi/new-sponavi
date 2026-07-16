@@ -508,13 +508,23 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
           const kpis = report.kpis || [];
           const labels = report.monthlyLabels || [];
           if (!curMonth) curMonth = labels[labels.length - 1] || "";
+          // ゼロ埋め正規化: "2026/06" → "2026/6"（perfLabels/monthlyLabelsの形式に合わせる）
+          curMonth = curMonth.replace(/\/0+(\d)/, "/$1");
 
           // performance_metrics_cacheで上書き（フロントと同じデータソースを使用）
+          // ※上書きに失敗するとreport_data_cacheの古い値で分析され、レポート表示と数値がズレる。
+          //   失敗は必ずログに残す（silent catchで原因が見えなくなっていた）
           let perfCharts = report.charts;
           let perfLabels = labels;
+          let perfOverlayApplied = false;
           try {
             const { getCachedPerformance } = await import("@/lib/gbp-performance");
-            const shopRow = shopInfoByName.get(shop.name) || shopInfoById.get(shop.id);
+            let shopRow = shopInfoByName.get(shop.name) || shopInfoById.get(shop.id);
+            if (!shopRow?.id) {
+              // バッチマップで解決できない場合は直接照会（表示側と同じ名前解決）
+              const { data: direct } = await supabase.from("shops").select("id, name").eq("name", shop.name).limit(1).maybeSingle();
+              if (direct?.id) shopRow = direct;
+            }
             if (shopRow?.id) {
               const perfData = await getCachedPerformance(shopRow.id, shop.name);
               if (perfData.length > 0) {
@@ -530,9 +540,19 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
                   foodMenus: perfData.map((p: any) => p.foodMenus),
                   bookings: perfData.map((p: any) => p.bookings),
                 };
+                perfOverlayApplied = true;
+              } else {
+                console.warn(`[analyze] ${shop.name}: performance_metrics_cacheが0件（shop_id=${shopRow.id}）`);
               }
+            } else {
+              console.warn(`[analyze] ${shop.name}: shopsテーブルで店舗名を解決できず（perf上書きスキップ）`);
             }
-          } catch {}
+          } catch (perfErr: any) {
+            console.error(`[analyze] ${shop.name}: perf上書きエラー:`, perfErr?.message || perfErr);
+          }
+          if (!perfOverlayApplied) {
+            console.warn(`[analyze] ${shop.name}: KPIはreport_data_cache由来の値で分析（レポート表示と数値がズレる可能性）`);
+          }
 
           // chartsから対象月のKPIを再構成
           const targetIdx0 = curMonth ? perfLabels.indexOf(curMonth) : perfLabels.length - 1;
@@ -694,8 +714,10 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
                       prevRank = prevCenter?.rank || 0;
                     }
                   }
-                  if (rank > 0) kwData.push({ word: snap.keyword, rank, prevRank: prevRank || rank });
+                  // 圏外(rank=0)も含める: 圏外転落はAIコメントで言及すべき重要な変動のため
+                  kwData.push({ word: snap.keyword, rank, prevRank: prevRank || rank });
                 }
+                // 全KWが圏外のみの月でもkwDataは有効（後続のシートフォールバックに落とさない）
               }
             }
 
@@ -706,13 +728,18 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
               kwData = freshRanks.length > 0 ? freshRanks : (report.keywords || []);
             }
 
+            // 圏外転落/復帰も明示する行フォーマット（前回=直近の計測回。前月とは限らない）
+            const fmtKwLine = (kw: { word: string; rank: number; prevRank: number }) => {
+              const d = kw.prevRank - kw.rank;
+              const arrow = kw.prevRank > 0 && kw.rank > 0
+                ? (d > 0 ? `↑${d}` : d < 0 ? `↓${Math.abs(d)}` : "→")
+                : kw.prevRank > 0 && kw.rank <= 0 ? "圏外へ転落"
+                : kw.prevRank <= 0 && kw.rank > 0 ? "圏内に復帰" : "→";
+              return `\n${kw.word}: ${kw.rank > 0 ? `${kw.rank}位` : "圏外"}（前回${kw.prevRank > 0 ? `${kw.prevRank}位` : "圏外"} ${arrow}）`;
+            };
             if (kwData.length > 0) {
               kpiText += `\n\n【キーワード順位（${curMonth}）】`;
-              for (const kw of kwData) {
-                const diff = kw.prevRank > 0 && kw.rank > 0 ? kw.prevRank - kw.rank : 0;
-                const arrow = diff > 0 ? `↑${diff}` : diff < 0 ? `↓${Math.abs(diff)}` : "→";
-                kpiText += `\n${kw.word}: ${kw.rank > 0 ? `${kw.rank}位` : "圏外"}（前月${kw.prevRank > 0 ? `${kw.prevRank}位` : "圏外"} ${arrow}）`;
-              }
+              for (const kw of kwData) kpiText += fmtKwLine(kw);
             }
           } catch {
             // フォールバック: キャッシュのデータを使用
@@ -720,9 +747,12 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
             if (kwData && kwData.length > 0) {
               kpiText += `\n\n【キーワード順位（${curMonth}）】`;
               for (const kw of kwData) {
-                const diff = kw.prevRank > 0 && kw.rank > 0 ? kw.prevRank - kw.rank : 0;
-                const arrow = diff > 0 ? `↑${diff}` : diff < 0 ? `↓${Math.abs(diff)}` : "→";
-                kpiText += `\n${kw.word}: ${kw.rank > 0 ? `${kw.rank}位` : "圏外"}（前月${kw.prevRank > 0 ? `${kw.prevRank}位` : "圏外"} ${arrow}）`;
+                const d = kw.prevRank - kw.rank;
+                const arrow = kw.prevRank > 0 && kw.rank > 0
+                  ? (d > 0 ? `↑${d}` : d < 0 ? `↓${Math.abs(d)}` : "→")
+                  : kw.prevRank > 0 && kw.rank <= 0 ? "圏外へ転落"
+                  : kw.prevRank <= 0 && kw.rank > 0 ? "圏内に復帰" : "→";
+                kpiText += `\n${kw.word}: ${kw.rank > 0 ? `${kw.rank}位` : "圏外"}（前回${kw.prevRank > 0 ? `${kw.prevRank}位` : "圏外"} ${arrow}）`;
               }
             }
           }
