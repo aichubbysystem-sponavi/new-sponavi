@@ -66,7 +66,8 @@ export const AI_CHARS_PER_PAGE = 800;
 /** 前月比の計算 */
 export function pctChange(cur: number, prev: number): PctChangeResult {
   if (prev === 0 && cur === 0) return { pct: 0, text: "±0.0%", isUp: true, isFlat: true };
-  if (prev === 0) return { pct: 999, text: "+∞", isUp: true, isFlat: false };
+  // 前月0からの増加は%が定義できない（「+∞」は顧客向け表示として不適切なため実数を表示）
+  if (prev === 0) return { pct: 999, text: `+${cur.toLocaleString()}`, isUp: true, isFlat: false };
   const pct = ((cur - prev) / prev) * 100;
   const isFlat = Math.abs(pct) < 0.05;
   return { pct, text: isFlat ? "+0.0%" : `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`, isUp: pct >= 0, isFlat };
