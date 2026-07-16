@@ -1,0 +1,78 @@
+## 【2026-07-16】
+
+### 決定事項
+- 順位履歴はSheet1/2（旧・手動）とSheet3（順位自動計測）を並列で両方探索し、KW×月単位でマージする（Sheet3優先、無い月・KWは旧シートで補完）。「最初にヒットしたシートで打ち切り」を廃止
+- 多地点平均順位のavgRank=0（全地点圏外）は数値として比較・表示しない。「圏外」表示、変動は「圏外へ」(赤)/「圏内復帰」(緑)。比較列ヘッダーは「前月比」→「前回比」（月が飛ぶため）
+- P6順位変動カードの前回値は実際の計測月を表示（「4月 21位」）。過去データが無いKWは「初計測」表示
+- AIコメントの数値ソースは表示側と完全に同一にする: KPI/アクション率=performance_metrics_cache、順位=グリッド中心>シートの統一系列（P6/P7と同じ優先順位）
+- AI分析内の失敗（perf上書き・店舗解決等）はサイレントにせず必ずconsoleログを残す
+- ポジ/ネガワード検証: 星評価フィルタで全滅した場合は全口コミから照合（原文含有は維持）、15字超は除外、末尾助詞はトリム
+- pctChangeの前月0→Nは「+∞」でなく実数（「+4」）表示
+- AIコメントのページ分割は「推定行数で初期分割 + レンダリング後のDOM実測で溢れたら次ページへ送る」二段構え
+- PDF検証の標準手順: テキスト抽出で数値検算 + 全ページ画像レンダリングでレイアウト目視（メモリにも保存済み）
+- メモ（担当者用）はメモがある場合のみPDFにも出力。編集UIは常に非表示、PDFのラベルは「メモ」
+- ユーザー管理ページに「ロール別権限の早見表」を常設（permissions.tsから自動生成し定義とズレない）
+- 課金操作(PAID_OP)は社長のみ。KW一括取得=DATA_OP(無料・シート読取のみ)、座標一括取得=PAID_OP(有料API)
+
+### 変更内容（具体的に）
+■ src/lib/ranking-fetch.ts
+- fetchRankingAndHistoryFromSheets: Sheet1/2とSheet3をPromise.allで並列探索し mergeHistories でマージする方式に全面改修
+- mergeHistories新設（KW正規化キーで統合、月ラベルは和集合の直近13ヶ月）
+- tabLocationCacheを{main, s3}の2スロット記憶に変更
+- 未使用化した fetchRankingHistoryFromSheets と専用ヘルパー4つを削除
+■ src/lib/spreadsheet.ts
+- フォールバック経路を fetchRankingAndHistoryFromSheets 1本に変更
+■ src/lib/report-utils.ts
+- fmtAvgRank / avgRankDiff 新設（圏外対応）
+- pctChange: prev=0 && cur>0 → 「+実数」表示
+- AI_CHARS_PER_PAGE: 800 → 19行×52字、estimateCommentLines新設、splitCommentPagesを行数ベースに
+■ src/app/report/[shopId]/client.tsx
+- 多地点の平均順位表示6箇所（P8左右・P9/P10 web/PDF・比較表）にfmtAvgRank/avgRankDiff適用
+- effectiveKeywordsにprevMonth/firstMeasure追加、P6カードを実月表示+「初計測」+圏外転落↓赤矢印に
+- AIコメント: commentPages(state)+commentCardRefs+DOM実測の自動ページ送り、カードにminHeight:0
+- メモ欄: memoあり&&非編集中のみ印刷対象、ボタン群と「（担当者用）」ラベルはno-print
+■ src/app/report/[shopId]/report-styles.ts
+- slideBodyStyleにminHeight:0（flexで枠線ごとスライド外に伸びるのを防止）
+■ src/app/api/report/analyze/route.ts
+- ★shops一括取得のselectから存在しない列（rating, review_count）を除去 + shopsErr必須ログ【全店舗の根本バグ】
+- perf上書き: 直接照会フォールバック + perfOverlayApplied警告 + catch{}撤廃
+- curMonthゼロ埋め正規化 / kwDataに圏外(rank=0)含む + first(初計測)マーク + sheetRankAtフォールバック（グリッド中心圏外時はシート順位）
+- 言語別集計に星評価内訳（高評価/低評価件数）追加
+- プロンプト: %再計算禁止・「◯ヶ月ぶり」制限・前年スパイク単純比較禁止・順位大変動の言及必須・ワード形式（原文どおり最優先）・外国語口コミ整合・初計測を「維持」と書かない・出力例の「海外からの好意的な口コミ」削除
+- 【直近3ヶ月の推移】→【直近13ヶ月の推移】
+- strictValidateAndRank: 15字超除外・末尾助詞トリム・重複排除・星フィルタ全滅時の全口コミフォールバック
+- 死んでいたofficialRatingのshopsフォールバックブロック削除
+■ src/app/user-management/page.tsx
+- ロール別権限の早見表カード追加（できる操作×ロールの✓表 + 見られるページ要約）
+■ src/lib/report-utils.test.ts
+- pctChange前月0の期待値を新仕様に更新（42件全パス）
+
+### 数値・設定値
+- AIコメント1ページ容量: 800字 → 19行×52字（実効988）+ DOM実測補正（超過時1項目ずつ次ページへ）
+- ワード: 2〜10文字目安・15文字超は除外・末尾助詞（が/の/を/に/は/へ/と/で/も）トリム
+- AIへ渡す月次推移: 3ヶ月 → 13ヶ月（前年スパイクをAI自身が確認可能に）
+- タブ位置キャッシュTTL: 24h（変更なし、2スロット化のみ）
+- 前月0→Nの前月比表示: 「+∞」→「+N」
+
+### 未解決・次回やること
+- クインシー: 4月10位→6月全地点圏外の急落の実態確認（計測条件か実際の順位喪失か）※顧客提出前に推奨
+- DESIGN FOOD MARKET 2店舗: 2026年4月だけ全KWが1〜3位の異常値 → 4月データの出どころ（一括生成/手入力履歴）確認
+- 2025年6月のマップ表示スパイク（約39,000）がクインシー・新橋店で共通 → Google側の集計仕様変更の可能性が高い。顧客説明に使える
+- unifiedRankingHistoryは「計測なし」と「圏外」をどちらもnullで表現しており区別不可（P7の「-」・P6の「圏外」表示の曖昧さ）。直すならranks配列に0=圏外の3値化が必要
+- 一括PDF: setTimeout経由のwindow.open連発でポップアップブロックに引っかかる可能性。ブロック検知トースト未実装（要望あれば数行で追加可）。ユーザーの実クリック確認待ち
+- 神南P15「来月の口コミ投稿数」→ 再分析か編集機能で「今月」に修正
+- 月初に前月分を一括再分析する運用の確立（AIコメントは生成時点の数値で固定されるため）
+- （以前からの残タスクは2026-07-15_セッション総括.txt参照: PROXY_GUARD_MODE enforce切替、Go API店名NFC統一 等）
+
+### 注意点・ハマったこと
+- ★shops一括取得のselectに存在しない列（rating/review_count）が混ざるとクエリ全体がエラー→店舗マップが常に空→perf上書き・グリッド補完・グループ/同業種平均が全店舗でサイレントスキップされていた。「+11%ズレ」「初計測誤り」の真犯人。supabaseのselect列は実在を確認し、catch{}は必ずログを出すこと（7/15の教訓の再演）
+- 「最初にヒットしたソースで打ち切り」探索は、複数ソース併存店舗で新しいデータを永久に隠す（Sheet1旧タブがSheet3自動計測を隠していた）
+- report_data_cache（シート転記由来）とperformance_metrics_cache（GBP API由来）は恒常的に値がズレる。表示とAI分析は必ず同一ソースを使う
+- avgRank=0（圏外）を数値比較すると「圏外へ転落」が「↑17.3改善」という真逆の表示になる
+- プロンプトの「断片不可・言い切り」ルールは「原文完全含有」検証と矛盾する（AIが整形→照合全滅→「データ準備中」）。原文どおり最優先と明記し、コード側にフォールバックを持つ
+- 文字数ではAIコメントの表示行数を予測できない（箇条書き改行・折り返し・半角文字幅で誤差大）。DOM実測が唯一確実
+- flexのmin-height:auto既定値により、中身が多いとカードがスライド外まで伸びて枠線ごと切れる → minHeight:0必須
+- PDF検証はテキスト抽出だけではレイアウト崩れを見逃す（ユーザー指摘で発覚）→ pdf-to-png-converterで全ページ画像化して目視。scratchpadに検証スクリプトの手順あり
+- gviz CSVは「手動計測 1月」のような日付なしセルをB列空で返すため自動取り込み不可（手入力機能かB列に実日付を）
+- 一括PDFは「レポートをタブで一斉に開く」機能でPDF自動生成ではない（各タブで手動ダウンロード）
+- 本番DB直結はプーラー（aws-1-ap-northeast-1.pooler.supabase.com / postgres.kxxwspavskhhjtiixcep、パスワードはメモ.txt）。performance_metrics_cache等の実データ検証に有効だった
