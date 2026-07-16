@@ -31,6 +31,7 @@ import {
   SLIDE_W, SLIDE_H, COLORS, AI_COMMENT_HEADINGS,
   SEARCH_QUERIES_PER_PAGE, AI_CHARS_PER_PAGE,
   pctChange, monthToNum, rankColor, rankColorModal,
+  fmtAvgRank, avgRankDiff,
   reorderKpis, formatAIComment, splitCommentPages,
 } from "@/lib/report-utils";
 import {
@@ -510,17 +511,18 @@ export default function ReportClient({
     const lastIdx = unifiedRankingHistory.labels.length - 1;
     if (lastIdx < 0) {
       // シート履歴もグリッドも無い店舗向けフォールバック（シート最新行の順位）
-      return keywords.map(kw => ({ ...kw, word: normalizeKw(kw.word) }));
+      return keywords.map(kw => ({ ...kw, word: normalizeKw(kw.word), prevMonth: "" }));
     }
     return unifiedRankingHistory.datasets.map(ds => {
       const rank = ds.ranks[lastIdx] ?? 0;
-      // 前月表示用: 直近でデータがある月の順位
+      // 前回表示用: 直近でデータがある月の順位とその月ラベル（前月とは限らない）
       let prevRank = 0;
+      let prevMonth = "";
       for (let i = lastIdx - 1; i >= 0; i--) {
         const r = ds.ranks[i];
-        if (r !== null && r > 0) { prevRank = r; break; }
+        if (r !== null && r > 0) { prevRank = r; prevMonth = unifiedRankingHistory.labels[i]; break; }
       }
-      return { word: ds.word, rank: rank || 0, prevRank: prevRank || rank || 0 };
+      return { word: ds.word, rank: rank || 0, prevRank: prevRank || rank || 0, prevMonth };
     });
   }, [unifiedRankingHistory, keywords]);
 
@@ -960,13 +962,14 @@ export default function ReportClient({
             if (avgEl && latestSnap) {
               let diffHtml = "";
               if (prevSnap) {
-                const d = prevSnap.avgRank - latestSnap.avgRank;
-                if (d !== 0) {
-                  const color = d > 0 ? "#0a8f3c" : "#c0392b";
-                  diffHtml = `<span style="margin-left:8px;font-size:20px;font-weight:700;color:${color};">${d > 0 ? "↑" + d.toFixed(1) : "↓" + Math.abs(d).toFixed(1)}</span>`;
+                const d = avgRankDiff(prevSnap.avgRank, latestSnap.avgRank);
+                if (d.text !== "→" && d.text !== "-") {
+                  diffHtml = `<span style="margin-left:8px;font-size:20px;font-weight:700;color:${d.color};">${d.text}</span>`;
                 }
               }
-              avgEl.innerHTML = `平均順位: <span style="font-size:28px;font-weight:900;color:#e94560;">${latestSnap.avgRank}</span>位${diffHtml}`;
+              avgEl.innerHTML = latestSnap.avgRank > 0
+                ? `平均順位: <span style="font-size:28px;font-weight:900;color:#e94560;">${latestSnap.avgRank}</span>位${diffHtml}`
+                : `平均順位: <span style="font-size:28px;font-weight:900;color:#94a3b8;">圏外</span>${diffHtml}`;
             }
           }
         }
@@ -1581,13 +1584,14 @@ export default function ReportClient({
                 const hasRank = kw.rank > 0;
                 const hasPrev = kw.prevRank > 0;
                 const diff = hasRank && hasPrev ? kw.prevRank - kw.rank : 0;
-                const arrow = diff > 0 ? "↑" : diff < 0 ? "↓" : "→";
-                const arrowColor = diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888";
+                // 圏外への転落は↓・圏外からの復帰は↑として扱う
+                const arrow = hasPrev && !hasRank ? "↓" : !hasPrev && hasRank ? "↑" : diff > 0 ? "↑" : diff < 0 ? "↓" : "→";
+                const arrowColor = arrow === "↑" ? "#0a8f3c" : arrow === "↓" ? "#c0392b" : "#888";
                 return (
                   <div key={i} style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     <div style={{ fontSize: 16, fontWeight: 600 }}>{kw.word}</div>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <span style={{ fontSize: 16, color: "#999" }}>前月{hasPrev ? `${kw.prevRank}位` : "圏外"}</span>
+                      <span style={{ fontSize: 16, color: "#999" }}>{kw.prevMonth ? `${parseInt(kw.prevMonth.split("/")[1])}月` : "前月"}{hasPrev ? ` ${kw.prevRank}位` : " 圏外"}</span>
                       <span style={{ fontSize: 22, color: arrowColor }}>{arrow}</span>
                       {hasRank ? (
                         <><span style={{ fontSize: 36, fontWeight: 900, color: "#e94560" }}>{kw.rank}</span>
@@ -1710,7 +1714,7 @@ export default function ReportClient({
                         <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
                           <thead>
                             <tr>
-                              {["キーワード", "平均順位", "前月比", "計測地点"].map((t, ti) => (
+                              {["キーワード", "平均順位", "前回比", "計測地点"].map((t, ti) => (
                                 <th key={t} style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: ti === 0 ? "left" : "center", fontSize: 15 }}>{t}</th>
                               ))}
                             </tr>
@@ -1720,15 +1724,15 @@ export default function ReportClient({
                             {gr.keywords.map((kw, si) => {
                               const s = latestMonth.snapshots.find(sn => sn.keyword === kw);
                               const ps = prevMonth?.snapshots.find(p => p.keyword === kw);
-                              const diff = s && ps ? ps.avgRank - s.avgRank : 0;
+                              const diff = s ? avgRankDiff(ps?.avgRank ?? null, s.avgRank) : { text: "-", color: "#888" };
                               return (
                                 <tr key={si} style={{ background: si % 2 === 0 ? "#fff" : "#f8f9fb" }}>
                                   <td style={{ padding: "8px 12px", fontSize: 15, borderBottom: "1px solid #eee" }}>{kw}</td>
                                   <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 15, fontWeight: 800, borderBottom: "1px solid #eee",
-                                    color: !s ? "#ccc" : s.avgRank <= 3 ? "#1d4ed8" : s.avgRank <= 10 ? "#15803d" : s.avgRank <= 20 ? "#b45309" : "#999" }}>{s ? s.avgRank : "-"}</td>
+                                    color: !s ? "#ccc" : s.avgRank <= 0 ? "#999" : s.avgRank <= 3 ? "#1d4ed8" : s.avgRank <= 10 ? "#15803d" : s.avgRank <= 20 ? "#b45309" : "#999" }}>{s ? fmtAvgRank(s.avgRank) : "-"}</td>
                                   <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 15, fontWeight: 700, borderBottom: "1px solid #eee",
-                                    color: diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
-                                    {s && ps ? (diff > 0 ? `↑${diff.toFixed(1)}` : diff < 0 ? `↓${Math.abs(diff).toFixed(1)}` : "→") : "-"}
+                                    color: diff.color }}>
+                                    {diff.text}
                                   </td>
                                   <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 15, color: "#888", borderBottom: "1px solid #eee" }}>{s ? `${s.gridSize}×${s.gridSize}` : "-"}</td>
                                 </tr>
@@ -1755,7 +1759,7 @@ export default function ReportClient({
                   {gr.keywords.map(kw => {
                     const data = recentHistory.map(h => { const s = h.snapshots.find(s => s.keyword === kw); return s ? s.avgRank : null; });
                     const valid = data.filter((v): v is number => v !== null);
-                    const diff = valid.length >= 2 ? valid[valid.length - 2] - valid[valid.length - 1] : 0;
+                    const diff = valid.length >= 2 ? avgRankDiff(valid[valid.length - 2], valid[valid.length - 1]) : { text: "→", color: "#888" };
                     return (
                       <div key={kw}>
                         <div style={{ fontSize: titleFS, fontWeight: 700, color: "#0f3460", marginBottom: headMB }}>「{kw}」</div>
@@ -1771,14 +1775,14 @@ export default function ReportClient({
                           <tbody>
                             <tr>
                               {data.map((v, i) => (
-                                <td key={i} style={{ padding: cellPad, textAlign: "center", fontSize: cellFS, fontWeight: v !== null && v <= 5 ? 900 : 600,
-                                  color: v === null ? "#ddd" : v <= 3 ? "#1d4ed8" : v <= 10 ? "#15803d" : v <= 20 ? "#b45309" : "#999", borderBottom: "1px solid #eee" }}>
-                                  {v !== null ? v : "-"}
+                                <td key={i} style={{ padding: cellPad, textAlign: "center", fontSize: cellFS, fontWeight: v !== null && v > 0 && v <= 5 ? 900 : 600,
+                                  color: v === null ? "#ddd" : v <= 0 ? "#999" : v <= 3 ? "#1d4ed8" : v <= 10 ? "#15803d" : v <= 20 ? "#b45309" : "#999", borderBottom: "1px solid #eee" }}>
+                                  {fmtAvgRank(v)}
                                 </td>
                               ))}
                               <td style={{ padding: cellPad, textAlign: "center", fontSize: cellFS, fontWeight: 700, borderBottom: "1px solid #eee",
-                                color: diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
-                                {valid.length >= 2 ? (diff > 0 ? `↑${diff.toFixed(1)}` : diff < 0 ? `↓${Math.abs(diff).toFixed(1)}` : "→") : "→"}
+                                color: diff.color }}>
+                                {diff.text}
                               </td>
                             </tr>
                           </tbody>
@@ -1854,12 +1858,16 @@ export default function ReportClient({
                             <span><span style={{ width: 20, height: 20, borderRadius: "50%", background: "#6B7280", display: "inline-block", verticalAlign: "middle", marginRight: 6 }} /><span style={{ verticalAlign: "middle" }}>圏外</span></span>
                           </div>
                           <div className="grid-kw-avg" style={{ fontSize: 20, color: "#555", textAlign: "center", width: 440 }}>
-                            平均順位: <span style={{ fontSize: 28, fontWeight: 900, color: "#e94560" }}>{snapshot.avgRank}</span>位
+                            平均順位: {snapshot.avgRank > 0 ? (
+                              <><span style={{ fontSize: 28, fontWeight: 900, color: "#e94560" }}>{snapshot.avgRank}</span>位</>
+                            ) : (
+                              <span style={{ fontSize: 28, fontWeight: 900, color: "#94a3b8" }}>圏外</span>
+                            )}
                             {prevSnapshot && (() => {
-                              const diff = prevSnapshot.avgRank - snapshot.avgRank;
-                              return diff !== 0 ? (
-                                <span style={{ marginLeft: 8, fontSize: 20, fontWeight: 700, color: diff > 0 ? "#0a8f3c" : "#c0392b" }}>
-                                  {diff > 0 ? `↑${diff.toFixed(1)}` : `↓${Math.abs(diff).toFixed(1)}`}
+                              const diff = avgRankDiff(prevSnapshot.avgRank, snapshot.avgRank);
+                              return diff.text !== "→" && diff.text !== "-" ? (
+                                <span style={{ marginLeft: 8, fontSize: 20, fontWeight: 700, color: diff.color }}>
+                                  {diff.text}
                                 </span>
                               ) : null;
                             })()}
@@ -1888,21 +1896,21 @@ export default function ReportClient({
                             <tr>
                               {trendData.map((v, i) => (
                                 <td key={i} style={{
-                                  padding: "12px 6px", textAlign: "center", fontSize: 16, fontWeight: v !== null && v <= 5 ? 900 : 600,
-                                  color: v === null ? "#ddd" : v <= 3 ? "#1d4ed8" : v <= 10 ? "#15803d" : v <= 20 ? "#b45309" : "#999",
+                                  padding: "12px 6px", textAlign: "center", fontSize: 16, fontWeight: v !== null && v > 0 && v <= 5 ? 900 : 600,
+                                  color: v === null ? "#ddd" : v <= 0 ? "#999" : v <= 3 ? "#1d4ed8" : v <= 10 ? "#15803d" : v <= 20 ? "#b45309" : "#999",
                                   background: i === activeMonthI ? "#fff8f0" : undefined, borderBottom: "1px solid #eee",
                                 }}>
-                                  {v !== null ? v : "-"}
+                                  {fmtAvgRank(v)}
                                 </td>
                               ))}
                               {(() => {
                                 const valid = trendData.filter((v): v is number => v !== null);
                                 if (valid.length < 2) return <td style={{ padding: "12px 6px", textAlign: "center", color: "#888", borderBottom: "1px solid #eee" }}>→</td>;
-                                const diff = valid[valid.length - 2] - valid[valid.length - 1];
+                                const diff = avgRankDiff(valid[valid.length - 2], valid[valid.length - 1]);
                                 return (
                                   <td style={{ padding: "12px 6px", textAlign: "center", fontSize: 16, fontWeight: 700, borderBottom: "1px solid #eee",
-                                    color: diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
-                                    {diff > 0 ? `↑${diff.toFixed(1)}` : diff < 0 ? `↓${Math.abs(diff).toFixed(1)}` : "→"}
+                                    color: diff.color }}>
+                                    {diff.text}
                                   </td>
                                 );
                               })()}
@@ -1919,24 +1927,24 @@ export default function ReportClient({
                                 <tr>
                                   <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "left", fontSize: 16 }}>キーワード</th>
                                   <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "center", fontSize: 16 }}>平均順位</th>
-                                  <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "center", fontSize: 16 }}>前月比</th>
+                                  <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "center", fontSize: 16 }}>前回比</th>
                                   <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "center", fontSize: 16 }}>計測地点</th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {monthData.snapshots.map((s, si) => {
                                   const ps = prevMonthData?.snapshots.find(p => p.keyword === s.keyword);
-                                  const diff = ps ? ps.avgRank - s.avgRank : 0;
+                                  const diff = avgRankDiff(ps?.avgRank ?? null, s.avgRank);
                                   return (
                                     <tr key={si} style={{ background: s.keyword === loopKw ? "#fff8f0" : si % 2 === 0 ? "#fff" : "#f8f9fb" }}>
                                       <td style={{ padding: "8px 12px", fontWeight: s.keyword === loopKw ? 700 : 500, fontSize: 16, borderBottom: "1px solid #eee" }}>{s.keyword}</td>
                                       <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 16, fontWeight: 800, borderBottom: "1px solid #eee",
-                                        color: s.avgRank <= 3 ? "#1d4ed8" : s.avgRank <= 10 ? "#15803d" : s.avgRank <= 20 ? "#b45309" : "#999" }}>
-                                        {s.avgRank}
+                                        color: s.avgRank <= 0 ? "#999" : s.avgRank <= 3 ? "#1d4ed8" : s.avgRank <= 10 ? "#15803d" : s.avgRank <= 20 ? "#b45309" : "#999" }}>
+                                        {fmtAvgRank(s.avgRank)}
                                       </td>
                                       <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 16, fontWeight: 700, borderBottom: "1px solid #eee",
-                                        color: diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888" }}>
-                                        {ps ? (diff > 0 ? `↑${diff.toFixed(1)}` : diff < 0 ? `↓${Math.abs(diff).toFixed(1)}` : "→") : "-"}
+                                        color: diff.color }}>
+                                        {diff.text}
                                       </td>
                                       <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 16, color: "#888", borderBottom: "1px solid #eee" }}>
                                         {s.gridSize}×{s.gridSize}

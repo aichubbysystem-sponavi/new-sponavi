@@ -96,6 +96,30 @@ export function rankTextColor(rank: number): string {
   return "#999";
 }
 
+/** 多地点平均順位の表示文字列。avgRank<=0 は「全地点圏外」を意味するため数値として表示しない */
+export function fmtAvgRank(v: number | null | undefined): string {
+  if (v == null) return "-";
+  return v > 0 ? String(v) : "圏外";
+}
+
+/** 多地点平均順位の変動表示。圏外(0以下)を数値として比較しない */
+export function avgRankDiff(
+  prev: number | null | undefined,
+  cur: number | null | undefined,
+): { text: string; color: string } {
+  const GREEN = "#0a8f3c", RED = "#c0392b", GRAY = "#888";
+  if (prev == null || cur == null) return { text: "-", color: GRAY };
+  if (prev > 0 && cur > 0) {
+    const d = prev - cur;
+    if (d > 0) return { text: `↑${d.toFixed(1)}`, color: GREEN };
+    if (d < 0) return { text: `↓${Math.abs(d).toFixed(1)}`, color: RED };
+    return { text: "→", color: GRAY };
+  }
+  if (prev > 0 && cur <= 0) return { text: "圏外へ", color: RED };
+  if (prev <= 0 && cur > 0) return { text: "圏内復帰", color: GREEN };
+  return { text: "→", color: GRAY };
+}
+
 /** ランク → モーダル用の背景色+テキスト色 */
 export function rankColorModal(rank: number): { bg: string; color: string } {
   if (rank <= 0) return { bg: "rgba(156,163,175,0.3)", color: "#9ca3af" };

@@ -183,7 +183,7 @@ ${langStatsText || ""}
   "reviews": [
     "「味噌のコクがたまらない」と<strong>味への満足度が高い</strong>",
     "「駅直結で便利」と立地を評価する声が多い",
-    "海外からの好意的な口コミも見られる",
+    "「また来たい」と<strong>再訪意向</strong>を示す口コミが複数ある",
     "接客態度への不満が<strong>低評価の主因</strong>となっている"
   ],
   "actions": [
@@ -195,15 +195,19 @@ ${langStatsText || ""}
 
 ■ ルール
 - analysis: ${hasKpi ? "KPI前月比の傾向を3項目。同業種平均やグループ平均のデータがあれば「同業種平均を上回っている」「平均を下回る」等の比較を含める" : "口コミから推定した概況を3項目"}。絶対値（147,422回等）は書かない
+- 前月比・前年比などの%はKPIデータに記載された値をそのまま使う（自分で再計算・丸め直ししない）
+- 「◯ヶ月ぶり」「◯ヶ月連続」等の期間表現は、提供された推移データで実際に確認できる場合のみ使う
+- 前年同月比を評価する際は推移全体を確認する。前年値が前後の月から大きく乖離した一時的スパイクの場合、単純比較で「悪化」「最優先課題」と断定しない（例外的な月との比較である旨を踏まえる）
+- キーワード順位に大きな変動（圏外への転落、大幅な上昇・下落）がある場合はanalysisの1項目で言及する
 - reviews: 高評価の傾向3項目＋低評価の傾向1項目。口コミ引用は「」で囲む
 - actions: 今日から実行可能な具体施策を3つ
 - 各項目は1つの完全な文（主語＋述語）。20〜35文字程度
 - 各項目の中で最も重要なキーワードを1つだけ<strong>タグで囲む
-- positiveWords/negativeWordsは口コミ原文そのまま（言い換え禁止）。各2〜8文字
+- positiveWords/negativeWordsは口コミ原文そのまま（言い換え禁止）。各2〜8文字。名詞・名詞句または言い切りの語句とし、文の途中で切れた断片（「睨まれ」「雰囲気もよく」等）は不可
 - 口コミの件数・増加数・「○○件」・「ゼロ」・「0件」・「投稿数」には一切言及しない。口コミは質と傾向のみ分析
 - 捏造禁止（実施していないキャンペーン等）
 - 評価は必ず${averageRating}を使用
-${langStatsText ? "- 口コミ言語は上記集計に記載された言語のみ言及" : ""}`;
+${langStatsText ? "- 口コミ言語は上記集計に記載された言語のみ言及。外国語口コミに言及する場合は言語別集計の評価内訳と矛盾しないこと（低評価が中心の言語を「海外から支持」等と書かない）" : ""}`;
 
   try {
     const controller = new AbortController();
@@ -579,18 +583,18 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
             console.warn(`[analyze] ${shop.name}: report_data_cacheにkpis配列が空`);
           }
 
-          // chartsデータから月次推移も追加（増減傾向の分析用）
+          // chartsデータから月次推移も追加（増減傾向の分析用。前年スパイク等の異常値確認のため13ヶ月分渡す）
           if (perfCharts && perfLabels.length >= 2) {
             // curMonthのインデックスを特定（override時は末尾とは限らない）
             const targetIdx = curMonth ? perfLabels.indexOf(curMonth) : -1;
             const effectiveLastIdx = targetIdx >= 0 ? targetIdx : perfLabels.length - 1;
-            const startIdx = Math.max(0, effectiveLastIdx - 2);
+            const startIdx = Math.max(0, effectiveLastIdx - 12);
             const recentLabels = perfLabels.slice(startIdx, effectiveLastIdx + 1);
             const getRecent = (arr: number[]) => arr ? arr.slice(startIdx, effectiveLastIdx + 1) : [];
             const searchTrend = getRecent(perfCharts.searchMobile?.map((v: number, i: number) => v + (perfCharts.searchPC?.[i] || 0)) || []);
             const mapTrend = getRecent(perfCharts.mapMobile?.map((v: number, i: number) => v + (perfCharts.mapPC?.[i] || 0)) || []);
             if (searchTrend.length >= 2) {
-              kpiText += `\n\n【直近3ヶ月の推移】`;
+              kpiText += `\n\n【直近${recentLabels.length}ヶ月の推移】`;
               kpiText += `\nGoogle検索: ${recentLabels.map((l: string, i: number) => `${l}=${searchTrend[i]?.toLocaleString() || 0}`).join(" → ")}`;
               kpiText += `\nGoogleマップ: ${recentLabels.map((l: string, i: number) => `${l}=${mapTrend[i]?.toLocaleString() || 0}`).join(" → ")}`;
             }
@@ -813,25 +817,30 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
         // fetchReviewsの加工済みcommentではなく、DBの生コメントを使う（review-language-stats APIと同じ挙動）
         const { data: rawReviews } = await supabase
           .from("reviews")
-          .select("comment")
+          .select("comment, star_rating")
           .eq("shop_id", shop.id)
           .not("comment", "is", null)
           .neq("comment", "")
           .limit(1000);
         if (rawReviews && rawReviews.length > 0) {
-          const langCounts: Record<string, { country: string; count: number }> = {};
+          // 星評価を数値化（"FOUR" / "4" 両形式に対応）
+          const starNum: Record<string, number> = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5, "1": 1, "2": 2, "3": 3, "4": 4, "5": 5 };
+          const langCounts: Record<string, { country: string; count: number; high: number; low: number }> = {};
           for (const r of rawReviews) {
             const det = detectLanguage(r.comment);
             if (det.lang === "不明") continue;
-            if (!langCounts[det.lang]) langCounts[det.lang] = { country: det.country, count: 0 };
+            if (!langCounts[det.lang]) langCounts[det.lang] = { country: det.country, count: 0, high: 0, low: 0 };
             langCounts[det.lang].count++;
+            const s = starNum[(r.star_rating || "").toUpperCase().replace(/_STARS?/, "")] || 0;
+            if (s >= 4) langCounts[det.lang].high++;
+            else if (s >= 1) langCounts[det.lang].low++;
           }
           const langs = Object.entries(langCounts)
-            .map(([lang, v]) => ({ lang, country: v.country, count: v.count }))
+            .map(([lang, v]) => ({ lang, ...v }))
             .sort((a, b) => b.count - a.count);
           if (langs.length > 0) {
             const totalLang = langs.reduce((s, l) => s + l.count, 0);
-            langStatsText = `【口コミ言語別集計（コメント付き${totalLang}件）】\n検出言語数: ${langs.length}\n${langs.map(l => `${l.lang}（${l.country}）: ${l.count}件（${Math.round(l.count / totalLang * 100)}%）`).join("\n")}`;
+            langStatsText = `【口コミ言語別集計（コメント付き${totalLang}件）】\n検出言語数: ${langs.length}\n${langs.map(l => `${l.lang}（${l.country}）: ${l.count}件（${Math.round(l.count / totalLang * 100)}%） 内訳: 高評価(★4-5) ${l.high}件 / 低評価(★1-3) ${l.low}件`).join("\n")}`;
           }
         }
       } catch (langErr) {
