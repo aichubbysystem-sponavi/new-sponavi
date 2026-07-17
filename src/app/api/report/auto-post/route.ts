@@ -935,7 +935,8 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
           id: crypto.randomUUID(),
           shop_id: shop.id,
           shop_name: shop.name,
-          summary: match.summary || "",
+          // 写真のみ投稿は本文を投稿に使わないため保存しない（予約一覧で本文が投稿されると誤解されるのを防ぐ）
+          summary: isPhotoOnly ? "" : (match.summary || ""),
           topic_type: match.topicType || "STANDARD",
           photo_url: match.photoUrl || null,
           action_type: match.ctaUrl ? "LEARN_MORE" : null,
@@ -950,10 +951,10 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
           schedResults.push({ shopName: match.shopName, status: `DB保存エラー: ${insertErr.message}` });
           schedErrors++;
         } else if (warnings.length > 0) {
-          schedResults.push({ shopName: match.shopName, status: `保留（要確認）`, warnings, savedSummary: (match.summary || "").slice(0, 80), savedCtaUrl: match.ctaUrl || "" });
+          schedResults.push({ shopName: match.shopName, status: `保留（要確認）`, warnings, savedSummary: isPhotoOnly ? "" : (match.summary || "").slice(0, 80), savedCtaUrl: match.ctaUrl || "" });
           schedErrors++;
         } else {
-          schedResults.push({ shopName: match.shopName, status: "予約登録成功", warnings: [], savedSummary: (match.summary || "").slice(0, 80), savedCtaUrl: match.ctaUrl || "" });
+          schedResults.push({ shopName: match.shopName, status: "予約登録成功", warnings: [], savedSummary: isPhotoOnly ? "" : (match.summary || "").slice(0, 80), savedCtaUrl: match.ctaUrl || "" });
           scheduled++;
         }
       } catch (e: any) {
