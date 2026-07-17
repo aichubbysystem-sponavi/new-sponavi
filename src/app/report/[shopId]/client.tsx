@@ -1786,7 +1786,7 @@ export default function ReportClient({
                 const cellPad = many ? "2px 4px" : "5px 4px";
                 const cellFS = many ? 11 : 12;
                 return (
-                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: many ? 0 : 10, justifyContent: many ? "space-between" : "flex-start", overflow: "hidden" }}>
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 5, justifyContent: "flex-start", overflow: "hidden" }}>
                   {gr.keywords.map(kw => {
                     const data = recentHistory.map(h => { const s = h.snapshots.find(s => s.keyword === kw); return s ? s.avgRank : null; });
                     const valid = data.filter((v): v is number => v !== null);
