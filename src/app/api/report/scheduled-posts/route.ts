@@ -47,8 +47,13 @@ export const POST = withAudit("予約投稿作成", "DATA_OP", async (request, c
   const body = await request.json();
   const { shopId, summary, topicType, photoUrl, actionType, actionUrl, scheduledAt } = body;
 
-  if (!shopId || !summary || !scheduledAt) {
+  // 写真投稿（topicType=PHOTO）は本文不要・写真URL必須（cronがMedia APIで「写真と動画」に投稿する）
+  const isPhotoPost = topicType === "PHOTO";
+  if (!shopId || !scheduledAt || (!summary && !isPhotoPost)) {
     return NextResponse.json({ error: "shopId, summary, scheduledAtが必要です" }, { status: 400 });
+  }
+  if (isPhotoPost && !photoUrl) {
+    return NextResponse.json({ error: "写真投稿にはphotoUrlが必要です" }, { status: 400 });
   }
 
   const shopRes = await requireCtxShopAccessById(ctx, shopId);
@@ -60,7 +65,7 @@ export const POST = withAudit("予約投稿作成", "DATA_OP", async (request, c
     id: crypto.randomUUID(),
     shop_id: shopId,
     shop_name: shopRes.shopName,
-    summary,
+    summary: summary || "",
     topic_type: topicType || "STANDARD",
     photo_url: photoUrl || null,
     action_type: actionType || null,
@@ -70,7 +75,7 @@ export const POST = withAudit("予約投稿作成", "DATA_OP", async (request, c
   });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  ctx.detail = `${shopRes.shopName}: ${scheduledAt}に予約「${String(summary).slice(0, 50)}」`;
+  ctx.detail = `${shopRes.shopName}: ${scheduledAt}に予約${isPhotoPost ? "（写真投稿）" : `「${String(summary).slice(0, 50)}」`}`;
   return NextResponse.json({ success: true });
 });
 

@@ -21,8 +21,13 @@ export const POST = withAudit("GBP投稿作成", "EXTERNAL_OP", async (request, 
     photoUrl?: string;
   };
 
-  if (!shopId || !summary) {
+  // 写真投稿（topicType=PHOTO）は本文不要・写真URL必須（Media APIで「写真と動画」に投稿する）
+  const isPhotoPost = topicType === "PHOTO";
+  if (!shopId || (!summary && !isPhotoPost)) {
     return NextResponse.json({ error: "shopIdとsummaryが必要です" }, { status: 400 });
+  }
+  if (isPhotoPost && !photoUrl) {
+    return NextResponse.json({ error: "写真投稿にはphotoUrlが必要です" }, { status: 400 });
   }
 
   // 認可チェック: shopIdからshop_nameを取得して店舗アクセス権を検証
@@ -49,23 +54,14 @@ export const POST = withAudit("GBP投稿作成", "EXTERNAL_OP", async (request, 
     return NextResponse.json({ error: "店舗のGBP情報が見つかりません" }, { status: 404 });
   }
 
-  ctx.detail = `${shop.name || shopId}: 「${summary.slice(0, 50)}」${photoUrl ? "（写真あり）" : ""}`;
+  ctx.detail = `${shop.name || shopId}: ${isPhotoPost ? "写真投稿" : `「${(summary || "").slice(0, 50)}」${photoUrl ? "（写真あり）" : ""}`}`;
 
   const { resolveLocationName } = await import("@/lib/gbp-location");
   const locationName = await resolveLocationName(shop.gbp_location_name);
   if (!locationName) return NextResponse.json({ error: "GBPロケーション解決失敗" }, { status: 400 });
 
-  // GBP投稿ボディ構築
-  const postBody: any = {
-    summary,
-    topicType: topicType || "STANDARD",
-    languageCode: "ja",
-  };
-
-  if (callToAction?.actionType && callToAction?.url) {
-    postBody.callToAction = callToAction;
-  }
-
+  // 写真URLの検証とDropbox直リンク変換（写真あり通常投稿・写真のみ投稿で共用）
+  let fixedUrl: string | null = null;
   if (photoUrl) {
     // URLバリデーション（SSRF防止: httpsのみ、許可ドメインのみ）
     try {
@@ -79,11 +75,57 @@ export const POST = withAudit("GBP投稿作成", "EXTERNAL_OP", async (request, 
     }
 
     // Dropbox URLを直接ダウンロードURLに変換
-    let fixedUrl = photoUrl;
+    fixedUrl = photoUrl;
     if (fixedUrl.includes("dropbox.com")) {
       fixedUrl = fixedUrl.replace("www.dropbox.com", "dl.dropboxusercontent.com");
       fixedUrl = fixedUrl.replace(/[&?]dl=\d/g, "").replace(/[&?]st=[^&]*/g, "").replace(/[?&]$/, "");
     }
+  }
+
+  // 写真のみ投稿: localPostsではなくMedia APIで「写真と動画」セクションにアップロード
+  if (isPhotoPost) {
+    try {
+      const res = await fetch(`${GBP_API_BASE}/${locationName}/media`, {
+        cache: "no-store" as const,
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ mediaFormat: "PHOTO", sourceUrl: fixedUrl, locationAssociation: { category: "ADDITIONAL" } }),
+      });
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => "");
+        console.error(`[create-post] GBP Media API error: ${res.status}`, errBody);
+        return NextResponse.json({ error: `GBP写真投稿エラーが発生しました（${res.status}）` }, { status: 500 });
+      }
+      const result = await res.json().catch(() => ({}));
+      try {
+        await supabase.from("post_logs").insert({
+          id: crypto.randomUUID(),
+          shop_id: shopId,
+          shop_name: shop.name || "",
+          summary: "",
+          topic_type: "PHOTO",
+          media_url: photoUrl,
+          gbp_post_name: result.name || null,
+        });
+      } catch {}
+      return NextResponse.json({ success: true, media: result });
+    } catch {
+      return NextResponse.json({ error: "写真投稿に失敗しました" }, { status: 500 });
+    }
+  }
+
+  // GBP投稿ボディ構築
+  const postBody: any = {
+    summary,
+    topicType: topicType || "STANDARD",
+    languageCode: "ja",
+  };
+
+  if (callToAction?.actionType && callToAction?.url) {
+    postBody.callToAction = callToAction;
+  }
+
+  if (fixedUrl) {
     postBody.media = [{ mediaFormat: "PHOTO", sourceUrl: fixedUrl }];
   }
 

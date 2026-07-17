@@ -331,7 +331,12 @@ export default function PostsPage() {
   }, [apiConnected, shops]);
 
   const handleCreate = async () => {
-    if (!newPost.summary.trim()) { setMsg("本文を入力してください"); return; }
+    // 写真モードで本文が空なら「写真のみ投稿」(topicType=PHOTO): 本文不要・写真URL必須
+    const isPhotoOnly = postSelectedType === "PHOTO" && !newPost.summary.trim();
+    if (isPhotoOnly) {
+      if (!newPost.photoUrl.trim()) { setMsg("写真のみ投稿するには写真URLを入力してください"); return; }
+    } else if (!newPost.summary.trim()) { setMsg("本文を入力してください"); return; }
+    const effectiveTopicType = isPhotoOnly ? "PHOTO" : newPost.topicType;
 
     // 投稿先店舗を決定: 「系列店にも同時投稿」ON時は選択された系列店、そうでなければ現在の店舗
     const targetIds = bulkPostMode ? bulkPostShopIds : (selectedShopId ? [selectedShopId] : []);
@@ -378,12 +383,12 @@ export default function PostsPage() {
       try {
         if (newPost.scheduledAt) {
           await api.post("/api/report/scheduled-posts", {
-            shopId: sid, summary: newPost.summary, topicType: newPost.topicType,
+            shopId: sid, summary: newPost.summary, topicType: effectiveTopicType,
             photoUrl: newPost.photoUrl.trim() || null, actionType: newPost.actionType || null,
             actionUrl: newPost.actionUrl || null, scheduledAt: new Date(newPost.scheduledAt).toISOString(),
           }, { timeout: 15000 });
         } else {
-          const postData: any = { shopId: sid, summary: newPost.summary, topicType: newPost.topicType };
+          const postData: any = { shopId: sid, summary: newPost.summary, topicType: effectiveTopicType };
           if (newPost.actionType && newPost.actionUrl) postData.callToAction = { actionType: newPost.actionType, url: newPost.actionUrl };
           if (newPost.photoUrl.trim()) {
             postData.photoUrl = newPost.photoUrl.trim();
@@ -1065,7 +1070,7 @@ export default function PostsPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-slate-500 block mb-1">投稿本文 *</label>
+                  <label className="text-xs text-slate-500 block mb-1">{postSelectedType === "PHOTO" ? "投稿本文（写真のみ投稿する場合は空欄可）" : "投稿本文 *"}</label>
                   <div className="relative flex gap-2">
                     <textarea value={newPost.summary} onChange={(e) => setNewPost({ ...newPost, summary: e.target.value })}
                       placeholder="投稿の内容を入力..." className="flex-1 border border-slate-200 rounded-lg px-4 py-3 text-sm min-h-[120px] resize-y focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20" />
@@ -1307,7 +1312,7 @@ export default function PostsPage() {
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
                   <button onClick={() => setShowCreate(false)} className="px-4 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">キャンセル</button>
-                  <button onClick={handleCreate} disabled={!can(role, "EXTERNAL_OP") || creating || !newPost.summary.trim() || (bulkPostMode && bulkPostShopIds.length === 0)}
+                  <button onClick={handleCreate} disabled={!can(role, "EXTERNAL_OP") || creating || (postSelectedType === "PHOTO" ? !newPost.summary.trim() && !newPost.photoUrl.trim() : !newPost.summary.trim()) || (bulkPostMode && bulkPostShopIds.length === 0)}
                     title={!can(role, "EXTERNAL_OP") ? PERMISSION_DENIED_HINT.EXTERNAL_OP : undefined}
                     className={`px-6 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed ${newPost.scheduledAt ? "bg-purple-600 hover:bg-purple-700" : "bg-[#003D6B] hover:bg-[#002a4a]"}`}
                     style={{ color: "#fff" }}>
