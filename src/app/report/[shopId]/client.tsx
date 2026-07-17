@@ -671,15 +671,21 @@ export default function ReportClient({
     return () => clearTimeout(timer);
   }, [showGridRanking, gridRanking, renderGridMapForKw]);
 
-  // ワードクリック: 直近1年の口コミからAPI検索（全件表示）
-  const handleWordClick = async (word: string, _source: any, type: "positive" | "negative") => {
+  // ワードクリック: 直近1年の口コミからAPI検索。0件なら分析時に保存した根拠口コミ（word_sources）を表示
+  // （分析の「直近1年」は対象月基準・検索APIは今日基準のため、境界の口コミは日が経つと検索で見つからなくなる）
+  const handleWordClick = async (word: string, source: { word: string; reviews: { reviewer: string; comment: string; date: string; starRating: string }[] } | undefined, type: "positive" | "negative") => {
+    const sourceReviews = source?.reviews?.filter(r => r.comment) || [];
     try {
       const authH = await getAuthHeaders();
       const res = await fetch(`/api/report/search-reviews?shop=${encodeURIComponent(shop.name)}&keyword=${encodeURIComponent(word)}&type=${type}`, { headers: authH });
       const data = await res.json();
-      setNegativeModal({ word, reviews: data.reviews || [], type, matched: data.matched });
+      if (data.reviews?.length > 0) {
+        setNegativeModal({ word, reviews: data.reviews, type, matched: data.matched });
+      } else {
+        setNegativeModal({ word, reviews: sourceReviews, type, matched: sourceReviews.length > 0 });
+      }
     } catch {
-      setNegativeModal({ word, reviews: [], type, matched: false });
+      setNegativeModal({ word, reviews: sourceReviews, type, matched: sourceReviews.length > 0 });
     }
   };
 
@@ -2513,7 +2519,7 @@ export default function ReportClient({
                 </div>
               );
             }) : (
-              <p style={{ color: "#999", textAlign: "center", padding: 20 }}>該当する口コミが見つかりませんでした。口コミデータの同期が完了していない可能性があります。</p>
+              <p style={{ color: "#999", textAlign: "center", padding: 20 }}>該当する口コミが見つかりませんでした。分析時より古い口コミが対象期間から外れた可能性があります。再分析すると解消されます。</p>
             )}
           </div>
         </div>

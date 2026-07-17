@@ -148,8 +148,10 @@ export async function GET(request: NextRequest) {
   // 1. 元フレーズ全体で完全含有検索（星評価フィルタあり）
   addResults(matchReviews(allReviews, (text) => text.includes(keyword), true));
 
-  // 2. 元フレーズ全体で完全含有検索（星評価フィルタなし — type未指定の場合のみ）
-  if (allMatched.length < 20 && !ratingFilter) {
+  // 2. 元フレーズ全体で完全含有検索（星評価フィルタなし）
+  // 星フィルタで全滅した場合もこちらで拾う（分析側strictValidateAndRankの「星フィルタ全滅→全口コミ照合」と同じ扱い。
+  // 例: ★4-5の口コミ内でネガティブに言及しているケース）
+  if (allMatched.length === 0 || (allMatched.length < 20 && !ratingFilter)) {
     addResults(matchReviews(allReviews, (text) => text.includes(keyword), false));
   }
 
