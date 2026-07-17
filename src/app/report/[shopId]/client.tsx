@@ -1793,7 +1793,7 @@ export default function ReportClient({
                     const diff = valid.length >= 2 ? avgRankDiff(valid[valid.length - 2], valid[valid.length - 1]) : { text: "→", color: "#888" };
                     return (
                       <div key={kw}>
-                        <div style={{ fontSize: 20, fontWeight: 700, color: "#0f3460", marginBottom: 0 }}>「{kw}」</div>
+                        <div style={{ fontSize: 18, fontWeight: 700, color: "#0f3460", marginBottom: 0 }}>「{kw}」</div>
                         <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", borderRadius: 6, overflow: "hidden" }}>
                           <thead>
                             <tr>
