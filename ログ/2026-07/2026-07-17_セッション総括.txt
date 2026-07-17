@@ -1,0 +1,52 @@
+## 【2026-07-17】
+
+### 決定事項
+- 手動フォームの「写真」選択で本文が空の場合は「写真のみ投稿」（topicType=PHOTO）として扱い、GBPの「写真と動画」セクションにMedia APIで投稿する（本文を入れた場合は従来どおり写真付き通常投稿）
+- 同一店舗の複数枚写真の予約は、2枚目以降の予約時刻を1分ずつオフセットして登録する（重複チェックと衝突させない。再実行時の二重登録防止は維持）
+- 写真のみの予約投稿はシートC列の本文を保存しない（予約一覧で「本文も投稿される」と誤解されるため）
+- レポートのワードクリックは「API検索 → 0件なら分析時に保存した根拠口コミ（word_sources）を表示」の2段構え
+- search-reviews APIはフレーズ完全一致が星フィルタで0件のとき星フィルタなしで再検索（analyze側の「星フィルタ全滅→全口コミ照合」と整合）。無関係な口コミを出さない原則（完全一致のみ）は維持
+- 解約フラグ（キラキらっこ宮崎店/鹿児島店/群馬店、2026-06-15設定）は現状維持でOK（ユーザー確定）
+- 多地点サマリーのKW見出しは18px/700/#0f3460/margin-bottom:0、右カラムはgap:5px/flex-start固定（件数による縮小・均等配置を廃止）
+
+### 変更内容（具体的に）
+■ src/app/posts/page.tsx（コミット db32463）
+- handleCreate: postSelectedType==="PHOTO"かつ本文空→isPhotoOnlyとして写真URL必須に切替、effectiveTopicType（PHOTO）を scheduled-posts / create-post 両ペイロードへ
+- 「予約する/GBPに投稿」ボタンのdisabled: 写真モードは本文と写真URLの両方が空の時のみ無効
+- 本文ラベルを写真モード時「投稿本文（写真のみ投稿する場合は空欄可）」に
+■ src/app/api/report/scheduled-posts/route.ts（db32463）
+- POST: topicType=PHOTOはsummary不要・photoUrl必須。summary||""でinsert。ctx.detailも写真投稿表記
+■ src/app/api/report/create-post/route.ts（db32463）
+- topicType=PHOTO分岐を新設: localPostsではなくMedia API（{locationName}/media、category=ADDITIONAL）で投稿、post_logsにtopic_type=PHOTOで記録。写真URL検証+Dropbox変換をfixedUrlに共通化
+■ src/app/api/report/auto-post/route.ts（a3bbfc8, 8c97871）
+- 写真マッチ展開時にphotoIndexを付与し、予約登録で2枚目以降のscheduled_atを+1分ずつオフセット（重複チェック・insertともmatchTime使用）
+- 写真のみ予約はsummary=""で保存、結果パネルのsavedSummaryも空に
+■ src/app/report/[shopId]/client.tsx（9c06a45, d36c5b5〜0d441f3）
+- handleWordClick: API検索0件/エラー時にword_sources（分析時保存の根拠口コミ）をフォールバック表示。未使用だった_source引数を活用
+- 「見つかりません」文言を「分析時より古い口コミが対象期間から外れた可能性。再分析で解消」に変更
+- 多地点サマリー: KW見出し 11/13px可変→18px固定・marginBottom 0、右カラム gap 0/10可変→5固定・space-between→flex-start固定（titleFS/headMB変数削除）
+■ src/app/api/report/search-reviews/route.ts（9c06a45）
+- フレーズ完全一致の星フィルタ検索が0件のとき、星フィルタなしで再検索するフォールバック追加
+
+### 数値・設定値
+- 複数枚写真の予約時刻オフセット: 2枚目以降 +1分/枚
+- 写真検索キー: 「第N回目」= `YY-M-N`（2026年7月第3回=「26-7-3」）。直後が数字なら除外。上限10枚/店舗
+- KW見出しフォント: 16px→20px→18pxで確定（margin-bottom 0）
+- 多地点サマリー右カラム: gap 5px、justify-content flex-start
+- 口コミ検索の期間: 検索API=今日基準の直近1年（変更なし）、分析=対象月基準の直近1年（ズレはword_sourcesフォールバックで吸収）
+
+### 未解決・次回やること
+- /postsのStep1店舗選択（対象:N店舗）が手動フォームに反映されない不整合（シート自動投稿専用）。「店舗ごとに違うURLを個別指定して一括予約」も未対応（要望あれば）
+- シートから自動投稿は解約フラグを見ない → 解約店舗もシートに行があれば投稿される。止めるにはシートから行削除の運用 or フィルタ追加
+- KW見出し18px固定化により、キーワード8件以上の店舗でPDF最下段が収まるかは未確認（ユーザー確認待ち。溢れたら8件以上のみ調整）
+- 過去分の予約一覧に残っている写真投稿の本文表示はそのまま（新規登録分から空になる）
+- 古い分析（word_sources未保存 or 言い換えワード）はクリックで該当なしになり得る → 再分析で解消
+
+### 注意点・ハマったこと
+- 投稿機能は「壊れていた」のではなく5/1以降誰も使っていなかっただけ。GBPトークン（Go API /api/google/token→Accounts API 200）、execute-posts cron（本番200応答）とも正常だった
+- 本文なし写真投稿は手動フォームからは構造的に不可能だった（UI disabled＋handleCreate＋両APIの多重バリデーション＋PHOTO→STANDARD変換）。可能だったのはシート自動投稿のPHOTOモードのみ
+- 予約登録の重複チェック（同一店舗・同一時刻）が複数枚写真をブロック。photo_urlは登録ごとにランダムUUID入りの安定URLに変換されるため重複キーに使えない→時刻オフセットで解決
+- 「該当する口コミが見つかりません」の真因は同期ではなく期間基準のズレ（分析=対象月基準/検索=今日基準の直近1年）。境界の口コミ（2025-07-06の★1）が日数経過で検索圏外に落ちていた
+- report_analysisのpositive/negative_word_sourcesに根拠口コミ（reviewer/comment/date/starRating、最大5件/ワード）が保存済み。クリック表示はこれを使うのが最も確実
+- 実運用テスト: 5店舗×3枚=15件全publishedをDB直結（scratchpadにnpm i pgでpgクライアント、psqlはWindowsに無い）+Monitorポーリングで自動確認
+- 店舗検索ドロップダウン(523)=Go API(601)−解約78。解約はshops.cancelled_at（/api/report/shop-cancel）

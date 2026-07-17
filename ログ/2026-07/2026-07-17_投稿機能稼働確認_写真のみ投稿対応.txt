@@ -1,0 +1,110 @@
+## 【2026-07-17】投稿機能の稼働確認 + 手動フォームの写真のみ投稿対応
+
+### 経緯
+- ユーザーから「投稿ってちゃんと動いてますか？」→ 実データ調査
+- 続いて「予約するボタンが押せない」→ 写真投稿なのに本文必須になっているバグと判明→修正
+
+### 調査結果（投稿機能の稼働状況）
+- GBP OAuthトークン: Go API /api/google/token から有効トークン取得成功
+  → そのトークンでGBP Accounts API 200応答（アカウント5件）。トークンは生きている
+- execute-posts cron: vercel.jsonに5分毎設定あり。本番エンドポイントを実際に叩いて
+  {"success":true,"message":"実行対象なし"} 200応答を確認
+- scheduled_posts: 全30件published、最後は2026-04-29（Whitening Salon Shiro）。error/pending滞留ゼロ
+- post_logs: 最後は2026-05-01（キラキら系の写真投稿24件、topic_type=PHOTO、summary空）
+- 結論: インフラは正常。5/1以降は「投稿がそもそも作られていない」だけで故障ではない
+
+### 判明したバグ（写真のみ投稿が手動フォームから不可能だった）
+- 手動フォーム（新規GBP投稿）は「写真」を選んでも:
+  1. UIボタンが本文必須でdisabled（page.tsx:1310 !newPost.summary.trim()）
+  2. handleCreateも本文必須（:334）
+  3. /api/report/scheduled-posts も summary必須（400）
+  4. /api/report/create-post も summary必須（400）+ localPostsのみでMedia API非対応
+  5. さらに「写真」選択は topicType="STANDARD" として送信される作り（page.tsx:652）
+     → cronの PHOTO 分岐（media_direct→Media API）に乗らない
+- 本文なし写真投稿が可能だったのは「シートから自動投稿」のPHOTOモードだけ（5/1の実績もこれ）
+
+### 変更内容（コミット db32463）
+■ src/app/posts/page.tsx
+- handleCreate: postSelectedType==="PHOTO" && 本文空 → isPhotoOnly として扱い、
+  写真URL必須チェックに切替。effectiveTopicType（isPhotoOnly ? "PHOTO" : topicType）を
+  scheduled-posts / create-post 両ペイロードに使用
+- 予約する/GBPに投稿ボタンのdisabled: 写真モードは「本文も写真URLも空」の時のみ無効
+- 本文ラベル: 写真モード時「投稿本文（写真のみ投稿する場合は空欄可）」
+- 本文を入れた場合は従来どおり写真付き通常投稿（既存フロー不変）
+■ src/app/api/report/scheduled-posts/route.ts (POST)
+- topicType==="PHOTO" は summary不要・photoUrl必須。summary || "" でinsert
+- 実行側の cron/execute-posts は元々 topic_type==="PHOTO" 対応済み（media_direct→Media APIフォールバック）なので変更不要
+■ src/app/api/report/create-post/route.ts
+- topicType==="PHOTO" は summary不要・photoUrl必須
+- PHOTO分岐を新設: localPostsではなく Media API（{locationName}/media、
+  mediaFormat=PHOTO、locationAssociation.category=ADDITIONAL）で「写真と動画」へ投稿
+  （auto-postの即時写真投稿と同じ方式）。post_logsにtopic_type=PHOTOで記録
+- 写真URL検証+Dropbox直リンク変換を共通化（fixedUrl）
+
+### 注意点・ハマったこと
+- /posts のStep1「店舗選択（対象: N店舗）」は「シートから自動投稿」専用。
+  手動フォーム（新規GBP投稿）には反映されず、handleCreateは
+  bulkPostMode（系列店にも同時投稿チェック）or 現在選択中の1店舗にしか投稿しない。
+  ユーザーが「4店舗選択したのに1店舗にしか投稿されない」と誤解しやすい【UI改善候補・未対応】
+- 本番DB直結はscratchpadに npm i pg で可能（psqlはWindowsに無い）。プーラー経由
+- scheduled_postsにapproval_statusカラムあり（NULL多数）、posted_atは無くpublished_at
+
+### 未解決・次回やること
+- Step1店舗選択と手動フォームの対象店舗の不整合（上記）— 要望あれば統合
+- 実際の写真のみ投稿の動作確認（ユーザーがテスト予定。期待: GBP「写真と動画」に反映、
+  post_logs/scheduled_postsに記録、予約なら5分毎cronで実行）
+
+━━━ 同日追記（シート写真投稿の実運用テスト〜追加修正2件） ━━━
+
+### 追加バグ①: 予約写真投稿の2枚目以降が「重複スキップ」される（コミット a3bbfc8）
+- auto-postの予約登録の重複チェックが「同一店舗・同一予約時刻」判定のため、
+  同一店舗の写真2枚目・3枚目（同時刻）が誤ってブロックされていた
+- 複数枚写真の「予約」登録は今回が初出（5/1実績は即時実行だったため潜在）
+- 修正: photoIndexをマッチ展開時に付与し、2枚目以降の予約時刻を1分ずつオフセット
+  （17:00/17:01/17:02）。再実行時の二重登録防止はそのまま機能する
+
+### 実運用テスト結果（2026-07-17 17:00〜17:05）
+- 5店舗×写真3枚=15件すべてpublished、エラー0件（post_logsにGBPロケーション名記録済み）
+- 店舗: キラキらふてる石川/キラキらっこ宮崎店/サニークリーン宮城/オリーブクリーン/キラキらいと滋賀
+- 監視はscratchpadのnode+pgポーリング（Monitor）で自動確認した
+
+### 追加修正②: 写真のみ予約はC列本文を保存しない（コミット 8c97871）
+- 写真のみ予約でもシートC列の本文がsummaryに保存され、予約一覧に表示されて
+  「本文が投稿されるのでは」と誤解を招いていた（実行時は写真のみで本文未使用）
+- 修正: isPhotoOnly時は summary="" で保存、実行結果パネルのsavedSummaryも空に
+
+### 判明した仕様・注意点
+- 店舗検索ドロップダウン(523店舗)はGo API(601店舗)から解約店舗78件を除外したもの
+  （shops.cancelled_at、/api/report/shop-cancel）。キラキらっこ宮崎店/鹿児島店/群馬店は
+  2026-06-15に解約フラグON → ユーザー確認の結果「そのまま」でOK
+- ただしシートから自動投稿は解約フラグを見ない（宮崎店も投稿された）。
+  解約店舗への投稿を止めたい場合はシートから行を消す運用 or フィルタ追加が必要【未対応】
+- 写真投稿の「第N回目」検索キーは `YY-M-N`（例: 2026年7月第3回=「26-7-3」）。
+  直後が数字だと除外（26-7-3が26-7-30にマッチしない）。1店舗あたり上限10枚
+
+━━━ 同日追記2（レポート: ワードクリック「該当なし」修正 9c06a45） ━━━
+
+### 症状
+- patty rôti -パティロティ- のレポートでネガティブワード「値段が高すぎ」クリック→
+  「該当する口コミが見つかりませんでした。口コミデータの同期が完了していない可能性があります」
+
+### 真因（DB実データで特定）
+- 根拠口コミは実在（2025-07-06の★1「値段が高すぎる」）。分析(対象月2026/6、7/16生成)の
+  「直近1年」には含まれるが、search-reviews APIの「直近1年」は【今日基準】のため
+  日が経つと境界の口コミが検索窓から外れる（本件: 7/17時点で2025-07-06は圏外）
+- 同期問題ではない。エラーメッセージが誤誘導だった
+
+### 修正
+■ client.tsx handleWordClick
+- API検索0件/エラー時、分析時に保存済みの根拠口コミ（positive/negative_word_sources、
+  reviewer/comment/date/starRating完備）をフォールバック表示。既存の_source引数が未使用だった
+- 「見つかりません」文言を「分析時より古い口コミが対象期間から外れた可能性。再分析で解消」に変更
+■ search-reviews/route.ts
+- フレーズ完全一致が星フィルタで0件のとき、星フィルタなしで再検索
+  （analyze側strictValidateAndRankの「星フィルタ全滅→全口コミ照合」と整合）
+- 「無関係な口コミは出さない」原則は維持（完全一致のみ、分割トークン検索は復活させていない）
+
+### ナレッジ
+- report_analysisにはワードごとの根拠口コミが positive/negative_word_sources として保存済み
+  （7/16のstrictValidateAndRankで生成、最大5件/ワード）。クリック表示はこれを使うのが最も確実
+- 「直近1年」が分析側=対象月基準/検索側=今日基準でズレる、という期間基準の不一致に注意
