@@ -1783,8 +1783,6 @@ export default function ReportClient({
                 {(() => {
                 const many = gr.keywords.length >= 8;
                 // 8件以上は詰める（そのままだと固定高スライドをはみ出して最終行が見切れるため）
-                const titleFS = many ? 11 : 13;
-                const headMB = many ? 2 : 6;
                 const cellPad = many ? "2px 4px" : "5px 4px";
                 const cellFS = many ? 11 : 12;
                 return (
@@ -1795,7 +1793,7 @@ export default function ReportClient({
                     const diff = valid.length >= 2 ? avgRankDiff(valid[valid.length - 2], valid[valid.length - 1]) : { text: "→", color: "#888" };
                     return (
                       <div key={kw}>
-                        <div style={{ fontSize: titleFS, fontWeight: 700, color: "#0f3460", marginBottom: headMB }}>「{kw}」</div>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", marginBottom: 0 }}>「{kw}」</div>
                         <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", borderRadius: 6, overflow: "hidden" }}>
                           <thead>
                             <tr>
