@@ -610,7 +610,7 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
 
   // 対象タブを読み込み
   const tabs = ["投稿用シート", "報告必須店舗 投稿用シート", "WHITE 系列 投稿用シート"];
-  const allMatches: { shopName: string; summary: string; photoUrl: string; ctaUrl: string; tab: string; rawPhotoCell: string; rawDateCell: string; photoDebug: string; topicType: string; offerTitle: string; offerStartDate: any; offerEndDate: any }[] = [];
+  const allMatches: { shopName: string; summary: string; photoUrl: string; ctaUrl: string; tab: string; rawPhotoCell: string; rawDateCell: string; photoDebug: string; topicType: string; offerTitle: string; offerStartDate: any; offerEndDate: any; photoIndex?: number }[] = [];
   const pendingPhotoSearch: { index: number; photoCell: string; shopName: string }[] = [];
 
   for (const tab of tabs) {
@@ -723,7 +723,7 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
         match.photoUrl = photoUrls[0] || "";
         match.photoDebug = photoUrls.length > 0 ? `写真1/${photoUrls.length}` : photoDebug;
         for (let pi = 1; pi < photoUrls.length; pi++) {
-          allMatches.push({ ...match, summary: "", photoUrl: photoUrls[pi], photoDebug: `写真${pi + 1}/${photoUrls.length}` });
+          allMatches.push({ ...match, summary: "", photoUrl: photoUrls[pi], photoDebug: `写真${pi + 1}/${photoUrls.length}`, photoIndex: pi });
         }
       } else if (photoUrls.length <= 1) {
         match.photoUrl = photoUrls[0] || "";
@@ -732,7 +732,7 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
         match.photoUrl = photoUrls[0];
         match.photoDebug = `写真${photoUrls.length}枚取得（1/${photoUrls.length}）`;
         for (let pi = 1; pi < photoUrls.length; pi++) {
-          allMatches.push({ ...match, summary: "", photoUrl: photoUrls[pi], photoDebug: `写真${pi + 1}/${photoUrls.length}` });
+          allMatches.push({ ...match, summary: "", photoUrl: photoUrls[pi], photoDebug: `写真${pi + 1}/${photoUrls.length}`, photoIndex: pi });
         }
       }
     }));
@@ -914,10 +914,17 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
       // 警告ありなら保留（on_hold）、なしなら予約（pending）
       const postStatus = warnings.length > 0 ? "on_hold" : "pending";
 
+      // 同一店舗の複数枚写真は2枚目以降を1分ずつずらす
+      // （同一店舗・同一時刻の重複チェックに写真2枚目以降が誤ってかからないようにするため。
+      //   再実行時は同じずらし時刻同士が一致するので二重登録防止はそのまま機能する）
+      const matchTime = match.photoIndex
+        ? new Date(new Date(scheduledTime).getTime() + match.photoIndex * 60000).toISOString()
+        : scheduledTime;
+
       try {
         // 重複チェック: 同一店舗・同一予約時刻の投稿が既に存在する場合はスキップ
         const { data: existing } = await supabase.from("scheduled_posts")
-          .select("id").eq("shop_id", shop.id).eq("scheduled_at", scheduledTime)
+          .select("id").eq("shop_id", shop.id).eq("scheduled_at", matchTime)
           .in("status", ["pending", "on_hold", "processing"]).limit(1);
         if (existing && existing.length > 0) {
           schedResults.push({ shopName: match.shopName, status: "重複スキップ（同一時刻の予約が既存）" });
@@ -933,7 +940,7 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
           photo_url: match.photoUrl || null,
           action_type: match.ctaUrl ? "LEARN_MORE" : null,
           action_url: match.ctaUrl || null,
-          scheduled_at: scheduledTime,
+          scheduled_at: matchTime,
           status: postStatus,
           offer_title: match.offerTitle || null,
           offer_start_date: match.offerStartDate || null,
