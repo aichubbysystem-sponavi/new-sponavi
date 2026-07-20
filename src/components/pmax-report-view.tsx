@@ -4,15 +4,16 @@ import {
   Chart as ChartJS,
   CategoryScale,
   LinearScale,
-  BarElement,
+  PointElement,
+  LineElement,
   ArcElement,
   Title,
   Tooltip,
   Legend,
 } from "chart.js";
-import { Bar, Pie } from "react-chartjs-2";
+import { Line, Pie } from "react-chartjs-2";
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend);
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, ArcElement, Title, Tooltip, Legend);
 
 export type CampaignRow = {
   language: string;
@@ -71,8 +72,8 @@ const CHANNEL_OTHER = { label: "その他", color: "#898781" };
 
 const SLIDE_W = 1123;
 const SLIDE_H = 794;
-const chartColors = ["rgba(79,195,247,.75)", "rgba(129,199,132,.75)", "rgba(255,183,77,.75)", "rgba(186,104,200,.75)", "rgba(231,115,115,.75)", "rgba(77,182,172,.75)"];
-const chartBorderColors = ["rgba(2,136,209,1)", "rgba(56,142,60,1)", "rgba(245,124,0,1)", "rgba(123,31,162,1)", "rgba(211,47,47,1)", "rgba(0,137,123,1)"];
+// 月次推移の線グラフ色（指標に固定: 表示回数=赤/クリック数=青/クリック率=黄/クリック単価=緑）
+const monthlyLineColors = { impressions: "#e53935", clicks: "#1e88e5", ctr: "#fdd835", cpc: "#43a047" } as const;
 const kpiTopColors = [
   "linear-gradient(90deg,#4fc3f7,#0288d1)", "linear-gradient(90deg,#81c784,#388e3c)",
   "linear-gradient(90deg,#ffb74d,#f57c00)", "linear-gradient(90deg,#ba68c8,#7b1fa2)",
@@ -348,10 +349,40 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
             <div style={{ ...slideBodyStyle, overflow: "visible" }}>
               <div style={stitleStyle}>月次推移</div>
               {mRows.length > 1 && (
-                <div style={{ height: 200, marginBottom: 12 }}>
-                  <Bar
-                    data={{ labels: mRows.map(r => formatMonthShort(r.month || "")), datasets: [{ label: "表示回数", data: mRows.map(r => r.impressions), backgroundColor: chartColors[langIdx % chartColors.length], borderColor: chartBorderColors[langIdx % chartBorderColors.length], borderWidth: 1 }] }}
-                    options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true, grid: { color: "#f0f0f0" }, ticks: { callback: (v) => Number(v).toLocaleString() } } } }}
+                <div style={{ height: 220, marginBottom: 12 }}>
+                  <Line
+                    data={{
+                      labels: mRows.map(r => formatMonthShort(r.month || "")),
+                      datasets: [
+                        { label: "表示回数", data: mRows.map(r => r.impressions), yAxisID: "y", borderColor: monthlyLineColors.impressions, backgroundColor: monthlyLineColors.impressions },
+                        { label: "クリック数", data: mRows.map(r => r.clicks), yAxisID: "y1", borderColor: monthlyLineColors.clicks, backgroundColor: monthlyLineColors.clicks },
+                        { label: "クリック率", data: mRows.map(r => r.ctr * 100), yAxisID: "y2", borderColor: monthlyLineColors.ctr, backgroundColor: monthlyLineColors.ctr },
+                        { label: "クリック単価", data: mRows.map(r => r.averageCpc / 1_000_000), yAxisID: "y3", borderColor: monthlyLineColors.cpc, backgroundColor: monthlyLineColors.cpc },
+                      ].map(d => ({ ...d, borderWidth: 2, pointRadius: 3, pointHoverRadius: 5, tension: 0.3, fill: false })),
+                    }}
+                    options={{
+                      responsive: true, maintainAspectRatio: false,
+                      plugins: {
+                        legend: { display: true, position: "bottom", labels: { boxWidth: 14, boxHeight: 3, padding: 16 } },
+                        tooltip: {
+                          callbacks: {
+                            label: (ctx) => {
+                              const v = ctx.parsed.y ?? 0;
+                              if (ctx.dataset.label === "クリック率") return `クリック率: ${v.toFixed(2)}%`;
+                              if (ctx.dataset.label === "クリック単価") return `クリック単価: ¥${v.toFixed(1)}`;
+                              return `${ctx.dataset.label}: ${Math.round(v).toLocaleString()}`;
+                            },
+                          },
+                        },
+                      },
+                      scales: {
+                        x: { grid: { display: false } },
+                        y: { beginAtZero: true, position: "left", grid: { color: "#f0f0f0" }, ticks: { callback: (v) => Number(v).toLocaleString() } },
+                        y1: { beginAtZero: true, position: "right", grid: { drawOnChartArea: false }, ticks: { callback: (v) => Number(v).toLocaleString() } },
+                        y2: { display: false, beginAtZero: true },
+                        y3: { display: false, beginAtZero: true },
+                      },
+                    }}
                   />
                 </div>
               )}
