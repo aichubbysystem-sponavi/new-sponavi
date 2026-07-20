@@ -6,14 +6,17 @@ import {
   LinearScale,
   PointElement,
   LineElement,
+  LineController,
+  BarElement,
+  BarController,
   ArcElement,
   Title,
   Tooltip,
   Legend,
 } from "chart.js";
-import { Line, Pie } from "react-chartjs-2";
+import { Chart, Pie } from "react-chartjs-2";
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, ArcElement, Title, Tooltip, Legend);
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, LineController, BarElement, BarController, ArcElement, Title, Tooltip, Legend);
 
 export type CampaignRow = {
   language: string;
@@ -350,20 +353,23 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
               <div style={stitleStyle}>月次推移</div>
               {mRows.length > 1 && (
                 <div style={{ height: 220, marginBottom: 12 }}>
-                  <Line
+                  <Chart
+                    type="bar"
                     data={{
                       labels: mRows.map(r => formatMonthShort(r.month || "")),
                       datasets: [
-                        { label: "表示回数", data: mRows.map(r => r.impressions), yAxisID: "y", borderColor: monthlyLineColors.impressions, backgroundColor: monthlyLineColors.impressions },
-                        { label: "クリック数", data: mRows.map(r => r.clicks), yAxisID: "y1", borderColor: monthlyLineColors.clicks, backgroundColor: monthlyLineColors.clicks },
-                        { label: "クリック率", data: mRows.map(r => r.ctr * 100), yAxisID: "y2", borderColor: monthlyLineColors.ctr, backgroundColor: monthlyLineColors.ctr },
-                        { label: "クリック単価", data: mRows.map(r => r.averageCpc / 1_000_000), yAxisID: "y3", borderColor: monthlyLineColors.cpc, backgroundColor: monthlyLineColors.cpc },
-                      ].map(d => ({ ...d, borderWidth: 2, pointRadius: 3, pointHoverRadius: 5, tension: 0.3, fill: false })),
+                        // 表示回数・クリック数は棒グラフ（order大きい=先に描画されて線の背面になる）
+                        { type: "bar" as const, label: "表示回数", data: mRows.map(r => r.impressions), yAxisID: "y", backgroundColor: monthlyLineColors.impressions, borderColor: monthlyLineColors.impressions, borderWidth: 0, borderRadius: 3, order: 2 },
+                        { type: "bar" as const, label: "クリック数", data: mRows.map(r => r.clicks), yAxisID: "y1", backgroundColor: monthlyLineColors.clicks, borderColor: monthlyLineColors.clicks, borderWidth: 0, borderRadius: 3, order: 2 },
+                        // クリック率・クリック単価は線グラフのまま
+                        { type: "line" as const, label: "クリック率", data: mRows.map(r => r.ctr * 100), yAxisID: "y2", borderColor: monthlyLineColors.ctr, backgroundColor: monthlyLineColors.ctr, borderWidth: 2, pointRadius: 3, pointHoverRadius: 5, tension: 0.3, fill: false, order: 1 },
+                        { type: "line" as const, label: "クリック単価", data: mRows.map(r => r.averageCpc / 1_000_000), yAxisID: "y3", borderColor: monthlyLineColors.cpc, backgroundColor: monthlyLineColors.cpc, borderWidth: 2, pointRadius: 3, pointHoverRadius: 5, tension: 0.3, fill: false, order: 1 },
+                      ],
                     }}
                     options={{
                       responsive: true, maintainAspectRatio: false,
                       plugins: {
-                        legend: { display: true, position: "bottom", labels: { boxWidth: 14, boxHeight: 3, padding: 16 } },
+                        legend: { display: true, position: "bottom", labels: { boxWidth: 14, padding: 16, usePointStyle: false } },
                         tooltip: {
                           callbacks: {
                             label: (ctx) => {
