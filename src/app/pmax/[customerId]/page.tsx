@@ -51,6 +51,7 @@ type GbpRow = {
   website: number;
   menuClicks: number;
   saveShare: number;
+  reservation: number; // 予約（GBPシートM列「注文」由来）
 };
 
 // ==============================
@@ -349,8 +350,8 @@ export default function PmaxReportPage() {
           { label: "電話", value: gbpCurrent?.phone || 0, prev: gbpPrev?.phone || 0, format: (v: number) => v.toLocaleString(), gbp: true },
           { label: "経路案内", value: gbpCurrent?.directions || 0, prev: gbpPrev?.directions || 0, format: (v: number) => v.toLocaleString(), gbp: true },
           { label: "メニュークリック", value: gbpCurrent?.menuClicks || 0, prev: gbpPrev?.menuClicks || 0, format: (v: number) => v.toLocaleString(), gbp: true },
-          { label: "予約", value: 0, prev: 0, format: (v: number) => v.toLocaleString(), gbp: true },
-          { label: "保存・共有", value: gbpCurrent?.saveShare || 0, prev: gbpPrev?.saveShare || 0, format: (v: number) => v.toLocaleString(), gbp: true },
+          { label: "予約", value: gbpCurrent?.reservation || 0, prev: gbpPrev?.reservation || 0, format: (v: number) => v.toLocaleString(), gbp: true },
+          { label: "保存・共有・写真", value: gbpCurrent?.saveShare || 0, prev: gbpPrev?.saveShare || 0, format: (v: number) => v.toLocaleString(), gbp: true },
           { label: "WEBサイト", value: gbpCurrent?.website || 0, prev: gbpPrev?.website || 0, format: (v: number) => v.toLocaleString(), gbp: true },
         ];
 

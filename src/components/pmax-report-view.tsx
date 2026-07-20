@@ -223,7 +223,7 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
     { key: "menuClicks", label: "メニュークリック" },
     { key: "reservation", label: "予約" },
     { key: "website", label: "WEBサイト" },
-    { key: "saveShare", label: "保存・共有" },
+    { key: "saveShare", label: "保存・共有・写真" },
   ];
   const hasConversion = convRows.length > 0;
   const convOffset = hasConversion ? 1 : 0;
@@ -261,7 +261,7 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
     { label: "メニュークリック", value: gbpCurrent?.menuClicks ?? 0, format: formatNum, prev: gbpPrev?.menuClicks ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.menuClicks ?? 0) : null },
     { label: "予約", value: gbpCurrent?.reservation ?? 0, format: formatNum, prev: gbpPrev?.reservation ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.reservation ?? 0) : null },
     { label: "WEBサイト", value: gbpCurrent?.website ?? 0, format: formatNum, prev: gbpPrev?.website ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.website ?? 0) : null },
-    { label: "保存・共有", value: gbpCurrent?.saveShare ?? 0, format: formatNum, prev: gbpPrev?.saveShare ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.saveShare ?? 0) : null },
+    { label: "保存・共有・写真", value: gbpCurrent?.saveShare ?? 0, format: formatNum, prev: gbpPrev?.saveShare ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.saveShare ?? 0) : null },
   ];
 
   return (

@@ -28,7 +28,7 @@ MAPからの行動は以下の通りです。
 ・経路案内：{数値}件（{増減}％）
 ・WEBサイト遷移：{数値}件（{増減}％）
 ・メニュークリック：{数値}件（{増減}％）
-・保存・共有：{数値}件（{増減}％）
+・保存・共有・写真：{数値}件（{増減}％）
 ・電話：{数値}件（{増減}％）
 ・合計来店数：{数値}件（{増減}％）
 
@@ -124,7 +124,7 @@ function buildUserPrompt(data: KpiData): string {
 ・経路案内：${fmtNum(data.directions.current)}件（先月比 ${formatPct(data.directions.current, data.directions.prev)}）
 ・WEBサイト：${fmtNum(data.website.current)}件（先月比 ${formatPct(data.website.current, data.website.prev)}）
 ・メニュークリック：${fmtNum(data.menuClicks.current)}件（先月比 ${formatPct(data.menuClicks.current, data.menuClicks.prev)}）
-・保存・共有：${fmtNum(data.saveShare.current)}件（先月比 ${formatPct(data.saveShare.current, data.saveShare.prev)}）`;
+・保存・共有・写真：${fmtNum(data.saveShare.current)}件（先月比 ${formatPct(data.saveShare.current, data.saveShare.prev)}）`;
 }
 
 export const POST = withAudit("P-MAX AI総評生成", "PAID_OP", async (request, ctx) => {
