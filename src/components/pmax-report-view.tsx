@@ -358,12 +358,13 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
                     data={{
                       labels: mRows.map(r => formatMonthShort(r.month || "")),
                       datasets: [
-                        // 表示回数・クリック数は棒グラフ（order大きい=先に描画されて線の背面になる）
-                        { type: "bar" as const, label: "表示回数", data: mRows.map(r => r.impressions), yAxisID: "y", backgroundColor: monthlyLineColors.impressions, borderColor: monthlyLineColors.impressions, borderWidth: 0, borderRadius: 3, order: 2 },
-                        { type: "bar" as const, label: "クリック数", data: mRows.map(r => r.clicks), yAxisID: "y1", backgroundColor: monthlyLineColors.clicks, borderColor: monthlyLineColors.clicks, borderWidth: 0, borderRadius: 3, order: 2 },
+                        // 表示回数・クリック数は棒グラフ（先に定義＝先に描画され、線の背面になる。
+                        // order指定は凡例の並び順まで変えてしまうので使わない）
+                        { type: "bar" as const, label: "表示回数", data: mRows.map(r => r.impressions), yAxisID: "y", backgroundColor: monthlyLineColors.impressions, borderColor: monthlyLineColors.impressions, borderWidth: 0, borderRadius: 3 },
+                        { type: "bar" as const, label: "クリック数", data: mRows.map(r => r.clicks), yAxisID: "y1", backgroundColor: monthlyLineColors.clicks, borderColor: monthlyLineColors.clicks, borderWidth: 0, borderRadius: 3 },
                         // クリック率・クリック単価は線グラフのまま
-                        { type: "line" as const, label: "クリック率", data: mRows.map(r => r.ctr * 100), yAxisID: "y2", borderColor: monthlyLineColors.ctr, backgroundColor: monthlyLineColors.ctr, borderWidth: 2, pointRadius: 3, pointHoverRadius: 5, tension: 0.3, fill: false, order: 1 },
-                        { type: "line" as const, label: "クリック単価", data: mRows.map(r => r.averageCpc / 1_000_000), yAxisID: "y3", borderColor: monthlyLineColors.cpc, backgroundColor: monthlyLineColors.cpc, borderWidth: 2, pointRadius: 3, pointHoverRadius: 5, tension: 0.3, fill: false, order: 1 },
+                        { type: "line" as const, label: "クリック率", data: mRows.map(r => r.ctr * 100), yAxisID: "y2", borderColor: monthlyLineColors.ctr, backgroundColor: monthlyLineColors.ctr, borderWidth: 2, pointRadius: 3, pointHoverRadius: 5, tension: 0.3, fill: false },
+                        { type: "line" as const, label: "クリック単価", data: mRows.map(r => r.averageCpc / 1_000_000), yAxisID: "y3", borderColor: monthlyLineColors.cpc, backgroundColor: monthlyLineColors.cpc, borderWidth: 2, pointRadius: 3, pointHoverRadius: 5, tension: 0.3, fill: false },
                       ],
                     }}
                     options={{
