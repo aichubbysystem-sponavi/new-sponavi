@@ -201,6 +201,7 @@ export async function GET(request: NextRequest) {
     website: Number(r.website),
     menuClicks: Number(r.menu_clicks),
     saveShare: Number(r.save_share),
+    reservation: Number(r.reservation ?? 0),
   }));
 
   // 同期ログ
