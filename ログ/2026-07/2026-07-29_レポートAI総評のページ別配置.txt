@@ -1,0 +1,110 @@
+## 【2026-07-29】レポート「AIによるコメント」独立ページを廃止し、各データページ末尾にAI総評を配置
+
+### 背景・要望
+- 従来: AI総評は「AIによるコメント」という独立ページ（1〜2ページ、①数値分析②口コミ傾向と強み③改善策のテーブル）に集約
+- 問題: どのグラフについて言及しているか読み手に伝わらない
+- 要望: 該当するデータページ（Google検索数推移など）の末尾に直接置き、担当者がその場で編集できるようにする
+- 「メモ（担当者用）」は残し、最後から2番目のページに置く
+
+### 決定事項
+- Claudeの出力を「analysis配列3項目（自由選択）」から**ページ単位の個別フィールド**に再設計
+  - 理由: 従来の3項目はClaudeが自由に選ぶため「どれが検索の話でどれがマップの話か」を機械的に保証できない。
+    たまたま検索・マップ・KWが1つずつになる月もあれば、検索の話が2つでマップが0の月もあり得るため、
+    文字列マッチでの振り分けは推測になる（CLAUDE.md「推測で修正しない」に反する）
+- 「改善策」は特定グラフに紐づかないため、メモページ直前に新設した「総括」ページへ配置
+- 旧 `comments` 列・組み立てロジックは削除せず維持（後方互換／過去月の参照保険）
+
+### 変更内容（具体的に）
+■ sql/2026-07-29_add_page_comments.sql（新規）
+- `ALTER TABLE report_analysis ADD COLUMN IF NOT EXISTS page_comments jsonb;`
+- 本番Supabase(kxxwspavskhhjtiixcep) SQL Editorで手動実行済み（2026-07-29 "Success. No rows returned"）
+- 形: { map, search, reactions, keyword, reviews[], actions[] }
+
+■ src/app/api/report/analyze/route.ts
+- プロンプトの出力JSONを analysis/reviews/actions → mapComment/searchComment/reactionComment/keywordComment/reviewComments/actions に変更
+- keywordComment は kpiText に順位行（"〜: N位" / "〜: 圏外"）が含まれるかで要求を出し分け（無い店舗は空文字を返させる）
+- 既存の cleanItem() によるサニタイズ・文体統一はそのまま再利用
+- parsed.pageComments を組み立てて保存。旧形式 comments も引き続き生成して保存（後方互換）
+- fixRating（評価値の公式値強制置換）を pageComments の全フィールドにも適用
+- upsert に page_comments を追加
+
+■ src/lib/report-data.ts
+- PageComments 型を追加、ReportData に pageComments?: PageComments | null を追加
+
+■ src/lib/review-analyzer.ts
+- StoredAnalysis に page_comments を追加、getStoredAnalysis の戻り値に pageComments を追加
+- getReviewAnalysis の戻り値型にも追加
+
+■ src/lib/report-api.ts / src/lib/spreadsheet.ts
+- キャッシュ経路・スプレッドシート経路の両方で pageComments を ReportData に載せる
+
+■ src/app/api/report/update-page-comments/route.ts（新規）
+- POST。update-comments/route.ts と同型（withAudit + requireCtxShopAccess）
+- body: { shopName, targetMonth, pageComments } → report_analysis.page_comments を更新
+
+■ src/app/report/[shopId]/client.tsx
+- 「AIによるコメント」ページのブロック（旧2284〜2418行）を削除。関連state・関数・import も削除
+  （editingComments/savedComments/commentSaving/commentSaved/commentError/saveComments/
+    commentPages/commentCardRefs/baseCommentPages、AI_COMMENT_HEADINGS/AI_CHARS_PER_PAGE/
+    formatAIComment/splitCommentPages のimport）
+  ※report-utils.ts側の関数自体は残置（テストが存在するため削除しない）
+- renderPageComment(key, label) を追加し、以下の末尾に差し込み:
+  - Googleマップ表示数推移 → map
+  - Google検索数推移 → search
+  - ユーザー反応数推移 → reactions
+  - キーワード順位変動 → keyword
+  - AIによる口コミ分析ページの「口コミ総評」カード → reviews（箇条書き）
+- 「総括」ページを新設（actions を番号付きリスト表示、編集可）
+- メモを独立ページ化（state・API呼び出しは無変更）。総括→メモの順で最後尾に配置
+- totalPages を 6+aiCommentPageCount → 8 に変更（無条件ページ = P1,P2,P3,P4,P5,口コミ分析,総括,メモ）
+
+■ src/app/report/[shopId]/chart-options.ts
+- buildStackedOptions の aspectRatio 2.2 → 2.5（AI総評スニペット分の縦幅を確保）
+
+### セルフレビューで発見・修正したバグ（4件）
+1. **totalPages の off-by-one**（重）
+   - base を 7 にしていたが正しくは 8。全ページのフッターが「x / 9」等と1少なく表示され、PDF側(pdfTotalPages)にも波及
+   - 検算: 全セクション有効時 8+2(口コミ)+6(条件付き)=16 で、実際のレポート「14 / 16」と一致することを確認
+2. **月切替で前月のAI総評が残る**（重・自分で作り込んだ退行）
+   - `useState(trimmedData.pageComments || empty)` は初回マウントのみ評価。
+     data-loader.tsx のeffectは月変更時に state を "loading" に戻さないため ReportClient はアンマウントされず、
+     propsだけ差し替わる → AI総評だけ前月のまま固定される
+   - 旧コードは `editingComments ?? savedComments ?? comments` と毎レンダーでpropsを読む形だったため無問題だった
+   - 対策: propPageComments を依存にした useEffect で同期。オブジェクト参照が変わった時だけ発火するため、
+     保存直後のローカル編集（stateのみ更新）は消えない
+3. **値が空だと編集ボタンごと消える**
+   - `if (isEmpty && !isEditingThis) return null` により過去月・AI未生成月で「追加」ができなかった
+   - 対策: ログイン中は空でもブロックを表示し「追加」ボタンを出す。未ログイン(クライアント)には従来通り非表示。
+     空・編集中のブロックは no-print でPDFから除外
+4. **メモが空でもPDFに空白ページが出る**
+   - 旧実装ではメモはAIコメントページに間借りしていたため空ページは発生しなかった
+   - 対策: メモが空ならスライドごと no-print。最終ページなので他ページ番号はずれず、
+     handlePdfDownload で印刷時の分母のみ補正（グリッドあり/なし両経路に対応）
+
+### 判断して見送った点
+- 総括ページは actions が空でも表示したまま（「データ準備中」表示）。
+  最終ページではないため非表示にすると後続ページの番号調整が必要になり、
+  かつ旧AIコメントページも空時は「データ準備中」を出していたため退行ではない
+- バグ2の副作用として、読み込み直後の2段階目フェッチが着弾した瞬間に編集中だった内容は破棄される。
+  月をまたいで誤った月に保存してしまうリスクを避ける方を優先（データが壊れる方向には倒れない）
+
+### 検証
+- npx tsc --noEmit → エラーなし
+- npm run build → 成功
+- npx vitest run → 115テスト全passing（8ファイル）
+
+### ハマった点・環境メモ
+- ローカルdev(`npm run dev`)でレポートを開くには SUPABASE_SERVICE_ROLE_KEY が必要だが .env.local に無い。
+  → Previewデプロイで確認する方針に切り替え
+- `.vercel` のリンク先が **spotlight-navigators-projects/new-sponavi** になっているが、これは全ビルド失敗の重複プロジェクト。
+  実際の本番は **aichubbysystem-6689s-projects/new-sponavi**（Supabaseは aichubbysystem-sponavi's Org / new-spotlight-navigator）。
+  CLIからは後者にアクセスできないため、Vercel設定の確認はダッシュボードで行うこと
+- 本番は main ブランチ = Production 即デプロイ（ステージング無し）。UI変更はfeatureブランチ→Previewで確認してからマージする
+
+### 残タスク
+- Previewデプロイで表示確認（AI総評の表示・編集・保存、ページ番号、PDF出力）
+- 確認後 main へマージ
+- マージ後、対象店舗で /api/report/analyze を再実行して新形式データを生成
+  （page_comments未生成の過去月は各欄が「未設定」表示のまま。強制再分析はしない）
+- Vercel Environment Variables で SUPABASE_SERVICE_ROLE_KEY / ANTHROPIC_API_KEY が Preview 環境にも
+  適用されているか要確認（Production限定だとPreviewでデータ取得不可）

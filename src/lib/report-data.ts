@@ -56,6 +56,16 @@ export interface ReviewAnalysis {
   summary: string;
 }
 
+/** ページ別AI総評。各ページ末尾に表示され、担当者が個別に編集できる */
+export interface PageComments {
+  map: string;
+  search: string;
+  reactions: string;
+  keyword: string;
+  reviews: string[];
+  actions: string[];
+}
+
 export interface RankingHistory {
   labels: string[];  // 月ラベル ["2025/10", "2025/11", ...]
   datasets: { word: string; ranks: (number | null)[] }[];
@@ -103,6 +113,7 @@ export interface ReportData {
   reviewDelta: (number | null)[];
   reviewAnalysis: ReviewAnalysis;
   comments: string[];
+  pageComments?: PageComments | null;
   searchQueries: { latest: SearchQueryEntry[]; latestMonth: string; history: SearchQueryMonthData[] };
   gridRanking?: GridRankingReport;
   analysisTargetMonth?: string | null;

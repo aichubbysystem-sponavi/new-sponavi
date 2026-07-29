@@ -650,6 +650,7 @@ export async function buildReportData(
 
   const reviewAnalysis = analyzed.analysis;
   const comments = analyzed.comments;
+  const pageComments = analyzed.pageComments || null;
 
   // DBの評価はスプレッドシートに値がない場合のみフォールバック
   if (analyzed.source === "db" && analyzed.rating && analyzed.rating > 0 && currentRating === 0) {
@@ -687,6 +688,7 @@ export async function buildReportData(
     reviewDelta,
     reviewAnalysis,
     comments,
+    pageComments,
   };
 }
 

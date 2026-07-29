@@ -4,7 +4,7 @@
  */
 
 import { getSupabase } from "@/lib/supabase";
-import type { ReviewAnalysis } from "./report-data";
+import type { ReviewAnalysis, PageComments } from "./report-data";
 
 
 
@@ -16,6 +16,7 @@ interface StoredAnalysis {
   negative_word_sources?: { word: string; reviews: { reviewer: string; comment: string; date: string; starRating: string }[] }[];
   summary: string;
   comments: string[];
+  page_comments?: PageComments | null;
   review_count: number;
   average_rating: number;
   analyzed_at: string;
@@ -28,8 +29,8 @@ interface StoredAnalysis {
 export async function getStoredAnalysis(
   shopName: string,
   month?: string
-): Promise<{ analysis: ReviewAnalysis; comments: string[]; rating?: number; reviewCount?: number; targetMonth?: string | null; source: "db" } | null> {
-  
+): Promise<{ analysis: ReviewAnalysis; comments: string[]; pageComments?: PageComments | null; rating?: number; reviewCount?: number; targetMonth?: string | null; source: "db" } | null> {
+
 
   try {
     const supabase = getSupabase();
@@ -54,6 +55,7 @@ export async function getStoredAnalysis(
         summary: stored.summary || "",
       },
       comments: stored.comments || [],
+      pageComments: stored.page_comments || null,
       rating: stored.average_rating || 0,
       reviewCount: stored.review_count || 0,
       targetMonth: stored.target_month || null,
@@ -110,7 +112,7 @@ export async function getReviewAnalysis(
   totalReviews: number,
   reviewDelta: number,
   kpiData: { searchPct: string; mapPct: string; actionPct: string }
-): Promise<{ analysis: ReviewAnalysis; comments: string[]; rating?: number; reviewCount?: number; source: "db" | "template" }> {
+): Promise<{ analysis: ReviewAnalysis; comments: string[]; pageComments?: PageComments | null; rating?: number; reviewCount?: number; source: "db" | "template" }> {
   // まずDBから取得を試行
   const stored = await getStoredAnalysis(shopName);
   if (stored) return stored;

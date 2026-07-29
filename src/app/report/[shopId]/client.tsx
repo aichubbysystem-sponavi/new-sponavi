@@ -28,11 +28,11 @@ import {
 import { Bar, Line } from "react-chartjs-2";
 import type { ReportData, NegativeWordSource } from "@/lib/report-data";
 import {
-  SLIDE_W, SLIDE_H, COLORS, AI_COMMENT_HEADINGS,
-  SEARCH_QUERIES_PER_PAGE, AI_CHARS_PER_PAGE,
+  SLIDE_W, SLIDE_H, COLORS,
+  SEARCH_QUERIES_PER_PAGE,
   pctChange, monthToNum, rankColor, rankColorModal,
   fmtAvgRank, avgRankDiff,
-  reorderKpis, formatAIComment, splitCommentPages,
+  reorderKpis,
 } from "@/lib/report-utils";
 import {
   slideStyle, slideBarStyle, slideBodyStyle, stitleStyle,
@@ -258,7 +258,7 @@ export default function ReportClient({
     };
   }, [data, targetMonth]);
 
-  const { shop, kpis: rawKpis, monthlyLabels, charts, keywords, rankingHistory, reviewLabels, reviewCounts, reviewDelta, reviewAnalysis, comments, searchQueries, gridRanking } = trimmedData;
+  const { shop, kpis: rawKpis, monthlyLabels, charts, keywords, rankingHistory, reviewLabels, reviewCounts, reviewDelta, reviewAnalysis, searchQueries, gridRanking } = trimmedData;
 
   // 全期間で値が0の指標を自動判定（業種によって「予約」「フードメニュー」等がない場合）
   const hasBookingsData = charts.bookings?.some(v => v > 0) ?? false;
@@ -284,15 +284,65 @@ export default function ReportClient({
   const [memoEditing, setMemoEditing] = useState(false);
   const [memoLoading, setMemoLoading] = useState(false);
 
-  // AIコメント編集
-  const [editingComments, setEditingComments] = useState<string[] | null>(null);
-  const [savedComments, setSavedComments] = useState<string[] | null>(null);
-  const [commentSaving, setCommentSaving] = useState(false);
-  const [commentSaved, setCommentSaved] = useState(false);
-  const [commentError, setCommentError] = useState("");
-  const isEditingComments = editingComments !== null;
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const displayComments = editingComments ?? savedComments ?? comments ?? [];
+
+  // ページ別AI総評（各データページ末尾に表示・編集）
+  const emptyPageComments = { map: "", search: "", reactions: "", keyword: "", reviews: [] as string[], actions: [] as string[] };
+  const [pageComments, setPageComments] = useState(trimmedData.pageComments || emptyPageComments);
+  const [pcEditingKey, setPcEditingKey] = useState<keyof typeof emptyPageComments | null>(null);
+  const [pcEditingValue, setPcEditingValue] = useState<string>("");
+  const [pcSaving, setPcSaving] = useState(false);
+  const [pcSavedKey, setPcSavedKey] = useState<string | null>(null);
+  const [pcError, setPcError] = useState("");
+  // 月切替・2段階フェッチでpropsが差し替わってもReportClientはアンマウントされないため、
+  // useStateの初期値だけでは前月のAI総評が residual として残る。props変化時に同期する。
+  const propPageComments = trimmedData.pageComments;
+  useEffect(() => {
+    setPageComments(propPageComments || { map: "", search: "", reactions: "", keyword: "", reviews: [], actions: [] });
+    setPcEditingKey(null);
+    setPcError("");
+  }, [propPageComments]);
+
+  const startEditPageComment = (key: keyof typeof emptyPageComments) => {
+    const v = pageComments[key];
+    setPcEditingKey(key);
+    setPcEditingValue(Array.isArray(v) ? v.join("\n") : v);
+    setPcError("");
+  };
+  const savePageComment = async () => {
+    if (!pcEditingKey) return;
+    setPcSaving(true);
+    setPcError("");
+    const nextValue = Array.isArray(pageComments[pcEditingKey])
+      ? pcEditingValue.split("\n").map(s => s.trim()).filter(Boolean)
+      : pcEditingValue;
+    const next = { ...pageComments, [pcEditingKey]: nextValue };
+    try {
+      const authH = await getAuthHeaders();
+      if (!authH.Authorization) {
+        setPcError("ログインが必要です");
+        setPcSaving(false);
+        return;
+      }
+      const res = await fetch("/api/report/update-page-comments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authH },
+        body: JSON.stringify({ shopName: shop.name, targetMonth: trimmedData.analysisTargetMonth || curLabel, pageComments: next }),
+      });
+      if (res.ok) {
+        setPageComments(next);
+        setPcSavedKey(pcEditingKey);
+        setPcEditingKey(null);
+        setTimeout(() => setPcSavedKey(null), 2000);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setPcError(err.error || `保存に失敗しました (${res.status})`);
+      }
+    } catch (e: any) {
+      setPcError(e?.message || "保存に失敗しました");
+    }
+    setPcSaving(false);
+  };
   const [showSettings, setShowSettings] = useState(false);
   const [negativeModal, setNegativeModal] = useState<{ word: string; reviews: { reviewer: string; comment: string; reply?: string | null; date: string; starRating: string }[]; type?: "positive" | "negative"; matched?: boolean } | null>(null);
   const [editingGridCell, setEditingGridCell] = useState<{ row: number; col: number } | null>(null);
@@ -726,43 +776,31 @@ export default function ReportClient({
     setMemoLoading(false);
   };
 
-  const saveComments = async () => {
-    if (!editingComments) return;
-    setCommentSaving(true);
-    setCommentError("");
-    try {
-      const authH = await getAuthHeaders();
-      if (!authH.Authorization) {
-        setCommentError("ログインが必要です");
-        setCommentSaving(false);
-        return;
-      }
-      const res = await fetch("/api/report/update-comments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authH },
-        body: JSON.stringify({ shopName: shop.name, comments: editingComments, targetMonth: trimmedData.analysisTargetMonth || curLabel }),
-      });
-      if (res.ok) {
-        setSavedComments([...editingComments]);
-        setEditingComments(null);
-        setCommentSaved(true);
-        setTimeout(() => setCommentSaved(false), 2000);
-      } else {
-        const err = await res.json().catch(() => ({}));
-        setCommentError(err.error || `保存に失敗しました (${res.status})`);
-      }
-    } catch (e: any) {
-      setCommentError("通信エラー: " + (e?.message || ""));
-    }
-    setCommentSaving(false);
-  };
-
   const handlePdfDownload = async () => {
     setPdfGenerating(true);
     const insertedEls: HTMLElement[] = [];
+    // メモが空の最終ページはno-printで除外されるため、印刷時の分母から差し引く
+    const hiddenTrailingPages = memo ? 0 : 1;
     try {
       if (!visibleGridRanking || visibleGridRanking.keywords.length === 0) {
-        // グリッドランキングなし → そのままprint
+        // グリッドランキングなし → 分母だけ補正してprint
+        if (hiddenTrailingPages > 0) {
+          const printTotal = totalPages - hiddenTrailingPages;
+          document.querySelectorAll<HTMLElement>(".pn-label").forEach(el => {
+            const text = el.textContent || "";
+            const match = text.match(/^(\d+)\s*\/\s*(\d+)$/);
+            if (!match) return;
+            el.dataset.origPn = text;
+            el.textContent = `${match[1]} / ${printTotal}`;
+          });
+          const restore = () => {
+            document.querySelectorAll<HTMLElement>(".pn-label").forEach(el => {
+              if (el.dataset.origPn) { el.textContent = el.dataset.origPn; delete el.dataset.origPn; }
+            });
+          };
+          window.addEventListener("afterprint", restore, { once: true });
+          setTimeout(restore, 5000);
+        }
         window.print();
         setPdfGenerating(false);
         return;
@@ -772,7 +810,7 @@ export default function ReportClient({
       const pdfMapPairCount = Math.ceil(gr.keywords.length / 2);
       // PDF基準: サマリー1 + マップceil(KW/2) vs web基準: サマリー1 + KW切替1
       const pageShift = pdfMapPairCount - 1; // PDF追加ページ数
-      const pdfTotalPages = totalPages + pageShift;
+      const pdfTotalPages = totalPages + pageShift - hiddenTrailingPages;
       // サマリーページ番号（summaryPageNumと同じ値を計算）
       const pdfSummaryPageNum = 5 + (showKeywords ? 1 : 0) + (showRankingHistory ? 1 : 0) + 1;
 
@@ -1037,34 +1075,9 @@ export default function ReportClient({
     }
   };
 
-  // ── AIコメントのページ分割 ──
-  // 初期値は推定分割。レンダリング後に実際のDOM高さを計測し、カードから溢れていたら
-  // 最後の項目を次ページへ送る（文字数推定では箇条書きの折り返し行数を正確に予測できず、
-  // スライドからはみ出すケースがあったため実測方式: 2026-07-16 新橋店P15）
-  const baseCommentPages = useMemo(() => splitCommentPages(displayComments, AI_CHARS_PER_PAGE), [displayComments]);
-  const [commentPages, setCommentPages] = useState(baseCommentPages);
-  useEffect(() => { setCommentPages(baseCommentPages); }, [baseCommentPages]);
-  const commentCardRefs = useRef<(HTMLDivElement | null)[]>([]);
-  useEffect(() => {
-    if (isEditingComments) return; // 編集中はtextareaで高さが変わるため調整しない
-    for (let i = 0; i < commentPages.length; i++) {
-      const el = commentCardRefs.current[i];
-      if (!el) continue;
-      if (el.scrollHeight > el.clientHeight + 4 && commentPages[i].end - commentPages[i].start > 1) {
-        // 溢れたページの最後の項目を次ページへ（1レンダリングにつき1項目ずつ、収まるまで繰り返す）
-        const next = commentPages.map(p => ({ ...p }));
-        next[i] = { start: next[i].start, end: next[i].end - 1 };
-        if (i + 1 < next.length) next[i + 1] = { start: next[i].end, end: next[i + 1].end };
-        else next.push({ start: next[i].end, end: displayComments.length });
-        setCommentPages(next);
-        return;
-      }
-    }
-  });
-
   // ── Page count ──
-  const aiCommentPageCount = Math.max(1, commentPages.length);
-  let totalPages = 6 + aiCommentPageCount; // P1,P2(月次),P3-P5(グラフ),口コミ分析 + AIコメント(動的)
+  // 無条件ページ: P1, P2(月次), P3-P5(グラフ)=5 + 口コミ分析 + 総括 + メモ = 8
+  let totalPages = 8;
   if (hasReviews) totalPages += 2; // 口コミ件数推移, 月間増加数
   if (showKeywords) totalPages++;
   if (showRankingHistory) totalPages++;
@@ -1074,6 +1087,56 @@ export default function ReportClient({
 
   function pn(slideNum: number) {
     return `${slideNum} / ${totalPages}`;
+  }
+
+  // ── ページ別AI総評スニペット（各データページ末尾に表示・編集） ──
+  function renderPageComment(key: keyof typeof emptyPageComments, label: string) {
+    const value = pageComments[key];
+    const isArr = Array.isArray(value);
+    const isEmpty = isArr ? (value as string[]).length === 0 : !value;
+    const isEditingThis = pcEditingKey === key;
+    // 未生成でもログイン中の担当者は「追加」できる。閲覧者(クライアント)には出さない。
+    if (isEmpty && !isEditingThis && !isLoggedIn) return null;
+    return (
+      // 中身が無い/編集中のブロックはPDFに出さない（メモ欄と同じ方針）
+      <div className={!isEmpty && !isEditingThis ? undefined : "no-print"}
+        style={{ marginTop: 10, borderTop: "1px solid #e5e7eb", paddingTop: 8, flexShrink: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "#0f3460" }}>{label}</span>
+          {isLoggedIn && (
+            <div className="no-print" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              {!isEditingThis ? (
+                <button onClick={() => startEditPageComment(key)} style={{ fontSize: 12, padding: "2px 8px", borderRadius: 5, border: "1px solid #ccd", background: "#fff", cursor: "pointer", color: "#555" }}>{isEmpty ? "追加" : "編集"}</button>
+              ) : (
+                <>
+                  <button onClick={savePageComment} disabled={pcSaving || !canData}
+                    title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                    style={{ fontSize: 12, padding: "2px 8px", borderRadius: 5, border: "none", background: pcSaving || !canData ? "#999" : "#0a8f3c", color: "#fff", cursor: pcSaving ? "wait" : !canData ? "not-allowed" : "pointer" }}>{pcSaving ? "保存中..." : "保存"}</button>
+                  <button onClick={() => { setPcEditingKey(null); setPcError(""); }} style={{ fontSize: 12, padding: "2px 8px", borderRadius: 5, border: "1px solid #ccd", background: "#fff", cursor: "pointer", color: "#555" }}>キャンセル</button>
+                </>
+              )}
+              {pcSavedKey === key && <span style={{ fontSize: 12, color: "#0a8f3c" }}>保存しました</span>}
+              {isEditingThis && pcError && <span style={{ fontSize: 12, color: "#c0392b" }}>{pcError}</span>}
+            </div>
+          )}
+        </div>
+        {isEditingThis ? (
+          <textarea value={pcEditingValue} onChange={(e) => setPcEditingValue(e.target.value)}
+            placeholder={isArr ? "1行につき1項目を入力..." : "この指標についての総評を入力..."}
+            style={{ width: "100%", minHeight: isArr ? 70 : 40, padding: "6px 8px", fontSize: 13, lineHeight: 1.6, border: "1px solid #ccd", borderRadius: 6, resize: "vertical", fontFamily: "inherit", color: "#333", background: "#fff" }} />
+        ) : isEmpty ? (
+          <p style={{ fontSize: 13, color: "#aaa", margin: 0, fontStyle: "italic" }}>未設定</p>
+        ) : isArr ? (
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.7, color: "#444" }}>
+            {(value as string[]).map((v, i) => (
+              <li key={i} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(v, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
+            ))}
+          </ul>
+        ) : (
+          <p style={{ fontSize: 13, lineHeight: 1.7, color: "#444", margin: 0 }} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(value as string, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
+        )}
+      </div>
+    );
   }
 
   // ── Monthly table data ──
@@ -1533,6 +1596,7 @@ export default function ReportClient({
                 {charts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700, color: "#fff" }}>{(v + charts.mapPC[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
+          {renderPageComment("map", "AI総評")}
         </div>
       </div>
 
@@ -1561,6 +1625,7 @@ export default function ReportClient({
                 {charts.searchMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700, color: "#fff" }}>{(v + charts.searchPC[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
+          {renderPageComment("search", "AI総評")}
         </div>
       </div>
 
@@ -1603,6 +1668,7 @@ export default function ReportClient({
                 })}</tr>
             </tbody>
           </table>
+          {renderPageComment("reactions", "AI総評")}
         </div>
       </div>
 
@@ -1637,6 +1703,7 @@ export default function ReportClient({
                 );
               })}
             </div>
+            {renderPageComment("keyword", "AI総評")}
           </div>
         </div>
       ); })()}
@@ -2276,146 +2343,11 @@ export default function ReportClient({
                 </div>
               </div>
               <p style={{ fontSize: 16, lineHeight: 1.9, color: "#444", margin: 0 }} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(reviewAnalysis.summary, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
+              {renderPageComment("reviews", "口コミ傾向と強み")}
             </div>
           </div>
         </div>
       </div>
-
-      {/* ════ AIコメント: 動的ページ分割（表示月と分析対象月が一致する場合のみ表示） ════ */}
-      {(() => {
-        // 分析対象月と表示月の一致チェック
-        const analysisMonth = trimmedData.analysisTargetMonth;
-        const displayMonth = monthlyLabels[monthlyLabels.length - 1] || curLabel;
-        if (analysisMonth && analysisMonth !== displayMonth) {
-          pageNum++;
-          return (
-            <div style={slideStyle} className="slide">
-              <div style={slideBarStyle}><span>{shop.name} — AIによるコメント</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
-              <div style={slideBodyStyle}>
-                <div style={stitleStyle}>AIによるコメント</div>
-                <div style={{ background: "#f8f9fa", border: "1px solid #dee2e6", borderRadius: 12, padding: "40px 32px", textAlign: "center" }}>
-                  <p style={{ fontSize: 16, color: "#666", marginBottom: 8 }}>この月（{displayMonth}）のAI総評はまだ生成されていません。</p>
-                  <p style={{ fontSize: 16, color: "#999" }}>最新の分析は {analysisMonth} のデータに基づいています。</p>
-                </div>
-              </div>
-            </div>
-          );
-        }
-        const allComments = displayComments;
-        // commentPages はコンポーネント上部で実測調整済みの state を使用
-
-        return commentPages.map((page, pageIdx) => {
-          pageNum++;
-          const isFirst = pageIdx === 0;
-          const isLast = pageIdx === commentPages.length - 1;
-          const pageLabel = commentPages.length > 1 ? `（${pageIdx + 1}/${commentPages.length}）` : "";
-
-          return (
-      <div key={`ai-comment-${pageIdx}`} style={slideStyle} className="slide">
-        <div style={slideBarStyle}>
-          <span>{shop.name} — AIによるコメント{pageLabel}</span>
-          {isFirst && isLoggedIn && (
-            <div className="no-print" style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              {!isEditingComments ? (
-                <button onClick={() => { setCommentError(""); setEditingComments([...allComments]); }} style={{ fontSize: 14, padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.15)", color: "#fff", cursor: "pointer" }}>編集</button>
-              ) : (
-                <>
-                  <button onClick={saveComments} disabled={commentSaving || !canData}
-                    title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
-                    style={{ fontSize: 14, padding: "3px 10px", borderRadius: 6, border: "none", background: commentSaving || !canData ? "#999" : "#0a8f3c", color: "#fff", cursor: commentSaving ? "wait" : !canData ? "not-allowed" : "pointer" }}>{commentSaving ? "保存中..." : "保存"}</button>
-                  <button onClick={() => { setEditingComments(null); setCommentError(""); }} style={{ fontSize: 14, padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.15)", color: "#fff", cursor: "pointer" }}>キャンセル</button>
-                </>
-              )}
-              {commentSaved && <span style={{ fontSize: 14, color: "#90ee90" }}>保存しました</span>}
-              {commentError && <span style={{ fontSize: 14, color: "#ff6b6b" }}>{commentError}</span>}
-            </div>
-          )}
-          <span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
-        </div>
-        <div style={slideBodyStyle}>
-          <div style={stitleStyle}>{isFirst ? "AIによるコメント" : "AIによるコメント（続き）"}</div>
-          <div ref={el => { commentCardRefs.current[pageIdx] = el; }} style={{ background: "linear-gradient(135deg,#f0f4ff,#fff)", border: "2px solid #0f3460", borderRadius: 14, padding: "16px 20px", flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden", wordBreak: "break-word" }}>
-            {isFirst && <h3 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", marginBottom: 16 }}>{curLabel} 総評</h3>}
-            <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
-              <thead>
-                <tr>
-                  <th style={{ width: 64, padding: "10px 8px", background: "#1F3864", color: "#fff", fontSize: 15, fontWeight: 700, textAlign: "center", border: "2px solid #fff" }}>番号</th>
-                  <th style={{ width: 170, padding: "10px 12px", background: "#1F3864", color: "#fff", fontSize: 15, fontWeight: 700, textAlign: "center", border: "2px solid #fff" }}>内容</th>
-                  <th style={{ padding: "10px 12px", background: "#1F3864", color: "#fff", fontSize: 15, fontWeight: 700, textAlign: "center", border: "2px solid #fff" }}>詳細</th>
-                </tr>
-              </thead>
-              <tbody>
-                {page.start === page.end && (
-                  <tr style={{ background: "#EFF1F6" }}>
-                    <td colSpan={3} style={{ padding: "20px 14px", textAlign: "center", fontSize: 15, color: "#999", fontStyle: "italic", border: "2px solid #fff" }}>データ準備中</td>
-                  </tr>
-                )}
-                {allComments.slice(page.start, page.end).map((c, i) => {
-                  const globalIdx = page.start + i;
-                  const heading = AI_COMMENT_HEADINGS[globalIdx] || "";
-                  const stripe = globalIdx % 2 === 0 ? "#D9DEE8" : "#EFF1F6";
-                  return (
-                  <tr key={globalIdx} style={{ background: stripe }}>
-                    <td style={{ padding: "10px 8px", textAlign: "center", fontSize: 17, fontWeight: 700, color: "#1F3864", border: "2px solid #fff", verticalAlign: "middle" }}>{"①②③④⑤⑥⑦⑧⑨⑩"[globalIdx] || globalIdx + 1}</td>
-                    <td style={{ padding: "10px 12px", fontSize: 15, fontWeight: 700, color: "#1F3864", border: "2px solid #fff", verticalAlign: "middle" }}>{heading}</td>
-                    <td style={{ padding: "10px 14px", fontSize: 15, lineHeight: 1.8, color: "#333", border: "2px solid #fff", verticalAlign: "middle" }}>
-                      {isEditingComments ? (
-                        <textarea
-                          value={editingComments[globalIdx] || ""}
-                          onChange={(e) => {
-                            const next = [...editingComments];
-                            next[globalIdx] = e.target.value;
-                            setEditingComments(next);
-                          }}
-                          style={{ width: "100%", minHeight: 80, padding: "8px 10px", fontSize: 14, lineHeight: 1.7, border: "1px solid #ccd", borderRadius: 8, resize: "vertical", fontFamily: "inherit", color: "#333", background: "#fff" }}
-                        />
-                      ) : (
-                        <span dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(formatAIComment(c, shop.rating), { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
-                      )}
-                    </td>
-                  </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {/* メモ欄（最終ページのみ）。メモがある場合はPDFにも本文を出力し、
-                編集UI・「メモなし」表示は常にPDF非表示（no-print） */}
-            {isLast && (
-            <div className={memo && !memoEditing ? undefined : "no-print"} style={{ marginTop: "auto", borderTop: "1px solid #dde", paddingTop: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                <span style={{ fontSize: 16, fontWeight: 600, color: "#0f3460" }}>メモ<span className="no-print">（担当者用）</span></span>
-                <div className="no-print" style={{ display: "flex", gap: 6 }}>
-                  {!memoEditing ? (
-                    <button onClick={() => setMemoEditing(true)} style={{ fontSize: 16, padding: "3px 10px", borderRadius: 6, border: "1px solid #ccd", background: "#fff", cursor: "pointer", color: "#555" }}>
-                      {memo ? "編集" : "追加"}
-                    </button>
-                  ) : (
-                    <>
-                      <button onClick={saveMemo} disabled={memoLoading || !canMemo}
-                        title={!canMemo ? PERMISSION_DENIED_HINT.MEMO : undefined}
-                        style={{ fontSize: 16, padding: "3px 10px", borderRadius: 6, border: "none", background: memoLoading || !canMemo ? "#999" : "#0f3460", color: "#fff", cursor: memoLoading ? "wait" : !canMemo ? "not-allowed" : "pointer" }}>{memoLoading ? "保存中..." : "保存"}</button>
-                      <button onClick={() => setMemoEditing(false)} style={{ fontSize: 16, padding: "3px 10px", borderRadius: 6, border: "1px solid #ccd", background: "#fff", cursor: "pointer", color: "#555" }}>キャンセル</button>
-                    </>
-                  )}
-                  {memoSaved && <span style={{ fontSize: 16, color: "#0a8f3c" }}>保存しました</span>}
-                </div>
-              </div>
-              {memoEditing ? (
-                <textarea value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="この店舗への所感やメモを記入..."
-                  style={{ width: "100%", minHeight: 60, padding: "8px 10px", fontSize: 16, lineHeight: 1.6, border: "1px solid #ccd", borderRadius: 8, resize: "vertical", fontFamily: "inherit" }} />
-              ) : memo ? (
-                <p style={{ fontSize: 16, lineHeight: 1.8, color: "#444", margin: 0, whiteSpace: "pre-wrap" }}>{memo}</p>
-              ) : (
-                <p style={{ fontSize: 16, color: "#aaa", margin: 0, fontStyle: "italic" }}>メモなし</p>
-              )}
-            </div>
-            )}
-          </div>
-        </div>
-      </div>
-          );
-        });
-      })()}
 
       {/* ════ 口コミ言語別分析 ════ */}
       {langStats.length > 1 && (() => { pageNum++; return (
@@ -2471,6 +2403,88 @@ export default function ReportClient({
                 )); })()}
               </tbody>
             </table>
+          </div>
+        </div>
+      ); })()}
+
+      {/* ════ 総括 ════ */}
+      {(() => { pageNum++; const isEditingActions = pcEditingKey === "actions"; return (
+        <div style={slideStyle} className="slide">
+          <div style={slideBarStyle}><span>{shop.name} — 総括</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+          <div style={slideBodyStyle}>
+            <div style={stitleStyle}>{curLabel} 総括</div>
+            <div style={{ background: "linear-gradient(135deg,#f0f4ff,#fff)", border: "2px solid #0f3460", borderRadius: 14, padding: "24px 28px", flex: 1, display: "flex", flexDirection: "column" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <h3 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", margin: 0 }}>今日から実行可能な改善策</h3>
+                {isLoggedIn && (
+                  <div className="no-print" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    {!isEditingActions ? (
+                      <button onClick={() => startEditPageComment("actions")} style={{ fontSize: 14, padding: "3px 10px", borderRadius: 6, border: "1px solid #ccd", background: "#fff", cursor: "pointer", color: "#555" }}>編集</button>
+                    ) : (
+                      <>
+                        <button onClick={savePageComment} disabled={pcSaving || !canData}
+                          title={!canData ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                          style={{ fontSize: 14, padding: "3px 10px", borderRadius: 6, border: "none", background: pcSaving || !canData ? "#999" : "#0a8f3c", color: "#fff", cursor: pcSaving ? "wait" : !canData ? "not-allowed" : "pointer" }}>{pcSaving ? "保存中..." : "保存"}</button>
+                        <button onClick={() => { setPcEditingKey(null); setPcError(""); }} style={{ fontSize: 14, padding: "3px 10px", borderRadius: 6, border: "1px solid #ccd", background: "#fff", cursor: "pointer", color: "#555" }}>キャンセル</button>
+                      </>
+                    )}
+                    {pcSavedKey === "actions" && <span style={{ fontSize: 14, color: "#0a8f3c" }}>保存しました</span>}
+                    {isEditingActions && pcError && <span style={{ fontSize: 14, color: "#c0392b" }}>{pcError}</span>}
+                  </div>
+                )}
+              </div>
+              {isEditingActions ? (
+                <textarea value={pcEditingValue} onChange={(e) => setPcEditingValue(e.target.value)}
+                  style={{ width: "100%", flex: 1, minHeight: 200, padding: "10px 12px", fontSize: 16, lineHeight: 1.8, border: "1px solid #ccd", borderRadius: 8, resize: "vertical", fontFamily: "inherit", color: "#333", background: "#fff" }} />
+              ) : pageComments.actions.length > 0 ? (
+                <ol style={{ fontSize: 16, lineHeight: 2, color: "#333", paddingLeft: 22, margin: 0 }}>
+                  {pageComments.actions.map((a, i) => (
+                    <li key={i} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(a, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
+                  ))}
+                </ol>
+              ) : (
+                <p style={{ color: "#999", fontStyle: "italic" }}>データ準備中</p>
+              )}
+            </div>
+          </div>
+        </div>
+      ); })()}
+
+      {/* ════ メモ ════ */}
+      {/* メモが空のときはスライドごとPDFから除外（空白ページ防止）。
+          最終ページなので他ページの番号はずれず、印刷時は分母のみ handlePdfDownload で調整する */}
+      {(() => { pageNum++; return (
+        <div style={slideStyle} className={memo ? "slide" : "slide no-print"}>
+          <div style={slideBarStyle}><span>{shop.name} — メモ</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+          <div style={{ ...slideBodyStyle, display: "flex", flexDirection: "column" }}>
+            <div style={stitleStyle}>メモ<span className="no-print" style={{ fontSize: 16, fontWeight: 400, color: "#999" }}>（担当者用）</span></div>
+            <div className={memo && !memoEditing ? undefined : "no-print"} style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", marginBottom: 10 }}>
+                <div className="no-print" style={{ display: "flex", gap: 6 }}>
+                  {!memoEditing ? (
+                    <button onClick={() => setMemoEditing(true)} style={{ fontSize: 16, padding: "3px 10px", borderRadius: 6, border: "1px solid #ccd", background: "#fff", cursor: "pointer", color: "#555" }}>
+                      {memo ? "編集" : "追加"}
+                    </button>
+                  ) : (
+                    <>
+                      <button onClick={saveMemo} disabled={memoLoading || !canMemo}
+                        title={!canMemo ? PERMISSION_DENIED_HINT.MEMO : undefined}
+                        style={{ fontSize: 16, padding: "3px 10px", borderRadius: 6, border: "none", background: memoLoading || !canMemo ? "#999" : "#0f3460", color: "#fff", cursor: memoLoading ? "wait" : !canMemo ? "not-allowed" : "pointer" }}>{memoLoading ? "保存中..." : "保存"}</button>
+                      <button onClick={() => setMemoEditing(false)} style={{ fontSize: 16, padding: "3px 10px", borderRadius: 6, border: "1px solid #ccd", background: "#fff", cursor: "pointer", color: "#555" }}>キャンセル</button>
+                    </>
+                  )}
+                  {memoSaved && <span style={{ fontSize: 16, color: "#0a8f3c" }}>保存しました</span>}
+                </div>
+              </div>
+              {memoEditing ? (
+                <textarea value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="この店舗への所感やメモを記入..."
+                  style={{ width: "100%", minHeight: 200, padding: "8px 10px", fontSize: 16, lineHeight: 1.6, border: "1px solid #ccd", borderRadius: 8, resize: "vertical", fontFamily: "inherit" }} />
+              ) : memo ? (
+                <p style={{ fontSize: 16, lineHeight: 1.8, color: "#444", margin: 0, whiteSpace: "pre-wrap" }}>{memo}</p>
+              ) : (
+                <p style={{ fontSize: 16, color: "#aaa", margin: 0, fontStyle: "italic" }}>メモなし</p>
+              )}
+            </div>
           </div>
         </div>
       ); })()}

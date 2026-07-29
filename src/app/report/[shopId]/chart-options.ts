@@ -5,7 +5,9 @@
 
 export function buildStackedOptions() {
   return {
-    responsive: true, maintainAspectRatio: true, aspectRatio: 2.2,
+    // aspectRatio: 各ページ末尾にAI総評スニペットを追加したため、
+    // グラフの縦幅を少し詰めて確保する（2.2→2.5）
+    responsive: true, maintainAspectRatio: true, aspectRatio: 2.5,
     plugins: {
       title: { display: false },
       legend: { position: "top" as const, labels: { font: { family: "Noto Sans JP", size: 11 } } },
