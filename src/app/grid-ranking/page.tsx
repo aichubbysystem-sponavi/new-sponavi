@@ -40,6 +40,10 @@ const INTERVALS = [
   { label: "5km", value: 5000 },
 ];
 const DEFAULT_INTERVAL = 1000;
+// 4点の回転角（15度刻み）。4点は90度間隔のため90度で一周＝0〜75で全方位カバー
+// 0度=斜め(NE/NW/SE/SW)、45度=十字(N/E/S/W)
+const ANGLES = [0, 15, 30, 45, 60, 75];
+const DEFAULT_ANGLE = 0;
 
 function rankColor(rank: number): string {
   if (rank <= 0) return "#6B7280"; // 圏外 = グレー
@@ -91,29 +95,31 @@ function pointsPerShop(kwCount: number): number {
 }
 
 /**
- * 店舗中心から距離rの「斜め4地点」（NE/NW/SE/SW）を生成する。
- * 各点は店舗からちょうど r メートル（緯度・経度オフセット各 ±r/√2）。
- * row/col は 2×2 グリッドとして保存（row=0が北側、col=0が西側）。中心点は含まない。
+ * 店舗中心から距離rの4地点を生成する。各点は店舗からちょうど r メートル。
+ * angleDeg=0 で斜め（方位角45/135/225/315度 = NE/SE/SW/NW）、45で十字（N/E/S/W）。
+ * 4点は常に90度間隔（回転角は0〜75の15度刻みで全方位カバー）。
+ * row/col は 2×2 グリッドのスロットとして保存（回転時も同じ割当。描画はlat/lngベース）。
  */
-function generate4Points(centerLat: number, centerLng: number, radiusM: number): GridPoint[] {
-  const d = radiusM / Math.SQRT2; // 各軸オフセット（斜め距離がちょうどrになる）
-  const latDeg = d / 111320;
-  const lngDeg = d / (111320 * Math.cos((centerLat * Math.PI) / 180));
-  const points: GridPoint[] = [];
-  for (let row = 0; row < 2; row++) {
-    for (let col = 0; col < 2; col++) {
-      const dRow = row === 0 ? 1 : -1;  // row=0が北側（緯度が大きい）
-      const dCol = col === 0 ? -1 : 1;  // col=0が西側
-      points.push({
-        row,
-        col,
-        lat: centerLat + dRow * latDeg,
-        lng: centerLng + dCol * lngDeg,
-        rank: 0,
-      });
-    }
-  }
-  return points;
+function generate4Points(centerLat: number, centerLng: number, radiusM: number, angleDeg: number = 0): GridPoint[] {
+  const latPerM = 1 / 111320;
+  const lngPerM = 1 / (111320 * Math.cos((centerLat * Math.PI) / 180));
+  // スロット順: (0,0)=NW系 315度, (0,1)=NE系 45度, (1,0)=SW系 225度, (1,1)=SE系 135度
+  const slots: { row: number; col: number; bearing: number }[] = [
+    { row: 0, col: 0, bearing: 315 + angleDeg },
+    { row: 0, col: 1, bearing: 45 + angleDeg },
+    { row: 1, col: 0, bearing: 225 + angleDeg },
+    { row: 1, col: 1, bearing: 135 + angleDeg },
+  ];
+  return slots.map(({ row, col, bearing }) => {
+    const rad = (bearing * Math.PI) / 180; // 方位角: 北=0度, 東=90度（時計回り）
+    return {
+      row,
+      col,
+      lat: centerLat + radiusM * Math.cos(rad) * latPerM,
+      lng: centerLng + radiusM * Math.sin(rad) * lngPerM,
+      rank: 0,
+    };
+  });
 }
 
 interface Preset {
@@ -148,8 +154,9 @@ export default function GridRankingPage() {
   const { gate, PasswordGateModal } = usePasswordGate();
   const [keyword, setKeyword] = useState("");
   const [savedKeywords, setSavedKeywords] = useState<string[]>([]);
-  // interval = 選択中店舗の計測距離（shops.grid_interval_m と同期。店舗ごとに永続化）
+  // interval/angle = 選択中店舗の計測設定（shops.grid_interval_m / grid_angle_deg と同期。店舗ごとに永続化）
   const [interval, setInterval] = useState(DEFAULT_INTERVAL);
+  const [angleDeg, setAngleDeg] = useState(DEFAULT_ANGLE);
   const [intervalSaving, setIntervalSaving] = useState(false);
   const [measuring, setMeasuring] = useState(false);
   const [progress, setProgress] = useState("");
@@ -305,14 +312,19 @@ export default function GridRankingPage() {
     }, () => {});
   }, [selectedShopId, selectedShop]);
 
-  // 店舗ごとの計測距離設定を読込（shops.grid_interval_m。店舗切替で同期）
+  // 店舗ごとの計測設定を読込（shops.grid_interval_m / grid_angle_deg。店舗切替で同期）
   useEffect(() => {
     const shopName = (selectedShop as any)?.name;
     if (!shopName) return;
     let cancelled = false;
     setInterval(DEFAULT_INTERVAL);
+    setAngleDeg(DEFAULT_ANGLE);
     api.get(`/api/report/grid-interval?shopName=${encodeURIComponent(shopName)}`)
-      .then(res => { if (!cancelled && res.data?.intervalM) setInterval(res.data.intervalM); })
+      .then(res => {
+        if (cancelled) return;
+        if (res.data?.intervalM) setInterval(res.data.intervalM);
+        if (typeof res.data?.angleDeg === "number") setAngleDeg(res.data.angleDeg);
+      })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [selectedShopId, selectedShop]);
@@ -325,6 +337,19 @@ export default function GridRankingPage() {
     setIntervalSaving(true);
     try {
       await api.put("/api/report/grid-interval", { shopName, intervalM: value });
+    } catch {} finally {
+      setIntervalSaving(false);
+    }
+  };
+
+  // 向きボタン変更: 即時反映＋店舗設定として永続化
+  const changeAngle = async (value: number) => {
+    setAngleDeg(value);
+    const shopName = (selectedShop as any)?.name;
+    if (!shopName) return;
+    setIntervalSaving(true);
+    try {
+      await api.put("/api/report/grid-interval", { shopName, angleDeg: value });
     } catch {} finally {
       setIntervalSaving(false);
     }
@@ -522,7 +547,7 @@ export default function GridRankingPage() {
     abortRef.current = false;
     setSelectedHistory(null);
 
-    const points = generate4Points(shopLat, shopLng, interval);
+    const points = generate4Points(shopLat, shopLng, interval, angleDeg);
     setGridResults(points);
     renderMarkers(points);
 
@@ -969,12 +994,14 @@ export default function GridRankingPage() {
                     try {
                       let lat = 0, lng = 0;
                       let shopInterval = DEFAULT_INTERVAL;
+                      let shopAngle = DEFAULT_ANGLE;
                       try {
-                        const { data: coordRow } = await supabase.from("shops").select("gbp_latitude, gbp_longitude, grid_interval_m").eq("name", p.shop_name).not("gbp_latitude", "is", null).gt("gbp_latitude", 0).limit(1).maybeSingle();
+                        const { data: coordRow } = await supabase.from("shops").select("gbp_latitude, gbp_longitude, grid_interval_m, grid_angle_deg").eq("name", p.shop_name).not("gbp_latitude", "is", null).gt("gbp_latitude", 0).limit(1).maybeSingle();
                         if (coordRow) {
                           lat = coordRow.gbp_latitude || 0;
                           lng = coordRow.gbp_longitude || 0;
                           shopInterval = coordRow.grid_interval_m || DEFAULT_INTERVAL;
+                          shopAngle = coordRow.grid_angle_deg || DEFAULT_ANGLE;
                         }
                       } catch {}
                       if (!lat || !lng) { skipped++; continue; }
@@ -984,10 +1011,10 @@ export default function GridRankingPage() {
                         : (p.keyword ? [p.keyword] : []);
                       if (keywords.length === 0) { skipped++; continue; }
 
-                      // 全KW共通: 店舗設定の距離で斜め4地点計測（メイン/サブの区別なし）
+                      // 全KW共通: 店舗設定の距離・向きで4地点計測（メイン/サブの区別なし）
                       for (let ki = 0; ki < keywords.length; ki++) {
                         const kw = keywords[ki];
-                        const points = generate4Points(lat, lng, shopInterval);
+                        const points = generate4Points(lat, lng, shopInterval, shopAngle);
                         for (let j = 0; j < points.length; j++) {
                           const pt = points[j];
                           setBatchProgress(`${i + 1}/${targetPresets.length} ${p.shop_name} [KW ${ki + 1}/${keywords.length} 4地点] (${j + 1}/${points.length})`);
@@ -1300,22 +1327,23 @@ export default function GridRankingPage() {
                     const s = allTargetShops[i];
                     const shopName = s.name || s.id;
                     try {
-                      // 座標＋店舗別計測距離を取得
-                      const { data: coordRow } = await supabase.from("shops").select("gbp_latitude, gbp_longitude, grid_interval_m").eq("name", s.name || s.id).not("gbp_latitude", "is", null).gt("gbp_latitude", 0).limit(1).maybeSingle();
+                      // 座標＋店舗別計測設定（距離・向き）を取得
+                      const { data: coordRow } = await supabase.from("shops").select("gbp_latitude, gbp_longitude, grid_interval_m, grid_angle_deg").eq("name", s.name || s.id).not("gbp_latitude", "is", null).gt("gbp_latitude", 0).limit(1).maybeSingle();
                       if (!coordRow?.gbp_latitude) { skipped++; continue; }
                       const lat = coordRow.gbp_latitude;
                       const lng = coordRow.gbp_longitude;
                       const shopInterval = coordRow.grid_interval_m || DEFAULT_INTERVAL;
+                      const shopAngle = coordRow.grid_angle_deg || DEFAULT_ANGLE;
 
                       // KW取得
                       const kwRes = await supabase.from("shop_keywords").select("keywords").eq("shop_id", s.id).maybeSingle();
                       const keywords: string[] = kwRes?.data?.keywords || [];
                       if (keywords.length === 0) { skipped++; continue; }
 
-                      // 全KW共通: 店舗設定の距離で斜め4地点計測（メイン/サブの区別なし）
+                      // 全KW共通: 店舗設定の距離・向きで4地点計測（メイン/サブの区別なし）
                       for (let ki = 0; ki < keywords.length; ki++) {
                         const kw = keywords[ki];
-                        const points = generate4Points(lat, lng, shopInterval);
+                        const points = generate4Points(lat, lng, shopInterval, shopAngle);
                         for (let j = 0; j < points.length; j++) {
                           const pt = points[j];
                           setAllShopsBatchProgress(`${i + 1}/${allTargetShops.length} ${shopName} [KW ${ki + 1}/${keywords.length} 4地点] (${j + 1}/${points.length})`);
@@ -1445,20 +1473,12 @@ export default function GridRankingPage() {
             </button>
           </div>
 
-          {/* 計測地点（斜め4地点固定） */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">計測地点</label>
-            <p className="px-3 py-2 rounded-lg bg-gray-50 text-sm text-gray-600 border border-gray-200">
-              店舗中心から指定距離の斜め4地点（NE/NW/SE/SW）
-            </p>
-          </div>
-
           {/* 距離（店舗中心から各計測地点まで。店舗ごとに保存） */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              距離（店舗中心から）{intervalSaving && <span className="ml-2 text-xs text-gray-400">保存中...</span>}
+              距離（店舗中心から4地点まで）{intervalSaving && <span className="ml-2 text-xs text-gray-400">保存中...</span>}
             </label>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               {INTERVALS.map((iv) => (
                 <button
                   key={iv.value}
@@ -1474,7 +1494,34 @@ export default function GridRankingPage() {
                 </button>
               ))}
             </div>
-            <p className="mt-1 text-xs text-gray-400">この設定は店舗ごとに保存され、一括計測でも使用されます</p>
+          </div>
+
+          {/* 向き（4点の回転角。店舗ごとに保存） */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              向き（4地点の回転）
+            </label>
+            <div className="flex gap-2 flex-wrap">
+              {ANGLES.map((a) => (
+                <button
+                  key={a}
+                  onClick={() => changeAngle(a)}
+                  disabled={measuring}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition ${
+                    angleDeg === a
+                      ? "bg-[#003D6B] text-white"
+                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  }`}
+                  title={a === 0 ? "斜め（NE/NW/SE/SW）" : a === 45 ? "十字（N/E/S/W）" : `${a}度回転`}
+                >
+                  {a === 0 ? "斜め" : a === 45 ? "十字" : `${a}°`}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-xs text-gray-400">
+              距離・向きは店舗ごとに保存され、一括計測でも使用されます。
+              ※1km以下の距離では15度単位の差はほぼ出ません（斜め⇔十字が有効）
+            </p>
           </div>
         </div>
 
@@ -1482,7 +1529,7 @@ export default function GridRankingPage() {
         {shopLat ? (
           <p className="text-xs text-gray-400">
             店舗座標: {shopLat.toFixed(6)}, {shopLng.toFixed(6)} ／
-            計測地点: 店舗から{interval >= 1000 ? `${interval / 1000}km` : `${interval}m`}の斜め4地点
+            計測地点: 店舗から{interval >= 1000 ? `${interval / 1000}km` : `${interval}m`}の4地点（{angleDeg === 0 ? "斜め" : angleDeg === 45 ? "十字" : `${angleDeg}度回転`}）
           </p>
         ) : (
           <div className="flex items-center gap-2">
