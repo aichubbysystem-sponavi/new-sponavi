@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { withAudit, requireCtxShopAccess } from "@/lib/audit";
 import { normalizeKw } from "@/lib/keyword-normalize";
+import { centerCell } from "@/lib/report-utils";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -830,7 +831,8 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
                   return r && r > 0 ? r : 0;
                 };
                 for (const snap of (latest.snapshots || [])) {
-                  const center = snap.results?.find((r: any) => r.row === Math.floor(snap.gridSize / 2) && r.col === Math.floor(snap.gridSize / 2));
+                  // centerCell: 偶数グリッド（斜め4地点計測）は中心なし→シート順位フォールバック
+                  const center = centerCell(snap.results as any[], snap.gridSize);
                   let rank = center?.rank || 0;
                   if (rank === 0) rank = sheetRankAt(snap.keyword, latest.month);
                   let prevRank = rank;
@@ -839,7 +841,7 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
                     const prevSnap = prev.snapshots.find((s: any) => s.keyword === snap.keyword);
                     if (prevSnap) {
                       hasPrevSnap = true;
-                      const prevCenter = prevSnap.results?.find((r: any) => r.row === Math.floor(prevSnap.gridSize / 2) && r.col === Math.floor(prevSnap.gridSize / 2));
+                      const prevCenter = centerCell(prevSnap.results as any[], prevSnap.gridSize);
                       prevRank = prevCenter?.rank || 0;
                       if (prevRank === 0) prevRank = sheetRankAt(snap.keyword, prev.month);
                     }

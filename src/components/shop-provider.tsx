@@ -76,7 +76,8 @@ export default function ShopProvider({ children }: { children: React.ReactNode }
     if (newIds.length === 0) return;
     const shopsToAdd = newIds.map(id => {
       const shop = shops.find(s => s.id === id);
-      return { shopId: id, shopName: shop?.name || "", keyword: null, gridSize: 7 };
+      // gridSize=2 = 斜め4地点計測（2026-07-29統一。バッチ計測はこの値に関わらず4地点で実行）
+      return { shopId: id, shopName: shop?.name || "", keyword: null, gridSize: 2 };
     });
     await api.post("/api/report/grid-ranking-presets", { shops: shopsToAdd });
     await refreshFavorites();

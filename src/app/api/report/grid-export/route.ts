@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, requireRole } from "@/lib/supabase";
+import { centerCell } from "@/lib/report-utils";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -65,9 +66,17 @@ export async function GET(request: NextRequest) {
   }) => {
     const shopName = nameMap.get(log.shop_id) || log.shop_id;
     const results = log.results || [];
-    const center = Math.floor(log.grid_size / 2);
-    const centerPoint = results.find(r => r.row === center && r.col === center);
-    const centerRank = centerPoint && centerPoint.rank > 0 ? centerPoint.rank : "圏外";
+    // 奇数グリッド=中心地点の順位、偶数グリッド（斜め4地点計測）=圏内地点の平均順位で代替
+    const centerPoint = centerCell(results, log.grid_size);
+    let centerRank: string | number;
+    if (centerPoint) {
+      centerRank = centerPoint.rank > 0 ? centerPoint.rank : "圏外";
+    } else {
+      const ranked = results.filter(r => r.rank > 0);
+      centerRank = ranked.length > 0
+        ? `平均${(ranked.reduce((s, r) => s + r.rank, 0) / ranked.length).toFixed(1)}`
+        : "圏外";
+    }
     const date = new Date(log.measured_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
 
     const esc = (v: string) => v.includes(",") || v.includes('"') ? `"${v.replace(/"/g, '""')}"` : v;

@@ -32,7 +32,7 @@ import {
   SEARCH_QUERIES_PER_PAGE,
   pctChange, monthToNum, rankColor, rankColorModal,
   fmtAvgRank, avgRankDiff,
-  reorderKpis,
+  reorderKpis, centerCell,
 } from "@/lib/report-utils";
 import {
   slideStyle, slideBarStyle, slideBodyStyle, stitleStyle,
@@ -522,10 +522,13 @@ export default function ReportClient({
     for (const h of gridRanking?.history || []) {
       if (curLabel && monthToNum(h.month) > monthToNum(curLabel)) continue;
       for (const s of h.snapshots) {
-        const c = Math.floor(s.gridSize / 2);
-        const cell = s.results.find(r => r.row === c && r.col === c);
+        // centerCell: 偶数グリッド（斜め4地点計測）は中心なし→undefined→シート順位フォールバックへ
+        const cell = centerCell(s.results, s.gridSize);
         if (cell && cell.rank > 0) {
           centerByMonthKw.set(`${h.month}::${normalizeKw(s.keyword)}`, cell.rank);
+          gridMonths.add(h.month);
+        } else if (s.results.length > 0) {
+          // 4地点計測などで中心順位が無くても「グリッド計測が存在する月」としては数える
           gridMonths.add(h.month);
         }
       }
@@ -651,7 +654,8 @@ export default function ReportClient({
       }));
     }
 
-    const centerPt = pts.find(p => p.row === Math.floor(gs / 2) && p.col === Math.floor(gs / 2));
+    // centerCell: 偶数グリッド（4地点計測）は中心なし→重心（4点対称なら店舗位置と一致）にフォールバック
+    const centerPt = centerCell(pts, gs);
     const cLat = centerPt?.lat ?? pts.reduce((s, p) => s + p.lat, 0) / pts.length;
     const cLng = centerPt?.lng ?? pts.reduce((s, p) => s + p.lng, 0) / pts.length;
 
@@ -1848,7 +1852,7 @@ export default function ReportClient({
                                     color: diff.color }}>
                                     {diff.text}
                                   </td>
-                                  <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 15, color: "#888", borderBottom: "1px solid #eee" }}>{s ? `${s.gridSize}×${s.gridSize}` : "-"}</td>
+                                  <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 15, color: "#888", borderBottom: "1px solid #eee" }}>{s ? (s.gridSize === 2 ? "4地点" : `${s.gridSize}×${s.gridSize}`) : "-"}</td>
                                 </tr>
                               );
                             })}
@@ -2060,7 +2064,7 @@ export default function ReportClient({
                                         {diff.text}
                                       </td>
                                       <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 16, color: "#888", borderBottom: "1px solid #eee" }}>
-                                        {s.gridSize}×{s.gridSize}
+                                        {s.gridSize === 2 ? "4地点" : `${s.gridSize}×${s.gridSize}`}
                                       </td>
                                     </tr>
                                   );
