@@ -9,6 +9,7 @@ import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
 import { usePasswordGate } from "@/components/password-gate";
 import DateRangePicker, { useDateRange } from "@/components/date-range-picker";
 import { jstToday } from "@/lib/jst-date";
+import { generate4Points, GRID_ANGLES } from "@/lib/grid-utils";
 
 interface GridPoint {
   row: number;
@@ -40,9 +41,8 @@ const INTERVALS = [
   { label: "5km", value: 5000 },
 ];
 const DEFAULT_INTERVAL = 1000;
-// 4点の回転角（15度刻み）。4点は90度間隔のため90度で一周＝0〜75で全方位カバー
-// 0度=斜め(NE/NW/SE/SW)、45度=十字(N/E/S/W)
-const ANGLES = [0, 15, 30, 45, 60, 75];
+// 4点の回転角（grid-utils.GRID_ANGLES）。0度=斜め(NE/NW/SE/SW)、45度=十字(N/E/S/W)
+const ANGLES = GRID_ANGLES;
 const DEFAULT_ANGLE = 0;
 
 function rankColor(rank: number): string {
@@ -94,33 +94,7 @@ function pointsPerShop(kwCount: number): number {
   return POINTS_PER_KW * Math.max(1, kwCount);
 }
 
-/**
- * 店舗中心から距離rの4地点を生成する。各点は店舗からちょうど r メートル。
- * angleDeg=0 で斜め（方位角45/135/225/315度 = NE/SE/SW/NW）、45で十字（N/E/S/W）。
- * 4点は常に90度間隔（回転角は0〜75の15度刻みで全方位カバー）。
- * row/col は 2×2 グリッドのスロットとして保存（回転時も同じ割当。描画はlat/lngベース）。
- */
-function generate4Points(centerLat: number, centerLng: number, radiusM: number, angleDeg: number = 0): GridPoint[] {
-  const latPerM = 1 / 111320;
-  const lngPerM = 1 / (111320 * Math.cos((centerLat * Math.PI) / 180));
-  // スロット順: (0,0)=NW系 315度, (0,1)=NE系 45度, (1,0)=SW系 225度, (1,1)=SE系 135度
-  const slots: { row: number; col: number; bearing: number }[] = [
-    { row: 0, col: 0, bearing: 315 + angleDeg },
-    { row: 0, col: 1, bearing: 45 + angleDeg },
-    { row: 1, col: 0, bearing: 225 + angleDeg },
-    { row: 1, col: 1, bearing: 135 + angleDeg },
-  ];
-  return slots.map(({ row, col, bearing }) => {
-    const rad = (bearing * Math.PI) / 180; // 方位角: 北=0度, 東=90度（時計回り）
-    return {
-      row,
-      col,
-      lat: centerLat + radiusM * Math.cos(rad) * latPerM,
-      lng: centerLng + radiusM * Math.sin(rad) * lngPerM,
-      rank: 0,
-    };
-  });
-}
+// generate4Points は src/lib/grid-utils.ts に分離（回転数式の単体テストのため）
 
 interface Preset {
   id: string;
@@ -750,7 +724,8 @@ export default function GridRankingPage() {
                       <span className={`w-2 h-2 rounded-full flex-shrink-0 ${hasCoord && (p.keyword || allKws.length > 0) ? "bg-emerald-500" : hasCoord ? "bg-yellow-400" : "bg-red-400"}`}
                         title={!hasCoord ? "座標なし" : !(p.keyword || allKws.length > 0) ? "KW未設定" : "準備OK"} />
                       <span className="text-sm font-medium text-slate-800 truncate">{p.shop_name}</span>
-                      <span className="text-xs text-slate-400 flex-shrink-0">{p.grid_size === 2 ? "4地点" : `${p.grid_size}x${p.grid_size}`}</span>
+                      {/* 計測は全店舗4地点に統一済み。旧プリセットのgrid_size(7等)は計測に使われないため常に4地点表記 */}
+                      <span className="text-xs text-slate-400 flex-shrink-0">4地点</span>
                       {measuredThisMonth
                         ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-600 font-semibold flex-shrink-0">{new Date().getMonth() + 1}月済</span>
                         : <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-600 font-semibold flex-shrink-0">未計測</span>
@@ -1526,8 +1501,9 @@ export default function GridRankingPage() {
                 <button
                   key={iv.value}
                   onClick={() => changeInterval(iv.value)}
-                  disabled={measuring}
-                  className={`px-3 py-2 rounded-lg text-sm font-medium transition ${
+                  disabled={measuring || !can(role, "DATA_OP")}
+                  title={!can(role, "DATA_OP") ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition disabled:opacity-40 disabled:cursor-not-allowed ${
                     interval === iv.value
                       ? "bg-[#003D6B] text-white"
                       : "bg-gray-100 text-gray-700 hover:bg-gray-200"
@@ -1549,13 +1525,13 @@ export default function GridRankingPage() {
                 <button
                   key={a}
                   onClick={() => changeAngle(a)}
-                  disabled={measuring}
-                  className={`px-3 py-2 rounded-lg text-sm font-medium transition ${
+                  disabled={measuring || !can(role, "DATA_OP")}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition disabled:opacity-40 disabled:cursor-not-allowed ${
                     angleDeg === a
                       ? "bg-[#003D6B] text-white"
                       : "bg-gray-100 text-gray-700 hover:bg-gray-200"
                   }`}
-                  title={a === 0 ? "斜め（NE/NW/SE/SW）" : a === 45 ? "十字（N/E/S/W）" : `${a}度回転`}
+                  title={!can(role, "DATA_OP") ? PERMISSION_DENIED_HINT.DATA_OP : a === 0 ? "斜め（NE/NW/SE/SW）" : a === 45 ? "十字（N/E/S/W）" : `${a}度回転`}
                 >
                   {a === 0 ? "斜め" : a === 45 ? "十字" : `${a}°`}
                 </button>
@@ -1563,7 +1539,7 @@ export default function GridRankingPage() {
             </div>
             <p className="mt-1 text-xs text-gray-400">
               距離・向きは店舗ごとに保存され、一括計測でも使用されます。
-              ※1km以下の距離では15度単位の差はほぼ出ません（斜め⇔十字が有効）
+              ※15度単位の差が計測に反映されるのは距離3km以上が目安です（2km以下では斜め⇔十字の45度単位が有効）
             </p>
           </div>
         </div>
