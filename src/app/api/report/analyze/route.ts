@@ -475,12 +475,16 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
   // （report_display_settings.shop_id は店舗名。display-settings/route.ts 参照）
   const kwVisibilityMap = new Map<string, Record<string, boolean>>();
   if (allNames.length > 0) {
+    // shop_idはフロントがdecodeURIComponentしただけの店舗名（正規化なし）。
+    // URL経由の名前はNFD（濁点分解形）で保存されている可能性があるため、
+    // NFC/NFD両形でIN検索し、Mapのキーは必ずNFCに寄せる（reviews.shop_nameと同じ罠）
+    const nameVariants = Array.from(new Set([...allNames, ...allNames.map(n => n.normalize("NFD"))]));
     const { data: dispRows, error: dispErr } = await supabase
       .from("report_display_settings")
       .select("shop_id, kw_visibility")
-      .in("shop_id", allNames);
+      .in("shop_id", nameVariants);
     if (dispErr) console.warn("[analyze] 表示設定の取得に失敗（全KWを対象に分析します）:", dispErr.message);
-    for (const r of (dispRows || [])) kwVisibilityMap.set(r.shop_id, (r.kw_visibility || {}) as Record<string, boolean>);
+    for (const r of (dispRows || [])) kwVisibilityMap.set(String(r.shop_id).normalize("NFC"), (r.kw_visibility || {}) as Record<string, boolean>);
   }
 
   // 2. shops テーブルを一括取得（名前で検索 — Go API IDはSupabaseに存在しない可能性があるため名前を優先）
@@ -858,13 +862,11 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
             // ── レポート表示設定でフィルタ（フロント client.tsx の visibleKeywords / visibleGridRanking と同条件）──
             // 非表示KWをAIに渡すと「レポートの表に無いキーワードの総評」が生成されてしまう
             const kwVis = kwVisibilityMap.get(shop.name) || {};
-            const isKwVisible = (word: string, rank: number, prevRank: number) => {
-              const w = normalizeKw(word);
-              const v = kwVis[w] ?? kwVis[word];
-              return v ?? (rank > 0 || prevRank > 0);
-            };
+            // 明示設定があれば従う。無ければdefaultVisibleに委ねる（ページごとにフロントの既定が異なる）
+            const kwVisSetting = (word: string): boolean | undefined => kwVis[normalizeKw(word)] ?? kwVis[word];
             const kwRankLookup = new Map(kwData.map(k => [normalizeKw(k.word), k]));
-            kwData = kwData.filter(kw => isKwVisible(kw.word, kw.rank, kw.prevRank));
+            // キーワード順位変動ページ: 既定 = rank>0 || prevRank>0（client.tsx visibleKeywords と同条件）
+            kwData = kwData.filter(kw => kwVisSetting(kw.word) ?? (kw.rank > 0 || kw.prevRank > 0));
 
             // 圏外転落/復帰も明示する行フォーマット（前回=直近の計測回。前月とは限らない）
             const fmtKwLine = (kw: { word: string; rank: number; prevRank: number; first?: boolean }) => {
@@ -894,8 +896,8 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
                 const lbls = rh2.labels.slice(startIdx, endIdx + 1);
                 const lines: string[] = [];
                 for (const ds of rh2.datasets) {
-                  const entry = kwRankLookup.get(normalizeKw(ds.word));
-                  if (!isKwVisible(ds.word, entry?.rank ?? 0, entry?.prevRank ?? 0)) continue;
+                  // 順位推移ページ: 既定 = 系列にデータがあれば表示（client.tsx visibleRankingDatasets と同条件）
+                  if (kwVisSetting(ds.word) === false) continue;
                   const ranks = ds.ranks.slice(startIdx, endIdx + 1);
                   if (!ranks.some((r: number | null) => r !== null && r > 0)) continue;
                   lines.push(`\n${ds.word}: ${lbls.map((l: string, i: number) => `${l}=${ranks[i] && ranks[i] > 0 ? `${ranks[i]}位` : "-"}`).join(" → ")}`);
@@ -915,10 +917,13 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
               const gLatest = gHist.length > 0 ? gHist[gHist.length - 1] : null;
               const snaps = (gLatest?.snapshots || [])
                 .filter((s: any) => Array.isArray(s.results) && s.results.length > 0)
-                // グリッドも表示設定でフィルタ（レポートの比較テーブルと同じKWだけを対象にする）
+                // グリッドも表示設定でフィルタ。既定はclient.tsx effVisibleと同条件
+                // （kwDataにあればrank>0||prevRank>0、無ければtrue）
                 .filter((s: any) => {
+                  const v = kwVisSetting(s.keyword);
+                  if (v !== undefined) return v;
                   const entry = kwRankLookup.get(normalizeKw(s.keyword));
-                  return isKwVisible(s.keyword, entry?.rank ?? 0, entry?.prevRank ?? 0);
+                  return entry ? (entry.rank > 0 || entry.prevRank > 0) : true;
                 });
               if (snaps.length > 0) {
                 kpiText += `\n\n【多地点グリッド計測（${gLatest.month}）】`;
