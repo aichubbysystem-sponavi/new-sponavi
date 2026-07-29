@@ -58,12 +58,19 @@ export interface ReviewAnalysis {
 
 /** ページ別AI総評。各ページ末尾に表示され、担当者が個別に編集できる */
 export interface PageComments {
-  map: string;
-  search: string;
-  reactions: string;
-  keyword: string;
-  reviews: string[];
-  actions: string[];
+  monthly: string;        // P2 月次推移データ
+  map: string;            // Googleマップ表示数推移
+  search: string;         // Google検索数推移
+  reactions: string;      // ユーザー反応数推移
+  keyword: string;        // キーワード順位変動
+  rankingHistory: string; // キーワード順位推移テーブル
+  grid: string;           // 多地点順位（サマリー）
+  searchQuery: string;    // 検索語句ランキング
+  reviewCount: string;    // 口コミ件数推移
+  reviewDelta: string;    // 月間口コミ増加数
+  language: string;       // 口コミ言語別分析
+  reviews: string[];      // AIによる口コミ分析（箇条書き）
+  actions: string[];      // 総括ページ（改善策）
 }
 
 export interface RankingHistory {

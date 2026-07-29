@@ -287,8 +287,17 @@ export default function ReportClient({
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   // ページ別AI総評（各データページ末尾に表示・編集）
-  const emptyPageComments = { map: "", search: "", reactions: "", keyword: "", reviews: [] as string[], actions: [] as string[] };
-  const [pageComments, setPageComments] = useState(trimmedData.pageComments || emptyPageComments);
+  const emptyPageComments = {
+    monthly: "", map: "", search: "", reactions: "", keyword: "", rankingHistory: "",
+    grid: "", searchQuery: "", reviewCount: "", reviewDelta: "", language: "",
+    reviews: [] as string[], actions: [] as string[],
+  };
+  // 過去に生成された分析は一部フィールドを持たないため、既定値とマージして欠損キーを埋める
+  const mergePageComments = (pc: Partial<typeof emptyPageComments> | null | undefined) => ({
+    ...emptyPageComments,
+    ...(pc || {}),
+  });
+  const [pageComments, setPageComments] = useState(() => mergePageComments(trimmedData.pageComments));
   const [pcEditingKey, setPcEditingKey] = useState<keyof typeof emptyPageComments | null>(null);
   const [pcEditingValue, setPcEditingValue] = useState<string>("");
   const [pcSaving, setPcSaving] = useState(false);
@@ -298,9 +307,10 @@ export default function ReportClient({
   // useStateの初期値だけでは前月のAI総評が residual として残る。props変化時に同期する。
   const propPageComments = trimmedData.pageComments;
   useEffect(() => {
-    setPageComments(propPageComments || { map: "", search: "", reactions: "", keyword: "", reviews: [], actions: [] });
+    setPageComments(mergePageComments(propPageComments));
     setPcEditingKey(null);
     setPcError("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [propPageComments]);
 
   const startEditPageComment = (key: keyof typeof emptyPageComments) => {
@@ -1568,6 +1578,7 @@ export default function ReportClient({
               </tbody>
             </table>
           </div>
+          {renderPageComment("monthly", "AI総評")}
         </div>
       </div>
 
@@ -1761,6 +1772,7 @@ export default function ReportClient({
                 </tbody>
               </table>
             </div>
+            {renderPageComment("rankingHistory", "AI総評")}
           </div>
         </div>
       ); })()}
@@ -1892,6 +1904,7 @@ export default function ReportClient({
                 );
                 })()}
                 </div>
+                {renderPageComment("grid", "AI総評")}
               </div>
             </div>
           </div>
@@ -2189,6 +2202,7 @@ export default function ReportClient({
             <div style={stitleStyle}>検索語句ランキング（{sqCurrent?.month || ""}）1〜{Math.min(PER_PAGE, currentKeywords.length)}位</div>
             {sqSummary}
             {renderSqTable(page1, 0)}
+            {renderPageComment("searchQuery", "AI総評")}
           </div>
         </div>
         </>);
@@ -2219,6 +2233,7 @@ export default function ReportClient({
                 </tr>
               </tbody>
             </table>
+            {renderPageComment("reviewCount", "AI総評")}
           </div>
         </div>
       )}
@@ -2278,6 +2293,7 @@ export default function ReportClient({
                 </tr>
               </tbody>
             </table>
+            {renderPageComment("reviewDelta", "AI総評")}
           </div>
         </div>
       )}
@@ -2403,6 +2419,7 @@ export default function ReportClient({
                 )); })()}
               </tbody>
             </table>
+            {renderPageComment("language", "AI総評")}
           </div>
         </div>
       ); })()}

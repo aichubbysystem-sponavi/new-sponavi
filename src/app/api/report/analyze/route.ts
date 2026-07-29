@@ -103,7 +103,7 @@ async function analyzeWithClaude(
   negativeWordSources: { word: string; reviews: { reviewer: string; comment: string; date: string; starRating: string }[] }[];
   summary: string;
   comments: string[];
-  pageComments?: { map: string; search: string; reactions: string; keyword: string; reviews: string[]; actions: string[] };
+  pageComments?: import("@/lib/report-data").PageComments;
 } | null> {
   if (!ANTHROPIC_API_KEY) return null;
 
@@ -171,10 +171,17 @@ ${langStatsText || ""}
   "positiveWords": ["原文フレーズ", "原文フレーズ", ...12個以上],
   "negativeWords": ["原文フレーズ", "原文フレーズ", ...12個以上],
   "summary": "20文字の総評",
+  "monthlyComment": "全指標を俯瞰した当月の総括1文",
   "mapComment": "Googleマップ表示数についての傾向1文",
   "searchComment": "Google検索数についての傾向1文",
   "reactionComment": "ウェブサイト/ルート/通話等のユーザー反応数についての傾向1文",
   "keywordComment": "${hasKeywordData ? "キーワード順位変動についての傾向1文" : "キーワードデータなしのため空文字\"\""}",
+  "rankingHistoryComment": "${hasKeywordData ? "キーワード順位の複数月推移についての傾向1文（keywordCommentとは別の切り口で）" : "キーワードデータなしのため空文字\"\""}",
+  "gridComment": "多地点グリッド計測（周辺エリアでの見え方）についての傾向1文。データがなければ空文字",
+  "searchQueryComment": "検索語句（指名検索/一般検索の比率など）についての傾向1文。データがなければ空文字",
+  "reviewCountComment": "口コミ累計件数の推移についての傾向1文。データがなければ空文字",
+  "reviewDeltaComment": "口コミの月間増加ペースについての傾向1文。データがなければ空文字",
+  "languageComment": "${langStatsText ? "口コミの言語別構成についての傾向1文" : "言語データなしのため空文字\"\""}",
   "reviewComments": ["口コミ傾向1", "口コミ傾向2", "口コミ傾向3", "低評価傾向"],
   "actions": ["施策1", "施策2", "施策3"]
 }
@@ -184,10 +191,17 @@ ${langStatsText || ""}
   "positiveWords": ["味噌のコク", "スープが熱々", "駅直結", "バターのまろやかさ"],
   "negativeWords": ["愛想が悪い", "荷物置き場がない", "待ち時間が長い"],
   "summary": "集客回復も接客課題が残る",
+  "monthlyComment": "マップ・検索とも回復基調だが、<strong>アクション率の低下</strong>が課題として残る",
   "mapComment": "<strong>マップ表示が前月比+5%</strong>と回復傾向で、同業種平均を下回る水準",
   "searchComment": "Google検索は前月比+14%と回復傾向で、<strong>グループ平均を上回る水準</strong>を維持",
   "reactionComment": "ルート検索は<strong>+60%と大幅増加</strong>し、来店意欲の高まりがうかがえる",
   "keywordComment": "主要キーワードが<strong>いずれも圏外に転落</strong>しており、オーガニック流入への影響が懸念される",
+  "rankingHistoryComment": "3ヶ月連続で順位を落としており、<strong>下降トレンドが定着</strong>しつつある",
+  "gridComment": "9地点中<strong>圏外が5地点</strong>あり、駅北側の商圏を取りこぼしている",
+  "searchQueryComment": "<strong>一般検索が92%</strong>を占め、新規顧客の発見チャネルとして機能している",
+  "reviewCountComment": "累計件数は横ばいで、<strong>削除による目減り</strong>が新規投稿を相殺している",
+  "reviewDeltaComment": "月間の新規投稿が<strong>平均1.2件</strong>と少なく、獲得施策の強化余地が大きい",
+  "languageComment": "<strong>英語口コミが18%</strong>を占め、インバウンド需要の受け皿になっている",
   "reviewComments": [
     "「味噌のコクがたまらない」と<strong>味への満足度が高い</strong>",
     "「駅直結で便利」と立地を評価する声が多い",
@@ -202,8 +216,17 @@ ${langStatsText || ""}
 }
 
 ■ ルール
+- 各コメントはレポートの別々のページに載る。**同じ内容を複数のコメントで繰り返さない**（例: mapCommentで書いた内容をmonthlyCommentで再度書かない）
+- 対応するデータが【】ブロックとして提供されていない項目は、推測で書かず必ず空文字""を返す
 - mapComment/searchComment/reactionComment: ${hasKpi ? "各KPIの前月比傾向を1文ずつ。同業種平均やグループ平均のデータがあれば「同業種平均を上回っている」「平均を下回る」等の比較を含める" : "口コミから推定した概況を1文ずつ"}。絶対値（147,422回等）は書かない
-- keywordComment: ${hasKeywordData ? "キーワード順位に大きな変動（圏外への転落、大幅な上昇・下落）があれば必ず言及。無ければ直近の順位傾向を1文で" : "キーワードデータが提供されていないため必ず空文字\"\"を返す"}
+- monthlyComment: 個別指標ではなく全体を俯瞰した1文。最も重要な変化または課題を1つだけ挙げる
+- keywordComment: ${hasKeywordData ? "当月の順位変動（圏外への転落、大幅な上昇・下落）に言及" : "キーワードデータが提供されていないため必ず空文字\"\"を返す"}
+- rankingHistoryComment: ${hasKeywordData ? "当月単体ではなく複数月にわたるトレンド（連続下降、底打ち、安定など）に言及。keywordCommentと同じ内容を書かない" : "キーワードデータが提供されていないため必ず空文字\"\"を返す"}
+- gridComment: 【多地点グリッド計測】がある場合のみ。平均順位・圏外地点数から商圏の取りこぼし具合に言及
+- searchQueryComment: 【検索語句分析】がある場合のみ。指名検索/一般検索の比率とその意味に言及
+- reviewCountComment: 【口コミ累計件数の推移】がある場合のみ。累計が減っている月は削除・非表示が起きている旨を書く
+- reviewDeltaComment: 【口コミ月間増加ペース】がある場合のみ。獲得ペースが十分か不足かに言及
+- languageComment: ${langStatsText ? "言語構成比と、それが示す客層（インバウンド需要など）に言及" : "言語データが提供されていないため必ず空文字\"\"を返す"}
 - 前月比・前年比などの%はKPIデータに記載された値をそのまま使う（自分で再計算・丸め直ししない）
 - 「◯ヶ月ぶり」「◯ヶ月連続」等の期間表現は、提供された推移データで実際に確認できる場合のみ使う
 - 前年同月比を評価する際は推移全体を確認する。前年値が前後の月から大きく乖離した一時的スパイクの場合、単純比較で「悪化」「最優先課題」と断定しない（例外的な月との比較である旨を踏まえる）
@@ -213,7 +236,8 @@ ${langStatsText || ""}
 - 各項目の中で最も重要なキーワードを1つだけ<strong>タグで囲む
 - positiveWords/negativeWordsは口コミ原文に連続した文字列としてそのまま含まれる抜き出しのみ有効（言い換え・活用形の変更・翻訳・要約はシステム側で無効化される）。各2〜10文字（15文字超は不可）。原文どおりを最優先した上で、できるだけ「態度が横柄」のような名詞句・言い切りの自然な区切りで抜き出す
 - 初計測（前回データなし）のキーワードを「維持」「継続」と表現しない（今回が最初の計測）
-- 口コミの件数・増加数・「○○件」・「ゼロ」・「0件」・「投稿数」には一切言及しない。口コミは質と傾向のみ分析
+- 口コミの件数・増加数・「○○件」・「ゼロ」・「0件」・「投稿数」に言及してよいのは reviewCountComment と reviewDeltaComment の2つだけ。
+  それ以外（summary/monthlyComment/reviewComments/actions等）では従来どおり一切言及せず、口コミは質と傾向のみ分析する
 - 捏造禁止（実施していないキャンペーン等）
 - 評価は必ず${averageRating}を使用
 ${langStatsText ? "- 口コミ言語は上記集計に記載された言語のみ言及。外国語口コミに言及する場合は言語別集計の評価内訳と矛盾しないこと（低評価が中心の言語を「海外から支持」等と書かない）" : ""}`;
@@ -320,10 +344,17 @@ ${langStatsText ? "- 口コミ言語は上記集計に記載された言語の�
       const toArr = (v: any): string[] => Array.isArray(v) ? v.filter((x: any) => typeof x === "string") : typeof v === "string" ? [v] : [];
       const cleanStr = (v: any): string => typeof v === "string" ? cleanItem(v) : "";
 
+      const monthlyComment = cleanStr(parsed.monthlyComment);
       const mapComment = cleanStr(parsed.mapComment);
       const searchComment = cleanStr(parsed.searchComment);
       const reactionComment = cleanStr(parsed.reactionComment);
       const keywordComment = cleanStr(parsed.keywordComment);
+      const rankingHistoryComment = cleanStr(parsed.rankingHistoryComment);
+      const gridComment = cleanStr(parsed.gridComment);
+      const searchQueryComment = cleanStr(parsed.searchQueryComment);
+      const reviewCountComment = cleanStr(parsed.reviewCountComment);
+      const reviewDeltaComment = cleanStr(parsed.reviewDeltaComment);
+      const languageComment = cleanStr(parsed.languageComment);
       const reviewComments: string[] = toArr(parsed.reviewComments).map(cleanItem).filter((s: string) => s.length >= 5);
       const actions: string[] = toArr(parsed.actions).map(cleanItem).filter((s: string) => s.length >= 10);
 
@@ -331,16 +362,23 @@ ${langStatsText ? "- 口コミ言語は上記集計に記載された言語の�
 
       if (hasNewFields) {
         parsed.pageComments = {
+          monthly: monthlyComment,
           map: mapComment,
           search: searchComment,
           reactions: reactionComment,
           keyword: keywordComment,
+          rankingHistory: rankingHistoryComment,
+          grid: gridComment,
+          searchQuery: searchQueryComment,
+          reviewCount: reviewCountComment,
+          reviewDelta: reviewDeltaComment,
+          language: languageComment,
           reviews: reviewComments.slice(0, 4),
           actions: actions.slice(0, 3),
         };
         // 旧形式comments（後方互換・他箇所からの参照保険。新UIの表示には使わない）
         parsed.comments = [
-          [mapComment, searchComment, reactionComment, keywordComment].filter(Boolean).map((s: string) => `・${s}`).join(""),
+          [monthlyComment, mapComment, searchComment, reactionComment, keywordComment].filter(Boolean).map((s: string) => `・${s}`).join(""),
           reviewComments.slice(0, 4).map((s: string) => `・${s}`).join(""),
           actions.slice(0, 3).map((s: string, i: number) => `${String.fromCharCode(97 + i)}) ${s}`).join(" "),
         ];
@@ -353,11 +391,18 @@ ${langStatsText ? "- 口コミ言語は上記集計に記載された言語の�
         parsed.summary = cleanItem(parsed.summary);
       }
 
-      // 不要なフィールドを削除
+      // 不要なフィールドを削除（pageCommentsに集約済み）
+      delete parsed.monthlyComment;
       delete parsed.mapComment;
       delete parsed.searchComment;
       delete parsed.reactionComment;
       delete parsed.keywordComment;
+      delete parsed.rankingHistoryComment;
+      delete parsed.gridComment;
+      delete parsed.searchQueryComment;
+      delete parsed.reviewCountComment;
+      delete parsed.reviewDeltaComment;
+      delete parsed.languageComment;
       delete parsed.reviewComments;
       delete parsed.actions;
 
@@ -711,6 +756,19 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
               const lastLabel = trimmedLabels[trimmedLabels.length - 1] || "当月";
               kpiText += `\n月平均: +${avgDelta} / ${lastLabel}: +${lastDelta ?? 0}`;
             }
+
+            // 口コミ累計件数の推移（「口コミ件数推移」ページのコメント生成用）
+            const reviewCounts = report.reviewCounts;
+            if (Array.isArray(reviewCounts) && reviewCounts.length > 0) {
+              const trimmedCounts = reviewCounts.slice(0, trimIdx);
+              const recentCounts = trimmedCounts.slice(-6);
+              const recentCountLabels = trimmedLabels.slice(-6);
+              if (recentCounts.length > 0) {
+                kpiText += `\n\n【口コミ累計件数の推移】`;
+                kpiText += `\n直近${recentCounts.length}ヶ月: ${recentCountLabels.map((l: string, i: number) => `${l}=${recentCounts[i] ?? 0}件`).join(" → ")}`;
+                kpiText += `\n※累計が減る月は既存口コミの削除・非表示を意味する（投稿ゼロとは異なる）`;
+              }
+            }
           }
 
           // キーワード順位データ（DBからリアルタイム取得 — フロントと同じデータソース）
@@ -798,6 +856,28 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
               kpiText += `\n\n【キーワード順位（${curMonth}）】`;
               for (const kw of kwData) kpiText += fmtKwLine(kw);
             }
+
+            // 多地点グリッド計測のサマリー統計（「多地点順位」ページのコメント生成用）
+            try {
+              const monthToNum2 = (m: string) => { const p = m.split("/"); return (parseInt(p[0]) || 0) * 100 + (parseInt(p[1]) || 0); };
+              const targetNum2 = monthToNum2(targetNorm);
+              const gHist = (gridRanking?.history || []).filter((h: any) => monthToNum2(h.month) <= targetNum2);
+              const gLatest = gHist.length > 0 ? gHist[gHist.length - 1] : null;
+              const snaps = (gLatest?.snapshots || []).filter((s: any) => Array.isArray(s.results) && s.results.length > 0);
+              if (snaps.length > 0) {
+                kpiText += `\n\n【多地点グリッド計測（${gLatest.month}）】`;
+                for (const s of snaps) {
+                  const pts = s.results as { rank: number }[];
+                  const inRange = pts.filter(p => p.rank > 0);
+                  const top3 = inRange.filter(p => p.rank <= 3).length;
+                  const top10 = inRange.filter(p => p.rank <= 10).length;
+                  const out = pts.length - inRange.length;
+                  const avg = inRange.length > 0 ? (inRange.reduce((a, p) => a + p.rank, 0) / inRange.length).toFixed(1) : "圏外";
+                  kpiText += `\n「${s.keyword}」: ${pts.length}地点中 平均${avg}位 / 1-3位${top3}地点 / 10位以内${top10}地点 / 圏外${out}地点`;
+                }
+                kpiText += `\n※周辺エリアのどこから検索されても上位に出るかを見る指標。圏外地点が多いほど商圏の取りこぼしが大きい`;
+              }
+            } catch {}
           } catch {
             // フォールバック: キャッシュのデータを使用
             const kwData = report.keywords;
@@ -970,15 +1050,12 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
         analysis.summary = fixRating(analysis.summary);
       }
       if (analysis.pageComments) {
-        const pc = analysis.pageComments;
-        analysis.pageComments = {
-          map: fixRating(pc.map || ""),
-          search: fixRating(pc.search || ""),
-          reactions: fixRating(pc.reactions || ""),
-          keyword: fixRating(pc.keyword || ""),
-          reviews: (pc.reviews || []).map(fixRating),
-          actions: (pc.actions || []).map(fixRating),
-        };
+        const pc = analysis.pageComments as Record<string, any>;
+        const fixed: Record<string, any> = {};
+        for (const [k, v] of Object.entries(pc)) {
+          fixed[k] = Array.isArray(v) ? v.map((s: string) => fixRating(s || "")) : fixRating(v || "");
+        }
+        analysis.pageComments = fixed as typeof analysis.pageComments;
       }
 
       // Supabaseに保存（upsert）
