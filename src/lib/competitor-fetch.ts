@@ -16,14 +16,20 @@ const GCP_API_KEY = process.env.GCP_API_KEY || "";
 
 /**
  * レポート表示用のローダー。
- * 表示月が当月（JST）→ DBに無ければ取得保存（¥4.8・月1回のみ課金）。
- * 過去月 → DB読みのみ（無ければnull=ページ非表示）。
+ * レポートは「最新の確定月＝前月」を表示する仕様のため、
+ * 表示月が当月または前月（JST）→ DBに無ければ取得保存（¥4.8・月1回のみ課金）。
+ * それより過去の月 → DB読みのみ（無ければnull=ページ非表示）。
+ * ※競合の口コミ数は過去に遡って取れないため、保存されるのは常に「取得時点」の
+ *   スナップショット（fetchedAtで明示）。表示月はレポートの紐付けキー。
  */
 export async function loadCompetitorComparison(shopName: string, displayMonth?: string): Promise<CompetitorComparison | null> {
   if (!displayMonth) return null;
   const jst = new Date(Date.now() + 9 * 3600 * 1000);
-  const curMonth = `${jst.getUTCFullYear()}/${jst.getUTCMonth() + 1}`;
-  if (displayMonth === curMonth) {
+  const y = jst.getUTCFullYear();
+  const m = jst.getUTCMonth() + 1;
+  const curLabel = `${y}/${m}`;
+  const prevLabel = m === 1 ? `${y - 1}/12` : `${y}/${m - 1}`;
+  if (displayMonth === curLabel || displayMonth === prevLabel) {
     return await fetchAndStoreCompetitors(shopName, displayMonth);
   }
   return await getStoredCompetitors(shopName, displayMonth);
@@ -35,7 +41,7 @@ export async function getStoredCompetitors(shopName: string, month: string): Pro
     const supabase = getSupabase();
     const { data } = await supabase
       .from("competitor_reviews")
-      .select("month, keyword, self, competitors")
+      .select("month, keyword, self, competitors, created_at")
       .eq("shop_name", shopName.normalize("NFC"))
       .eq("month", month)
       .maybeSingle();
@@ -45,6 +51,7 @@ export async function getStoredCompetitors(shopName: string, month: string): Pro
       keyword: data.keyword,
       self: data.self || null,
       competitors: (data.competitors || []) as CompetitorEntry[],
+      fetchedAt: data.created_at || null,
     };
   } catch {
     return null;
@@ -134,7 +141,8 @@ export async function fetchAndStoreCompetitors(shopName: string, month: string):
       ? { ...entries[selfIdx], rank: selfIdx + 1 }
       : null; // 上位20圏外（表示側は「圏外」表記で対応可能）
 
-    const result: CompetitorComparison = { month, keyword, self, competitors: entries };
+    const fetchedAt = new Date().toISOString();
+    const result: CompetitorComparison = { month, keyword, self, competitors: entries, fetchedAt };
 
     // 6. 保存（upsert: 競合状態でも二重課金は最大1回分）
     const { error: upErr } = await supabase
@@ -146,7 +154,7 @@ export async function fetchAndStoreCompetitors(shopName: string, month: string):
           keyword,
           self,
           competitors: entries,
-          created_at: new Date().toISOString(),
+          created_at: fetchedAt,
         },
         { onConflict: "shop_name,month" }
       );

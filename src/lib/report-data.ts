@@ -83,10 +83,11 @@ export interface CompetitorEntry {
 
 /** 口コミ競合比較（同エリア）。月次でDB保存されたスナップショット */
 export interface CompetitorComparison {
-  month: string;    // "2026/7"
+  month: string;    // "2026/7"（レポートの紐付けキー）
   keyword: string;  // 検索に使ったKW
   self: (CompetitorEntry & { rank: number }) | null; // リスト内の自店（上位20圏外はnull）
   competitors: CompetitorEntry[]; // 上位20（自店含む・検索結果順）
+  fetchedAt?: string | null; // 取得日時ISO（過去に遡れないため取得時点のスナップショット）
 }
 
 export interface RankingHistory {

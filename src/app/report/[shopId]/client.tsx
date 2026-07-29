@@ -2389,7 +2389,8 @@ export default function ReportClient({
             <div style={stitleStyle}>
               口コミの競合比較（同エリア）
               <span style={{ fontSize: 14, fontWeight: 400, color: "#999", marginLeft: 10 }}>
-                「{comp.keyword}」検索の上位{comp.competitors.length}店舗（{comp.month}時点）
+                「{comp.keyword}」検索の上位{comp.competitors.length}店舗
+                {comp.fetchedAt && (() => { const d = new Date(comp.fetchedAt); return `（${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}時点）`; })()}
                 {!comp.self && "／あなたの店舗は上位圏外"}
               </span>
             </div>
