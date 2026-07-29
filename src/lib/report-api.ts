@@ -448,6 +448,7 @@ export async function getReportData(
         if (stored) {
           cached.reviewAnalysis = stored.analysis;
           cached.comments = stored.comments;
+          cached.pageComments = stored.pageComments || null;
           cached.analysisTargetMonth = stored.targetMonth || null;
         }
       } catch {}

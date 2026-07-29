@@ -41,12 +41,17 @@ function checkFallbackLimit(key: string, limit: number, windowMs: number): boole
 }
 
 // 許可されたオリジン
+// Previewデプロイでは一時URL（new-sponavi-git-xxx.vercel.app 等）からのPOSTが
+// 全て403になり保存系の検証ができないため、Vercelが自動設定する
+// 「そのデプロイ自身のURL」だけを許可に加える（*.vercel.app を丸ごと開けはしない）
 const ALLOWED_ORIGINS = [
   `https://${MAIN_HOSTNAME}`,
   `https://www.${MAIN_HOSTNAME}`,
   `https://${REPORT_HOSTNAME}`,
   `https://${PMAX_HOSTNAME}`,
   "https://new-sponavi.vercel.app",
+  ...(process.env.VERCEL_ENV === "preview" && process.env.VERCEL_URL ? [`https://${process.env.VERCEL_URL}`] : []),
+  ...(process.env.VERCEL_ENV === "preview" && process.env.VERCEL_BRANCH_URL ? [`https://${process.env.VERCEL_BRANCH_URL}`] : []),
   ...(process.env.NODE_ENV === "development" ? ["http://localhost:3000", "http://localhost:3001"] : []),
 ];
 
