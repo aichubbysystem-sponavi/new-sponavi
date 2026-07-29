@@ -183,6 +183,7 @@ ${langStatsText || ""}
   "reviewCountComment": "口コミ累計件数の推移についての傾向1文。データがなければ空文字",
   "reviewDeltaComment": "口コミの月間増加ペースについての傾向1文。データがなければ空文字",
   "languageComment": "${langStatsText ? "口コミの言語別構成についての傾向1文" : "言語データなしのため空文字\"\""}",
+  "competitorComment": "同エリア競合との口コミ数の位置づけ1文。データがなければ空文字",
   "reviewComments": ["口コミ傾向1", "口コミ傾向2", "口コミ傾向3", "低評価傾向"],
   "actions": ["施策1", "施策2", "施策3"]
 }
@@ -203,6 +204,7 @@ ${langStatsText || ""}
   "reviewCountComment": "累計件数は横ばいで、<strong>削除による目減り</strong>が新規投稿を相殺している",
   "reviewDeltaComment": "月間の新規投稿が<strong>平均1.2件</strong>と少なく、獲得施策の強化余地が大きい",
   "languageComment": "<strong>英語口コミが18%</strong>を占め、インバウンド需要の受け皿になっている",
+  "competitorComment": "同エリアでは<strong>口コミ数7位</strong>で、上位3店との差は平均360件と大きい",
   "reviewComments": [
     "「味噌のコクがたまらない」と<strong>味への満足度が高い</strong>",
     "「駅直結で便利」と立地を評価する声が多い",
@@ -229,6 +231,7 @@ ${langStatsText || ""}
 - reviewCountComment: 【口コミ累計件数の推移】がある場合のみ。累計が減っている月は削除・非表示が起きている旨を書く
 - reviewDeltaComment: 【口コミ月間増加ペース】がある場合のみ。獲得ペースが十分か不足かに言及
 - languageComment: ${langStatsText ? "言語構成比と、それが示す客層（インバウンド需要など）に言及" : "言語データが提供されていないため必ず空文字\"\"を返す"}
+- competitorComment: 【口コミ競合比較】がある場合のみ。同エリア内での口コミ数の位置づけ（リスト順位・上位との差）に言及。この欄では口コミ件数への言及を許可する
 - 前月比・前年比などの%はKPIデータに記載された値をそのまま使う（自分で再計算・丸め直ししない）
 - 「◯ヶ月ぶり」「◯ヶ月連続」等の期間表現は、提供された推移データで実際に確認できる場合のみ使う
 - 前年同月比を評価する際は推移全体を確認する。前年値が前後の月から大きく乖離した一時的スパイクの場合、単純比較で「悪化」「最優先課題」と断定しない（例外的な月との比較である旨を踏まえる）
@@ -238,7 +241,7 @@ ${langStatsText || ""}
 - 各項目の中で最も重要なキーワードを1つだけ<strong>タグで囲む
 - positiveWords/negativeWordsは口コミ原文に連続した文字列としてそのまま含まれる抜き出しのみ有効（言い換え・活用形の変更・翻訳・要約はシステム側で無効化される）。各2〜10文字（15文字超は不可）。原文どおりを最優先した上で、できるだけ「態度が横柄」のような名詞句・言い切りの自然な区切りで抜き出す
 - 初計測（前回データなし）のキーワードを「維持」「継続」と表現しない（今回が最初の計測）
-- 口コミの件数・増加数・「○○件」・「ゼロ」・「0件」・「投稿数」に言及してよいのは reviewCountComment と reviewDeltaComment の2つだけ。
+- 口コミの件数・増加数・「○○件」・「ゼロ」・「0件」・「投稿数」に言及してよいのは reviewCountComment・reviewDeltaComment・competitorComment の3つだけ。
   それ以外（summary/monthlyComment/reviewComments/actions等）では従来どおり一切言及せず、口コミは質と傾向のみ分析する
 - 捏造禁止（実施していないキャンペーン等）
 - 評価は必ず${averageRating}を使用
@@ -357,6 +360,7 @@ ${langStatsText ? "- 口コミ言語は上記集計に記載された言語の�
       const reviewCountComment = cleanStr(parsed.reviewCountComment);
       const reviewDeltaComment = cleanStr(parsed.reviewDeltaComment);
       const languageComment = cleanStr(parsed.languageComment);
+      const competitorComment = cleanStr(parsed.competitorComment);
       const reviewComments: string[] = toArr(parsed.reviewComments).map(cleanItem).filter((s: string) => s.length >= 5);
       const actions: string[] = toArr(parsed.actions).map(cleanItem).filter((s: string) => s.length >= 10);
 
@@ -375,6 +379,7 @@ ${langStatsText ? "- 口コミ言語は上記集計に記載された言語の�
           reviewCount: reviewCountComment,
           reviewDelta: reviewDeltaComment,
           language: languageComment,
+          competitor: competitorComment,
           reviews: reviewComments.slice(0, 4),
           actions: actions.slice(0, 3),
         };
@@ -405,6 +410,7 @@ ${langStatsText ? "- 口コミ言語は上記集計に記載された言語の�
       delete parsed.reviewCountComment;
       delete parsed.reviewDeltaComment;
       delete parsed.languageComment;
+      delete parsed.competitorComment;
       delete parsed.reviewComments;
       delete parsed.actions;
 
@@ -977,6 +983,31 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
             kpiText += `\n指名検索（店舗名含む）: ${brandCount.toLocaleString()}回（${brandPct}%）`;
             kpiText += `\n一般検索: ${(totalCount - brandCount).toLocaleString()}回（${100 - brandPct}%）`;
             kpiText += `\n※一般検索100%は「新規顧客の発見チャネルとして機能している」ことを意味する。駅ナカ・商業施設内の飲食店では指名検索0%は一般的であり、必ずしもネガティブではない`;
+          }
+
+          // 口コミ競合比較（同エリア）— competitorCommentページ用
+          // 当月分析時は未取得なら取得保存（¥4.8・月1回）、過去月は保存済みのみ
+          try {
+            const { loadCompetitorComparison } = await import("@/lib/competitor-fetch");
+            const comp = await loadCompetitorComparison(shop.name, curMonth);
+            if (comp && comp.competitors.length > 0) {
+              const others = comp.competitors.filter((_, i) => i !== ((comp.self?.rank ?? 0) - 1));
+              const top3 = [...others].sort((a, b) => b.reviewCount - a.reviewCount).slice(0, 3);
+              const top3Avg = top3.length ? Math.round(top3.reduce((s, c) => s + c.reviewCount, 0) / top3.length) : 0;
+              const selfCount = comp.self?.reviewCount ?? 0;
+              const moreCount = others.filter(c => c.reviewCount > selfCount).length;
+              kpiText += `\n\n【口コミ競合比較（同エリア「${comp.keyword}」上位${comp.competitors.length}店）】`;
+              kpiText += comp.self
+                ? `\n自店: リスト${comp.self.rank}位・評価${comp.self.rating}・口コミ${comp.self.reviewCount}件`
+                : `\n自店: 上位${comp.competitors.length}圏外`;
+              if (top3.length > 0) {
+                kpiText += `\n口コミ数トップ: ${top3[0].name}（${top3[0].reviewCount}件）／上位3店平均: ${top3Avg}件`;
+                kpiText += `\n自店より口コミが多い店: ${moreCount}店`;
+              }
+              kpiText += `\n※店舗名はこのリストに記載のものだけを使うこと`;
+            }
+          } catch (compErr: any) {
+            console.warn(`[analyze] ${shop.name}: 競合比較取得スキップ:`, compErr?.message || compErr);
           }
         } else {
           console.warn(`[analyze] ${shop.name}: report_data_cacheにデータなし`);

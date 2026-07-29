@@ -652,6 +652,13 @@ export async function buildReportData(
   const comments = analyzed.comments;
   const pageComments = analyzed.pageComments || null;
 
+  // 口コミ競合比較（当月なら取得保存・過去月はDB読みのみ。失敗はnullでページ非表示）
+  let competitorComparison = null;
+  try {
+    const { loadCompetitorComparison } = await import("./competitor-fetch");
+    competitorComparison = await loadCompetitorComparison(shopName, currentLabel);
+  } catch {}
+
   // DBの評価はスプレッドシートに値がない場合のみフォールバック
   if (analyzed.source === "db" && analyzed.rating && analyzed.rating > 0 && currentRating === 0) {
     currentRating = analyzed.rating;
@@ -689,6 +696,7 @@ export async function buildReportData(
     reviewAnalysis,
     comments,
     pageComments,
+    competitorComparison,
   };
 }
 
