@@ -108,3 +108,22 @@
   （page_comments未生成の過去月は各欄が「未設定」表示のまま。強制再分析はしない）
 - Vercel Environment Variables で SUPABASE_SERVICE_ROLE_KEY / ANTHROPIC_API_KEY が Preview 環境にも
   適用されているか要確認（Production限定だとPreviewでデータ取得不可）
+
+### 追記（同日セッション後半）
+- Preview検証で発覚した問題と対応:
+  1. PreviewでPOSTが全て403 → middleware ALLOWED_ORIGINS に VERCEL_URL/VERCEL_BRANCH_URL（preview時のみ）を追加
+  2. AI総評の対象を5→12ページに拡張（monthly/rankingHistory/grid/searchQuery/reviewCount/reviewDelta/language追加）
+  3. 口コミ件数言及の禁止ルールに例外2フィールド（reviewCountComment/reviewDeltaComment）のみ解禁
+  4. 口コミ件数推移・月間増加数ページでAI総評が中央寄せに縮む → alignSelf:stretch で修正
+- PDF実物レビュー（patty rôti 2026/6）で発覚したAI文面の問題と対応:
+  1. レポートに無いKW「一社 カフェ」への言及 → report_display_settings.kw_visibility でAIに渡すKWをフィルタ（NFC/NFD両形でIN検索。shop_idは未正規化保存のため）＋造語禁止をプロンプト明記
+  2. 順位変動(P6)と順位推移(P7)の内容重複 → 複数月推移系列【キーワード順位の推移】をAIに追加提供し、P7は「系列のみ根拠・月名必須・当月変動禁止」に
+  3. 圏外転落より軽微な下落を優先して言及 → 圏外転落を最優先で言及するようルール化
+- 再分析→PDF再検証で3点すべて解消を確認（造語ゼロ・P6/P7別内容・圏外転落言及）
+- main へマージ（cb292f8）→ 本番デプロイ。既存店舗のAI総評欄は再分析まで「未設定」表示
+
+### 次の機能（承認済み・未着手）
+- 多地点順位チェックを「斜め4地点のみ（中心なし）」に統一
+- 距離間隔を店舗ごとに 500m/1km/2km/3km/4km/5km から設定可能に
+- 各点は店舗から正確に指定距離r（斜めNE/NW/SE/SW配置）。中心順位はシート順位フォールバックで代用
+- コスト: 7×7 ¥235/KW → 4地点 ¥19.2/KW（SKU移行後¥3）
