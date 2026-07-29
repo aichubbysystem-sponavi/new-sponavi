@@ -1109,8 +1109,10 @@ export default function ReportClient({
     if (isEmpty && !isEditingThis && !isLoggedIn) return null;
     return (
       // 中身が無い/編集中のブロックはPDFに出さない（メモ欄と同じ方針）
+      // alignSelf:stretch — 親が alignItems:center の縦フレックス（口コミ件数推移・月間増加数）だと
+      // 幅指定の無い子は内容幅まで縮んで中央寄せされるため、明示的に全幅へ伸ばす
       <div className={!isEmpty && !isEditingThis ? undefined : "no-print"}
-        style={{ marginTop: 10, borderTop: "1px solid #e5e7eb", paddingTop: 8, flexShrink: 0 }}>
+        style={{ marginTop: 10, borderTop: "1px solid #e5e7eb", paddingTop: 8, flexShrink: 0, alignSelf: "stretch", width: "100%" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
           <span style={{ fontSize: 13, fontWeight: 700, color: "#0f3460" }}>{label}</span>
           {isLoggedIn && (
