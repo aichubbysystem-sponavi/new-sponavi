@@ -1,0 +1,77 @@
+## 【2026-07-29〜30】セッション総括: AI総評のページ別配置／4地点計測＋コスト削減／口コミ競合比較
+
+※詳細な経緯は「2026-07-29_レポートAI総評のページ別配置.txt」「2026-07-30_口コミ競合比較ページ.txt」参照。本ファイルはセッション総括。
+
+### 決定事項
+- 「AIによるコメント」独立ページを廃止し、AI総評を全12データページの末尾に編集可能な形で配置。総括（改善策）→メモを最終2ページに再構成
+- Claudeの出力を「analysis配列3項目（自由選択）」からページ単位の個別フィールド（13種）に再設計（どのページの話か機械的に保証するため。文字列マッチでの振り分けは推測になるので不採用）
+- 多地点順位計測を全店舗「斜め4地点」（gridSize=2）に統一。中心点（店舗自身）は計測せず、店舗中心の順位はシート記録へフォールバック
+- 距離（店舗中心から4地点まで）と向き（15度刻み回転）を店舗ごとに設定・永続化。一括計測も店舗別設定で実行
+- place_id一括取得でSKU竹→梅移行を完遂（自動移行が店名装飾のせいで2/605で停止していたため）
+- 口コミ件数への言及禁止ルールに例外を新設: reviewCountComment / reviewDeltaComment / competitorComment の3欄のみ解禁。他欄は従来どおり禁止
+- 口コミ競合比較はメインKW×周辺3km上位20店舗を月次スナップショット保存（過去に遡れないため取得日を明記）
+- 完全自由な360度配置（③案）は見送り（すすきの等の密集地で相乗り消失＋1km圏では効果が薄いため）。15度刻み回転（②案）を採用（社長承認済み）
+
+### 変更内容（具体的に）
+■ src/app/api/report/analyze/route.ts
+- プロンプト出力をページ別13フィールドに再設計（monthly/map/search/reactions/keyword/rankingHistory/grid/searchQuery/reviewCount/reviewDelta/language/competitor + reviews[]/actions[]）
+- AIに渡すKWを report_display_settings.kw_visibility でフィルタ（NFC/NFD両形でIN検索）。造語・リスト外店名の使用禁止をプロンプト明記
+- 複数月順位推移【キーワード順位の推移】・多地点グリッド統計・口コミ累計推移・競合比較サマリーを新たにAIへ提供
+- page_comments(jsonb) 保存。旧comments も後方互換で維持。centerCellガード適用
+■ src/app/report/[shopId]/client.tsx
+- AIコメント独立ページ削除、renderPageComment() で12ページ末尾＋競合比較ページにスニペット、総括・メモ独立ページ新設
+- 口コミ競合比較スライド新設（#/店舗名/評価/口コミ数/差分・自店ハイライト・取得日表記）。表示設定ON/OFF・totalPages連動
+- centerCellガード（unifiedRankingHistory・マップ中心）。計測地点セルは gridSize=2 を「4地点」表記
+■ src/app/grid-ranking/page.tsx
+- グリッドサイズ選択UI撤去→4地点固定。距離6種・向き6種のボタン（店舗ごとに保存・DATA_OP権限ゲート）
+- 単店舗計測＋バッチ2経路（いつもの店舗/全店舗）を generate4Points＋店舗別設定に。サブKWの3×3→7×7推定パス廃止
+- place_id一括取得ボタン（費用confirm・進捗・スキップ一覧・カーソルページング）
+■ 新規ファイル
+- src/lib/grid-utils.ts(+test): generate4Points（方位角ベース・各点ちょうどr・回転対応）
+- src/lib/competitor-fetch.ts: 競合取得＋月次保存（月1回課金ガード・place_id自店特定）
+- src/app/api/report/update-page-comments/route.ts / grid-interval/route.ts（距離・向き両対応、店舗名キー）/ place-id-backfill/route.ts
+■ その他
+- src/lib/report-utils.ts(+test): centerCell（偶数グリッド→undefined）
+- src/lib/report-data.ts: PageComments/CompetitorComparison型。report-api.ts/spreadsheet.ts: 2経路配線
+- src/middleware.ts: Preview一時URL（VERCEL_URL/VERCEL_BRANCH_URL・preview時のみ）をCSRF許可に追加
+- src/app/report/[shopId]/chart-options.ts: aspectRatio 2.2→2.5。shop-provider.tsx: プリセット既定gridSize 7→2
+- src/app/api/report/grid-export/route.ts: 偶数グリッドは圏内平均を出力。grid-ranking-presets/route.ts: 見積を4×KW数に
+■ SQL（すべて本番実行済み）
+- 2026-07-29_add_page_comments.sql（report_analysis.page_comments jsonb）
+- 2026-07-29_add_grid_interval.sql（shops.grid_interval_m int）
+- 2026-07-29_add_grid_angle.sql（shops.grid_angle_deg int）
+- 2026-07-30_competitor_reviews.sql（competitor_reviews表＋RLS authenticated SELECT）
+
+### 数値・設定値
+- 計測: 4地点固定（POINTS_PER_KW=4）。距離 500/1000/2000/3000/4000/5000m（既定1000）。向き 0/15/30/45/60/75度（既定0=斜め、45=十字）
+- 単価: 店名照合Pro ¥4.8/req → ID照合Essentials ¥0.75/req。1地点=1〜5req（発見ページ数）
+- 1KWあたり: 旧7×7 ¥235 → 4地点 ¥19.2 → SKU後 ¥3（1P¥0.75〜5P¥3.75/地点）
+- 241店舗×6KW×4地点: 1P¥4,338 / 3P¥13,014 / 5P¥21,690（旧単価なら1P¥27,763/5P¥138,816）
+- place_id: 605店舗中601取得済み（今回599件、スキップ4件、重複7組は全て同一店舗二重登録で正常）
+- 15度刻み回転が計測に効くのは距離3km以上目安（キャッシュ格子≈1kmに丸まるため。2km以下は45度単位が有効）
+- 競合比較: 半径3km・上位20件・¥4.8/店舗/月（同月2回目以降¥0）。FieldMask id,displayName,rating,userRatingCount
+- グラフaspectRatio 2.5。AI総評スニペット fontSize 13
+- キャッシュ相乗りの実態: 計測KW1,526中296（19%）が複数店舗共有。最大「札幌/すすきの キャバクラ」18店舗
+- grid_ranking_logs: 4,115行・4.4MB（DB全体389MB/8GB）。保存は無期限・自動削除なし（表示は直近13ヶ月/6ヶ月/50件）
+
+### 未解決・次回やること
+- テスト計測ログの削除（ユーザー作業: 名東区パスタの斜め2km・十字1km分を計測履歴から削除）
+- place_idスキップ4店舗（WHITE山科店・ラビットクリーン長野=座標ズレ、ぱいぱい那覇・福キタル名駅=座標なし）→ 座標修正後にボタン再実行（約¥19）
+- 8月の一括計測前に主要店舗の距離・向きを調整（既定は1km・斜め）→ 初の4地点フル運用で実測費用を確認
+- 過去月のAI総評は再分析まで「未設定」表示（強制再分析はしない方針）
+- 店舗横断の重複排除①（旧Puppeteer実装の移植）は本格対応せず（キャッシュ格子共有で部分対応中）
+- Vercelの死んだ重複プロジェクト（spotlight-navigators-projects/new-sponavi・全ビルド失敗）の整理と.vercelリンク先修正
+- originリモートURLにGitHub PAT直埋め（リポジトリはPublic）→ credential helper/SSHへの移行推奨
+
+### 注意点・ハマったこと
+- 【最重要】レポートは「当月は集計期間中→常に前月（確定月）を表示」する仕様。「表示月==当月なら取得」という条件は一生成立しない（競合比較で実際に踏んだ。取得条件を当月or前月に修正）
+- 偶数グリッドで Math.floor(gridSize/2)=1 → (1,1)=南東の点を「中心」と誤認する罠。centerCell（偶数→undefined）で5箇所ガード
+- report_display_settings.shop_id は decodeURIComponent しただけの未正規化店名（NFD罠）。NFC/NFD両形でIN検索が必要（reviews.shop_nameと同型）
+- 店名装飾（「-パティロティ-」等）のせいで計測中の「完全一致でID自動保存」がほぼ発動せず、SKU移行が2/605で停止していた（シート上は「自動移行中✅」だった）
+- Preview一時URLからのPOSTはCSRFで全403（保存系の検証不能）→ VERCEL_URLをpreview時のみ許可
+- .vercelのリンク先が別チームの死んだ重複プロジェクトで、実本番は aichubbysystem-6689s-projects/new-sponavi（CLIからアクセス不可。Vercel設定確認はダッシュボードで）
+- mainブランチ=即本番デプロイ（ステージングなし）。UI変更はfeatureブランチ→Preview検証→マージの手順を厳守
+- propsを useState 初期値にすると月切替で前の値が残留（ReportClientはアンマウントされない）→ props変化時のuseEffect同期が必須
+- 競合比較テーブルの自店口コミ数はGoogle現在値（例:243件）でヘッダーの確定月値（231件）と異なる=仕様。取得日表記で明示
+- grid-interval APIは店舗名キー（selectedShopIdはGo API IDでSupabase IDと不一致のため）
+- pdf-parse v2はPDFParseクラスAPI（旧v1の関数呼びは不可）。Supabase直結はpooler経由（aws-1-ap-northeast-1.pooler.supabase.com / postgres.kxxwspavskhhjtiixcep。db.*.supabase.coはIPv6でタイムアウト）
