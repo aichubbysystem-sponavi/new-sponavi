@@ -182,6 +182,8 @@ export default function GridRankingPage() {
   const [allShopsCoordResult, setAllShopsCoordResult] = useState("");
   const [allShopsKwSyncing, setAllShopsKwSyncing] = useState(false);
   const [allShopsKwResult, setAllShopsKwResult] = useState("");
+  const [placeIdSyncing, setPlaceIdSyncing] = useState(false);
+  const [placeIdResult, setPlaceIdResult] = useState("");
 
   // KW未取得一覧
   const [kwMissingShops, setKwMissingShops] = useState<{ shopId: string; shopName: string; checkedAt: string }[]>([]);
@@ -1166,13 +1168,54 @@ export default function GridRankingPage() {
                 >
                   {allShopsKwSyncing ? "KW取得中..." : `KW一括取得（${allShopsFiltered.length}店舗）`}
                 </button>
+
+                {/* place_id一括取得（SKU竹→梅移行。単価¥4.8→¥0.75の前提整備） */}
+                <button
+                  onClick={async () => {
+                    if (placeIdSyncing) return;
+                    if (!isPresident) { alert("place_id一括取得は社長アカウントのみ可能です"); return; }
+                    if (!confirm(
+                      "未取得店舗のplace_id（Google店舗ID）を一括取得します。\n" +
+                      "費用: 1店舗あたり約¥4.8（一度きり）。全店未取得なら合計約¥2,900。\n\n" +
+                      "取得後は順位計測の単価が ¥4.8 → ¥0.75（▲84%）になります。\n" +
+                      "店名・座標が曖昧な店舗は安全のためスキップして報告します。\n\nよろしいですか？"
+                    )) return;
+                    setPlaceIdSyncing(true);
+                    let totalMatched = 0, totalSkipped = 0, cursor = "";
+                    const skippedNames: string[] = [];
+                    try {
+                      for (let guard = 0; guard < 100; guard++) {
+                        setPlaceIdResult(`place_id取得中... 取得${totalMatched}件 / スキップ${totalSkipped}件`);
+                        window.dispatchEvent(new Event("batch-activity"));
+                        const res = await api.post("/api/report/place-id-backfill", { limit: 15, afterName: cursor }, { timeout: 60000 });
+                        const d = res.data || {};
+                        totalMatched += d.matched || 0;
+                        totalSkipped += d.skipped || 0;
+                        for (const item of (d.details || [])) {
+                          if (item.status === "skipped") skippedNames.push(`${item.name}（${item.reason}）`);
+                        }
+                        if (!d.processed || !d.lastName) break;
+                        cursor = d.lastName;
+                      }
+                      setPlaceIdResult(`✓ ID取得${totalMatched}件 / スキップ${totalSkipped}件${skippedNames.length > 0 ? ` — スキップ: ${skippedNames.slice(0, 5).join("、")}${skippedNames.length > 5 ? ` 他${skippedNames.length - 5}件` : ""}` : ""}`);
+                    } catch (e: any) {
+                      setPlaceIdResult(`エラー: ${e?.message || "不明"}（取得済み${totalMatched}件は保存されています）`);
+                    } finally { setPlaceIdSyncing(false); }
+                  }}
+                  disabled={!can(role, "PAID_OP") || placeIdSyncing || allShopsBatchRunning}
+                  title={!can(role, "PAID_OP") ? PERMISSION_DENIED_HINT.PAID_OP : "順位計測の単価を¥4.8→¥0.75にするためのID一括取得（一度きり・約¥2,900）"}
+                  className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${placeIdSyncing ? "bg-slate-100 text-slate-400" : "bg-slate-100 text-emerald-600 hover:bg-emerald-50 border border-emerald-200"}`}
+                >
+                  {placeIdSyncing ? "place_id取得中..." : "place_id一括取得（単価▲84%化）"}
+                </button>
               </div>
 
               {/* ステータス表示 */}
-              {(allShopsCoordResult || allShopsKwResult) && (
+              {(allShopsCoordResult || allShopsKwResult || placeIdResult) && (
                 <div className="flex gap-3 text-xs flex-wrap">
                   {allShopsCoordResult && <span className={allShopsCoordResult.includes("エラー") ? "text-red-500" : "text-blue-500"}>{allShopsCoordResult}</span>}
                   {allShopsKwResult && <span className={allShopsKwResult.includes("見つからず") ? "text-orange-500" : "text-purple-500"}>{allShopsKwResult}</span>}
+                  {placeIdResult && <span className={placeIdResult.includes("エラー") ? "text-red-500" : "text-emerald-600"}>{placeIdResult}</span>}
                 </div>
               )}
 
