@@ -28,13 +28,18 @@ interface GridLog {
   measured_at: string;
 }
 
-const GRID_SIZES = [3, 5, 7, 9] as const;
+// 計測は全店舗「斜め4地点」（gridSize=2）に統一（2026-07-29 コスト削減: 7×7比▲92%）
+const GRID_SIZE_4POINT = 2;
+const POINTS_PER_KW = 4;
 const INTERVALS = [
   { label: "500m", value: 500 },
   { label: "1km", value: 1000 },
   { label: "2km", value: 2000 },
+  { label: "3km", value: 3000 },
+  { label: "4km", value: 4000 },
   { label: "5km", value: 5000 },
 ];
+const DEFAULT_INTERVAL = 1000;
 
 function rankColor(rank: number): string {
   if (rank <= 0) return "#6B7280"; // 圏外 = グレー
@@ -80,29 +85,25 @@ function estimateCost(totalPoints: number): { max: number; afterId: number } {
     afterId: Math.round(totalPoints * 2 * YEN_PER_REQ_ESSENTIALS),
   };
 }
-// 1店舗の計測地点数: メインKW 7×7=49 + サブKW 3×3=9×(KW数-1)
+// 1店舗の計測地点数: 全KW共通で斜め4地点
 function pointsPerShop(kwCount: number): number {
-  return 49 + 9 * Math.max(0, kwCount - 1);
+  return POINTS_PER_KW * Math.max(1, kwCount);
 }
 
-/** 中心座標からグリッド地点を生成 */
-function generateGrid(
-  centerLat: number,
-  centerLng: number,
-  gridSize: number,
-  intervalM: number
-): GridPoint[] {
+/**
+ * 店舗中心から距離rの「斜め4地点」（NE/NW/SE/SW）を生成する。
+ * 各点は店舗からちょうど r メートル（緯度・経度オフセット各 ±r/√2）。
+ * row/col は 2×2 グリッドとして保存（row=0が北側、col=0が西側）。中心点は含まない。
+ */
+function generate4Points(centerLat: number, centerLng: number, radiusM: number): GridPoint[] {
+  const d = radiusM / Math.SQRT2; // 各軸オフセット（斜め距離がちょうどrになる）
+  const latDeg = d / 111320;
+  const lngDeg = d / (111320 * Math.cos((centerLat * Math.PI) / 180));
   const points: GridPoint[] = [];
-  const half = Math.floor(gridSize / 2);
-  // 緯度1度 ≈ 111,320m
-  const latDeg = intervalM / 111320;
-  // 経度1度 ≈ 111,320 * cos(lat) m
-  const lngDeg = intervalM / (111320 * Math.cos((centerLat * Math.PI) / 180));
-
-  for (let row = 0; row < gridSize; row++) {
-    for (let col = 0; col < gridSize; col++) {
-      const dRow = half - row; // row=0が北端（緯度が大きい）
-      const dCol = col - half;
+  for (let row = 0; row < 2; row++) {
+    for (let col = 0; col < 2; col++) {
+      const dRow = row === 0 ? 1 : -1;  // row=0が北側（緯度が大きい）
+      const dCol = col === 0 ? -1 : 1;  // col=0が西側
       points.push({
         row,
         col,
@@ -147,8 +148,9 @@ export default function GridRankingPage() {
   const { gate, PasswordGateModal } = usePasswordGate();
   const [keyword, setKeyword] = useState("");
   const [savedKeywords, setSavedKeywords] = useState<string[]>([]);
-  const [gridSize, setGridSize] = useState<number>(7);
-  const [interval, setInterval] = useState(1000);
+  // interval = 選択中店舗の計測距離（shops.grid_interval_m と同期。店舗ごとに永続化）
+  const [interval, setInterval] = useState(DEFAULT_INTERVAL);
+  const [intervalSaving, setIntervalSaving] = useState(false);
   const [measuring, setMeasuring] = useState(false);
   const [progress, setProgress] = useState("");
   const [gridResults, setGridResults] = useState<GridPoint[]>([]);
@@ -242,7 +244,7 @@ export default function GridRankingPage() {
         }
       } catch {}
       // プリセット登録
-      await api.post("/api/report/grid-ranking-presets", { shops: [{ shopId, shopName, keyword: bestKw, gridSize: size || 7 }] });
+      await api.post("/api/report/grid-ranking-presets", { shops: [{ shopId, shopName, keyword: bestKw, gridSize: size || GRID_SIZE_4POINT }] });
       await refreshPresets();
       setShowPresetPanel(true);
     } finally {
@@ -302,6 +304,31 @@ export default function GridRankingPage() {
         }, () => {});
     }, () => {});
   }, [selectedShopId, selectedShop]);
+
+  // 店舗ごとの計測距離設定を読込（shops.grid_interval_m。店舗切替で同期）
+  useEffect(() => {
+    const shopName = (selectedShop as any)?.name;
+    if (!shopName) return;
+    let cancelled = false;
+    setInterval(DEFAULT_INTERVAL);
+    api.get(`/api/report/grid-interval?shopName=${encodeURIComponent(shopName)}`)
+      .then(res => { if (!cancelled && res.data?.intervalM) setInterval(res.data.intervalM); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [selectedShopId, selectedShop]);
+
+  // 距離ボタン変更: 即時反映＋店舗設定として永続化
+  const changeInterval = async (value: number) => {
+    setInterval(value);
+    const shopName = (selectedShop as any)?.name;
+    if (!shopName) return;
+    setIntervalSaving(true);
+    try {
+      await api.put("/api/report/grid-interval", { shopName, intervalM: value });
+    } catch {} finally {
+      setIntervalSaving(false);
+    }
+  };
 
   // 保存済みキーワードをDBから読み込み
   useEffect(() => {
@@ -495,7 +522,7 @@ export default function GridRankingPage() {
     abortRef.current = false;
     setSelectedHistory(null);
 
-    const points = generateGrid(shopLat, shopLng, gridSize, interval);
+    const points = generate4Points(shopLat, shopLng, interval);
     setGridResults(points);
     renderMarkers(points);
 
@@ -517,12 +544,13 @@ export default function GridRankingPage() {
           keyword: keyword.trim(),
           lat: pt.lat,
           lng: pt.lng,
-          interval, // 格子幅を間隔に合わせる（細間隔での潰れ防止）
-          center: pt.row === Math.floor(gridSize / 2) && pt.col === Math.floor(gridSize / 2),
+          interval, // キャッシュ格子幅の調整に使用
+          // 中心点は計測しないため、1点目をplace_id失効チェックのトリガーにする
+          center: i === 0,
         });
-        pt.rank = res.data.rank || -1; // 0 = 見つからない → -1 (圏外)
+        pt.rank = res.data.rank || 0; // 0 = 圏外（バッチ計測と同じセンチネルに統一）
       } catch {
-        pt.rank = -1;
+        pt.rank = 0;
       }
 
       completed++;
@@ -544,7 +572,7 @@ export default function GridRankingPage() {
             row: p.row,
             col: p.col,
           })),
-          gridSize,
+          gridSize: GRID_SIZE_4POINT,
           interval,
         });
         fetchHistory();
@@ -695,7 +723,7 @@ export default function GridRankingPage() {
                       <span className={`w-2 h-2 rounded-full flex-shrink-0 ${hasCoord && (p.keyword || allKws.length > 0) ? "bg-emerald-500" : hasCoord ? "bg-yellow-400" : "bg-red-400"}`}
                         title={!hasCoord ? "座標なし" : !(p.keyword || allKws.length > 0) ? "KW未設定" : "準備OK"} />
                       <span className="text-sm font-medium text-slate-800 truncate">{p.shop_name}</span>
-                      <span className="text-xs text-slate-400 flex-shrink-0">{p.grid_size}x{p.grid_size}</span>
+                      <span className="text-xs text-slate-400 flex-shrink-0">{p.grid_size === 2 ? "4地点" : `${p.grid_size}x${p.grid_size}`}</span>
                       {measuredThisMonth
                         ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-600 font-semibold flex-shrink-0">{new Date().getMonth() + 1}月済</span>
                         : <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-600 font-semibold flex-shrink-0">未計測</span>
@@ -940,9 +968,14 @@ export default function GridRankingPage() {
                     const p = targetPresets[i];
                     try {
                       let lat = 0, lng = 0;
+                      let shopInterval = DEFAULT_INTERVAL;
                       try {
-                        const { data: coordRow } = await supabase.from("shops").select("gbp_latitude, gbp_longitude").eq("name", p.shop_name).not("gbp_latitude", "is", null).gt("gbp_latitude", 0).limit(1).maybeSingle();
-                        if (coordRow) { lat = coordRow.gbp_latitude || 0; lng = coordRow.gbp_longitude || 0; }
+                        const { data: coordRow } = await supabase.from("shops").select("gbp_latitude, gbp_longitude, grid_interval_m").eq("name", p.shop_name).not("gbp_latitude", "is", null).gt("gbp_latitude", 0).limit(1).maybeSingle();
+                        if (coordRow) {
+                          lat = coordRow.gbp_latitude || 0;
+                          lng = coordRow.gbp_longitude || 0;
+                          shopInterval = coordRow.grid_interval_m || DEFAULT_INTERVAL;
+                        }
                       } catch {}
                       if (!lat || !lng) { skipped++; continue; }
 
@@ -951,20 +984,13 @@ export default function GridRankingPage() {
                         : (p.keyword ? [p.keyword] : []);
                       if (keywords.length === 0) { skipped++; continue; }
 
-                      // メインKW = プリセットのkeyword or 最初のKW
-                      const mainKw = p.keyword || keywords[0];
-
+                      // 全KW共通: 店舗設定の距離で斜め4地点計測（メイン/サブの区別なし）
                       for (let ki = 0; ki < keywords.length; ki++) {
                         const kw = keywords[ki];
-                        const isMain = kw === mainKw;
-                        const measureSize = isMain ? (p.grid_size || 7) : 3;
-
-                        // 実測グリッド生成
-                        const points = generateGrid(lat, lng, measureSize, 1000);
+                        const points = generate4Points(lat, lng, shopInterval);
                         for (let j = 0; j < points.length; j++) {
                           const pt = points[j];
-                          const label = isMain ? "7x7" : "3x3";
-                          setBatchProgress(`${i + 1}/${targetPresets.length} ${p.shop_name} [KW ${ki + 1}/${keywords.length} ${label}] (${j + 1}/${points.length})`);
+                          setBatchProgress(`${i + 1}/${targetPresets.length} ${p.shop_name} [KW ${ki + 1}/${keywords.length} 4地点] (${j + 1}/${points.length})`);
                           window.dispatchEvent(new Event("batch-activity"));
                           let res: any = null;
                           try {
@@ -972,8 +998,9 @@ export default function GridRankingPage() {
                               try {
                                 res = await api.post("/api/report/grid-ranking", {
                                   shopId: p.shop_id, keyword: kw, lat: pt.lat, lng: pt.lng,
-                                  interval: 1000,
-                                  center: pt.row === Math.floor(measureSize / 2) && pt.col === Math.floor(measureSize / 2),
+                                  interval: shopInterval,
+                                  // 中心点は計測しないため、1点目をplace_id失効チェックのトリガーにする
+                                  center: j === 0,
                                 }, { timeout: 15000 });
                                 break;
                               } catch (e: any) {
@@ -989,50 +1016,9 @@ export default function GridRankingPage() {
                           await new Promise(r => setTimeout(r, res?.data?.cached ? 50 : 1000));
                         }
 
-                        if (isMain) {
-                          // メインKW: 実測結果をそのまま保存
-                          await api.put("/api/report/grid-ranking", {
-                            shopId: p.shop_id, keyword: kw, gridResults: points, gridSize: measureSize, interval: 1000,
-                          });
-                        } else {
-                          // サブKW: 3×3実測→7×7推定生成してから保存
-                          // 3×3の実測結果を7×7の中央3×3（row:2-4, col:2-4）にマッピング
-                          const centerPoints = points.map(pt => ({
-                            row: pt.row + 2, // 3×3の(0,0)→7×7の(2,2)
-                            col: pt.col + 2,
-                            rank: pt.rank,
-                          }));
-                          // API経由で7×7推定グリッド生成
-                          const measuredSet = new Set(centerPoints.map((cp: any) => `${cp.row},${cp.col}`));
-                          try {
-                            const genRes = await api.post("/api/report/grid-ranking-generate", {
-                              shopId: p.shop_id,
-                              shopName: p.shop_name,
-                              keyword: kw,
-                              month: `${new Date().getFullYear()}/${new Date().getMonth() + 1}`,
-                              centerPoints,
-                              useFrom3x3: true,
-                            });
-                            // grid_ranking_logsにも保存（7×7の座標付き+推定フラグ）
-                            const fullGrid = generateGrid(lat, lng, 7, 1000);
-                            const generated = genRes.data?.results || [];
-                            for (const g of generated) {
-                              const idx = fullGrid.findIndex((fp: GridPoint) => fp.row === g.row && fp.col === g.col);
-                              if (idx >= 0) {
-                                fullGrid[idx].rank = g.rank;
-                                fullGrid[idx].estimated = !measuredSet.has(`${g.row},${g.col}`);
-                              }
-                            }
-                            await api.put("/api/report/grid-ranking", {
-                              shopId: p.shop_id, keyword: kw, gridResults: fullGrid, gridSize: 7, interval: 1000,
-                            });
-                          } catch {
-                            // 推定生成に失敗したら3×3の実測結果だけ保存
-                            await api.put("/api/report/grid-ranking", {
-                              shopId: p.shop_id, keyword: kw, gridResults: points, gridSize: 3, interval: 1000,
-                            });
-                          }
-                        }
+                        await api.put("/api/report/grid-ranking", {
+                          shopId: p.shop_id, keyword: kw, gridResults: points, gridSize: GRID_SIZE_4POINT, interval: shopInterval,
+                        });
                         totalKws++;
                       }
                       completed++;
@@ -1314,28 +1300,25 @@ export default function GridRankingPage() {
                     const s = allTargetShops[i];
                     const shopName = s.name || s.id;
                     try {
-                      // 座標取得
-                      const { data: coordRow } = await supabase.from("shops").select("gbp_latitude, gbp_longitude").eq("name", s.name || s.id).not("gbp_latitude", "is", null).gt("gbp_latitude", 0).limit(1).maybeSingle();
+                      // 座標＋店舗別計測距離を取得
+                      const { data: coordRow } = await supabase.from("shops").select("gbp_latitude, gbp_longitude, grid_interval_m").eq("name", s.name || s.id).not("gbp_latitude", "is", null).gt("gbp_latitude", 0).limit(1).maybeSingle();
                       if (!coordRow?.gbp_latitude) { skipped++; continue; }
                       const lat = coordRow.gbp_latitude;
                       const lng = coordRow.gbp_longitude;
+                      const shopInterval = coordRow.grid_interval_m || DEFAULT_INTERVAL;
 
                       // KW取得
                       const kwRes = await supabase.from("shop_keywords").select("keywords").eq("shop_id", s.id).maybeSingle();
                       const keywords: string[] = kwRes?.data?.keywords || [];
                       if (keywords.length === 0) { skipped++; continue; }
 
-                      const mainKw = keywords[0];
+                      // 全KW共通: 店舗設定の距離で斜め4地点計測（メイン/サブの区別なし）
                       for (let ki = 0; ki < keywords.length; ki++) {
                         const kw = keywords[ki];
-                        const isMain = kw === mainKw;
-                        const measureSize = isMain ? 7 : 3;
-
-                        const points = generateGrid(lat, lng, measureSize, 1000);
+                        const points = generate4Points(lat, lng, shopInterval);
                         for (let j = 0; j < points.length; j++) {
                           const pt = points[j];
-                          const label = isMain ? "7x7" : "3x3";
-                          setAllShopsBatchProgress(`${i + 1}/${allTargetShops.length} ${shopName} [KW ${ki + 1}/${keywords.length} ${label}] (${j + 1}/${points.length})`);
+                          setAllShopsBatchProgress(`${i + 1}/${allTargetShops.length} ${shopName} [KW ${ki + 1}/${keywords.length} 4地点] (${j + 1}/${points.length})`);
                           window.dispatchEvent(new Event("batch-activity"));
                           let res: any = null;
                           try {
@@ -1343,8 +1326,9 @@ export default function GridRankingPage() {
                               try {
                                 res = await api.post("/api/report/grid-ranking", {
                                   shopId: s.id, keyword: kw, lat: pt.lat, lng: pt.lng,
-                                  interval: 1000,
-                                  center: pt.row === Math.floor(measureSize / 2) && pt.col === Math.floor(measureSize / 2),
+                                  interval: shopInterval,
+                                  // 中心点は計測しないため、1点目をplace_id失効チェックのトリガーにする
+                                  center: j === 0,
                                 }, { timeout: 15000 });
                                 break;
                               } catch (e: any) {
@@ -1360,34 +1344,9 @@ export default function GridRankingPage() {
                           await new Promise(r => setTimeout(r, res?.data?.cached ? 50 : 1000));
                         }
 
-                        if (isMain) {
-                          await api.put("/api/report/grid-ranking", {
-                            shopId: s.id, keyword: kw, gridResults: points, gridSize: measureSize, interval: 1000,
-                          });
-                        } else {
-                          const centerPoints = points.map(pt => ({ row: pt.row + 2, col: pt.col + 2, rank: pt.rank }));
-                          try {
-                            const genRes = await api.post("/api/report/grid-ranking-generate", {
-                              shopId: s.id, shopName, keyword: kw,
-                              month: `${new Date().getFullYear()}/${new Date().getMonth() + 1}`,
-                              centerPoints, useFrom3x3: true,
-                            });
-                            const fullGrid = generateGrid(lat, lng, 7, 1000);
-                            const measuredSet = new Set(centerPoints.map(cp => `${cp.row},${cp.col}`));
-                            const generated = genRes.data?.results || [];
-                            for (const g of generated) {
-                              const idx = fullGrid.findIndex(fp => fp.row === g.row && fp.col === g.col);
-                              if (idx >= 0) { fullGrid[idx].rank = g.rank; fullGrid[idx].estimated = !measuredSet.has(`${g.row},${g.col}`); }
-                            }
-                            await api.put("/api/report/grid-ranking", {
-                              shopId: s.id, keyword: kw, gridResults: fullGrid, gridSize: 7, interval: 1000,
-                            });
-                          } catch {
-                            await api.put("/api/report/grid-ranking", {
-                              shopId: s.id, keyword: kw, gridResults: points, gridSize: 3, interval: 1000,
-                            });
-                          }
-                        }
+                        await api.put("/api/report/grid-ranking", {
+                          shopId: s.id, keyword: kw, gridResults: points, gridSize: GRID_SIZE_4POINT, interval: shopInterval,
+                        });
                         totalKws++;
                       }
                       completed++;
@@ -1486,37 +1445,24 @@ export default function GridRankingPage() {
             </button>
           </div>
 
-          {/* グリッドサイズ */}
+          {/* 計測地点（斜め4地点固定） */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              グリッドサイズ ({gridSize}x{gridSize} = {gridSize * gridSize}地点)
-            </label>
-            <div className="flex gap-2">
-              {GRID_SIZES.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setGridSize(s)}
-                  disabled={measuring}
-                  className={`px-3 py-2 rounded-lg text-sm font-medium transition ${
-                    gridSize === s
-                      ? "bg-[#003D6B] text-white"
-                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                  }`}
-                >
-                  {s}x{s}
-                </button>
-              ))}
-            </div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">計測地点</label>
+            <p className="px-3 py-2 rounded-lg bg-gray-50 text-sm text-gray-600 border border-gray-200">
+              店舗中心から指定距離の斜め4地点（NE/NW/SE/SW）
+            </p>
           </div>
 
-          {/* 距離間隔 */}
+          {/* 距離（店舗中心から各計測地点まで。店舗ごとに保存） */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">距離間隔</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              距離（店舗中心から）{intervalSaving && <span className="ml-2 text-xs text-gray-400">保存中...</span>}
+            </label>
             <div className="flex gap-2">
               {INTERVALS.map((iv) => (
                 <button
                   key={iv.value}
-                  onClick={() => setInterval(iv.value)}
+                  onClick={() => changeInterval(iv.value)}
                   disabled={measuring}
                   className={`px-3 py-2 rounded-lg text-sm font-medium transition ${
                     interval === iv.value
@@ -1528,6 +1474,7 @@ export default function GridRankingPage() {
                 </button>
               ))}
             </div>
+            <p className="mt-1 text-xs text-gray-400">この設定は店舗ごとに保存され、一括計測でも使用されます</p>
           </div>
         </div>
 
@@ -1535,7 +1482,7 @@ export default function GridRankingPage() {
         {shopLat ? (
           <p className="text-xs text-gray-400">
             店舗座標: {shopLat.toFixed(6)}, {shopLng.toFixed(6)} ／
-            計測範囲: 約{((gridSize - 1) * interval) / 1000}km四方
+            計測地点: 店舗から{interval >= 1000 ? `${interval / 1000}km` : `${interval}m`}の斜め4地点
           </p>
         ) : (
           <div className="flex items-center gap-2">
@@ -1574,9 +1521,9 @@ export default function GridRankingPage() {
 
         {/* API費用目安 */}
         <p className="text-xs text-gray-400">
-          💰 API費用目安（1KW・{gridSize * gridSize}地点）: 初回店舗 最大 ¥
-          {estimateCost(gridSize * gridSize).max.toLocaleString()} ／ ID取得済み店舗 約¥
-          {estimateCost(gridSize * gridSize).afterId.toLocaleString()} ／ 同月の再計測 ¥0
+          💰 API費用目安（1KW・{POINTS_PER_KW}地点）: 初回店舗 最大 ¥
+          {estimateCost(POINTS_PER_KW).max.toLocaleString()} ／ ID取得済み店舗 約¥
+          {estimateCost(POINTS_PER_KW).afterId.toLocaleString()} ／ 同月の再計測 ¥0
         </p>
 
         {!isPresident && (
@@ -1607,7 +1554,7 @@ export default function GridRankingPage() {
           {aborted && <span className="text-sm text-red-500">中断しました</span>}
           {selectedShopId && selectedShop && (
             <button
-              onClick={() => addToPreset(selectedShopId, (selectedShop as any).name || "", gridSize)}
+              onClick={() => addToPreset(selectedShopId, (selectedShop as any).name || "", GRID_SIZE_4POINT)}
               disabled={!can(role, "DATA_OP") || addingPreset}
               title={!can(role, "DATA_OP") ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
               className="bg-indigo-500 text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-indigo-600 transition disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1692,7 +1639,8 @@ export default function GridRankingPage() {
                         <td
                           key={`${pt.row}-${pt.col}`}
                           className={`w-12 h-12 text-center text-sm font-bold border ${rankBg(pt.rank)} ${
-                            pt.row === Math.floor(gridSize / 2) && pt.col === Math.floor(gridSize / 2)
+                            // 中心セル強調は奇数グリッド（過去の履歴表示）のみ。4地点計測に中心はない
+                            rows.length % 2 === 1 && pt.row === Math.floor(rows.length / 2) && pt.col === Math.floor(rows.length / 2)
                               ? "ring-2 ring-black ring-inset"
                               : ""
                           } ${pt.estimated ? "opacity-60" : ""}`}
@@ -1801,7 +1749,7 @@ export default function GridRankingPage() {
                             : <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-600 font-semibold">実測</span>;
                         })()}
                       </td>
-                      <td className="px-4 py-2.5">{log.grid_size}x{log.grid_size}</td>
+                      <td className="px-4 py-2.5">{log.grid_size === 2 ? "4地点" : `${log.grid_size}x${log.grid_size}`}</td>
                       <td className="px-4 py-2.5">
                         {log.interval_m >= 1000 ? `${log.interval_m / 1000}km` : `${log.interval_m}m`}
                       </td>

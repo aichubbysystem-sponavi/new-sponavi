@@ -216,6 +216,22 @@ export function splitCommentPages(
   return pages;
 }
 
+/**
+ * グリッド計測結果から中心セル（=店舗位置）を取得する。
+ * 偶数グリッド（斜め4地点計測 gridSize=2 など）には中心セルが存在しないため undefined を返す。
+ * ※ガード無しで Math.floor(gridSize/2) を使うと、gridSize=2 では (1,1)=南東の点を
+ *   誤って「中心」として拾ってしまう（2026-07-29 4地点計測導入時の罠）
+ */
+export function centerCell<T extends { row: number; col: number }>(
+  results: T[] | null | undefined,
+  gridSize: number,
+): T | undefined {
+  if (!results || results.length === 0) return undefined;
+  if (gridSize % 2 === 0) return undefined; // 偶数グリッドに中心は無い
+  const c = Math.floor(gridSize / 2);
+  return results.find(r => r.row === c && r.col === c);
+}
+
 /** diff表示の色 */
 export function diffColor(d: number | null): string {
   if (d === null) return "#ccc";

@@ -70,13 +70,11 @@ export async function GET(request: NextRequest) {
     (p as any).last_measurement = logMap.get(p.shop_id) || null;
   }
 
-  // 月額コスト見積もり（メインKW=full grid、サブKW=3×3=9地点）
+  // 月額コスト見積もり（全KW共通: 斜め4地点計測）
   let totalRequests = 0;
   for (const p of (data || [])) {
-    const size = p.grid_size || 7;
     const kwCount = Math.max(1, ((p as any).all_keywords || []).length);
-    // メイン1KW=full grid + サブKW=3×3(9地点)
-    totalRequests += size * size + Math.max(0, kwCount - 1) * 9;
+    totalRequests += 4 * kwCount;
   }
   const costPerRequest = 0.032;
   const freeCredit = 200;

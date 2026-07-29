@@ -9,6 +9,7 @@ import {
   reorderKpis,
   formatAIComment,
   splitCommentPages,
+  centerCell,
   diffColor,
   formatDiff,
   COLORS,
@@ -256,6 +257,38 @@ describe("diffColor / formatDiff", () => {
   it("nullは-", () => {
     expect(diffColor(null)).toBe("#ccc");
     expect(formatDiff(null)).toBe("-");
+  });
+});
+
+describe("centerCell", () => {
+  const grid = (size: number) => {
+    const pts: { row: number; col: number; rank: number }[] = [];
+    for (let r = 0; r < size; r++) for (let c = 0; c < size; c++) pts.push({ row: r, col: c, rank: r * size + c + 1 });
+    return pts;
+  };
+
+  it("奇数グリッド(7×7)は中心(3,3)を返す", () => {
+    const cell = centerCell(grid(7), 7);
+    expect(cell).toEqual({ row: 3, col: 3, rank: 3 * 7 + 3 + 1 });
+  });
+
+  it("奇数グリッド(3×3)は中心(1,1)を返す", () => {
+    expect(centerCell(grid(3), 3)).toEqual({ row: 1, col: 1, rank: 5 });
+  });
+
+  it("偶数グリッド(2×2=斜め4地点)は中心なし=undefined（(1,1)を誤って返さない）", () => {
+    expect(centerCell(grid(2), 2)).toBeUndefined();
+  });
+
+  it("空配列・null・undefinedはundefined", () => {
+    expect(centerCell([], 7)).toBeUndefined();
+    expect(centerCell(null, 7)).toBeUndefined();
+    expect(centerCell(undefined, 7)).toBeUndefined();
+  });
+
+  it("中心セルが結果に含まれない場合はundefined", () => {
+    const pts = grid(3).filter(p => !(p.row === 1 && p.col === 1));
+    expect(centerCell(pts, 3)).toBeUndefined();
   });
 });
 
