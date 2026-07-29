@@ -195,8 +195,8 @@ ${langStatsText || ""}
   "mapComment": "<strong>マップ表示が前月比+5%</strong>と回復傾向で、同業種平均を下回る水準",
   "searchComment": "Google検索は前月比+14%と回復傾向で、<strong>グループ平均を上回る水準</strong>を維持",
   "reactionComment": "ルート検索は<strong>+60%と大幅増加</strong>し、来店意欲の高まりがうかがえる",
-  "keywordComment": "主要キーワードが<strong>いずれも圏外に転落</strong>しており、オーガニック流入への影響が懸念される",
-  "rankingHistoryComment": "3ヶ月連続で順位を落としており、<strong>下降トレンドが定着</strong>しつつある",
+  "keywordComment": "「一社 イタリアン」「名東区 パスタ」が<strong>1位から圏外に転落</strong>しており、オーガニック流入への影響が懸念される",
+  "rankingHistoryComment": "「名東区 レストラン」は1月の11位から4月3位まで改善したが、<strong>直近2計測は下降</strong>に転じている",
   "gridComment": "9地点中<strong>圏外が5地点</strong>あり、駅北側の商圏を取りこぼしている",
   "searchQueryComment": "<strong>一般検索が92%</strong>を占め、新規顧客の発見チャネルとして機能している",
   "reviewCountComment": "累計件数は横ばいで、<strong>削除による目減り</strong>が新規投稿を相殺している",
@@ -220,9 +220,10 @@ ${langStatsText || ""}
 - 対応するデータが【】ブロックとして提供されていない項目は、推測で書かず必ず空文字""を返す
 - mapComment/searchComment/reactionComment: ${hasKpi ? "各KPIの前月比傾向を1文ずつ。同業種平均やグループ平均のデータがあれば「同業種平均を上回っている」「平均を下回る」等の比較を含める" : "口コミから推定した概況を1文ずつ"}。絶対値（147,422回等）は書かない
 - monthlyComment: 個別指標ではなく全体を俯瞰した1文。最も重要な変化または課題を1つだけ挙げる
-- keywordComment: ${hasKeywordData ? "当月の順位変動（圏外への転落、大幅な上昇・下落）に言及" : "キーワードデータが提供されていないため必ず空文字\"\"を返す"}
-- rankingHistoryComment: ${hasKeywordData ? "当月単体ではなく複数月にわたるトレンド（連続下降、底打ち、安定など）に言及。keywordCommentと同じ内容を書かない" : "キーワードデータが提供されていないため必ず空文字\"\"を返す"}
+- keywordComment: ${hasKeywordData ? "【キーワード順位】の当月変動について。**「圏外へ転落」したキーワードがあれば、他の変動より最優先で必ず言及する**（3ランク下落より圏外転落の方が重大）。圏外転落が無い場合のみ、下落幅の大きいものに言及する" : "キーワードデータが提供されていないため必ず空文字\"\"を返す"}
+- rankingHistoryComment: ${hasKeywordData ? "【キーワード順位の推移】の系列**のみ**を根拠に、複数月にわたるトレンド（連続下降/底打ち/安定/回復）を述べる。月名を1つ以上含めること。**当月だけの変動には触れない**（それはkeywordCommentの担当）。「下落が確認された」「監視が必要」のような、keywordCommentと区別がつかない表現は禁止" : "キーワードデータが提供されていないため必ず空文字\"\"を返す"}
 - gridComment: 【多地点グリッド計測】がある場合のみ。平均順位・圏外地点数から商圏の取りこぼし具合に言及
+- **キーワード名は【】ブロック内に記載されたものを一字一句そのまま使う。2つのキーワードを混ぜた造語（例:「一社 ランチ」と「名東区 カフェ」から「一社 カフェ」）や、記載の無いキーワードへの言及は絶対に禁止**
 - searchQueryComment: 【検索語句分析】がある場合のみ。指名検索/一般検索の比率とその意味に言及
 - reviewCountComment: 【口コミ累計件数の推移】がある場合のみ。累計が減っている月は削除・非表示が起きている旨を書く
 - reviewDeltaComment: 【口コミ月間増加ペース】がある場合のみ。獲得ペースが十分か不足かに言及
@@ -466,6 +467,20 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
       .select("shop_name, report_json")
       .in("shop_name", allNames);
     for (const c of (allCaches || [])) cacheMap.set(c.shop_name, c.report_json);
+  }
+
+  // 1-b. レポート表示設定を一括取得（キーワードの表示ON/OFF）
+  // レポートに描画されないKWをAIに渡すと「表に無いキーワードの総評」が生成され、
+  // 顧客向け資料の整合性が崩れるため、フロントと同じ条件でフィルタする
+  // （report_display_settings.shop_id は店舗名。display-settings/route.ts 参照）
+  const kwVisibilityMap = new Map<string, Record<string, boolean>>();
+  if (allNames.length > 0) {
+    const { data: dispRows, error: dispErr } = await supabase
+      .from("report_display_settings")
+      .select("shop_id, kw_visibility")
+      .in("shop_id", allNames);
+    if (dispErr) console.warn("[analyze] 表示設定の取得に失敗（全KWを対象に分析します）:", dispErr.message);
+    for (const r of (dispRows || [])) kwVisibilityMap.set(r.shop_id, (r.kw_visibility || {}) as Record<string, boolean>);
   }
 
   // 2. shops テーブルを一括取得（名前で検索 — Go API IDはSupabaseに存在しない可能性があるため名前を優先）
@@ -840,6 +855,17 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
               kwData = freshRanks.length > 0 ? freshRanks : (report.keywords || []);
             }
 
+            // ── レポート表示設定でフィルタ（フロント client.tsx の visibleKeywords / visibleGridRanking と同条件）──
+            // 非表示KWをAIに渡すと「レポートの表に無いキーワードの総評」が生成されてしまう
+            const kwVis = kwVisibilityMap.get(shop.name) || {};
+            const isKwVisible = (word: string, rank: number, prevRank: number) => {
+              const w = normalizeKw(word);
+              const v = kwVis[w] ?? kwVis[word];
+              return v ?? (rank > 0 || prevRank > 0);
+            };
+            const kwRankLookup = new Map(kwData.map(k => [normalizeKw(k.word), k]));
+            kwData = kwData.filter(kw => isKwVisible(kw.word, kw.rank, kw.prevRank));
+
             // 圏外転落/復帰も明示する行フォーマット（前回=直近の計測回。前月とは限らない）
             const fmtKwLine = (kw: { word: string; rank: number; prevRank: number; first?: boolean }) => {
               if (kw.first) {
@@ -857,13 +883,43 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
               for (const kw of kwData) kpiText += fmtKwLine(kw);
             }
 
+            // キーワード順位の複数月推移（「キーワード順位推移」ページのコメント生成用）
+            // これが無いとAIはトレンドを書けず、当月変動＝キーワード順位変動ページと同じ内容になる
+            try {
+              const rh2 = report.rankingHistory;
+              if (rh2?.labels?.length >= 2 && Array.isArray(rh2.datasets)) {
+                const tIdx = rh2.labels.indexOf(targetNorm);
+                const endIdx = tIdx >= 0 ? tIdx : rh2.labels.length - 1;
+                const startIdx = Math.max(0, endIdx - 5);
+                const lbls = rh2.labels.slice(startIdx, endIdx + 1);
+                const lines: string[] = [];
+                for (const ds of rh2.datasets) {
+                  const entry = kwRankLookup.get(normalizeKw(ds.word));
+                  if (!isKwVisible(ds.word, entry?.rank ?? 0, entry?.prevRank ?? 0)) continue;
+                  const ranks = ds.ranks.slice(startIdx, endIdx + 1);
+                  if (!ranks.some((r: number | null) => r !== null && r > 0)) continue;
+                  lines.push(`\n${ds.word}: ${lbls.map((l: string, i: number) => `${l}=${ranks[i] && ranks[i] > 0 ? `${ranks[i]}位` : "-"}`).join(" → ")}`);
+                }
+                if (lines.length > 0) {
+                  kpiText += `\n\n【キーワード順位の推移（直近${lbls.length}計測）】${lines.join("")}`;
+                  kpiText += `\n※「-」は計測なしまたは圏外。当月単体ではなく複数月の傾向（連続下降/底打ち/安定）を読むための系列`;
+                }
+              }
+            } catch {}
+
             // 多地点グリッド計測のサマリー統計（「多地点順位」ページのコメント生成用）
             try {
               const monthToNum2 = (m: string) => { const p = m.split("/"); return (parseInt(p[0]) || 0) * 100 + (parseInt(p[1]) || 0); };
               const targetNum2 = monthToNum2(targetNorm);
               const gHist = (gridRanking?.history || []).filter((h: any) => monthToNum2(h.month) <= targetNum2);
               const gLatest = gHist.length > 0 ? gHist[gHist.length - 1] : null;
-              const snaps = (gLatest?.snapshots || []).filter((s: any) => Array.isArray(s.results) && s.results.length > 0);
+              const snaps = (gLatest?.snapshots || [])
+                .filter((s: any) => Array.isArray(s.results) && s.results.length > 0)
+                // グリッドも表示設定でフィルタ（レポートの比較テーブルと同じKWだけを対象にする）
+                .filter((s: any) => {
+                  const entry = kwRankLookup.get(normalizeKw(s.keyword));
+                  return isKwVisible(s.keyword, entry?.rank ?? 0, entry?.prevRank ?? 0);
+                });
               if (snaps.length > 0) {
                 kpiText += `\n\n【多地点グリッド計測（${gLatest.month}）】`;
                 for (const s of snaps) {
