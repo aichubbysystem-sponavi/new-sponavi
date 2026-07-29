@@ -452,6 +452,14 @@ export async function getReportData(
           cached.analysisTargetMonth = stored.targetMonth || null;
         }
       } catch {}
+      // 口コミ競合比較: 当月ならDB→無ければ取得保存(¥4.8・月1回)、過去月はDB読みのみ
+      try {
+        const { loadCompetitorComparison } = await import("./competitor-fetch");
+        cached.competitorComparison = await loadCompetitorComparison(
+          shopName,
+          normalizedMonth || (cached.monthlyLabels?.length ? cached.monthlyLabels[cached.monthlyLabels.length - 1] : undefined),
+        );
+      } catch { cached.competitorComparison = null; }
       return { data: cached, source: "cache" };
     }
   } catch {}

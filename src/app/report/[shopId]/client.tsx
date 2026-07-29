@@ -258,7 +258,7 @@ export default function ReportClient({
     };
   }, [data, targetMonth]);
 
-  const { shop, kpis: rawKpis, monthlyLabels, charts, keywords, rankingHistory, reviewLabels, reviewCounts, reviewDelta, reviewAnalysis, searchQueries, gridRanking } = trimmedData;
+  const { shop, kpis: rawKpis, monthlyLabels, charts, keywords, rankingHistory, reviewLabels, reviewCounts, reviewDelta, reviewAnalysis, searchQueries, gridRanking, competitorComparison } = trimmedData;
 
   // 全期間で値が0の指標を自動判定（業種によって「予約」「フードメニュー」等がない場合）
   const hasBookingsData = charts.bookings?.some(v => v > 0) ?? false;
@@ -289,7 +289,7 @@ export default function ReportClient({
   // ページ別AI総評（各データページ末尾に表示・編集）
   const emptyPageComments = {
     monthly: "", map: "", search: "", reactions: "", keyword: "", rankingHistory: "",
-    grid: "", searchQuery: "", reviewCount: "", reviewDelta: "", language: "",
+    grid: "", searchQuery: "", reviewCount: "", reviewDelta: "", language: "", competitor: "",
     reviews: [] as string[], actions: [] as string[],
   };
   // 過去に生成された分析は一部フィールドを持たないため、既定値とマージして欠損キーを埋める
@@ -369,6 +369,7 @@ export default function ReportClient({
     rankingHistory: true,
     searchQueries: true,
     gridRanking: true,
+    competitors: true,
     metricBookings: true,
     metricFoodMenus: true,
   });
@@ -619,6 +620,7 @@ export default function ReportClient({
   const showRankingHistory = mounted && sectionVisibility.rankingHistory !== false && unifiedRankingHistory.labels.length > 0;
   const showSearchQueries = mounted && sectionVisibility.searchQueries !== false && hasSearchQueries;
   const showGridRanking = mounted && sectionVisibility.gridRanking !== false && hasGridRanking && (visibleGridRanking?.keywords.length ?? 0) > 0;
+  const showCompetitors = mounted && sectionVisibility.competitors !== false && (competitorComparison?.competitors?.length ?? 0) > 0;
 
   // グリッドマップ用: 現在表示中のスナップショットを取得
   const activeGridKw = visibleGridRanking?.keywords[gridKwIdx] || visibleGridRanking?.keywords[0] || "";
@@ -1098,6 +1100,7 @@ export default function ReportClient({
   if (showGridRanking) totalPages += 2; // サマリー1ページ + KW切替1ページ（web表示基準）
   if (langStats.length > 1) totalPages++; // 口コミ言語別分析
   if (showSearchQueries) totalPages++;
+  if (showCompetitors) totalPages++; // 口コミ競合比較（同エリア）
 
   function pn(slideNum: number) {
     return `${slideNum} / ${totalPages}`;
@@ -1217,6 +1220,7 @@ export default function ReportClient({
                   { key: "rankingHistory", label: "順位推移テーブル", hasData: unifiedRankingHistory.labels.length > 0 },
                   { key: "gridRanking", label: "多地点順位", hasData: hasGridRanking },
                   { key: "searchQueries", label: "検索語句", hasData: hasSearchQueries },
+                  { key: "competitors", label: "口コミ競合比較", hasData: (competitorComparison?.competitors?.length ?? 0) > 0 },
                 ].map(item => (
                   <label key={item.key} style={{ display: "flex", alignItems: "center", gap: 8, cursor: item.hasData ? "pointer" : "not-allowed", opacity: item.hasData ? 1 : 0.4 }}>
                     <input type="checkbox" checked={sectionVisibility[item.key] !== false && item.hasData} disabled={!item.hasData}
@@ -2370,6 +2374,58 @@ export default function ReportClient({
           </div>
         </div>
       </div>
+
+      {/* ════ 口コミの競合比較（同エリア） ════ */}
+      {showCompetitors && competitorComparison && (() => {
+        pageNum++;
+        const comp = competitorComparison;
+        // 差分の基準: リスト内の自店口コミ数（圏外なら店舗の総口コミ数で代用）
+        const baseCount = comp.self?.reviewCount ?? displayTotalReviews;
+        const selfIdx = comp.self ? comp.self.rank - 1 : -1;
+        return (
+        <div style={slideStyle} className="slide">
+          <div style={slideBarStyle}><span>{shop.name} — 口コミの競合比較</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+          <div style={{ ...slideBodyStyle, padding: "16px 24px" }}>
+            <div style={stitleStyle}>
+              口コミの競合比較（同エリア）
+              <span style={{ fontSize: 14, fontWeight: 400, color: "#999", marginLeft: 10 }}>
+                「{comp.keyword}」検索の上位{comp.competitors.length}店舗（{comp.month}時点）
+                {!comp.self && "／あなたの店舗は上位圏外"}
+              </span>
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", borderRadius: 10, overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.04)" }}>
+              <thead>
+                <tr style={{ background: "#0f3460" }}>
+                  <th style={{ padding: "6px 10px", color: "#fff", fontSize: 13, fontWeight: 600, textAlign: "center", width: 42 }}>#</th>
+                  <th style={{ padding: "6px 12px", color: "#fff", fontSize: 13, fontWeight: 600, textAlign: "left" }}>店舗名</th>
+                  <th style={{ padding: "6px 10px", color: "#fff", fontSize: 13, fontWeight: 600, textAlign: "center", width: 70 }}>評価</th>
+                  <th style={{ padding: "6px 10px", color: "#fff", fontSize: 13, fontWeight: 600, textAlign: "center", width: 90 }}>口コミ数</th>
+                  <th style={{ padding: "6px 10px", color: "#fff", fontSize: 13, fontWeight: 600, textAlign: "center", width: 90 }}>差分</th>
+                </tr>
+              </thead>
+              <tbody>
+                {comp.competitors.map((c, i) => {
+                  const isSelf = i === selfIdx;
+                  const diff = baseCount - c.reviewCount;
+                  return (
+                    <tr key={i} style={{ background: isSelf ? "#cfe0f5" : i % 2 === 1 ? "#f7f9fc" : "#fff", fontWeight: isSelf ? 700 : 400 }}>
+                      <td style={{ padding: "4px 10px", fontSize: 13, textAlign: "center", color: "#333", borderBottom: "1px solid #eef1f6" }}>{i + 1}</td>
+                      <td style={{ padding: "4px 12px", fontSize: 13, color: "#333", borderBottom: "1px solid #eef1f6", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 480 }}>{c.name}{isSelf && "（あなた）"}</td>
+                      <td style={{ padding: "4px 10px", fontSize: 13, textAlign: "center", color: "#333", borderBottom: "1px solid #eef1f6" }}>{c.rating > 0 ? c.rating.toFixed(1) : "-"}</td>
+                      <td style={{ padding: "4px 10px", fontSize: 13, textAlign: "center", color: "#333", borderBottom: "1px solid #eef1f6" }}>{c.reviewCount.toLocaleString()}件</td>
+                      <td style={{ padding: "4px 10px", fontSize: 13, textAlign: "center", fontWeight: 700, borderBottom: "1px solid #eef1f6", color: isSelf ? "#888" : diff < 0 ? "#c0392b" : diff > 0 ? "#0a8f3c" : "#888" }}>
+                        {isSelf ? "-" : diff < 0 ? `${diff.toLocaleString()}件` : diff > 0 ? `+${diff.toLocaleString()}件` : "±0件"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {renderPageComment("competitor", "AI総評")}
+          </div>
+        </div>
+        );
+      })()}
 
       {/* ════ 口コミ言語別分析 ════ */}
       {langStats.length > 1 && (() => { pageNum++; return (

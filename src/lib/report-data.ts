@@ -69,8 +69,24 @@ export interface PageComments {
   reviewCount: string;    // 口コミ件数推移
   reviewDelta: string;    // 月間口コミ増加数
   language: string;       // 口コミ言語別分析
+  competitor: string;     // 口コミ競合比較（同エリア）
   reviews: string[];      // AIによる口コミ分析（箇条書き）
   actions: string[];      // 総括ページ（改善策）
+}
+
+/** 口コミ競合比較の1行（評価・口コミ数） */
+export interface CompetitorEntry {
+  name: string;
+  rating: number;
+  reviewCount: number;
+}
+
+/** 口コミ競合比較（同エリア）。月次でDB保存されたスナップショット */
+export interface CompetitorComparison {
+  month: string;    // "2026/7"
+  keyword: string;  // 検索に使ったKW
+  self: (CompetitorEntry & { rank: number }) | null; // リスト内の自店（上位20圏外はnull）
+  competitors: CompetitorEntry[]; // 上位20（自店含む・検索結果順）
 }
 
 export interface RankingHistory {
@@ -121,6 +137,7 @@ export interface ReportData {
   reviewAnalysis: ReviewAnalysis;
   comments: string[];
   pageComments?: PageComments | null;
+  competitorComparison?: CompetitorComparison | null;
   searchQueries: { latest: SearchQueryEntry[]; latestMonth: string; history: SearchQueryMonthData[] };
   gridRanking?: GridRankingReport;
   analysisTargetMonth?: string | null;
