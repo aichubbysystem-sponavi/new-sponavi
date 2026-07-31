@@ -1889,15 +1889,19 @@ export default function ReportClient({
                         <td style={{ padding: "6px 6px", fontWeight: 700, color: "#333", whiteSpace: "nowrap", borderBottom: "1px solid #eee", fontSize: 16 }}>{ds.word}</td>
                         {ds.ranks.map((r, ri) => {
                           const isLatest = ri === unifiedRankingHistory.labels.length - 1;
+                          // 計測したが順位が付かなかった月は「-」でなく「圏外」と明示する。
+                          // 「-」だと未計測と区別が付かず、「なぜこの列が表に残っているのか」も読めない
+                          const isOut = r === null && ds.measured?.[ri] === true;
                           return (
                             <td key={ri} style={{
-                              padding: "6px 4px", textAlign: "center", borderBottom: "1px solid #eee", fontSize: 16,
+                              padding: "6px 4px", textAlign: "center", borderBottom: "1px solid #eee",
+                              fontSize: isOut ? 13 : 16,
                               fontWeight: r !== null && r <= 3 ? 900 : isLatest ? 700 : 400,
                               // 順位帯の色は全ページ共通のrankTextColorに統一（3位以内=青／4-10位=緑）
-                              color: r === null ? "#ddd" : rankTextColor(r),
+                              color: r === null ? (isOut ? "#999" : "#ddd") : rankTextColor(r),
                               background: isLatest ? "#fff8f0" : undefined,
                             }}>
-                              {r ?? "-"}
+                              {r ?? (isOut ? "圏外" : "-")}
                             </td>
                           );
                         })}

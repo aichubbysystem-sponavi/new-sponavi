@@ -197,3 +197,18 @@ SPOTLIGHT NAVIGATOR 超重要ナレッジ
   Ads API v23の segments.ad_network_type でP-MAXもチャネル別(MAPS/SEARCH/CONTENT/YOUTUBE/GMAIL/
   DISCOVER/SEARCH_PARTNERS)に取れる（2025-06-01以降の日付のみ）。pmax_channel_dataにキャッシュ
   （表示時オンデマンド取得、sync時に対象月削除）。impが全0の行はセグメント付きGAQLでは返らない
+
+━━━ 2026-07-31 追加（詳細: ログ/2026-07/2026-07-31_レポートPDFレビュー_指摘全件修正.txt）━━━
+■「圏外」と「未計測」は必ず区別する（同日に3箇所で同型バグが出た頻出パターン）
+  順位データのnullには「計測して圏外だった」と「そもそも計測していない」の2つが混ざる。
+  混同すると: ①未計測month→「圏外に転落」と誤報告 ②null除外の末尾2件比較で
+  過去2ヶ月の差分が当月の変動として出る（↑6緑表示） ③AIが未計測月を「圏外に沈んだ」と作文
+  - シートパーサ(ranking-fetch.ts)は datasets.outOfRange?: boolean[] で「圏外」セルを別途記録
+  - 表示は rankTrend(series, measured)（report-utils.ts）。null除外→末尾2件比較は禁止
+  - AIプロンプト(analyze)には「N位/圏外/未計測」の3値で渡す（一律「-」で渡さない）
+■ 順位変動は「最新列」基準で計算する。過去へ遡ってよいのは比較相手だけ
+■ 固定高スライド(794px)に要素を足したら最悪ケース（13行/20行/長文AI総評）で収まるか必ず確認。
+  justifyContent:center のページは溢れると上下同時に切れてタイトルが消え、気づきにくい。
+  中身が詰まったページは flex-start にして「下だけ切れる」安全な失敗にする
+■ 競合比較の自店口コミ数: comp.self?.reviewCount ?? 0 は禁止（圏外店で「全店に劣る」と真逆になる）。
+  フォールバックは表示側と同じ officialCount / displayTotalReviews

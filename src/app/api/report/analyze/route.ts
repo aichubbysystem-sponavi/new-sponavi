@@ -245,6 +245,7 @@ ${langStatsText || ""}
 - 各項目の中で最も重要なキーワードを1つだけ<strong>タグで囲む
 - positiveWords/negativeWordsは口コミ原文に連続した文字列としてそのまま含まれる抜き出しのみ有効（言い換え・活用形の変更・翻訳・要約はシステム側で無効化される）。各2〜10文字（15文字超は不可）。原文どおりを最優先した上で、できるだけ「態度が横柄」のような名詞句・言い切りの自然な区切りで抜き出す
 - 初計測（前回データなし）のキーワードを「維持」「継続」と表現しない（今回が最初の計測）
+- 「未計測」と記載された月は順位データが存在しないだけ。その月を「圏外」「転落」「沈んだ」と書かない（圏外と書いてよいのは「圏外」と明記された月だけ）
 - 口コミの件数・増加数・「○○件」・「ゼロ」・「0件」・「投稿数」に言及してよいのは reviewCountComment・reviewDeltaComment・competitorComment の3つだけ。
   それ以外（summary/monthlyComment/reviewComments/actions等）では従来どおり一切言及せず、口コミは質と傾向のみ分析する
 - 捏造禁止（実施していないキャンペーン等）
@@ -906,17 +907,38 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
                 const endIdx = tIdx >= 0 ? tIdx : rh2.labels.length - 1;
                 const startIdx = Math.max(0, endIdx - 5);
                 const lbls = rh2.labels.slice(startIdx, endIdx + 1);
+                // 「圏外」と「未計測」を区別してAIに渡す。
+                // 一律「-」で渡すとAIが未計測月を「圏外に沈んだ」と推測で書く
+                // （2026-07-31 Queency: 未計測の2026/5を圏外と断定するコメントが生成された）。
+                // 判定材料: シートの明示的な「圏外」記録(outOfRange) + グリッド計測があった月
+                const gridMeasured = new Map<string, Set<string>>(); // 正規化KW -> 計測があった月
+                for (const h of gridRanking?.history || []) {
+                  for (const s of h.snapshots || []) {
+                    if (Array.isArray(s.results) && s.results.length > 0) {
+                      const k = normalizeKw(s.keyword);
+                      if (!gridMeasured.has(k)) gridMeasured.set(k, new Set());
+                      gridMeasured.get(k)!.add(h.month);
+                    }
+                  }
+                }
                 const lines: string[] = [];
                 for (const ds of rh2.datasets) {
                   // 順位推移ページ: 既定 = 系列にデータがあれば表示（client.tsx visibleRankingDatasets と同条件）
                   if (kwVisSetting(ds.word) === false) continue;
                   const ranks = ds.ranks.slice(startIdx, endIdx + 1);
                   if (!ranks.some((r: number | null) => r !== null && r > 0)) continue;
-                  lines.push(`\n${ds.word}: ${lbls.map((l: string, i: number) => `${l}=${ranks[i] && ranks[i] > 0 ? `${ranks[i]}位` : "-"}`).join(" → ")}`);
+                  const oor: boolean[] | undefined = (ds as any).outOfRange?.slice(startIdx, endIdx + 1);
+                  const gm = gridMeasured.get(normalizeKw(ds.word));
+                  const cell = (l: string, i: number) => {
+                    const r = ranks[i];
+                    if (r && r > 0) return `${r}位`;
+                    return (oor?.[i] === true || gm?.has(l)) ? "圏外" : "未計測";
+                  };
+                  lines.push(`\n${ds.word}: ${lbls.map((l: string, i: number) => `${l}=${cell(l, i)}`).join(" → ")}`);
                 }
                 if (lines.length > 0) {
                   kpiText += `\n\n【キーワード順位の推移（直近${lbls.length}計測）】${lines.join("")}`;
-                  kpiText += `\n※「-」は計測なしまたは圏外。当月単体ではなく複数月の傾向（連続下降/底打ち/安定）を読むための系列`;
+                  kpiText += `\n※「未計測」はデータが無いだけで圏外という意味ではない。未計測の月を「圏外に沈んだ」「転落した」等と書くことは禁止。当月単体ではなく複数月の傾向（連続下降/底打ち/安定）を読むための系列`;
                 }
               }
             } catch {}
