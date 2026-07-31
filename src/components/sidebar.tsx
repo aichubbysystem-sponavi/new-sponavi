@@ -34,6 +34,7 @@ const navSections = [
       { href: "/customer-master", label: "店舗一覧" },
       { href: "/search-keywords", label: "検索語句管理" },
       { href: "/grid-ranking", label: "多地点順位チェック" },
+      { href: "/csv-export", label: "CSV一括出力" },
       { href: "/reports", label: "店舗パフォーマンス" },
       { href: "/basic-info", label: "基礎情報管理" },
       { href: "/basic-info/fixed-message", label: "差し込み文字列設定" },

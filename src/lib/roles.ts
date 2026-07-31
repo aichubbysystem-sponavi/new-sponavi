@@ -46,6 +46,7 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
     "/group-management",
     "/gbp-accounts",
     "/audit-log",
+    "/csv-export",
   ],
   // 幹部: 社員と同じページ集合（管理系ページは社長のみ）。ボタン操作の可否は permissions.ts の can() で制御
   executive: [
@@ -72,6 +73,7 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
     "/ai-integration",
     "/feature",
     "/review-analysis",
+    "/csv-export",
   ],
   manager: [
     "/",
@@ -97,6 +99,7 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
     "/ai-integration",
     "/feature",
     "/review-analysis",
+    "/csv-export",
   ],
   part_time: [
     "/",

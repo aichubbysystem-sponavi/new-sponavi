@@ -1,0 +1,58 @@
+■ 2026-07-31 CSV一括出力ページ（全店舗×月指定×8種）
+
+【依頼】
+検索語句・多地点順位・口コミ国別などのデータを「店舗ずつ切り替えず、全店舗まとめてCSVで
+落としたい。各項目（各ページ）ずつ」。対象=データの取れるページすべて／全店舗／月選択あり。
+
+【実装】
+- 新API: GET /api/export?type=<種別>&month=YYYY-MM（src/app/api/export/route.ts）
+  認可 requireRole(president/executive/manager)。maxDuration=120。
+  type 8種:
+   1. insights         performance_metrics_cache（month="2026/7"形式）→ 検索/マップ/WEB/ルート/通話/予約 等15列
+   2. search-keywords  search_query_cache（"2026/7"）→ 店舗×語句×表示回数（回数順に順位付き）
+   3. grid-ranking     grid_ranking_logs（measured_at範囲）→ 中心順位/平均/TOP3/TOP10/圏外。
+                       同月複数計測は最新のみ。KWは normalizeKw。旧4地点(偶数グリッド)の中心は圏内平均で代替
+   4. reviews          reviews（create_time範囲）→ 口コミ本文・評価・返信状態
+   5. review-analysis  report_analysis（target_month="2026/7"）→ ポジ/ネガワード・AI総評
+   6. review-language  reviews＋detectLanguage をサーバー集計 → 店舗×言語×星内訳。
+                       既存APIの「20店舗制限」を回避する専用実装
+   7. pmax             pmax_store_data（month="2026-07"形式）→ 表示/クリック/CTR/CPC/費用(円)
+   8. posts            post_logs（created_at範囲）→ 投稿日時・種別・本文
+- 新ページ: /csv-export（src/app/csv-export/page.tsx）
+  月選択（既定=前月）＋8項目カード＋各DLボタン。api.get(blob)→a.click()（Authorization必須のため）。
+  X-Row-Count ヘッダーで「✓ N行」を表示。エラーはblob→JSON解読して表示
+- サイドバー「店舗情報管理＞CSV一括出力」追加（sidebar.tsx）
+- ページ権限 /csv-export を president/executive/manager に追加（roles.ts）。バイトは不可
+
+【重要な設計判断・罠対応】
+- PostgRESTは .limit(N) 指定でも1000行で切られる → 全クエリ .range() ページング（fetchAllヘルパー）。
+  併せてページング安定用の第2ソートキー（id/shop_id/campaign_id）を全typeに付与
+- 月フォーマットはテーブルごとに違う（実データで検証済み）:
+  "2026/7"=performance_metrics_cache/search_query_cache/report_analysis ／ "2026-07"=pmax_store_data ／
+  timestamp範囲=reviews/post_logs/grid_ranking_logs（JST月境界で範囲指定）
+- reviews.shop_id はGo API系とSupabase系の2系統が混在 → 集計・出力はshop_name（NFC正規化）
+- performance_metrics_cache/search_query_cache は同一店舗名でshop_id世代違いの重複あり
+  → updated_at降順で最初の1件のみ採用
+- report_analysis に target_month=null の旧行423件あり → eq()で自然に除外
+- P-MAXの店舗名は広告キャンペーン名由来（GBP店舗名と不一致あり）→ ページ上に注記
+- CSVは BOM(﻿)+CRLF、エスケープは /[",\r\n]/ を二重引用符で包む方式（audit-log準拠）
+
+【実データ検証（scratchpadのpg直結で確認）】
+- insights 2026/6=458行, 2026/5=644行 ／ search_query 2026/5=824行（6月は26行=同期前）
+- report_analysis 2026/7=492行 ／ pmax 2026-07=477行
+- reviews 6月投稿=6,936行（コメント有5,280）／ grid_logs 7月=3,637行 → ページング必須を確認
+- post_logs は 5月24件・7月48件・6月0件（6月が0なのはデータ通り）
+
+【対象外とその理由（ユーザーに報告済み）】
+- /diagnosis（店舗診断）: 1店舗ごとにGo APIを3回呼ぶ構造＋結果の保存テーブルなし
+- /reports（店舗パフォーマンス）: Go APIの1店舗単位エンドポイントのみ。Go API側に一括APIが必要
+→ どちらも将来やるならGo API側の対応 or Supabaseへのキャッシュ化とセット
+
+【検証】
+- next build 成功。ブランチ feature/bulk-csv-export
+- 機能テストはPreviewで実施（ローカルは.env.localにサービスキーが無くAPI実行不可）
+
+【調査で見つけた既存の潜在バグ（今回は未修正・別タスク）】
+- grid-export/route.ts の .limit(50000)、pmax/store-summary の .limit(10000)、
+  診断ベンチマークの .limit(10000)、posts全店舗状況の limit無しクエリは
+  いずれもPostgREST 1000行制限に潰されて静かに欠落している疑い（要検証）
