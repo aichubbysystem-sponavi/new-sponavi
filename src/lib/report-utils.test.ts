@@ -17,6 +17,10 @@ import {
   CHART_COLORS,
   AI_COMMENT_HEADINGS,
   KPI,
+  rankTrend,
+  rankCoverage,
+  parseStartMonth,
+  isYoyComparable,
 } from "./report-utils";
 
 describe("pctChange", () => {
@@ -320,5 +324,150 @@ describe("gridLayoutLabel", () => {
 
   it("7×7はそのままN×N表記", () => {
     expect(gridLayoutLabel(7, 49)).toBe("7×7");
+  });
+});
+
+describe("rankTrend（順位変動）", () => {
+  it("通常の上昇: 前月5位→当月2位は↑3", () => {
+    const r = rankTrend([8, 5, 2]);
+    expect(r.text).toBe("↑3");
+    expect(r.kind).toBe("up");
+  });
+
+  it("通常の下降: 前月2位→当月5位は↓3", () => {
+    const r = rankTrend([8, 2, 5]);
+    expect(r.text).toBe("↓3");
+    expect(r.kind).toBe("down");
+  });
+
+  it("同順位は→", () => {
+    expect(rankTrend([3, 3]).text).toBe("→");
+  });
+
+  it("【回帰】当月データなしのとき過去2点の差分を変動にしない（旧バグ: ↑6と表示）", () => {
+    // 一社イタリアン 2026: 1月3位/2月7位/3月-/4月1位/6月データなし
+    const r = rankTrend([3, 7, null, 1, null]);
+    expect(r.text).not.toBe("↑6");
+    expect(r.kind).not.toBe("up");
+  });
+
+  it("計測済みで順位が付かなければ「圏外へ」（赤）", () => {
+    const r = rankTrend([3, 7, null, 1, null], [true, true, false, true, true]);
+    expect(r.text).toBe("圏外へ");
+    expect(r.kind).toBe("out");
+    expect(r.color).toBe("#c0392b");
+  });
+
+  it("未計測なら圏外と断定せず「未計測」（灰）", () => {
+    const r = rankTrend([3, 7, null, 1, null], [true, true, false, true, false]);
+    expect(r.text).toBe("未計測");
+    expect(r.color).toBe("#888");
+  });
+
+  it("measured未指定なら圏外と断定しない", () => {
+    expect(rankTrend([1, null]).text).toBe("未計測");
+  });
+
+  it("【回帰】当月のみ実測・過去なしは「初計測」で→ではない（旧バグ: 横ばい扱い）", () => {
+    const r = rankTrend([null, null, null, null, 2]);
+    expect(r.text).toBe("初計測");
+    expect(r.kind).toBe("first");
+  });
+
+  it("比較相手は直近の順位ありの月（間の欠測を飛ばす）", () => {
+    const r = rankTrend([10, null, null, 4]);
+    expect(r.text).toBe("↑6");
+    expect(r.prevIndex).toBe(0);
+  });
+
+  it("小数1桁指定で多地点平均に対応", () => {
+    const r = rankTrend([8.4, 13.1], undefined, 1);
+    expect(r.text).toBe("↓4.7");
+  });
+
+  it("【回帰】多地点でも当月データなしなら↑6.2にならない", () => {
+    // 一社イタリアン多地点: 1月10.3 / 2月14.5 / 4月8.3 / 6月データなし
+    const r = rankTrend([10.3, 14.5, 8.3, null], undefined, 1);
+    expect(r.text).not.toBe("↑6.2");
+  });
+
+  it("avgRank=0（全地点圏外）は順位ありとして扱わない", () => {
+    const r = rankTrend([8.3, 0], [true, true], 1);
+    expect(r.text).toBe("圏外へ");
+  });
+
+  it("空配列・全null", () => {
+    expect(rankTrend([]).text).toBe("-");
+    expect(rankTrend([null, null]).text).toBe("-");
+  });
+});
+
+describe("rankCoverage（圏内率）", () => {
+  it("49地点中16地点が圏内なら33%", () => {
+    const results = Array.from({ length: 49 }, (_, i) => ({ rank: i < 16 ? i + 1 : 0 }));
+    const c = rankCoverage(results)!;
+    expect(c.ranked).toBe(16);
+    expect(c.total).toBe(49);
+    expect(c.pct).toBe(33);
+  });
+
+  it("全地点圏内は100%", () => {
+    const c = rankCoverage([{ rank: 1 }, { rank: 2 }])!;
+    expect(c.pct).toBe(100);
+  });
+
+  it("全地点圏外は0%", () => {
+    const c = rankCoverage([{ rank: 0 }, { rank: 0 }])!;
+    expect(c.ranked).toBe(0);
+    expect(c.pct).toBe(0);
+  });
+
+  it("空・nullはnull", () => {
+    expect(rankCoverage([])).toBeNull();
+    expect(rankCoverage(null)).toBeNull();
+  });
+});
+
+describe("parseStartMonth", () => {
+  it("和暦風の「2025年8月」", () => {
+    expect(parseStartMonth("2025年8月")).toBe("2025/8");
+  });
+  it("スラッシュ・ハイフン・日付付き", () => {
+    expect(parseStartMonth("2025/8")).toBe("2025/8");
+    expect(parseStartMonth("2025-08-01")).toBe("2025/8");
+  });
+  it("解釈できない値はnull", () => {
+    expect(parseStartMonth("")).toBeNull();
+    expect(parseStartMonth(null)).toBeNull();
+    expect(parseStartMonth("未設定")).toBeNull();
+    expect(parseStartMonth("2025年13月")).toBeNull();
+  });
+});
+
+describe("isYoyComparable（前年比を出してよいか）", () => {
+  it("【回帰】対策開始前の前年同月とは比較しない（旧バグ: +116325%）", () => {
+    // patty rôti: 対策開始2025年8月、当月2026/6 → 前年同月2025/6は開始前
+    expect(isYoyComparable(4, "2026/6", "2025年8月")).toBe(false);
+  });
+
+  it("【回帰】前年同月が0なら比較しない（旧バグ: +108,951と実数表示）", () => {
+    expect(isYoyComparable(0, "2026/6", "2024年1月")).toBe(false);
+    expect(isYoyComparable(null, "2026/6", "2024年1月")).toBe(false);
+  });
+
+  it("対策開始月と同月なら比較可", () => {
+    expect(isYoyComparable(100, "2026/8", "2025年8月")).toBe(true);
+  });
+
+  it("対策開始より後の前年同月は比較可", () => {
+    expect(isYoyComparable(100, "2026/6", "2024年3月")).toBe(true);
+  });
+
+  it("開始日が不明でも値があれば比較可", () => {
+    expect(isYoyComparable(100, "2026/6", undefined)).toBe(true);
+  });
+
+  it("当月ラベルが不正なら比較しない", () => {
+    expect(isYoyComparable(100, "", "2024/1")).toBe(false);
   });
 });

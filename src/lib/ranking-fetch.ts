@@ -14,7 +14,13 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 export interface RankEntry { word: string; rank: number; prevRank: number; }
 export interface RankHistoryData {
   labels: string[];
-  datasets: { word: string; ranks: (number | null)[] }[];
+  /**
+   * ranks: 順位（null = 順位なし）
+   * outOfRange: そのセルが明示的に「圏外」だったか。
+   *   ranksだけだと「計測して圏外」と「未計測（空欄）」がどちらもnullになり区別できず、
+   *   未計測を「圏外に転落」と誤報告する原因になる（2026-07-31）
+   */
+  datasets: { word: string; ranks: (number | null)[]; outOfRange?: boolean[] }[];
 }
 
 export interface RankingSheetsResult {
@@ -107,12 +113,20 @@ function mergeHistories(base: RankHistoryData, priority: RankHistoryData): RankH
     const r = ds ? ds.ranks[i] : null;
     return r && r > 0 ? r : null;
   };
+  // 明示的に「圏外」と記録されていたか（未計測の空欄と区別するため）
+  const outAt = (h: RankHistoryData, key: string, month: string): boolean => {
+    const i = h.labels.indexOf(month);
+    if (i < 0) return false;
+    const ds = h.datasets.find(d => normalizeKw(d.word) === key);
+    return ds?.outOfRange?.[i] === true;
+  };
 
   return {
     labels,
     datasets: words.map(({ key, word }) => ({
       word,
       ranks: labels.map(m => rankAt(priority, key, m) ?? rankAt(base, key, m)),
+      outOfRange: labels.map(m => outAt(priority, key, m) || outAt(base, key, m)),
     })),
   };
 }
@@ -442,13 +456,15 @@ function parseRanksHistory(headerText: string, dataText: string): RankHistoryDat
   const labels = recent.map(m => m.label);
   const datasets = kwIndices.map(idx => {
     const word = (headerRow[idx] || "").trim();
-    const ranks = recent.map(m => {
-      const val = (m.row[idx] || "").trim();
+    const cells = recent.map(m => (m.row[idx] || "").trim());
+    const ranks = cells.map(val => {
       if (val === "圏外") return null;
       const v = parseInt(val.replace(/,/g, "")) || 0;
       return v > 0 ? v : null;
     });
-    return { word, ranks };
+    // 「圏外」と空欄(未計測)はどちらもranks=nullになるため、圏外だけ別途記録する
+    const outOfRange = cells.map(val => val === "圏外");
+    return { word, ranks, outOfRange };
   });
 
   return { labels, datasets };
@@ -562,13 +578,15 @@ function parseRanksHistorySheet3(headerText: string, dataText: string): RankHist
   const labels = recent.map(m => m.label);
   const datasets = kwIndices.map(idx => {
     const word = (headerRow[idx] || "").trim();
-    const ranks = recent.map(m => {
-      const val = (m.row[idx] || "").trim();
+    const cells = recent.map(m => (m.row[idx] || "").trim());
+    const ranks = cells.map(val => {
       if (val === "圏外") return null;
       const v = parseInt(val.replace(/,/g, "")) || 0;
       return v > 0 ? v : null;
     });
-    return { word, ranks };
+    // 「圏外」と空欄(未計測)はどちらもranks=nullになるため、圏外だけ別途記録する
+    const outOfRange = cells.map(val => val === "圏外");
+    return { word, ranks, outOfRange };
   });
 
   return { labels, datasets };

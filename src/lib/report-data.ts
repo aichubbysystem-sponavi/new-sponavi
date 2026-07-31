@@ -92,7 +92,8 @@ export interface CompetitorComparison {
 
 export interface RankingHistory {
   labels: string[];  // 月ラベル ["2025/10", "2025/11", ...]
-  datasets: { word: string; ranks: (number | null)[] }[];
+  // outOfRange: そのセルが明示的に「圏外」だったか（空欄=未計測 と区別するため。2026-07-31追加）
+  datasets: { word: string; ranks: (number | null)[]; outOfRange?: boolean[] }[];
 }
 
 export interface SearchQueryEntry { word: string; count: number; }

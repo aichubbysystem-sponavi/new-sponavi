@@ -30,8 +30,8 @@ import type { ReportData, NegativeWordSource } from "@/lib/report-data";
 import {
   SLIDE_W, SLIDE_H, COLORS,
   SEARCH_QUERIES_PER_PAGE,
-  pctChange, monthToNum, rankColor, rankColorModal,
-  fmtAvgRank, avgRankDiff,
+  pctChange, monthToNum, rankColor, rankColorModal, rankTextColor,
+  fmtAvgRank, rankTrend, rankCoverage, isYoyComparable, parseStartMonth,
   reorderKpis, centerCell, gridLayoutLabel,
 } from "@/lib/report-utils";
 import {
@@ -198,6 +198,8 @@ export default function ReportClient({
       datasets: data.rankingHistory.datasets.map(ds => ({
         ...ds,
         ranks: ds.ranks.slice(0, data.rankingHistory.labels.filter(l => l <= targetMonth).length),
+        // ranksと同じ長さに揃えないと月とのインデックス対応がずれる
+        outOfRange: ds.outOfRange?.slice(0, data.rankingHistory.labels.filter(l => l <= targetMonth).length),
       })),
     } : data.rankingHistory;
 
@@ -520,11 +522,15 @@ export default function ReportClient({
     // グリッドの中心順位を「月::KW」で索引化
     const centerByMonthKw = new Map<string, number>();
     const gridMonths = new Set<string>();
+    // 「その月にそのKWを計測したか」。順位が付かなかった時に
+    // 「圏外」と「未計測」を区別するために必要（区別しないと未計測を圏外転落と誤報告する）
+    const measuredMonthKw = new Set<string>();
     for (const h of gridRanking?.history || []) {
       if (curLabel && monthToNum(h.month) > monthToNum(curLabel)) continue;
       for (const s of h.snapshots) {
         // centerCell: 偶数グリッド（斜め4地点計測）は中心なし→undefined→シート順位フォールバックへ
         const cell = centerCell(s.results, s.gridSize);
+        if (s.results.length > 0) measuredMonthKw.add(`${h.month}::${normalizeKw(s.keyword)}`);
         if (cell && cell.rank > 0) {
           centerByMonthKw.set(`${h.month}::${normalizeKw(s.keyword)}`, cell.rank);
           gridMonths.add(h.month);
@@ -566,6 +572,16 @@ export default function ReportClient({
         }
         return null;
       }),
+      // 順位が付かなかった月が「圏外」か「未計測」かの判定材料。
+      // グリッド計測があった月に加え、シートに明示的に「圏外」と記録された月も計測済みとする
+      measured: labels.map(m => {
+        if (measuredMonthKw.has(`${m}::${w}`)) return true;
+        const ds = sheetByWord.get(w);
+        if (!ds) return false;
+        const i = sheetLabels.indexOf(m);
+        if (i < 0) return false;
+        return ds.ranks[i] != null && ds.ranks[i]! > 0 ? true : ds.outOfRange?.[i] === true;
+      }),
     }));
     return { labels, datasets };
   }, [gridRanking, rankingHistory, curLabel]);
@@ -575,7 +591,9 @@ export default function ReportClient({
     const lastIdx = unifiedRankingHistory.labels.length - 1;
     if (lastIdx < 0) {
       // シート履歴もグリッドも無い店舗向けフォールバック（シート最新行の順位）
-      return keywords.map(kw => ({ ...kw, word: normalizeKw(kw.word), prevMonth: "", firstMeasure: false }));
+      // シート最新行の順位そのもの＝シート上で計測済みの値なので curMeasured は true
+      // （falseにすると順位0のKWが「圏外」ではなく「未計測」と表示されてしまう）
+      return keywords.map(kw => ({ ...kw, word: normalizeKw(kw.word), prevMonth: "", firstMeasure: false, curMeasured: true }));
     }
     return unifiedRankingHistory.datasets.map(ds => {
       const rank = ds.ranks[lastIdx] ?? 0;
@@ -588,7 +606,9 @@ export default function ReportClient({
       }
       // 過去に一度も順位が無い＝今回が初計測（prevRank=rankのフォールバック表示と区別する）
       const firstMeasure = prevRank === 0 && (rank || 0) > 0;
-      return { word: ds.word, rank: rank || 0, prevRank: prevRank || rank || 0, prevMonth, firstMeasure };
+      // 当月に順位が無い場合、計測済みなら「圏外」・未計測なら「未計測」と表示を分ける
+      const curMeasured = ds.measured?.[lastIdx] === true;
+      return { word: ds.word, rank: rank || 0, prevRank: prevRank || rank || 0, prevMonth, firstMeasure, curMeasured };
     });
   }, [unifiedRankingHistory, keywords]);
 
@@ -823,7 +843,18 @@ export default function ReportClient({
       }
 
       const gr = visibleGridRanking;
-      const pdfMapPairCount = Math.ceil(gr.keywords.length / 2);
+      // 対象月に計測が無いKWをPDFに出すと、地図タイルもマーカーも無い
+      // 真っ白な枠＋「平均順位: -位」のスライドになるため除外する（2026-07-31）
+      const pdfTargetHistory = gr.history.filter(h => monthToNum(h.month) <= monthToNum(curLabel)).slice(-6);
+      // 月セレクタで選択中の月＝実際にキャプチャされる月。ここを最新月固定にすると
+      // 「地図は選択月・平均順位は最新月」という食い違いが起きる
+      const pdfMonthI = gridMonthIdx >= 0 && gridMonthIdx < pdfTargetHistory.length ? gridMonthIdx : pdfTargetHistory.length - 1;
+      const pdfTargetMonth = pdfTargetHistory[pdfMonthI];
+      const pdfKwEntries = gr.keywords
+        .map((kw, idx) => ({ kw, idx, snap: pdfTargetMonth?.snapshots.find(s => s.keyword === kw) }))
+        .filter(e => (e.snap?.results?.length ?? 0) > 0);
+      const pdfKws = pdfKwEntries.map(e => e.kw);
+      const pdfMapPairCount = Math.ceil(pdfKws.length / 2);
       // PDF基準: サマリー1 + マップceil(KW/2) vs web基準: サマリー1 + KW切替1
       const pageShift = pdfMapPairCount - 1; // PDF追加ページ数
       const pdfTotalPages = totalPages + pageShift - hiddenTrailingPages;
@@ -832,10 +863,10 @@ export default function ReportClient({
 
       // ── 1. マップペアスライドをDOMに生成（ヘッダーバー付き） ──
       const mapPairSlides: HTMLElement[] = [];
-      for (let m = 0; m < gr.keywords.length; m += 2) {
+      for (let m = 0; m < pdfKws.length; m += 2) {
         const pairIdx = m / 2;
         const pairPageNum = pdfSummaryPageNum + 1 + pairIdx;
-        const kwNames = gr.keywords.slice(m, m + 2);
+        const kwNames = pdfKws.slice(m, m + 2);
 
         const pairSlide = document.createElement("div");
         pairSlide.className = "slide grid-print-slide";
@@ -870,21 +901,27 @@ export default function ReportClient({
           // マップ（html2canvasでここだけキャプチャ）
           const mapDiv = document.createElement("div");
           mapDiv.className = "grid-print-map";
-          mapDiv.style.cssText = `width:440px;height:400px;border-radius:12px;overflow:hidden;background:#e8edf5;`;
+          mapDiv.style.cssText = `width:500px;height:455px;border-radius:12px;overflow:hidden;background:#e8edf5;`;
           mapSlot.appendChild(mapDiv);
           // 凡例（HTMLで直接配置、html2canvasを通さない）
           const legend = document.createElement("div");
           const legendColors = [["#2563EB","1-3位"],["#16A34A","4-10位"],["#F59E0B","11-20位"],["#EF4444","21位~"],["#6B7280","圏外"]];
-          legend.style.cssText = `display:flex;font-size:18px;color:#555;margin-top:4px;width:440px;justify-content:space-between;`;
+          legend.style.cssText = `display:flex;font-size:18px;color:#555;margin-top:4px;width:500px;justify-content:space-between;`;
           legend.innerHTML = legendColors.map(([c,t]) => `<span><span style="display:inline-block;vertical-align:middle;width:20px;height:20px;border-radius:50%;background:${c};margin-right:6px;"></span><span style="vertical-align:middle;">${t}</span></span>`).join("");
           mapSlot.appendChild(legend);
           // 平均順位（HTMLで直接配置）
           const avgDiv = document.createElement("div");
           avgDiv.className = "grid-print-avg";
           avgDiv.dataset.kw = kwName;
-          avgDiv.style.cssText = `font-size:20px;color:#555;text-align:center;width:440px;margin-top:2px;`;
-          avgDiv.innerHTML = `平均順位: <span style="font-size:28px;font-weight:900;color:#e94560;">-</span>位`;
+          avgDiv.style.cssText = `font-size:20px;color:#555;text-align:center;width:500px;margin-top:2px;`;
+          avgDiv.innerHTML = `平均順位: <span style="font-size:28px;font-weight:900;color:#94a3b8;">-</span>位`;
           mapSlot.appendChild(avgDiv);
+          // 圏内率（キャプチャ後に実データで埋める）
+          const covDiv = document.createElement("div");
+          covDiv.className = "grid-print-cov";
+          covDiv.dataset.kw = kwName;
+          covDiv.style.cssText = `font-size:16px;color:#666;text-align:center;width:500px;margin-top:2px;`;
+          mapSlot.appendChild(covDiv);
           body.appendChild(mapSlot);
         }
         pairSlide.appendChild(body);
@@ -905,8 +942,9 @@ export default function ReportClient({
       const mapSlots = document.querySelectorAll<HTMLElement>(".grid-print-map-slot");
       const origGridKwIdx = gridKwIdx;
 
-      for (let kwIdx = 0; kwIdx < gr.keywords.length; kwIdx++) {
-        const kw = gr.keywords[kwIdx];
+      for (let slotIdx = 0; slotIdx < pdfKwEntries.length; slotIdx++) {
+        // slotIdx=生成したスライド枠の順、kwIdx=webスライド側の元インデックス（表示切替に必要）
+        const { kw, idx: kwIdx } = pdfKwEntries[slotIdx];
         setGridKwIdx(kwIdx);
         await new Promise(r => setTimeout(r, 300));
         const activeSlide = document.querySelector<HTMLElement>(".grid-kw-slide:not(.grid-kw-hidden)");
@@ -959,7 +997,11 @@ export default function ReportClient({
           // ── マーカーを非表示にして地図タイルだけキャプチャ ──
           const markers = gridMarkersRefs.current[kw] || [];
           markers.forEach(m => m.setMap(null));
-          const ctrlEls = mapContainer.querySelectorAll<HTMLElement>(".gmnoprint, .gm-style-mtc, .gm-bundled-control, .gm-svpc");
+          // 帰属表示（ロゴ・「地図の誤りを報告する」）はhtml2canvasだと半分に切れて描画されるため、
+          // ここでは一旦隠し、キャプチャ後にCanvas 2Dで確実に描き直す（マーカーと同じ方式）
+          const ctrlEls = mapContainer.querySelectorAll<HTMLElement>(
+            ".gmnoprint, .gm-style-mtc, .gm-bundled-control, .gm-svpc, .gm-style-cc, a[href*='maps.google.com'], img[alt='Google']"
+          );
           ctrlEls.forEach(el => { el.dataset.origDisplay = el.style.display; el.style.display = "none"; });
           await new Promise(r => setTimeout(r, 100));
 
@@ -1006,10 +1048,30 @@ export default function ReportClient({
             ctx.fillText(rank > 0 ? String(rank) : "-", cx, cy);
           });
 
+          // ── 地図の帰属表示（Googleマップの利用規約上、出力物にも必須） ──
+          // html2canvas任せだと文字が切れるため、キャプチャ後に自前で描画して全文を保証する
+          {
+            const attrText = `地図データ ©${new Date().getFullYear()} Google`;
+            const attrFS = 11 * sf;
+            ctx.font = `${attrFS}px sans-serif`;
+            const tw = ctx.measureText(attrText).width;
+            const padX = 6 * sf, padY = 3 * sf;
+            const boxH = attrFS + padY * 2;
+            const boxW = tw + padX * 2;
+            const bx = finalCanvas.width - boxW;
+            const by = finalCanvas.height - boxH;
+            ctx.fillStyle = "rgba(255,255,255,0.75)";
+            ctx.fillRect(bx, by, boxW, boxH);
+            ctx.fillStyle = "#3c4043";
+            ctx.textAlign = "left";
+            ctx.textBaseline = "middle";
+            ctx.fillText(attrText, bx + padX, by + boxH / 2);
+          }
+
           const canvas = finalCanvas; // 以降の処理で使用
 
           const imgDataUrl = canvas.toDataURL("image/png");
-          const slot = mapSlots[kwIdx];
+          const slot = mapSlots[slotIdx];
           if (slot) {
             const mapDiv = slot.querySelector<HTMLElement>(".grid-print-map");
             if (mapDiv) {
@@ -1018,20 +1080,27 @@ export default function ReportClient({
             }
             // 平均順位を実データで更新
             const avgEl = slot.querySelector<HTMLElement>(".grid-print-avg");
-            const snapHist = gr.history.filter(h => monthToNum(h.month) <= monthToNum(curLabel)).slice(-6);
+            // キャプチャした地図と同じ月の値を出す（最新月固定だと地図と数値がずれる）
+            const snapHist = pdfTargetHistory.slice(0, pdfMonthI + 1);
             const latestSnap = snapHist[snapHist.length - 1]?.snapshots.find(s => s.keyword === kw);
-            const prevSnap = snapHist.length >= 2 ? snapHist[snapHist.length - 2]?.snapshots.find(s => s.keyword === kw) : null;
             if (avgEl && latestSnap) {
-              let diffHtml = "";
-              if (prevSnap) {
-                const d = avgRankDiff(prevSnap.avgRank, latestSnap.avgRank);
-                if (d.text !== "→" && d.text !== "-") {
-                  diffHtml = `<span style="margin-left:8px;font-size:20px;font-weight:700;color:${d.color};">${d.text}</span>`;
-                }
-              }
+              // 変動は最新列基準（null除外の末尾2件比較だと未計測が「改善」になる）
+              const series = snapHist.map(h => { const sn = h.snapshots.find(x => x.keyword === kw); return sn ? sn.avgRank : null; });
+              const measuredArr = snapHist.map(h => h.snapshots.some(x => x.keyword === kw));
+              const d = rankTrend(series, measuredArr, 1);
+              const diffHtml = d.text !== "→" && d.text !== "-"
+                ? `<span style="margin-left:8px;font-size:20px;font-weight:700;color:${d.color};">${d.text}</span>`
+                : "";
               avgEl.innerHTML = latestSnap.avgRank > 0
-                ? `平均順位: <span style="font-size:28px;font-weight:900;color:#e94560;">${latestSnap.avgRank}</span>位${diffHtml}`
+                ? `平均順位: <span style="font-size:28px;font-weight:900;color:${rankTextColor(latestSnap.avgRank)};">${latestSnap.avgRank}</span>位${diffHtml}`
                 : `平均順位: <span style="font-size:28px;font-weight:900;color:#94a3b8;">圏外</span>${diffHtml}`;
+            }
+            // 圏内率（avgRankは圏内地点のみの平均なので単体では実態を誤認させる）
+            const covEl = slot.querySelector<HTMLElement>(".grid-print-cov");
+            const cov = rankCoverage(latestSnap?.results);
+            if (covEl && cov) {
+              const c = cov.pct >= 80 ? "#15803d" : cov.pct >= 50 ? "#b45309" : "#c0392b";
+              covEl.innerHTML = `圏内 <span style="font-weight:800;color:${c};">${cov.ranked}</span><span style="color:#999;"> / ${cov.total}地点（${cov.pct}%）</span>`;
             }
           }
         }
@@ -1146,7 +1215,8 @@ export default function ReportClient({
         ) : isEmpty ? (
           <p style={{ fontSize: 13, color: "#aaa", margin: 0, fontStyle: "italic" }}>未設定</p>
         ) : isArr ? (
-          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.7, color: "#444" }}>
+          /* Tailwind preflightで list-style が消えるため明示指定（指定なしだと記号が出ない） */
+          <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, lineHeight: 1.7, color: "#444", listStyleType: "disc", listStylePosition: "outside" }}>
             {(value as string[]).map((v, i) => (
               <li key={i} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(v, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
             ))}
@@ -1158,16 +1228,44 @@ export default function ReportClient({
     );
   }
 
+  // ── 表示対象の月 ──
+  // 対策開始前で「マップ表示もアクションも0」の先頭月は計測開始前の空データ。
+  // 表に出すと固定高スライドから溢れて最終行が切れ（"直近13ヶ月"なのに12行になる）、
+  // グラフでは値0の空カラムになるだけなので先頭から取り除く（2026-07-31）
+  const monthTrimStart = (() => {
+    const start = parseStartMonth(shop.startDate);
+    if (!start) return 0;
+    let i = 0;
+    while (i < monthlyLabels.length) {
+      if (monthToNum(monthlyLabels[i]) >= monthToNum(start)) break;
+      const mapTotal = (charts.mapMobile[i] || 0) + (charts.mapPC[i] || 0);
+      const actions = (charts.calls[i] || 0) + (charts.routes[i] || 0) + (charts.websites[i] || 0)
+        + (charts.bookings[i] || 0) + (charts.foodMenus[i] || 0);
+      if (mapTotal > 0 || actions > 0) break; // 実データがある月は残す
+      i++;
+    }
+    return i;
+  })();
+  const dispLabels = monthTrimStart > 0 ? monthlyLabels.slice(monthTrimStart) : monthlyLabels;
+  const sliceM = (a: number[] | undefined) => (a || []).slice(monthTrimStart);
+  const dispCharts: typeof charts = monthTrimStart > 0 ? {
+    searchMobile: sliceM(charts.searchMobile), searchPC: sliceM(charts.searchPC),
+    mapMobile: sliceM(charts.mapMobile), mapPC: sliceM(charts.mapPC),
+    calls: sliceM(charts.calls), routes: sliceM(charts.routes),
+    websites: sliceM(charts.websites), bookings: sliceM(charts.bookings),
+    foodMenus: sliceM(charts.foodMenus),
+  } : charts;
+
   // ── Monthly table data ──
-  const monthlyTableData = monthlyLabels.map((label, i) => ({
+  const monthlyTableData = dispLabels.map((label, i) => ({
     label,
-    searchMobile: charts.searchMobile[i], searchPC: charts.searchPC[i],
-    searchTotal: charts.searchMobile[i] + charts.searchPC[i],
-    mapMobile: charts.mapMobile[i], mapPC: charts.mapPC[i],
-    mapTotal: charts.mapMobile[i] + charts.mapPC[i],
-    calls: charts.calls[i], routes: charts.routes[i], websites: charts.websites[i],
-    bookings: charts.bookings[i], foodMenus: charts.foodMenus[i],
-    totalActions: charts.calls[i] + charts.routes[i] + charts.websites[i] + charts.bookings[i] + charts.foodMenus[i],
+    searchMobile: dispCharts.searchMobile[i], searchPC: dispCharts.searchPC[i],
+    searchTotal: dispCharts.searchMobile[i] + dispCharts.searchPC[i],
+    mapMobile: dispCharts.mapMobile[i], mapPC: dispCharts.mapPC[i],
+    mapTotal: dispCharts.mapMobile[i] + dispCharts.mapPC[i],
+    calls: dispCharts.calls[i], routes: dispCharts.routes[i], websites: dispCharts.websites[i],
+    bookings: dispCharts.bookings[i], foodMenus: dispCharts.foodMenus[i],
+    totalActions: dispCharts.calls[i] + dispCharts.routes[i] + dispCharts.websites[i] + dispCharts.bookings[i] + dispCharts.foodMenus[i],
   }));
 
   // ── Page numbering tracker ──
@@ -1491,6 +1589,8 @@ export default function ReportClient({
           <div style={{ fontSize: 16, opacity: 0.7, marginTop: 2 }}>MEO対策 レポート報告</div>
           <div style={{ fontSize: 16, opacity: 0.5, marginTop: 6 }}>{shop.address}</div>
           <div style={{ position: "absolute", top: 28, right: 36, background: "rgba(255,255,255,.12)", padding: "7px 18px", borderRadius: 8, fontSize: 16, fontWeight: 600 }}>{shop.period.start} - {shop.period.end}</div>
+          {/* 表紙だけページ番号が無く、2ページ目以降と体裁が揃っていなかった */}
+          <span className="pn-label" style={{ position: "absolute", bottom: 8, right: 36, fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(1)}</span>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", padding: "5px 9px", background: "#e8eaf0", flexShrink: 0 }}>
           {[{ lb: "対策開始日", vl: shop.startDate }, { lb: "レポート対象", vl: curLabel }, ...(shop.category ? [{ lb: "業種", vl: shop.category }] : []), { lb: "口コミ合計", vl: `${displayTotalReviews.toLocaleString()}件` }, { lb: "評価", vl: String(shop.rating) }].map((b, i) => (
@@ -1505,7 +1605,11 @@ export default function ReportClient({
             {kpis.map((kpi, i) => {
               const isLastKpi = i === kpis.length - 1;
               const mom = kpi.momValue != null ? pctChange(kpi.value, kpi.momValue) : null;
-              const yoyC = kpi.yoyValue != null ? pctChange(kpi.value, kpi.yoyValue) : null;
+              // 対策開始前・0件の前年同月とは比較しない（"+116325.0%（4→4,657）"のような無意味な表示を防ぐ）
+              const yoyOk = isYoyComparable(kpi.yoyValue, curLabel, shop.startDate);
+              const yoyC = yoyOk ? pctChange(kpi.value, kpi.yoyValue!) : null;
+              // 「データが無い」のか「計測開始前で比較にならない」のかを書き分ける
+              const yoyNote = kpi.yoyValue == null ? "前年比 なし" : "前年比 なし（前年は計測前）";
               const badgeStyle = (isUp: boolean, isFlat?: boolean): React.CSSProperties => ({ display: "inline-block", padding: "2px 7px", borderRadius: 16, fontSize: 16, fontWeight: 600, background: isFlat ? "#f0f0f0" : isUp ? "#e6f9ee" : "#fde8e8", color: isFlat ? "#888" : isUp ? "#0a8f3c" : "#c0392b" });
               const arrow = (c: { isUp: boolean; isFlat: boolean }) => c.isFlat ? "→" : c.isUp ? "▲" : "▼";
               return (
@@ -1529,16 +1633,16 @@ export default function ReportClient({
                       <span style={badgeStyle(kpi.value > 0, kpi.value === 0)}>
                         {kpi.value > 0 ? "▲" : kpi.value === 0 ? "→" : "▼"} {(displayTotalReviews - kpi.value).toLocaleString()}→{displayTotalReviews.toLocaleString()}件 前月比
                       </span>
-                      {kpi.yoyValue != null ? (() => {
+                      {yoyOk ? (() => {
                         const yoyDelta = displayTotalReviews - kpi.yoyValue!;
                         return <span style={badgeStyle(yoyDelta >= 0)}>
                           {yoyDelta >= 0 ? "▲" : "▼"} {kpi.yoyValue!.toLocaleString()}→{displayTotalReviews.toLocaleString()}件 前年比
                         </span>;
-                      })() : <span style={{ fontSize: 16, color: "#bbb" }}>前年比 なし</span>}
+                      })() : <span style={{ fontSize: 16, color: "#bbb" }}>{yoyNote}</span>}
                     </>) : (<>
                       {mom && <span style={badgeStyle(mom.isUp, mom.isFlat)}>{arrow(mom)} {mom.text}（{kpi.momValue!.toLocaleString()}→{kpi.value.toLocaleString()}）前月比</span>}
                       {yoyC ? <span style={badgeStyle(yoyC.isUp, yoyC.isFlat)}>{arrow(yoyC)} {yoyC.text}（{kpi.yoyValue!.toLocaleString()}→{kpi.value.toLocaleString()}）前年比</span>
-                        : <span style={{ fontSize: 16, color: "#bbb" }}>前年比 なし</span>}
+                        : <span style={{ fontSize: 16, color: "#bbb" }}>{yoyNote}</span>}
                     </>)}
                   </div>
                 </div>
@@ -1553,7 +1657,7 @@ export default function ReportClient({
       <div style={slideStyle} className="slide">
         <div style={slideBarStyle}><span>{shop.name} — 月次推移データ</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
-          <div style={stitleStyle}>月次推移データ（直近{monthlyLabels.length}ヶ月）</div>
+          <div style={stitleStyle}>月次推移データ（直近{dispLabels.length}ヶ月）</div>
           <div style={{ overflow: "hidden", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", fontSize: 16, flex: 1 }}>
               <thead><tr>
@@ -1598,23 +1702,23 @@ export default function ReportClient({
         <div style={slideBarStyle}><span>{shop.name} — Googleマップ表示数推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={{ width: "95%", margin: "0 auto" }}>
-            <Bar data={{ labels: monthlyLabels, datasets: [
-              { label: "モバイル", data: charts.mapMobile, backgroundColor: "rgba(129,199,132,.75)" },
-              { label: "PC", data: charts.mapPC, backgroundColor: "rgba(56,142,60,.75)" },
+            <Bar data={{ labels: dispLabels, datasets: [
+              { label: "モバイル", data: dispCharts.mapMobile, backgroundColor: "rgba(129,199,132,.75)" },
+              { label: "PC", data: dispCharts.mapPC, backgroundColor: "rgba(56,142,60,.75)" },
             ]}} options={buildStackedOptions()} />
           </div>
           <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 16 }}>
             <tbody>
               <tr style={{ background: "#0f3460" }}>
                 <td style={{ padding: "3px 4px", fontWeight: 600, color: "#fff", width: 60, whiteSpace: "nowrap" }}>月</td>
-                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#fff", fontWeight: 600 }}>{l.split("/")[1]}月</td>)}
+                {dispLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#fff", fontWeight: 600 }}>{l.split("/")[1]}月</td>)}
               </tr>
               <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>モバイル</td>
-                {charts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
+                {dispCharts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
               <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>PC</td>
-                {charts.mapPC.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
+                {dispCharts.mapPC.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
               <tr style={{ background: "#0f3460" }}><td style={{ padding: "3px 4px", fontWeight: 700, color: "#fff", whiteSpace: "nowrap" }}>合計</td>
-                {charts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700, color: "#fff" }}>{(v + charts.mapPC[i]).toLocaleString()}</td>)}</tr>
+                {dispCharts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700, color: "#fff" }}>{(v + dispCharts.mapPC[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
           {renderPageComment("map", "AI総評")}
@@ -1627,23 +1731,23 @@ export default function ReportClient({
         <div style={slideBarStyle}><span>{shop.name} — Google検索数推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={{ width: "95%", margin: "0 auto" }}>
-            <Bar data={{ labels: monthlyLabels, datasets: [
-              { label: "モバイル", data: charts.searchMobile, backgroundColor: "rgba(79,195,247,.75)" },
-              { label: "PC", data: charts.searchPC, backgroundColor: "rgba(2,136,209,.75)" },
+            <Bar data={{ labels: dispLabels, datasets: [
+              { label: "モバイル", data: dispCharts.searchMobile, backgroundColor: "rgba(79,195,247,.75)" },
+              { label: "PC", data: dispCharts.searchPC, backgroundColor: "rgba(2,136,209,.75)" },
             ]}} options={buildStackedOptions()} />
           </div>
           <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 16 }}>
             <tbody>
               <tr style={{ background: "#0f3460" }}>
                 <td style={{ padding: "3px 4px", fontWeight: 600, color: "#fff", width: 60, whiteSpace: "nowrap" }}>月</td>
-                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#fff", fontWeight: 600 }}>{l.split("/")[1]}月</td>)}
+                {dispLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#fff", fontWeight: 600 }}>{l.split("/")[1]}月</td>)}
               </tr>
               <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>モバイル</td>
-                {charts.searchMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
+                {dispCharts.searchMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
               <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>PC</td>
-                {charts.searchPC.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
+                {dispCharts.searchPC.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
               <tr style={{ background: "#0f3460" }}><td style={{ padding: "3px 4px", fontWeight: 700, color: "#fff", whiteSpace: "nowrap" }}>合計</td>
-                {charts.searchMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700, color: "#fff" }}>{(v + charts.searchPC[i]).toLocaleString()}</td>)}</tr>
+                {dispCharts.searchMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700, color: "#fff" }}>{(v + dispCharts.searchPC[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
           {renderPageComment("search", "AI総評")}
@@ -1656,35 +1760,35 @@ export default function ReportClient({
         <div style={slideBarStyle}><span>{shop.name} — ユーザー反応数推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={{ width: "95%", margin: "0 auto" }}>
-            <Bar data={{ labels: monthlyLabels, datasets: [
-              { label: "ウェブサイト", data: charts.websites, backgroundColor: "rgba(255,183,77,.75)" },
-              { label: "ルート", data: charts.routes, backgroundColor: "rgba(186,104,200,.75)" },
-              { label: "通話", data: charts.calls, backgroundColor: "rgba(239,154,154,.75)" },
-              ...(hasFoodMenus ? [{ label: "メニュー", data: charts.foodMenus, backgroundColor: "rgba(77,182,172,.75)" }] : []),
-              ...(hasBookings ? [{ label: "予約", data: charts.bookings, backgroundColor: "rgba(121,134,203,.75)" }] : []),
+            <Bar data={{ labels: dispLabels, datasets: [
+              { label: "ウェブサイト", data: dispCharts.websites, backgroundColor: "rgba(255,183,77,.75)" },
+              { label: "ルート", data: dispCharts.routes, backgroundColor: "rgba(186,104,200,.75)" },
+              { label: "通話", data: dispCharts.calls, backgroundColor: "rgba(239,154,154,.75)" },
+              ...(hasFoodMenus ? [{ label: "メニュー", data: dispCharts.foodMenus, backgroundColor: "rgba(77,182,172,.75)" }] : []),
+              ...(hasBookings ? [{ label: "予約", data: dispCharts.bookings, backgroundColor: "rgba(121,134,203,.75)" }] : []),
             ]}} options={buildStackedOptions()} />
           </div>
           <table style={{ width: "95%", margin: "8px auto 0", borderCollapse: "collapse", fontSize: 16 }}>
             <tbody>
               <tr style={{ background: "#0f3460" }}>
                 <td style={{ padding: "3px 4px", fontWeight: 600, color: "#fff", width: 60, whiteSpace: "nowrap" }}>月</td>
-                {monthlyLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#fff", fontWeight: 600 }}>{l.split("/")[1]}月</td>)}
+                {dispLabels.map((l, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", color: "#fff", fontWeight: 600 }}>{l.split("/")[1]}月</td>)}
               </tr>
               <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>Web</td>
-                {charts.websites.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
+                {dispCharts.websites.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
               <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>ルート</td>
-                {charts.routes.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
+                {dispCharts.routes.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
               <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>通話</td>
-                {charts.calls.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
+                {dispCharts.calls.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>
               {hasFoodMenus && <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>メニュー</td>
-                {charts.foodMenus.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>}
+                {dispCharts.foodMenus.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>}
               {hasBookings && <tr style={{ background: "#fff" }}><td style={{ padding: "3px 4px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>予約</td>
-                {charts.bookings.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>}
+                {dispCharts.bookings.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center" }}>{v.toLocaleString()}</td>)}</tr>}
               <tr style={{ background: "#0f3460" }}><td style={{ padding: "3px 4px", fontWeight: 700, color: "#fff", whiteSpace: "nowrap" }}>合計</td>
-                {charts.websites.map((v, i) => {
-                  let total = v + charts.routes[i] + charts.calls[i];
-                  if (hasFoodMenus) total += charts.foodMenus[i];
-                  if (hasBookings) total += charts.bookings[i];
+                {dispCharts.websites.map((v, i) => {
+                  let total = v + dispCharts.routes[i] + dispCharts.calls[i];
+                  if (hasFoodMenus) total += dispCharts.foodMenus[i];
+                  if (hasBookings) total += dispCharts.bookings[i];
                   return <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700, color: "#fff" }}>{total.toLocaleString()}</td>;
                 })}</tr>
             </tbody>
@@ -1698,14 +1802,19 @@ export default function ReportClient({
         <div style={slideStyle} className="slide">
           <div style={slideBarStyle}><span>{shop.name} — キーワード順位変動</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={slideBodyStyle}>
-            <div style={stitleStyle}>キーワード順位変動（{curLabel}）</div>
+            {/* 比較元は前月とは限らない（5月に計測が無ければ4月と比較になる）ため注記する */}
+            <div style={stitleStyle}>
+              キーワード順位変動（{curLabel}）
+              <span style={{ fontSize: 13, fontWeight: 400, color: "#999", marginLeft: 10 }}>※左側は直近で計測できた月との比較です</span>
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16, flex: 1 }}>
               {visibleKeywords.map((kw, i) => {
                 const hasRank = kw.rank > 0;
                 const hasPrev = kw.prevRank > 0;
                 const diff = hasRank && hasPrev ? kw.prevRank - kw.rank : 0;
-                // 圏外への転落は↓・圏外からの復帰は↑として扱う
-                const arrow = hasPrev && !hasRank ? "↓" : !hasPrev && hasRank ? "↑" : diff > 0 ? "↑" : diff < 0 ? "↓" : "→";
+                // 圏外への転落は↓・圏外からの復帰は↑。未計測は矢印を出さない（下落と誤読されるため）
+                const unmeasured = !hasRank && !kw.curMeasured;
+                const arrow = unmeasured ? "—" : hasPrev && !hasRank ? "↓" : !hasPrev && hasRank ? "↑" : diff > 0 ? "↑" : diff < 0 ? "↓" : "→";
                 const arrowColor = arrow === "↑" ? "#0a8f3c" : arrow === "↓" ? "#c0392b" : "#888";
                 return (
                   <div key={i} style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -1714,10 +1823,11 @@ export default function ReportClient({
                       <span style={{ fontSize: 16, color: "#999" }}>{kw.firstMeasure ? "初計測" : `${kw.prevMonth ? `${parseInt(kw.prevMonth.split("/")[1])}月` : "前月"}${hasPrev ? ` ${kw.prevRank}位` : " 圏外"}`}</span>
                       <span style={{ fontSize: 22, color: arrowColor }}>{arrow}</span>
                       {hasRank ? (
-                        <><span style={{ fontSize: 36, fontWeight: 900, color: "#e94560" }}>{kw.rank}</span>
+                        // 順位帯で色分け（一律赤だと1位も30位も同じ見た目になり、良い結果が警告色になる）
+                        <><span style={{ fontSize: 36, fontWeight: 900, color: rankTextColor(kw.rank) }}>{kw.rank}</span>
                         <span style={{ fontSize: 16, color: "#666" }}>位</span></>
                       ) : (
-                        <span style={{ fontSize: 26, fontWeight: 900, color: "#94a3b8" }}>圏外</span>
+                        <span style={{ fontSize: 26, fontWeight: 900, color: "#94a3b8" }}>{unmeasured ? "未計測" : "圏外"}</span>
                       )}
                     </div>
                   </div>
@@ -1734,7 +1844,12 @@ export default function ReportClient({
         <div style={slideStyle} className="slide">
           <div style={slideBarStyle}><span>{shop.name} — キーワード順位推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={{ ...slideBodyStyle, display: "flex", flexDirection: "column", justifyContent: "center" }}>
-            <div style={stitleStyle}>キーワード順位推移（直近{unifiedRankingHistory.labels.length}ヶ月）</div>
+            {/* labelsは「計測実績のある月」だけを並べたもので連続月とは限らない
+                （例: 5月に計測が無いと 1月/2月/3月/4月/6月 になる）。連続月と誤読されないよう明示する */}
+            <div style={stitleStyle}>
+              キーワード順位推移（計測実績のある直近{unifiedRankingHistory.labels.length}ヶ月）
+              <span style={{ fontSize: 13, fontWeight: 400, color: "#999", marginLeft: 10 }}>※計測が無い月は列に含まれません</span>
+            </div>
             <div style={{ overflowX: "auto", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", flex: 1, minWidth: 700 }}>
                 <thead>
@@ -1750,10 +1865,9 @@ export default function ReportClient({
                 </thead>
                 <tbody>
                   {visibleRankingDatasets.map((ds, di) => {
-                    const validRanks = ds.ranks.filter((r): r is number => r !== null);
-                    const latest = validRanks.length > 0 ? validRanks[validRanks.length - 1] : null;
-                    const prev = validRanks.length > 1 ? validRanks[validRanks.length - 2] : null;
-                    const diff = latest !== null && prev !== null ? prev - latest : 0;
+                    // 変動は必ず「最新列」基準。null除外後の末尾2件を比較すると
+                    // 当月データなしの時に過去2ヶ月の差分が当月の変動として出てしまう
+                    const trend = rankTrend(ds.ranks, ds.measured);
                     return (
                       <tr key={di} style={{ background: di % 2 === 0 ? "#fff" : "#f8f9fb" }}>
                         <td style={{ padding: "6px 6px", fontWeight: 700, color: "#333", whiteSpace: "nowrap", borderBottom: "1px solid #eee", fontSize: 16 }}>{ds.word}</td>
@@ -1763,7 +1877,8 @@ export default function ReportClient({
                             <td key={ri} style={{
                               padding: "6px 4px", textAlign: "center", borderBottom: "1px solid #eee", fontSize: 16,
                               fontWeight: r !== null && r <= 3 ? 900 : isLatest ? 700 : 400,
-                              color: r === null ? "#ddd" : r <= 3 ? "#0a8f3c" : r <= 5 ? "#0f3460" : r <= 10 ? "#555" : "#999",
+                              // 順位帯の色は全ページ共通のrankTextColorに統一（3位以内=青／4-10位=緑）
+                              color: r === null ? "#ddd" : rankTextColor(r),
                               background: isLatest ? "#fff8f0" : undefined,
                             }}>
                               {r ?? "-"}
@@ -1771,10 +1886,11 @@ export default function ReportClient({
                           );
                         })}
                         <td style={{
-                          padding: "6px 4px", textAlign: "center", borderBottom: "1px solid #eee", fontSize: 16, fontWeight: 700,
-                          color: diff > 0 ? "#0a8f3c" : diff < 0 ? "#c0392b" : "#888",
+                          padding: "6px 4px", textAlign: "center", borderBottom: "1px solid #eee",
+                          fontSize: trend.text.length > 2 ? 14 : 16, fontWeight: 700,
+                          color: trend.color,
                         }}>
-                          {diff > 0 ? `↑${diff}` : diff < 0 ? `↓${Math.abs(diff)}` : "→"}
+                          {trend.text}
                         </td>
                       </tr>
                     );
@@ -1836,8 +1952,8 @@ export default function ReportClient({
                         <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
                           <thead>
                             <tr>
-                              {["キーワード", "平均順位", "前回比", "計測地点"].map((t, ti) => (
-                                <th key={t} style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: ti === 0 ? "left" : "center", fontSize: 15 }}>{t}</th>
+                              {["キーワード", "平均順位", "圏内率", "前回比", "計測地点"].map((t, ti) => (
+                                <th key={t} style={{ background: "#0f3460", color: "#fff", padding: "8px 10px", textAlign: ti === 0 ? "left" : "center", fontSize: 15 }}>{t}</th>
                               ))}
                             </tr>
                           </thead>
@@ -1845,18 +1961,27 @@ export default function ReportClient({
                             {/* 右の月別表と同じ全KWを表示（この月のデータがないKWは「-」） */}
                             {gr.keywords.map((kw, si) => {
                               const s = latestMonth.snapshots.find(sn => sn.keyword === kw);
-                              const ps = prevMonth?.snapshots.find(p => p.keyword === kw);
-                              const diff = s ? avgRankDiff(ps?.avgRank ?? null, s.avgRank) : { text: "-", color: "#888" };
+                              // 前回比は右の月別表と同じ最新列基準のロジックに統一（左右で結論が食い違わないように）
+                              const series = recentHistory.map(h => { const sn = h.snapshots.find(x => x.keyword === kw); return sn ? sn.avgRank : null; });
+                              const measuredArr = recentHistory.map(h => h.snapshots.some(x => x.keyword === kw));
+                              const diff = rankTrend(series, measuredArr, 1);
+                              // avgRankは圏内地点のみの平均なので、圏内率が無いと実態を誤認する
+                              const cov = rankCoverage(s?.results);
                               return (
                                 <tr key={si} style={{ background: si % 2 === 0 ? "#fff" : "#f8f9fb" }}>
-                                  <td style={{ padding: "8px 12px", fontSize: 15, borderBottom: "1px solid #eee" }}>{kw}</td>
-                                  <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 15, fontWeight: 800, borderBottom: "1px solid #eee",
+                                  <td style={{ padding: "8px 10px", fontSize: 15, borderBottom: "1px solid #eee" }}>{kw}</td>
+                                  <td style={{ padding: "8px 10px", textAlign: "center", fontSize: 15, fontWeight: 800, borderBottom: "1px solid #eee",
                                     color: !s ? "#ccc" : s.avgRank <= 0 ? "#999" : s.avgRank <= 3 ? "#1d4ed8" : s.avgRank <= 10 ? "#15803d" : s.avgRank <= 20 ? "#b45309" : "#999" }}>{s ? fmtAvgRank(s.avgRank) : "-"}</td>
-                                  <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 15, fontWeight: 700, borderBottom: "1px solid #eee",
+                                  <td style={{ padding: "8px 10px", textAlign: "center", fontSize: 14, borderBottom: "1px solid #eee",
+                                    fontWeight: cov && cov.pct < 50 ? 700 : 400,
+                                    color: !cov ? "#ccc" : cov.pct >= 80 ? "#15803d" : cov.pct >= 50 ? "#b45309" : "#c0392b" }}>
+                                    {cov ? `${cov.ranked}/${cov.total}` : "-"}
+                                  </td>
+                                  <td style={{ padding: "8px 10px", textAlign: "center", fontSize: diff.text.length > 2 ? 13 : 15, fontWeight: 700, borderBottom: "1px solid #eee",
                                     color: diff.color }}>
                                     {diff.text}
                                   </td>
-                                  <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 15, color: "#888", borderBottom: "1px solid #eee" }}>{s ? gridLayoutLabel(s.gridSize, s.results?.length ?? 0) : "-"}</td>
+                                  <td style={{ padding: "8px 10px", textAlign: "center", fontSize: 15, color: "#888", borderBottom: "1px solid #eee" }}>{s ? gridLayoutLabel(s.gridSize, s.results?.length ?? 0) : "-"}</td>
                                 </tr>
                               );
                             })}
@@ -1878,8 +2003,10 @@ export default function ReportClient({
                 <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 5, justifyContent: "flex-start", overflow: "hidden" }}>
                   {gr.keywords.map(kw => {
                     const data = recentHistory.map(h => { const s = h.snapshots.find(s => s.keyword === kw); return s ? s.avgRank : null; });
-                    const valid = data.filter((v): v is number => v !== null);
-                    const diff = valid.length >= 2 ? avgRankDiff(valid[valid.length - 2], valid[valid.length - 1]) : { text: "→", color: "#888" };
+                    // その月にスナップショットがあれば計測済み（avgRank=0でも「全地点圏外」として計測済み扱い）
+                    const measuredArr = recentHistory.map(h => h.snapshots.some(s => s.keyword === kw));
+                    // 変動は最新列基準。null除外して末尾2件を比べると圏外/未計測が「改善」に見える
+                    const diff = rankTrend(data, measuredArr, 1);
                     return (
                       <div key={kw}>
                         <div style={{ fontSize: 18, fontWeight: 700, color: "#0f3460", marginBottom: 0 }}>「{kw}」</div>
@@ -1980,12 +2107,15 @@ export default function ReportClient({
                           </div>
                           <div className="grid-kw-avg" style={{ fontSize: 20, color: "#555", textAlign: "center", width: 440 }}>
                             平均順位: {snapshot.avgRank > 0 ? (
-                              <><span style={{ fontSize: 28, fontWeight: 900, color: "#e94560" }}>{snapshot.avgRank}</span>位</>
+                              // 順位帯で色分け（一律赤だと2.7位の好成績も警告色に見える）
+                              <><span style={{ fontSize: 28, fontWeight: 900, color: rankTextColor(snapshot.avgRank) }}>{snapshot.avgRank}</span>位</>
                             ) : (
                               <span style={{ fontSize: 28, fontWeight: 900, color: "#94a3b8" }}>圏外</span>
                             )}
                             {prevSnapshot && (() => {
-                              const diff = avgRankDiff(prevSnapshot.avgRank, snapshot.avgRank);
+                              // このスライドは月セレクタで選択中の月を表示するため、系列を選択月までに切る
+                              const measuredArr = recentHistory.map(h => h.snapshots.some(s => s.keyword === loopKw));
+                              const diff = rankTrend(trendData.slice(0, activeMonthI + 1), measuredArr.slice(0, activeMonthI + 1), 1);
                               return diff.text !== "→" && diff.text !== "-" ? (
                                 <span style={{ marginLeft: 8, fontSize: 20, fontWeight: 700, color: diff.color }}>
                                   {diff.text}
@@ -1993,6 +2123,17 @@ export default function ReportClient({
                               ) : null;
                             })()}
                           </div>
+                          {/* avgRankは圏内地点のみの平均。圏内率が無いと「45/49が圏外でも26.5位」と読めてしまう */}
+                          {(() => {
+                            const cov = rankCoverage(snapshot.results);
+                            if (!cov) return null;
+                            return (
+                              <div className="grid-kw-cov" style={{ fontSize: 16, color: "#666", textAlign: "center", width: 440 }}>
+                                圏内 <span style={{ fontWeight: 800, color: cov.pct >= 80 ? "#15803d" : cov.pct >= 50 ? "#b45309" : "#c0392b" }}>{cov.ranked}</span>
+                                <span style={{ color: "#999" }}> / {cov.total}地点（{cov.pct}%）</span>
+                              </div>
+                            );
+                          })()}
                         </>
                       ) : (
                         <div style={{ padding: 40, textAlign: "center" }}>
@@ -2025,11 +2166,11 @@ export default function ReportClient({
                                 </td>
                               ))}
                               {(() => {
-                                const valid = trendData.filter((v): v is number => v !== null);
-                                if (valid.length < 2) return <td style={{ padding: "12px 6px", textAlign: "center", color: "#888", borderBottom: "1px solid #eee" }}>→</td>;
-                                const diff = avgRankDiff(valid[valid.length - 2], valid[valid.length - 1]);
+                                // 選択月基準。null除外後の末尾2件比較は当月未計測時に誤った改善を出す
+                                const measuredArr = recentHistory.map(h => h.snapshots.some(s => s.keyword === loopKw));
+                                const diff = rankTrend(trendData.slice(0, activeMonthI + 1), measuredArr.slice(0, activeMonthI + 1), 1);
                                 return (
-                                  <td style={{ padding: "12px 6px", textAlign: "center", fontSize: 16, fontWeight: 700, borderBottom: "1px solid #eee",
+                                  <td style={{ padding: "12px 6px", textAlign: "center", fontSize: diff.text.length > 2 ? 14 : 16, fontWeight: 700, borderBottom: "1px solid #eee",
                                     color: diff.color }}>
                                     {diff.text}
                                   </td>
@@ -2046,28 +2187,37 @@ export default function ReportClient({
                             <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
                               <thead>
                                 <tr>
-                                  <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "left", fontSize: 16 }}>キーワード</th>
-                                  <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "center", fontSize: 16 }}>平均順位</th>
-                                  <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "center", fontSize: 16 }}>前回比</th>
-                                  <th style={{ background: "#0f3460", color: "#fff", padding: "8px 12px", textAlign: "center", fontSize: 16 }}>計測地点</th>
+                                  <th style={{ background: "#0f3460", color: "#fff", padding: "8px 10px", textAlign: "left", fontSize: 16 }}>キーワード</th>
+                                  <th style={{ background: "#0f3460", color: "#fff", padding: "8px 10px", textAlign: "center", fontSize: 16 }}>平均順位</th>
+                                  <th style={{ background: "#0f3460", color: "#fff", padding: "8px 10px", textAlign: "center", fontSize: 16 }}>圏内率</th>
+                                  <th style={{ background: "#0f3460", color: "#fff", padding: "8px 10px", textAlign: "center", fontSize: 16 }}>前回比</th>
+                                  <th style={{ background: "#0f3460", color: "#fff", padding: "8px 10px", textAlign: "center", fontSize: 16 }}>計測地点</th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {monthData.snapshots.map((s, si) => {
-                                  const ps = prevMonthData?.snapshots.find(p => p.keyword === s.keyword);
-                                  const diff = avgRankDiff(ps?.avgRank ?? null, s.avgRank);
+                                  // 選択月までの系列で最新列基準の変動を出す（サマリーページと同一ロジック）
+                                  const series = recentHistory.slice(0, activeMonthI + 1).map(h => { const sn = h.snapshots.find(x => x.keyword === s.keyword); return sn ? sn.avgRank : null; });
+                                  const measuredArr = recentHistory.slice(0, activeMonthI + 1).map(h => h.snapshots.some(x => x.keyword === s.keyword));
+                                  const diff = rankTrend(series, measuredArr, 1);
+                                  const cov = rankCoverage(s.results);
                                   return (
                                     <tr key={si} style={{ background: s.keyword === loopKw ? "#fff8f0" : si % 2 === 0 ? "#fff" : "#f8f9fb" }}>
-                                      <td style={{ padding: "8px 12px", fontWeight: s.keyword === loopKw ? 700 : 500, fontSize: 16, borderBottom: "1px solid #eee" }}>{s.keyword}</td>
-                                      <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 16, fontWeight: 800, borderBottom: "1px solid #eee",
+                                      <td style={{ padding: "8px 10px", fontWeight: s.keyword === loopKw ? 700 : 500, fontSize: 16, borderBottom: "1px solid #eee" }}>{s.keyword}</td>
+                                      <td style={{ padding: "8px 10px", textAlign: "center", fontSize: 16, fontWeight: 800, borderBottom: "1px solid #eee",
                                         color: s.avgRank <= 0 ? "#999" : s.avgRank <= 3 ? "#1d4ed8" : s.avgRank <= 10 ? "#15803d" : s.avgRank <= 20 ? "#b45309" : "#999" }}>
                                         {fmtAvgRank(s.avgRank)}
                                       </td>
-                                      <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 16, fontWeight: 700, borderBottom: "1px solid #eee",
+                                      <td style={{ padding: "8px 10px", textAlign: "center", fontSize: 15, borderBottom: "1px solid #eee",
+                                        fontWeight: cov && cov.pct < 50 ? 700 : 400,
+                                        color: !cov ? "#ccc" : cov.pct >= 80 ? "#15803d" : cov.pct >= 50 ? "#b45309" : "#c0392b" }}>
+                                        {cov ? `${cov.ranked}/${cov.total}` : "-"}
+                                      </td>
+                                      <td style={{ padding: "8px 10px", textAlign: "center", fontSize: diff.text.length > 2 ? 14 : 16, fontWeight: 700, borderBottom: "1px solid #eee",
                                         color: diff.color }}>
                                         {diff.text}
                                       </td>
-                                      <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 16, color: "#888", borderBottom: "1px solid #eee" }}>
+                                      <td style={{ padding: "8px 10px", textAlign: "center", fontSize: 16, color: "#888", borderBottom: "1px solid #eee" }}>
                                         {gridLayoutLabel(s.gridSize, s.results?.length ?? 0)}
                                       </td>
                                     </tr>
@@ -2110,8 +2260,14 @@ export default function ReportClient({
         const sqYoy = yoyMonth ? sqHistory.find(h => h.month === yoyMonth) : null;
         const yoyMap = new Map((sqYoy?.keywords || []).map(k => [k.word, k.count]));
         const yoyTotalCount = sqYoy ? (sqYoy.keywords || []).reduce((sum: number, kw: any) => sum + kw.count, 0) : null;
-        const yoyTotalDiff = yoyTotalCount !== null ? totalCount - yoyTotalCount : null;
-        const hasYoy = sqYoy !== null;
+        // 前年同月が「対策開始前」「語句0件」「当月と共通語句なし」のいずれかなら列を出さない。
+        // 出すと全行「-」の空列が2列できるだけで情報量がゼロになる（2026-07-31 発見）
+        const yoyStartMonth = parseStartMonth(shop.startDate);
+        const yoyBeforeStart = !!(yoyStartMonth && yoyMonth && monthToNum(yoyMonth) < monthToNum(yoyStartMonth));
+        const hasYoy = !!sqYoy && !yoyBeforeStart
+          && (sqYoy.keywords || []).length > 0
+          && currentKeywords.some(kw => yoyMap.has(kw.word));
+        const yoyTotalDiff = hasYoy && yoyTotalCount !== null ? totalCount - yoyTotalCount : null;
         // 全期間の累計マップ
         const cumulativeMap = new Map<string, number>();
         for (const m of sqHistory) {
@@ -2161,7 +2317,8 @@ export default function ReportClient({
                   const fmtDiff = (d: number | null) => d === null ? "-" : d > 0 ? `+${d.toLocaleString()}` : d === 0 ? "→" : d.toLocaleString();
                   return (
                     <tr key={`${sqCurrent?.month}-${rank}`} style={{ background: ri % 2 === 0 ? "#fff" : "#f8f9fb", borderBottom: "1px solid #eee" }}>
-                      <td style={{ padding: "2px 4px", textAlign: "center", fontSize: 14, fontWeight: 700, color: rank < 3 ? "#e94560" : rank < 10 ? "#0f3460" : "#888" }}>{rank + 1}</td>
+                      {/* 上位を赤にすると他ページの順位色（3位以内=青）と逆の意味に見えるため統一する */}
+                      <td style={{ padding: "2px 4px", textAlign: "center", fontSize: 14, fontWeight: 700, color: rankTextColor(rank + 1) }}>{rank + 1}</td>
                       <td style={{ padding: "2px 6px", fontSize: 14, color: "#333" }}>{kw.word}</td>
                       <td style={{ padding: "2px 4px", textAlign: "center", fontSize: 14, fontWeight: 700, color: "#0f3460" }}>{kw.count.toLocaleString()}</td>
                       {hasPrev && <td style={{ padding: "2px 4px", textAlign: "center", fontSize: 14, color: "#888", borderLeft: "2px solid #e8edf3" }}>{prev !== undefined ? prev.toLocaleString() : "-"}</td>}
@@ -2187,7 +2344,8 @@ export default function ReportClient({
         );
         const sqSummary = (
           <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 12, padding: "2px 16px 2px", fontSize: 14 }}>
-            <span style={{ color: "#555", fontWeight: 500 }}>総検索数: <strong style={{ color: "#0f3460", fontSize: 15 }}>{totalCount.toLocaleString()}</strong></span>
+            {/* 表は上位20件ずつだが、この合計は当月の全語句が対象なので明示する */}
+            <span style={{ color: "#555", fontWeight: 500 }}>総検索数（全語句）: <strong style={{ color: "#0f3460", fontSize: 15 }}>{totalCount.toLocaleString()}</strong></span>
             {totalDiff !== null && (
               <span style={{ fontSize: 14, fontWeight: 600, color: totalDiff > 0 ? "#0a8f3c" : totalDiff < 0 ? "#c0392b" : "#888" }}>
                 前月比: {totalDiff > 0 ? `+${totalDiff.toLocaleString()}` : totalDiff === 0 ? "→" : totalDiff.toLocaleString()}
@@ -2303,6 +2461,13 @@ export default function ReportClient({
                 </tr>
               </tbody>
             </table>
+            {/* 増加数は前月との差分なので初月は必ず出せない。
+                前ページ（累計）と期間がずれる理由が分からないと欠測に見える */}
+            {reviewLabels.length > 1 && (
+              <div style={{ fontSize: 12, color: "#999", textAlign: "right", width: "95%", margin: "4px auto 0" }}>
+                ※増加数は前月との差分のため、集計開始月（{reviewLabels[0]}）は対象外です
+              </div>
+            )}
             {renderPageComment("reviewDelta", "AI総評")}
           </div>
         </div>
@@ -2316,7 +2481,7 @@ export default function ReportClient({
           <div style={stitleStyle}>口コミ分析（直近1年）</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "auto 1fr", gap: 16, flex: 1 }}>
             <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", justifyContent: "center" }}>
-              <h3 style={{ fontSize: 16, fontWeight: 700, color: "#27ae60", marginBottom: 14 }}>ポジティブワード（推定）</h3>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: "#27ae60", marginBottom: 14 }}>よく挙がる好評ポイント</h3>
               <div>{(() => {
                 const sources = reviewAnalysis.positiveWordSources;
                 const hasSources = sources && sources.length > 0 && sources.some(s => s.reviews.length > 0);
@@ -2338,7 +2503,7 @@ export default function ReportClient({
               <p className="no-print" style={{ fontSize: 16, color: "#aaa", marginTop: 8, margin: "8px 0 0" }}>※ クリックで該当する口コミを表示します</p>
             </div>
             <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", justifyContent: "center" }}>
-              <h3 style={{ fontSize: 16, fontWeight: 700, color: "#c0392b", marginBottom: 14 }}>ネガティブワード（推定）</h3>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: "#c0392b", marginBottom: 14 }}>よく挙がる改善ポイント</h3>
               <div>{(() => {
                 const sources = reviewAnalysis.negativeWordSources;
                 const hasSources = sources && sources.length > 0 && sources.some(s => s.reviews.length > 0);
@@ -2360,12 +2525,22 @@ export default function ReportClient({
               <p className="no-print" style={{ fontSize: 16, color: "#aaa", marginTop: 8, margin: "8px 0 0" }}>※ クリックで該当する口コミを表示します</p>
             </div>
             <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", gridColumn: "1/-1", display: "flex", flexDirection: "column", justifyContent: "center" }}>
-              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>口コミ総評</h3>
+              {/* summaryは口コミ限定ではなく当月全体の総評フィールドなので見出しを実態に合わせる */}
+              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>口コミ評価と今月の総評</h3>
               <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 12 }}>
                 <div>
-                  <div style={{ fontSize: 32, color: "#fbc02d" }}>{"★".repeat(Math.round(shop.rating))}{"☆".repeat(5 - Math.round(shop.rating))}</div>
-                  <span style={{ fontSize: 56, fontWeight: 900, color: "#0f3460" }}>{shop.rating}</span>
-                  <span style={{ fontSize: 16, color: "#888", marginLeft: 8 }}>/ 5.0（{displayTotalReviews.toLocaleString()}件）</span>
+                  {/* Math.roundだと4.7が★5つ＝満点に見えるため、評価値どおりの部分塗りにする */}
+                  <div style={{ position: "relative", display: "inline-block", fontSize: 32, lineHeight: 1.2, letterSpacing: 1 }}>
+                    <span style={{ color: "#dcdcdc" }}>★★★★★</span>
+                    <span style={{
+                      position: "absolute", top: 0, left: 0, color: "#fbc02d", overflow: "hidden", whiteSpace: "nowrap",
+                      width: `${Math.max(0, Math.min(5, shop.rating)) / 5 * 100}%`,
+                    }}>★★★★★</span>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: 56, fontWeight: 900, color: "#0f3460" }}>{shop.rating}</span>
+                    <span style={{ fontSize: 16, color: "#888", marginLeft: 8 }}>/ 5.0（{displayTotalReviews.toLocaleString()}件）</span>
+                  </div>
                 </div>
               </div>
               <p style={{ fontSize: 16, lineHeight: 1.9, color: "#444", margin: 0 }} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(reviewAnalysis.summary, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
@@ -2397,11 +2572,12 @@ export default function ReportClient({
             <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", borderRadius: 10, overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.04)" }}>
               <thead>
                 <tr style={{ background: "#0f3460" }}>
-                  <th style={{ padding: "6px 10px", color: "#fff", fontSize: 13, fontWeight: 600, textAlign: "center", width: 42 }}>#</th>
+                  {/* 「#」だけでは何の順位か分からないため列名を明示 */}
+                  <th style={{ padding: "6px 10px", color: "#fff", fontSize: 13, fontWeight: 600, textAlign: "center", width: 52 }}>検索順位</th>
                   <th style={{ padding: "6px 12px", color: "#fff", fontSize: 13, fontWeight: 600, textAlign: "left" }}>店舗名</th>
                   <th style={{ padding: "6px 10px", color: "#fff", fontSize: 13, fontWeight: 600, textAlign: "center", width: 70 }}>評価</th>
                   <th style={{ padding: "6px 10px", color: "#fff", fontSize: 13, fontWeight: 600, textAlign: "center", width: 90 }}>口コミ数</th>
-                  <th style={{ padding: "6px 10px", color: "#fff", fontSize: 13, fontWeight: 600, textAlign: "center", width: 90 }}>差分</th>
+                  <th style={{ padding: "6px 10px", color: "#fff", fontSize: 13, fontWeight: 600, textAlign: "center", width: 100 }}>自店との差</th>
                 </tr>
               </thead>
               <tbody>
@@ -2422,6 +2598,16 @@ export default function ReportClient({
                 })}
               </tbody>
             </table>
+            {/* 競合値はMaps掲載値のスナップショットのため、レポート対象月の自店数値と一致しない。
+                注記が無いと「P1は231件なのにここは243件」と読まれるので必ず突き合わせを書く */}
+            <div style={{ fontSize: 12, color: "#888", marginTop: 6, lineHeight: 1.6 }}>
+              ※「自店との差」は自店の口コミ数−各店の口コミ数です。
+              {comp.fetchedAt && (() => {
+                const d = new Date(comp.fetchedAt);
+                const stamp = `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+                return `この表はすべて${stamp}時点のGoogleマップ掲載値のため、レポート対象月（${curLabel}）末時点の自店実績（${displayTotalReviews.toLocaleString()}件・評価${shop.rating}）とは一致しません。`;
+              })()}
+            </div>
             {renderPageComment("competitor", "AI総評")}
           </div>
         </div>
@@ -2493,9 +2679,18 @@ export default function ReportClient({
           <div style={slideBarStyle}><span>{shop.name} — 総括</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={slideBodyStyle}>
             <div style={stitleStyle}>{curLabel} 総括</div>
-            <div style={{ background: "linear-gradient(135deg,#f0f4ff,#fff)", border: "2px solid #0f3460", borderRadius: 14, padding: "24px 28px", flex: 1, display: "flex", flexDirection: "column" }}>
+            {/* 当月サマリー: 「総括」ページに総括が無く改善策だけ、という構成を解消する */}
+            {pageComments.monthly && (
+              <div style={{ background: "#fff", border: "1px solid #dbe3ef", borderRadius: 12, padding: "14px 20px", marginBottom: 12 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#0f3460", marginBottom: 6 }}>{curLabel} のまとめ</div>
+                <p style={{ fontSize: 16, lineHeight: 1.8, color: "#333", margin: 0 }}
+                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(pageComments.monthly, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
+              </div>
+            )}
+            {/* flex:1 だと項目3件でも枠がスライド高いっぱいに広がり8割が空白になる */}
+            <div style={{ background: "linear-gradient(135deg,#f0f4ff,#fff)", border: "2px solid #0f3460", borderRadius: 14, padding: "24px 28px", display: "flex", flexDirection: "column" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                <h3 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", margin: 0 }}>今日から実行可能な改善策</h3>
+                <h3 style={{ fontSize: 16, fontWeight: 700, color: "#0f3460", margin: 0 }}>次のアクション</h3>
                 {isLoggedIn && (
                   <div className="no-print" style={{ display: "flex", gap: 6, alignItems: "center" }}>
                     {!isEditingActions ? (
@@ -2517,9 +2712,11 @@ export default function ReportClient({
                 <textarea value={pcEditingValue} onChange={(e) => setPcEditingValue(e.target.value)}
                   style={{ width: "100%", flex: 1, minHeight: 200, padding: "10px 12px", fontSize: 16, lineHeight: 1.8, border: "1px solid #ccd", borderRadius: 8, resize: "vertical", fontFamily: "inherit", color: "#333", background: "#fff" }} />
               ) : pageComments.actions.length > 0 ? (
-                <ol style={{ fontSize: 16, lineHeight: 2, color: "#333", paddingLeft: 22, margin: 0 }}>
+                /* Tailwindのpreflightが list-style を none にするため明示指定が必須。
+                   指定が無いと番号も「・」も出ず、ただの改行の羅列に見える（2026-07-31） */
+                <ol style={{ fontSize: 16, lineHeight: 2, color: "#333", paddingLeft: 26, margin: 0, listStyleType: "decimal", listStylePosition: "outside" }}>
                   {pageComments.actions.map((a, i) => (
-                    <li key={i} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(a, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
+                    <li key={i} style={{ paddingLeft: 4 }} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(a, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
                   ))}
                 </ol>
               ) : (
