@@ -1,0 +1,79 @@
+## 【2026-07-31】セッション総括: 多地点5地点化／CSV一括出力ページ新設／GitHub認証の根本修正
+
+※詳細は同日の個別ログ参照:
+「2026-07-31_多地点計測5地点化_4ページ打ち切り.txt」
+「2026-07-31_CSV一括出力ページ_全店舗8種.txt」
+「2026-07-31_CSV一括出力_セルフレビュー修正6件.txt」
+
+### 決定事項
+- 多地点順位計測を「店舗中心＋外周4点＝5地点」に変更（7/29の「中心は計測せずシートへフォールバック」決定を上書き）。保存形式はgridSize=3の中心+四隅スロット＝奇数グリッドにし、centerCell()がそのまま中心実測値を返す設計
+- 検索打ち切りを5ページ(100位)→4ページ(80位)に変更。「圏外」の意味が80位以下に変わる（顧客説明時に注意）。1KW最大費用は 4地点×5P=20req → 5地点×4P=20req で据え置き
+- 全店舗まとめCSVは既存ページへのボタン追加ではなく専用ページ /csv-export に集約（既存画面を壊さない・拡張しやすい）。対象は8種、店舗診断・店舗パフォーマンスは対象外（1店舗ずつGo API呼び出し構造のため。対応するならGo API側一括APIかSupabaseキャッシュ化とセット）
+- CSVエクスポートの権限はSTAFF_VIEW（社長/幹部/社員）、全ダウンロードを監査ログに記録、解約店舗は除外
+- GitHub認証はgh CLI(omni-seo)優先→ダメならGCM(aichubbysystem-sponavi)のフォールバック連鎖に修正
+
+### 変更内容（具体的に）
+■ 多地点5地点化（feature/grid-5point-4page → main 79aa189）
+- src/lib/grid-utils.ts: generate5Points追加（中心(1,1)先頭＋generate4Pointsの四隅読み替え。外周座標は完全同一）
+- src/lib/grid-utils.test.ts / report-utils.test.ts: テスト追加（計61→134件時点で全パス）
+- src/lib/report-utils.ts: gridLayoutLabel(gridSize, pointCount)追加（2→"4地点"／3かつ5点→"5地点"／他"N×N"）
+- src/app/api/report/grid-ranking/route.ts: 検索ループ page<4・isLastPage page===3
+- src/app/grid-ranking/page.tsx: GRID_SIZE_5POINT=3/POINTS_PER_KW=5、単店舗+一括2経路をgenerate5Pointsに、gridTableを疎グリッド対応（row/col最大値でサイズ算出＋nullセル埋め）、履歴ラベル・UI文言・費用目安更新
+- src/app/report/[shopId]/client.tsx: 計測地点ラベル2箇所をgridLayoutLabelに
+- src/components/shop-provider.tsx: いつもの店舗追加時の既定gridSize 2→3
+- src/app/api/report/grid-ranking-presets/route.ts: 月額見積 4req/KW→5req/KW
+
+■ CSV一括出力（feature/bulk-csv-export → main 1faa3f3、レビュー修正 → main d1c1b16）
+- src/app/api/export/route.ts 新規: GET /api/export?type=&month=YYYY-MM。8type
+  （insights/search-keywords/grid-ranking/reviews/review-analysis/review-language/pmax/posts）。
+  fetchAll(.range()ページング)＋安定ソートキー、月フォーマット差異吸収、shop_name(NFC)キー集計、
+  requirePermission("STAFF_VIEW")+writeAudit、解約店舗除外（grid=shop_id/他=NFKC正規化名照合）、
+  esc()に数式インジェクションガード、review-languageは既存APIの20店舗制限を回避する専用集計
+- src/app/csv-export/page.tsx 新規: 月選択（既定=前月）＋8項目カード。api.get(blob)→a.click()、X-Row-Countで件数表示
+- src/components/sidebar.tsx: 店舗情報管理＞CSV一括出力（多地点順位チェックの下）
+- src/lib/roles.ts: /csv-export をpresident/executive/managerに追加（バイト不可）
+
+■ GitHub認証（コード外・設定変更）
+- ~/.gitconfig の [credential "https://github.com"] に helper=manager を追記
+  （gh CLIのみ→gh→GCMのフォールバック連鎖に。omni-seoの他リポジトリに影響なし）
+- GCMブラウザ認証1回実施済み → 以降のpush/マージはClaude Codeから直接実行可能
+
+### 数値・設定値
+- 計測: POINTS_PER_KW=5、GRID_SIZE_5POINT=3、検索最大4ページ=80位、費用目安max=地点数×4req×¥4.8（1KW最大20req＝従来同額）
+- 一括計測の所要時間目安: 50秒/店舗→60秒/店舗（地点数+25%）
+- export API: PAGE=1000（PostgREST上限対応）、FETCH_CAP=500,000行（超過は明示エラー）、maxDuration=120秒、クライアントtimeout=180秒
+- 月フォーマット（実データ検証済み）: "2026/7"=performance_metrics_cache/search_query_cache/report_analysis ／ "2026-07"=pmax_store_data ／ "2026/06"=pmax_gbp_data ／ timestamp範囲=reviews/post_logs/grid_ranking_logs
+- 実データ件数（検証時）: 店舗605（解約75）／6月インサイト458行（解約除外1行）／6月口コミ6,936件（コメント有5,280）／7月grid_logs 3,637行／post_logsは5月24・6月0・7月48件
+- pmax単位: ctr=比率(0-1)→%表示、average_cpc/cost_micros=マイクロ円→÷1,000,000で円
+- 解約店と同名の営業中店舗=0件（除外の誤爆なしを実データ確認）
+
+### 未解決・次回やること
+- 8月の一括計測が5地点×店舗別距離設定の初フル運用 → 実測費用の確認。主要店舗の距離・向き調整（既定1km・斜め）
+- place_idスキップ4店舗（WHITE山科店・ラビットクリーン長野=座標ズレ、ぱいぱい那覇・福キタル名駅=座標なし）→ 座標修正後に一括取得ボタン再実行（約¥19）
+- テスト計測ログの削除（ユーザー作業: 名東区パスタ・名東区モーニング分）
+- 【調査で発見した潜在バグ・未修正】PostgREST 1000行制限に潰されている疑いのある既存クエリ:
+  grid-export/route.ts の .limit(50000)、pmax/store-summary の .limit(10000)、
+  diagnosis のベンチマーク .limit(10000)、posts全店舗状況の limit無しクエリ → 要検証・修正
+- 店舗診断/店舗パフォーマンスのCSV一括出力（やるならGo API側一括エンドポイント or Supabaseキャッシュ化とセット）
+- Vercelの死んだ重複プロジェクト整理と.vercelリンク先修正（前回からの持ち越し）
+- （任意）OneDriveごみ箱・バージョン履歴に残る移動前秘密ファイルの完全削除（同日朝のセキュリティ対応の残り）
+
+### 注意点・ハマったこと
+- 【最重要・GitHub認証の真因】push時にGCMブラウザ認証が出ずパスワード入力に落ちる原因は、
+  ~/.gitconfig の [credential "https://github.com"] セクションが「helper=（空でリセット）→gh CLIのみ」
+  になっていたこと。gh は omni-seo でログインしており aichubbysystem-sponavi の認証には何も返せず
+  素のパスワードプロンプトに落ちていた。helper=manager をセクション末尾に追記して解決。
+  ※omni-seo には new-sponavi のpush権限なし（pullのみ）
+- Claude Codeのシェル（サンドボックス）からはGCMのブラウザ/GUI/デバイスコード認証がすべて不可
+  （/dev/ttyなし・GUI不可・device flowも失敗）。初回認証はユーザーの通常ターミナルで実施が正解
+- レポートは「当月は集計中→常に前月（確定月）表示」。7/31の計測が見えるのは8/1以降の7月分レポート（仕様・バグではない）
+- 偶数グリッド時代のログ互換: centerCellのgridSize=2→undefinedフォールバック分岐は旧データ用に残してある。
+  grid-export系で偶数グリッドの中心は圏内平均で代替
+- 5地点の順位グリッド表は疎（3×3の中心+四隅）→ gridTableでnullセル埋めしないと列位置がズレる。
+  sqrt(results.length)でサイズ算出する旧ロジックは5点だと2×2に誤判定する罠
+- reviews.shop_idはGo API系/Supabase系の2系統混在 → 全店舗集計は必ずshop_name(NFC)で
+- performance_metrics_cache/search_query_cacheは同一店舗名でshop_id世代違いの重複行あり → updated_at降順の先勝ちで解決
+- report_analysisにtarget_month=nullの旧行423件あり（eq()で自然に除外される）
+- CSVの数式インジェクション: =/+/@/タブ始まりに'前置。"-"は負数(-1,-5.2,-3%)と区別が必要
+  （一律ガードすると数値列が壊れる）。既存のreviews画面CSVには同じ穴が残っている（未修正）
+- grid_search_cacheは旧complete行(5ページ=100件)と新complete行(4ページ=80件)が同月混在し得るが判定ロジック上は問題なし
