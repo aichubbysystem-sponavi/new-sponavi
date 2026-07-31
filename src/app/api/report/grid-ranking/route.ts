@@ -75,7 +75,7 @@ function findRank(places: string[], targetName: string): number {
 
 /**
  * POST /api/report/grid-ranking
- * 1地点×1キーワードの順位計測（最大100位まで5ページ検索）
+ * 1地点×1キーワードの順位計測（最大80位まで4ページ検索）
  * 検索結果は grid_search_cache に月次保存し、同月の再計測はAPIを呼ばない
  */
 export const POST = withAudit("多地点順位実測", "PAID_OP", async (request, ctx) => {
@@ -212,8 +212,8 @@ export const POST = withAudit("多地点順位実測", "PAID_OP", async (request
       ? "places.id,nextPageToken"
       : "places.id,places.displayName,nextPageToken"; // Pro（従来と同額）。idを同時取得して次回からEssentialsに移行
 
-    // 最大5ページ（100位）まで検索
-    for (let page = 0; page < 5; page++) {
+    // 最大4ページ（80位）まで検索（2026-07-31 コスト削減: 5ページ→4ページ）
+    for (let page = 0; page < 4; page++) {
       const reqBody: any = {
         textQuery: keyword,
         languageCode: "ja",
@@ -247,8 +247,8 @@ export const POST = withAudit("多地点順位実測", "PAID_OP", async (request
         if (!useIdMode) allNames.push(p.displayName?.text || "");
       }
 
-      // このページが最終か（次ページなし or 5ページ=100位到達）
-      const isLastPage = !data.nextPageToken || places.length === 0 || page === 4;
+      // このページが最終か（次ページなし or 4ページ=80位到達）
+      const isLastPage = !data.nextPageToken || places.length === 0 || page === 3;
       if (isLastPage) complete = true; // 最後まで見た＝リスト完全
 
       rank = useIdMode ? allIds.indexOf(shopPlaceId) + 1 : findRank(allNames, targetName);
@@ -259,7 +259,7 @@ export const POST = withAudit("多地点順位実測", "PAID_OP", async (request
     }
 
     // 【IDの鮮度チェック】IDモードで中心地点すら圏外の場合、IDの失効を疑って確認する
-    // （失効を放置すると「全地点圏外の誤レポート + 毎回5ページ全消費」が続く。無料SKUで自動回復）
+    // （失効を放置すると「全地点圏外の誤レポート + 毎回4ページ全消費」が続く。無料SKUで自動回復）
     if (useIdMode && rank === 0 && center === true) {
       const freshId = await refreshPlaceId(supabase, shopId, shopPlaceId);
       if (freshId && freshId !== shopPlaceId) {

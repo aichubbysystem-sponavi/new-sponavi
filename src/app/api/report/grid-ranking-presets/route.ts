@@ -70,11 +70,11 @@ export async function GET(request: NextRequest) {
     (p as any).last_measurement = logMap.get(p.shop_id) || null;
   }
 
-  // 月額コスト見積もり（全KW共通: 斜め4地点計測）
+  // 月額コスト見積もり（全KW共通: 中心＋外周4地点の5地点計測）
   let totalRequests = 0;
   for (const p of (data || [])) {
     const kwCount = Math.max(1, ((p as any).all_keywords || []).length);
-    totalRequests += 4 * kwCount;
+    totalRequests += 5 * kwCount;
   }
   const costPerRequest = 0.032;
   const freeCredit = 200;

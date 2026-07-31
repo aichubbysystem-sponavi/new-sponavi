@@ -232,6 +232,17 @@ export function centerCell<T extends { row: number; col: number }>(
   return results.find(r => r.row === c && r.col === c);
 }
 
+/**
+ * 計測レイアウトの表示ラベル。
+ * gridSize=2 → 旧「4地点」計測、gridSize=3かつ5点 → 「5地点」計測（中心＋外周4点）、
+ * それ以外（旧3×3全9点・7×7等）→ 「N×N」。
+ */
+export function gridLayoutLabel(gridSize: number, pointCount: number): string {
+  if (gridSize === 2) return "4地点";
+  if (gridSize === 3 && pointCount === 5) return "5地点";
+  return `${gridSize}×${gridSize}`;
+}
+
 /** diff表示の色 */
 export function diffColor(d: number | null): string {
   if (d === null) return "#ccc";

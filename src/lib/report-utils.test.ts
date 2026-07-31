@@ -10,6 +10,7 @@ import {
   formatAIComment,
   splitCommentPages,
   centerCell,
+  gridLayoutLabel,
   diffColor,
   formatDiff,
   COLORS,
@@ -301,5 +302,23 @@ describe("定数の整合性", () => {
     // rankColor: #2563EB, rankColorModal: #2563eb (大文字小文字の違い)
     expect(rankColor(3).toLowerCase()).toContain("2563eb");
     expect(rankColorModal(3).color).toBe("#2563eb");
+  });
+});
+
+describe("gridLayoutLabel", () => {
+  it("gridSize=2は旧4地点計測", () => {
+    expect(gridLayoutLabel(2, 4)).toBe("4地点");
+  });
+
+  it("gridSize=3かつ5点は5地点計測（中心＋外周4点）", () => {
+    expect(gridLayoutLabel(3, 5)).toBe("5地点");
+  });
+
+  it("gridSize=3で9点（旧フル3×3）は3×3表記", () => {
+    expect(gridLayoutLabel(3, 9)).toBe("3×3");
+  });
+
+  it("7×7はそのままN×N表記", () => {
+    expect(gridLayoutLabel(7, 49)).toBe("7×7");
   });
 });

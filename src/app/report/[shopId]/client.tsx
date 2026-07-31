@@ -32,7 +32,7 @@ import {
   SEARCH_QUERIES_PER_PAGE,
   pctChange, monthToNum, rankColor, rankColorModal,
   fmtAvgRank, avgRankDiff,
-  reorderKpis, centerCell,
+  reorderKpis, centerCell, gridLayoutLabel,
 } from "@/lib/report-utils";
 import {
   slideStyle, slideBarStyle, slideBodyStyle, stitleStyle,
@@ -1856,7 +1856,7 @@ export default function ReportClient({
                                     color: diff.color }}>
                                     {diff.text}
                                   </td>
-                                  <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 15, color: "#888", borderBottom: "1px solid #eee" }}>{s ? (s.gridSize === 2 ? "4地点" : `${s.gridSize}×${s.gridSize}`) : "-"}</td>
+                                  <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 15, color: "#888", borderBottom: "1px solid #eee" }}>{s ? gridLayoutLabel(s.gridSize, s.results?.length ?? 0) : "-"}</td>
                                 </tr>
                               );
                             })}
@@ -2068,7 +2068,7 @@ export default function ReportClient({
                                         {diff.text}
                                       </td>
                                       <td style={{ padding: "8px 12px", textAlign: "center", fontSize: 16, color: "#888", borderBottom: "1px solid #eee" }}>
-                                        {s.gridSize === 2 ? "4地点" : `${s.gridSize}×${s.gridSize}`}
+                                        {gridLayoutLabel(s.gridSize, s.results?.length ?? 0)}
                                       </td>
                                     </tr>
                                   );

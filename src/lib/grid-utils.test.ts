@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { generate4Points, GRID_ANGLES } from "./grid-utils";
+import { generate4Points, generate5Points, GRID_ANGLES } from "./grid-utils";
 
 // 2点間の概算距離（メートル）— テスト内検算用
 function distanceM(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -74,6 +74,41 @@ describe("generate4Points", () => {
     for (let i = 0; i < 4; i++) {
       const moved = distanceM(a[i].lat, a[i].lng, b[i].lat, b[i].lng);
       expect(Math.abs(moved - expected)).toBeLessThan(2);
+    }
+  });
+});
+
+describe("generate5Points", () => {
+  const LAT = 35.165696;
+  const LNG = 136.995758;
+
+  it("常に5点を返し、1点目が中心(1,1)=店舗座標そのもの", () => {
+    const pts = generate5Points(LAT, LNG, 1000);
+    expect(pts).toHaveLength(5);
+    expect(pts[0]).toMatchObject({ row: 1, col: 1, lat: LAT, lng: LNG });
+  });
+
+  it("row/colは3×3の中心＋四隅スロット（centerCellが中心を拾える奇数グリッド）", () => {
+    const keys = generate5Points(LAT, LNG, 1000).map(p => `${p.row},${p.col}`).sort();
+    expect(keys).toEqual(["0,0", "0,2", "1,1", "2,0", "2,2"]);
+  });
+
+  it("外周4点はgenerate4Pointsと同一座標（スロットの読み替えのみ）", () => {
+    for (const angle of GRID_ANGLES) {
+      const outer5 = generate5Points(LAT, LNG, 2000, angle).slice(1);
+      const outer4 = generate4Points(LAT, LNG, 2000, angle);
+      for (let i = 0; i < 4; i++) {
+        expect(outer5[i].lat).toBe(outer4[i].lat);
+        expect(outer5[i].lng).toBe(outer4[i].lng);
+        expect(outer5[i].row).toBe(outer4[i].row * 2);
+        expect(outer5[i].col).toBe(outer4[i].col * 2);
+      }
+    }
+  });
+
+  it("外周4点は中心からちょうどr（誤差1m未満）", () => {
+    for (const pt of generate5Points(LAT, LNG, 3000, 15).slice(1)) {
+      expect(Math.abs(distanceM(LAT, LNG, pt.lat, pt.lng) - 3000)).toBeLessThan(1);
     }
   });
 });
