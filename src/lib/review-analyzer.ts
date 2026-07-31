@@ -29,7 +29,7 @@ interface StoredAnalysis {
 export async function getStoredAnalysis(
   shopName: string,
   month?: string
-): Promise<{ analysis: ReviewAnalysis; comments: string[]; pageComments?: PageComments | null; rating?: number; reviewCount?: number; targetMonth?: string | null; source: "db" } | null> {
+): Promise<{ analysis: ReviewAnalysis; comments: string[]; pageComments?: PageComments | null; rating?: number; reviewCount?: number; targetMonth?: string | null; analyzedAt?: string | null; source: "db" } | null> {
 
 
   try {
@@ -59,6 +59,9 @@ export async function getStoredAnalysis(
       rating: stored.average_rating || 0,
       reviewCount: stored.review_count || 0,
       targetMonth: stored.target_month || null,
+      // 分析実行時点。レポートの表は表示時に再計算されるため、
+      // 保存済みAI総評と数値がズレたときに読者が理由を判別できるよう表示に使う
+      analyzedAt: stored.analyzed_at || null,
       source: "db",
     };
   } catch {
@@ -112,7 +115,7 @@ export async function getReviewAnalysis(
   totalReviews: number,
   reviewDelta: number,
   kpiData: { searchPct: string; mapPct: string; actionPct: string }
-): Promise<{ analysis: ReviewAnalysis; comments: string[]; pageComments?: PageComments | null; rating?: number; reviewCount?: number; source: "db" | "template" }> {
+): Promise<{ analysis: ReviewAnalysis; comments: string[]; pageComments?: PageComments | null; rating?: number; reviewCount?: number; analyzedAt?: string | null; source: "db" | "template" }> {
   // まずDBから取得を試行
   const stored = await getStoredAnalysis(shopName);
   if (stored) return stored;

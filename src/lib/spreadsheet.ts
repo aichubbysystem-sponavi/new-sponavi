@@ -651,6 +651,7 @@ export async function buildReportData(
   const reviewAnalysis = analyzed.analysis;
   const comments = analyzed.comments;
   const pageComments = analyzed.pageComments || null;
+  const analysisDate = ("analyzedAt" in analyzed ? (analyzed as { analyzedAt?: string | null }).analyzedAt : null) || null;
 
   // 口コミ競合比較（当月なら取得保存・過去月はDB読みのみ。失敗はnullでページ非表示）
   let competitorComparison = null;
@@ -696,6 +697,7 @@ export async function buildReportData(
     reviewAnalysis,
     comments,
     pageComments,
+    analysisDate,
     competitorComparison,
   };
 }

@@ -139,6 +139,8 @@ export interface ReportData {
   reviewAnalysis: ReviewAnalysis;
   comments: string[];
   pageComments?: PageComments | null;
+  // AI総評の分析実行時点（ISO）。表は表示時に再計算されるため総評との数値ズレの説明に使う
+  analysisDate?: string | null;
   competitorComparison?: CompetitorComparison | null;
   searchQueries: { latest: SearchQueryEntry[]; latestMonth: string; history: SearchQueryMonthData[] };
   gridRanking?: GridRankingReport;

@@ -1222,7 +1222,19 @@ export default function ReportClient({
       <div className={!isEmpty && !isEditingThis ? undefined : "no-print"}
         style={{ marginTop: 10, borderTop: "1px solid #e5e7eb", paddingTop: 8, flexShrink: 0, alignSelf: "stretch", width: "100%" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: "#0f3460" }}>{label}</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "#0f3460" }}>
+            {label}
+            {/* 分析実行時点を明示する。表は表示のたびに最新DBから再計算されるが総評は分析時点で固定のため、
+                その後の口コミ同期で数値がズレる（例: 総評「英語3.9%」vs 表4.7%）。時点が見えれば読者が判別できる */}
+            {trimmedData.analysisDate && (() => {
+              const d = new Date(trimmedData.analysisDate!);
+              return isNaN(d.getTime()) ? null : (
+                <span style={{ fontSize: 11, fontWeight: 400, color: "#aaa", marginLeft: 8 }}>
+                  {d.getMonth() + 1}/{d.getDate()}分析時点
+                </span>
+              );
+            })()}
+          </span>
           {isLoggedIn && (
             <div className="no-print" style={{ display: "flex", gap: 6, alignItems: "center" }}>
               {!isEditingThis ? (
@@ -2478,7 +2490,7 @@ export default function ReportClient({
                     label: "月間増加数", data: deltaData,
                     backgroundColor: deltaColors,
                     borderRadius: 3,
-                  }]}} plugins={[datalabelPlugin]} options={{ responsive: true, maintainAspectRatio: true, plugins: { legend: { display: false } }, layout: { padding: { top: 24 } }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true, min: 0, grid: { color: "#f0f0f0" }, ticks: { stepSize: 1 } } } }} />
+                  }]}} plugins={[datalabelPlugin]} options={{ responsive: true, maintainAspectRatio: true, plugins: { legend: { display: false } }, layout: { padding: { top: 24 } }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true, min: 0, grid: { color: "#f0f0f0" }, ticks: { stepSize: 1, maxTicksLimit: 8 } } } }} />
                 );
               })()}
             </div>
