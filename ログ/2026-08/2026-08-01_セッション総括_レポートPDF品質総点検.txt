@@ -1,0 +1,88 @@
+## 【2026-07-31〜2026-08-01】セッション総括: レポートPDF品質総点検（5店舗反復レビューで指摘ゼロまで収束）
+
+※詳細な経緯・個別バグの調査記録は「ログ/2026-07/2026-07-31_レポートPDFレビュー_指摘全件修正.txt」参照
+
+### 決定事項
+- レポートPDFを実店舗5件（patty rôti→Queency→CHILLRI→新橋→鮨神南）で反復レビューし、指摘ゼロになるまで修正する方針で完走。指摘数 24→3→3→2→0 で収束
+- 順位の「圏外（計測して順位なし）」と「未計測（データなし）」は全レイヤー（シートパーサ・表示・AIプロンプト）で必ず区別する
+- 順位変動は必ず「最新列」基準で計算。null除外→末尾2件比較は禁止
+- 過去に計測圏外→今回順位獲得は「初計測」でなく「圏内復帰」（緑）
+- 多地点の平均順位（圏内のみの平均）には圏内率(N/49)を必ず併記
+- 前年比は対策開始「翌月以降」のフル計測月とだけ比較（開始月は途中稼働の不完全データなので対象外）
+- 競合比較は「自店以外の店」が0件ならページごと非表示（analyze側もスキップ）
+- AI総評には確定値（口コミ数順位・月平均・言語比率小数1桁）を渡し、AIに数えさせない。未計測月の「圏外」断定は禁止
+- AI総評の見出しに「M/D分析時点」を表示（総評=分析時点のスナップショット、表=表示時再計算のズレを読者が判別可能に）
+- セクション別ヘッダーカラーは実装後ユーザー判断で取り消し（revertコミットe7664bd。復活は git revert e7664bd 一発）
+- 他社レポート（TRUE DESIGN CLINIC）比較で有望と判断したGOOD/MORE構成・「弊社からのお願い」ページは未採用（採否はユーザー判断待ち）
+
+### 変更内容（具体的に）
+■ src/lib/report-utils.ts
+- rankTrend()新設: 最新列基準の変動（↑/↓/→/圏外へ/未計測/圏内復帰/初計測）。旧avgRankDiffは@deprecated
+- rankCoverage()新設: 圏内率 { ranked, total, pct }
+- parseStartMonth() / isYoyComparable()新設: 前年比の表示可否判定
+■ src/lib/ranking-fetch.ts
+- RankHistoryData.datasets に outOfRange?: boolean[] 追加（シートの「圏外」セルを空欄と区別して記録）。
+  parseRanksHistory / parseRanksHistorySheet3 / mergeHistories の3箇所で生成・引き継ぎ
+■ src/lib/report-data.ts — RankingHistory.outOfRange / ReportData.analysisDate 追加
+■ src/lib/review-analyzer.ts — getStoredAnalysis/getReviewAnalysis が analyzed_at を返す
+■ src/lib/spreadsheet.ts — analysisDate を ReportData へ配線
+■ src/app/report/[shopId]/client.tsx（最多変更）
+- 変動計算をP6カード/P7表/P8サマリー左右/KW別スライド/PDF生成の全6箇所で rankTrend に統一
+- unifiedRankingHistory: measured配列追加、全KW空の月列除去（当月列だけは空でも残す）
+- P7セル: 計測済み順位なしは「-」でなく「圏外」表示。P6カードに圏内復帰（「4月 圏外 ↑ 1位」）
+- 圏内率をP8比較表・KW別スライド・PDF地図スライドに併記
+- P2月次表: 13行が固定高に収まるよう行padding縮小（dispLabels/dispChartsで開始前空月も除去）
+- 前年比: isYoyComparableで抑止し「前年比 なし（前年データが不完全なため）」表示
+- 競合比較: 突き合わせ注記追加・行詰め・上詰め化・自店以外0件でページ非表示（competitorRivalCount）
+- ★評価を部分塗り2層表示（Math.round廃止）/ 総括ページ再構成（当月まとめ+番号付きリスト）/
+  検索語句の空「前年」列非表示・順位色統一 / P1ページ番号 / AI総評見出しに「M/D分析時点」
+- PDF生成: データ無しKWのスライド除外（pdfKwEntries）・Google帰属をCanvas直描画・地図440→500px
+■ src/app/report/[shopId]/chart-options.ts — lineOptions Y軸 maxTicksLimit:6
+■ src/app/api/report/analyze/route.ts
+- 言語比率: 10%未満は小数1桁（Math.round潰れで「各1〜2%」誇張の真因）
+- 競合: selfCountフォールバックを ?? 0 → ?? officialCount（圏外店で「全店を下回る」真逆総評の真因）。
+  口コミ数順位を確定値で渡す・1時点データの推移断定禁止・自店以外0件でブロックスキップ
+- kwDataのfirst判定にシート履歴（順位orOutOfRange）を追加（圏内復帰が「初計測」で渡る問題）
+- 複数月系列を「N位/圏外/未計測」3値化＋「未計測月を圏外と書くの禁止」ルール
+■ src/lib/report-utils.test.ts — 実店舗データの回帰テスト中心に27件追加（計165件）
+■ 重要ナレッジ.txt — 圏外/未計測区別・最新列基準・固定高最悪ケース・??0禁止 の4項を追記
+
+### 数値・設定値
+- P2月次表: 行padding 10px→4px・ヘッダ12px→8px（13行+ヘッダ≒450px<可用580px。flex:1で12行以下は従来見た目）
+- 競合比較表: 行4px→2px・ヘッダ6px→4px・注記fontSize11/lineHeight1.45・justifyContent:flex-start
+- PDF地図スライド: 440×400 → 500×455px（余白詰め）
+- 前年比表示条件: 前年同月 > 対策開始月（<=は非表示）かつ前年値>0
+- 言語比率の桁: 10%未満=小数1桁（4.7%）、10%以上=整数
+- Y軸: 口コミ累計 maxTicksLimit 6 / 月間増加数 maxTicksLimit 8（stepSize:1维持）
+- 順位色統一: 1-3位=青 #1d4ed8 / 4-10位=緑 #15803d / 11-20位=橙 #b45309 / 21位〜=灰
+- 圏内率の色: ≥80%緑 / ≥50%橙 / <50%赤太字
+- 順位推移の列: 空月除去→slice(-13)。当月列は例外的に必ず残す
+- コミット: 6e397c9(本体)→9bc4ad0(P16溢れ)→baa6856/e7664bd(色分け/revert)→305ade8(Queency3件)→
+  2d4d62d(圏外/未計測残2箇所)→748a121(CHILLRI3件)→036c4a3(分析時点+Y軸)→8078d6c(神南レビュー)
+
+### 未解決・次回やること
+- 旧分析が残る店舗の一括再分析（/review-analysis で「分析済みも再分析する」を全店1回。
+  分析が古い店は総評と表の数値がズレる=新橋店の「英語3.9%vs4.7%」。時点表示で判別は可能）
+- PostgREST 1000行制限の疑いがある既存クエリ4件（grid-export .limit(50000) / pmax store-summary /
+  diagnosis / posts全店舗状況）→ 要検証・修正（7/31からの持ち越し）
+- 口コミ画面CSVの数式インジェクション（/api/export側のみ対策済み、既存画面は未対応）
+- 採否待ち: GOOD/MORE構成（成果と課題→次回アクションを指標ごとに対にする）・
+  「弊社からのお願い」定型ページ・ヘッダー色分け復活（git revert e7664bd）
+- Vercel重複プロジェクト整理と.vercelリンク先修正（以前からの持ち越し）
+
+### 注意点・ハマったこと
+- 【最重要】「圏外」と「未計測」の混同は1セッションで3箇所（変動計算・パーサ・AIプロンプト）から
+  出た頻出パターン。nullに2つの意味を混ぜない。重要ナレッジに恒久記録済み
+- 修正が「たまたま直って見える」罠: 13行溢れはpattyで開始前月除外により偶然解消に見えたが、
+  対策開始が古いQueencyで再発。症状でなく原因（最悪ケース=13行フル）で検証すること
+- ?? 0 フォールバック（selfCount）は自店圏外時に「全20店を下回る」という事実と真逆のAI総評を生成した。
+  フォールバックは表示側と同じ値に揃える
+- 固定高スライド(794px)で justifyContent:center のまま溢れると上下が同時に切れてタイトルが消え
+  気づきにくい。中身が詰まるページは flex-start にして「下だけ切れる」安全な失敗にする
+- JSXの三項演算子の分岐内に {/* */} を置くとパースエラー（/* */のみ可）。
+  Tailwind preflight が ol/ul の list-style を消すため明示指定必須
+- AI総評は分析時点のスナップショット・表は表示時再計算→分析後の口コミ同期で数値がズレる。
+  コードバグと誤診しないこと（プロンプトに渡した値を確認してから判断）。「M/D分析時点」表示で対処
+- PDFレビュー手順: PyMuPDFで110dpi画像化→Readで目視＋numpyピクセル比較で意図外変化を検出が有効
+- PDFの出力時刻とVercelデプロイ完了の時差に注意。ページ数変化など「新コードの証拠」を先に確認する
+- プロンプト修正は再分析するまで効かない（表示側修正は即時、AI文言は再生成後）
