@@ -1,0 +1,61 @@
+■ 2026-07-31 多地点順位計測: 5地点化（中心復活）＋検索4ページ打ち切り
+
+【依頼】
+「5地点の4ページ目までに変更してください」
+= 計測地点を4地点→5地点（店舗中心を復活）、検索打ち切りを5ページ(100位)→4ページ(80位)に変更。
+
+【設計判断（重要）】
+- 5地点 = 店舗中心1点 + 外周4点（従来の斜め4地点はそのまま外周として維持）
+- 保存形式は gridSize=3 の「中心(1,1)＋四隅(0,0)(0,2)(2,0)(2,2)」スロット
+  → 奇数グリッドになるため既存の centerCell() がそのまま中心を返す。
+  → レポートの中心順位（P6/P7統一順位系列・grid-export CSV・AI分析）が
+     シート記録フォールバックではなく「中心の実測値」に自動で切り替わる。
+  （7/29の「中心は計測せずシートへフォールバック」決定を上書き。コード側の
+   フォールバック分岐は旧4地点ログ(gridSize=2)用にそのまま残してある）
+- 1点目=中心を必ず先頭にし、center フラグ（place_id失効チェック）のトリガーを兼ねる
+  （従来は「1点目を便宜的にトリガー扱い」だったが、真の中心地点になった）
+- 4ページ打ち切りで圏外の定義が「100位以下」→「80位以下」に変わる。
+  平均順位の圏外センチネル(101)は過去月との比較連続性のため変更していない。
+
+【変更ファイル】
+- src/lib/grid-utils.ts: generate5Points 追加（generate4Pointsは残置・外周の座標は完全に同一）
+- src/lib/grid-utils.test.ts: generate5Points のテスト4本追加
+- src/lib/report-utils.ts: gridLayoutLabel(gridSize, pointCount) 追加
+  （2→"4地点"、3かつ5点→"5地点"、他→"N×N"。旧3×3全9点ログと区別するため点数も見る）
+- src/lib/report-utils.test.ts: gridLayoutLabel テスト追加
+- src/app/api/report/grid-ranking/route.ts: 検索ループ 5ページ→4ページ（page<4 / page===3）
+- src/app/api/report/grid-ranking-presets/route.ts: 月額見積 4req/KW→5req/KW
+- src/app/grid-ranking/page.tsx:
+  ・GRID_SIZE_4POINT(2)→GRID_SIZE_5POINT(3)、POINTS_PER_KW 4→5
+  ・estimateCost の最大req/地点 5→4（ページ打ち切り変更を反映）
+  ・単店舗計測・一括計測2経路とも generate5Points に変更、進捗表示「5地点」
+  ・gridTable を疎グリッド対応（row/col最大値からサイズ算出＋nullセル埋め。
+    5地点=3×3の中心+四隅なので、欠けセルを埋めないと列位置がズレる）
+  ・履歴テーブルのレイアウト表記を gridLayoutLabel に統一
+  ・所要時間目安 50秒/店舗→60秒/店舗（地点数+25%）
+- src/app/report/[shopId]/client.tsx: 計測地点ラベル2箇所を gridLayoutLabel に
+- src/components/shop-provider.tsx: いつもの店舗追加時の既定 gridSize 2→3
+
+【コスト影響】
+- 1KWあたり: 4地点×最大5ページ=20req → 5地点×最大4ページ=20req で最大費用は同じ
+  （Essentials ¥0.75/req 前提で1KW最大¥15。発見が早ければ従来同様に打ち切り）
+- 中心はキャッシュ格子上、近隣店舗と共有されやすい点なのでキャッシュ命中率は高め見込み
+
+【検証】
+- vitest 61件 全パス（grid-utils / report-utils）
+- next build 成功
+- 旧データ互換: gridSize=2（4地点）・gridSize=3全9点・7×7 の過去ログ表示は
+  gridLayoutLabel と gridTable のnull埋めでいずれも従来どおり表示されることをコードで確認
+
+【デプロイ状態】
+- ブランチ feature/grid-5point-4page にコミット済み（77e7ff9）
+- push は GCM のブラウザ認証待ちで未完（旧PAT削除後の初push。
+  ブラウザで aichubbysystem-sponavi ログイン → git push -u origin feature/grid-5point-4page）
+- mainは即本番のため、Preview検証（計測画面で1店舗計測→グリッド表示・履歴・レポート確認）
+  → マージの手順を厳守すること
+
+【注意点・申し送り】
+- 圏外の意味が「80位以下」に変わった（従来100位以下）。顧客説明時に注意
+- grid_search_cache の旧complete行(100件)と新complete行(80件)が同月に混在し得るが、
+  判定ロジック上は問題なし（発見済み or complete で確定、undecidableなら実測）
+- 8月の一括計測は5地点×店舗別距離設定での初回フル運用。実測費用の確認を忘れずに
