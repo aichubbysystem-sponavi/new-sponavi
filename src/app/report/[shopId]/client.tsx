@@ -2560,8 +2560,11 @@ export default function ReportClient({
         return (
         <div style={slideStyle} className="slide">
           <div style={slideBarStyle}><span>{shop.name} — 口コミの競合比較</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
-          <div style={{ ...slideBodyStyle, padding: "16px 24px" }}>
-            <div style={stitleStyle}>
+          {/* 20行の表で中身が詰まっているページ。justifyContent:center のままだと
+              溢れた時に上下両方が切れてタイトルごと消えるため、上詰めにして
+              万一溢れても見出しは必ず残るようにする */}
+          <div style={{ ...slideBodyStyle, padding: "16px 24px", justifyContent: "flex-start" }}>
+            <div style={{ ...stitleStyle, marginBottom: 10, flexShrink: 0 }}>
               口コミの競合比較（同エリア）
               <span style={{ fontSize: 14, fontWeight: 400, color: "#999", marginLeft: 10 }}>
                 「{comp.keyword}」検索の上位{comp.competitors.length}店舗
@@ -2573,11 +2576,11 @@ export default function ReportClient({
               <thead>
                 <tr style={{ background: "#0f3460" }}>
                   {/* 「#」だけでは何の順位か分からないため列名を明示 */}
-                  <th style={{ padding: "6px 10px", color: "#fff", fontSize: 13, fontWeight: 600, textAlign: "center", width: 52 }}>検索順位</th>
-                  <th style={{ padding: "6px 12px", color: "#fff", fontSize: 13, fontWeight: 600, textAlign: "left" }}>店舗名</th>
-                  <th style={{ padding: "6px 10px", color: "#fff", fontSize: 13, fontWeight: 600, textAlign: "center", width: 70 }}>評価</th>
-                  <th style={{ padding: "6px 10px", color: "#fff", fontSize: 13, fontWeight: 600, textAlign: "center", width: 90 }}>口コミ数</th>
-                  <th style={{ padding: "6px 10px", color: "#fff", fontSize: 13, fontWeight: 600, textAlign: "center", width: 100 }}>自店との差</th>
+                  <th style={{ padding: "4px 10px", color: "#fff", fontSize: 13, fontWeight: 600, textAlign: "center", width: 52 }}>検索順位</th>
+                  <th style={{ padding: "4px 12px", color: "#fff", fontSize: 13, fontWeight: 600, textAlign: "left" }}>店舗名</th>
+                  <th style={{ padding: "4px 10px", color: "#fff", fontSize: 13, fontWeight: 600, textAlign: "center", width: 70 }}>評価</th>
+                  <th style={{ padding: "4px 10px", color: "#fff", fontSize: 13, fontWeight: 600, textAlign: "center", width: 90 }}>口コミ数</th>
+                  <th style={{ padding: "4px 10px", color: "#fff", fontSize: 13, fontWeight: 600, textAlign: "center", width: 100 }}>自店との差</th>
                 </tr>
               </thead>
               <tbody>
@@ -2586,11 +2589,11 @@ export default function ReportClient({
                   const diff = baseCount - c.reviewCount;
                   return (
                     <tr key={i} style={{ background: isSelf ? "#cfe0f5" : i % 2 === 1 ? "#f7f9fc" : "#fff", fontWeight: isSelf ? 700 : 400 }}>
-                      <td style={{ padding: "4px 10px", fontSize: 13, textAlign: "center", color: "#333", borderBottom: "1px solid #eef1f6" }}>{i + 1}</td>
-                      <td style={{ padding: "4px 12px", fontSize: 13, color: "#333", borderBottom: "1px solid #eef1f6", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 480 }}>{c.name}{isSelf && "（あなた）"}</td>
-                      <td style={{ padding: "4px 10px", fontSize: 13, textAlign: "center", color: "#333", borderBottom: "1px solid #eef1f6" }}>{c.rating > 0 ? c.rating.toFixed(1) : "-"}</td>
-                      <td style={{ padding: "4px 10px", fontSize: 13, textAlign: "center", color: "#333", borderBottom: "1px solid #eef1f6" }}>{c.reviewCount.toLocaleString()}件</td>
-                      <td style={{ padding: "4px 10px", fontSize: 13, textAlign: "center", fontWeight: 700, borderBottom: "1px solid #eef1f6", color: isSelf ? "#888" : diff < 0 ? "#c0392b" : diff > 0 ? "#0a8f3c" : "#888" }}>
+                      <td style={{ padding: "2px 10px", fontSize: 13, textAlign: "center", color: "#333", borderBottom: "1px solid #eef1f6" }}>{i + 1}</td>
+                      <td style={{ padding: "2px 12px", fontSize: 13, color: "#333", borderBottom: "1px solid #eef1f6", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 480 }}>{c.name}{isSelf && "（あなた）"}</td>
+                      <td style={{ padding: "2px 10px", fontSize: 13, textAlign: "center", color: "#333", borderBottom: "1px solid #eef1f6" }}>{c.rating > 0 ? c.rating.toFixed(1) : "-"}</td>
+                      <td style={{ padding: "2px 10px", fontSize: 13, textAlign: "center", color: "#333", borderBottom: "1px solid #eef1f6" }}>{c.reviewCount.toLocaleString()}件</td>
+                      <td style={{ padding: "2px 10px", fontSize: 13, textAlign: "center", fontWeight: 700, borderBottom: "1px solid #eef1f6", color: isSelf ? "#888" : diff < 0 ? "#c0392b" : diff > 0 ? "#0a8f3c" : "#888" }}>
                         {isSelf ? "-" : diff < 0 ? `${diff.toLocaleString()}件` : diff > 0 ? `+${diff.toLocaleString()}件` : "±0件"}
                       </td>
                     </tr>
@@ -2600,7 +2603,7 @@ export default function ReportClient({
             </table>
             {/* 競合値はMaps掲載値のスナップショットのため、レポート対象月の自店数値と一致しない。
                 注記が無いと「P1は231件なのにここは243件」と読まれるので必ず突き合わせを書く */}
-            <div style={{ fontSize: 12, color: "#888", marginTop: 6, lineHeight: 1.6 }}>
+            <div style={{ fontSize: 11, color: "#888", marginTop: 4, lineHeight: 1.45, flexShrink: 0 }}>
               ※「自店との差」は自店の口コミ数−各店の口コミ数です。
               {comp.fetchedAt && (() => {
                 const d = new Date(comp.fetchedAt);
