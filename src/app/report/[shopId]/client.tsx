@@ -541,10 +541,9 @@ export default function ReportClient({
       }
     }
     const sheetLabels = rankingHistory?.labels || [];
-    // 月ラベル: シート ∪ グリッド を時系列ソートし直近13ヶ月
-    const labels = Array.from(new Set([...sheetLabels, ...Array.from(gridMonths)]))
-      .sort((a, b) => monthToNum(a) - monthToNum(b))
-      .slice(-13);
+    // 月ラベル: シート ∪ グリッド を時系列ソート（空月の除去は datasets 構築後に行う）
+    const allLabels = Array.from(new Set([...sheetLabels, ...Array.from(gridMonths)]))
+      .sort((a, b) => monthToNum(a) - monthToNum(b));
     // KW: シート ∪ グリッド（正規化で統合、シート順を優先）
     const words: string[] = [];
     const seen = new Set<string>();
@@ -557,9 +556,9 @@ export default function ReportClient({
       if (!seen.has(w)) { seen.add(w); words.push(w); }
     }
     const sheetByWord = new Map((rankingHistory?.datasets || []).map(ds => [normalizeKw(ds.word), ds]));
-    const datasets = words.map(w => ({
+    const fullDatasets = words.map(w => ({
       word: w,
-      ranks: labels.map(m => {
+      ranks: allLabels.map(m => {
         // 1. グリッド中心点（手動 > 実測 > シート推定 の合成結果）
         const g = centerByMonthKw.get(`${m}::${w}`);
         if (g && g > 0) return g;
@@ -574,7 +573,7 @@ export default function ReportClient({
       }),
       // 順位が付かなかった月が「圏外」か「未計測」かの判定材料。
       // グリッド計測があった月に加え、シートに明示的に「圏外」と記録された月も計測済みとする
-      measured: labels.map(m => {
+      measured: allLabels.map(m => {
         if (measuredMonthKw.has(`${m}::${w}`)) return true;
         const ds = sheetByWord.get(w);
         if (!ds) return false;
@@ -582,6 +581,21 @@ export default function ReportClient({
         if (i < 0) return false;
         return ds.ranks[i] != null && ds.ranks[i]! > 0 ? true : ds.outOfRange?.[i] === true;
       }),
+    }));
+    // 全KWが「順位なし・計測なし」の月はシートに空行があるだけのノイズ列
+    // （Queencyでは13列中10列が全KW「-」だった）。注記「計測が無い月は列に含まれません」を
+    // 事実にするためここで除去する。ただし当月(curLabel)列だけは空でも必ず残す —
+    // 消すと直近の順位あり月が最終列となり、過去の順位が「当月の順位」として表示されてしまう
+    const keepIdx = allLabels
+      .map((m, i) => ({ m, i }))
+      .filter(({ m, i }) => m === curLabel || fullDatasets.some(ds => ds.ranks[i] != null || ds.measured[i]))
+      .map(({ i }) => i)
+      .slice(-13);
+    const labels = keepIdx.map(i => allLabels[i]);
+    const datasets = fullDatasets.map(ds => ({
+      word: ds.word,
+      ranks: keepIdx.map(i => ds.ranks[i]),
+      measured: keepIdx.map(i => ds.measured[i]),
     }));
     return { labels, datasets };
   }, [gridRanking, rankingHistory, curLabel]);
@@ -1230,8 +1244,10 @@ export default function ReportClient({
 
   // ── 表示対象の月 ──
   // 対策開始前で「マップ表示もアクションも0」の先頭月は計測開始前の空データ。
-  // 表に出すと固定高スライドから溢れて最終行が切れ（"直近13ヶ月"なのに12行になる）、
-  // グラフでは値0の空カラムになるだけなので先頭から取り除く（2026-07-31）
+  // グラフでは値0の空カラム・表では全0行のノイズになるだけなので先頭から取り除く。
+  // ※これはノイズ除去であって行溢れ対策ではない。13行が固定高に収まらない問題は
+  //   P2テーブルの行padding縮小(10px→4px)で別途解消済み（対策開始が古い店舗では
+  //   この除外が効かず13行フルで表示されるため。2026-07-31 Queencyで発覚）
   const monthTrimStart = (() => {
     const start = parseStartMonth(shop.startDate);
     if (!start) return 0;
@@ -1665,7 +1681,7 @@ export default function ReportClient({
                   ...(hasFoodMenus ? ["メニュー"] : []),
                   ...(hasBookings ? ["予約"] : []),
                   "合計"].map((h,i) => (
-                  <th key={i} style={{ background: "#0f3460", color: "#fff", padding: "12px 10px", textAlign: "center", fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
+                  <th key={i} style={{ background: "#0f3460", color: "#fff", padding: "8px 10px", textAlign: "center", fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
                 ))}
               </tr></thead>
               <tbody>
@@ -1673,19 +1689,19 @@ export default function ReportClient({
                   const isLast = i === 0; // 新しい月が先頭
                   return (
                     <tr key={i} style={{ background: isLast ? "#cfffE3" : i % 2 === 1 ? "#eef1f6" : "#fff", fontWeight: isLast ? 600 : undefined }}>
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.label}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.mapMobile.toLocaleString()}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.mapPC.toLocaleString()}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.mapTotal.toLocaleString()}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.searchMobile.toLocaleString()}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.searchPC.toLocaleString()}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.searchTotal.toLocaleString()}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.websites.toLocaleString()}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.routes.toLocaleString()}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.calls.toLocaleString()}</td>
-                      {hasFoodMenus && <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.foodMenus.toLocaleString()}</td>}
-                      {hasBookings && <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.bookings.toLocaleString()}</td>}
-                      <td style={{ padding: "10px 10px", textAlign: "center", borderBottom: "1px solid #ddd", fontWeight: 700, color: "#222" }}>{r.totalActions.toLocaleString()}</td>
+                      <td style={{ padding: "4px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.label}</td>
+                      <td style={{ padding: "4px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.mapMobile.toLocaleString()}</td>
+                      <td style={{ padding: "4px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.mapPC.toLocaleString()}</td>
+                      <td style={{ padding: "4px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.mapTotal.toLocaleString()}</td>
+                      <td style={{ padding: "4px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.searchMobile.toLocaleString()}</td>
+                      <td style={{ padding: "4px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.searchPC.toLocaleString()}</td>
+                      <td style={{ padding: "4px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.searchTotal.toLocaleString()}</td>
+                      <td style={{ padding: "4px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.websites.toLocaleString()}</td>
+                      <td style={{ padding: "4px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.routes.toLocaleString()}</td>
+                      <td style={{ padding: "4px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.calls.toLocaleString()}</td>
+                      {hasFoodMenus && <td style={{ padding: "4px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.foodMenus.toLocaleString()}</td>}
+                      {hasBookings && <td style={{ padding: "4px 10px", textAlign: "center", borderBottom: "1px solid #ddd", color: "#222" }}>{r.bookings.toLocaleString()}</td>}
+                      <td style={{ padding: "4px 10px", textAlign: "center", borderBottom: "1px solid #ddd", fontWeight: 700, color: "#222" }}>{r.totalActions.toLocaleString()}</td>
                     </tr>
                   );
                 })}
@@ -1848,7 +1864,7 @@ export default function ReportClient({
                 （例: 5月に計測が無いと 1月/2月/3月/4月/6月 になる）。連続月と誤読されないよう明示する */}
             <div style={stitleStyle}>
               キーワード順位推移（計測実績のある直近{unifiedRankingHistory.labels.length}ヶ月）
-              <span style={{ fontSize: 13, fontWeight: 400, color: "#999", marginLeft: 10 }}>※計測が無い月は列に含まれません</span>
+              <span style={{ fontSize: 13, fontWeight: 400, color: "#999", marginLeft: 10 }}>※計測の無い過去月は列に含まれません</span>
             </div>
             <div style={{ overflowX: "auto", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", flex: 1, minWidth: 700 }}>

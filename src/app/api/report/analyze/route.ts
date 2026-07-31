@@ -998,20 +998,27 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
               const others = comp.competitors.filter((_, i) => i !== ((comp.self?.rank ?? 0) - 1));
               const top3 = [...others].sort((a, b) => b.reviewCount - a.reviewCount).slice(0, 3);
               const top3Avg = top3.length ? Math.round(top3.reduce((s, c) => s + c.reviewCount, 0) / top3.length) : 0;
-              const selfCount = comp.self?.reviewCount ?? 0;
+              // 【重要】自店が検索上位圏外(comp.self=null)でも口コミ数は officialCount にある。
+              // ?? 0 にすると「全店が自店を上回る」ことになり、実際は自店より少ない店が
+              // 13/20あるのに「20店すべてを下回る」と真逆の総評を生成していた（2026-07-31 Queencyで発覚）。
+              // 表示側(client.tsx)の baseCount = comp.self?.reviewCount ?? displayTotalReviews と同じ基準に揃える
+              const selfCount = comp.self?.reviewCount ?? officialCount;
               const moreCount = others.filter(c => c.reviewCount > selfCount).length;
+              const totalShops = others.length + 1; // 自店を含めた比較対象数（自店がリスト内でもリスト外でも成立）
               kpiText += `\n\n【口コミ競合比較（同エリア「${comp.keyword}」上位${comp.competitors.length}店）】`;
               kpiText += comp.self
                 ? `\n自店: リスト${comp.self.rank}位・評価${comp.self.rating}・口コミ${comp.self.reviewCount}件`
-                : `\n自店: 上位${comp.competitors.length}圏外`;
+                : `\n自店: 検索上位${comp.competitors.length}圏外（口コミ${selfCount}件・評価${officialRating}）`;
               if (top3.length > 0) {
                 kpiText += `\n口コミ数トップ: ${top3[0].name}（${top3[0].reviewCount}件）／上位3店平均: ${top3Avg}件`;
-                kpiText += `\n自店より口コミが多い店: ${moreCount}店`;
+                kpiText += `\n自店より口コミが多い店: ${moreCount}店／少ない店: ${others.length - moreCount}店`;
                 // 「口コミ数で何番目か」をAIに数えさせると
-                // 「リスト2位以内の2店に次ぐ位置」のような破綻文になるため確定値を渡す
-                if (comp.self) {
-                  kpiText += `\n口コミ数の順位: ${comp.competitors.length}店中${moreCount + 1}位（検索順位${comp.self.rank}位とは別物なので混同しないこと）`;
-                }
+                // 「リスト2位以内の2店に次ぐ位置」のような破綻文になるため確定値を渡す。
+                // 自店圏外時も出す（出さないとAIが自前で数えて誤る）
+                kpiText += `\n口コミ数の順位: 自店を含む${totalShops}店中${moreCount + 1}位`;
+                kpiText += comp.self
+                  ? `（検索順位${comp.self.rank}位とは別物なので混同しないこと）`
+                  : `（「検索上位圏外」は表示順位の話。口コミ数が最下位という意味ではないので混同しないこと）`;
               }
               kpiText += `\n※店舗名はこのリストに記載のものだけを使うこと`;
               kpiText += `\n※この比較は取得時点の1回分のみで前回値が無い。「差が縮まっている／広がっている」など推移の断定は禁止`;
