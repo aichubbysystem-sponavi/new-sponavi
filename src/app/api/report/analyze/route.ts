@@ -231,8 +231,12 @@ ${langStatsText || ""}
 - reviewCountComment: 【口コミ累計件数の推移】がある場合のみ。累計が減っている月は削除・非表示が起きている旨を書く
 - reviewDeltaComment: 【口コミ月間増加ペース】がある場合のみ。獲得ペースが十分か不足かに言及
 - languageComment: ${langStatsText ? "言語構成比と、それが示す客層（インバウンド需要など）に言及" : "言語データが提供されていないため必ず空文字\"\"を返す"}
-- competitorComment: 【口コミ競合比較】がある場合のみ。同エリア内での口コミ数の位置づけ（リスト順位・上位との差）に言及。この欄では口コミ件数への言及を許可する
+- competitorComment: 【口コミ競合比較】がある場合のみ。同エリア内での口コミ数の位置づけに言及。この欄では口コミ件数への言及を許可する。
+  「口コミ数の順位」が与えられている場合は必ずその値をそのまま使い、自分で数え直さない。
+  検索順位と口コミ数順位は別物なので混同しない（「リスト2位以内の2店に次ぐ位置」のような曖昧・非文は禁止。「口コミ数では20店中3位」のように断定的に書く）
 - 前月比・前年比などの%はKPIデータに記載された値をそのまま使う（自分で再計算・丸め直ししない）
+- 比率を「各1〜2%」のように幅で丸めて実際より大きく見せない。1%未満は「1%未満」と書く
+- データが1時点しか無い項目に「縮まっている」「広がっている」など推移の断定を書かない
 - 「◯ヶ月ぶり」「◯ヶ月連続」等の期間表現は、提供された推移データで実際に確認できる場合のみ使う
 - 前年同月比を評価する際は推移全体を確認する。前年値が前後の月から大きく乖離した一時的スパイクの場合、単純比較で「悪化」「最優先課題」と断定しない（例外的な月との比較である旨を踏まえる）
 - reviewComments: 高評価の傾向3項目＋低評価の傾向1項目。口コミ引用は「」で囲む
@@ -1003,8 +1007,14 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
               if (top3.length > 0) {
                 kpiText += `\n口コミ数トップ: ${top3[0].name}（${top3[0].reviewCount}件）／上位3店平均: ${top3Avg}件`;
                 kpiText += `\n自店より口コミが多い店: ${moreCount}店`;
+                // 「口コミ数で何番目か」をAIに数えさせると
+                // 「リスト2位以内の2店に次ぐ位置」のような破綻文になるため確定値を渡す
+                if (comp.self) {
+                  kpiText += `\n口コミ数の順位: ${comp.competitors.length}店中${moreCount + 1}位（検索順位${comp.self.rank}位とは別物なので混同しないこと）`;
+                }
               }
               kpiText += `\n※店舗名はこのリストに記載のものだけを使うこと`;
+              kpiText += `\n※この比較は取得時点の1回分のみで前回値が無い。「差が縮まっている／広がっている」など推移の断定は禁止`;
             }
           } catch (compErr: any) {
             console.warn(`[analyze] ${shop.name}: 競合比較取得スキップ:`, compErr?.message || compErr);
@@ -1101,7 +1111,13 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
             .sort((a, b) => b.count - a.count);
           if (langs.length > 0) {
             const totalLang = langs.reduce((s, l) => s + l.count, 0);
-            langStatsText = `【口コミ言語別集計（コメント付き${totalLang}件）】\n検出言語数: ${langs.length}\n${langs.map(l => `${l.lang}（${l.country}）: ${l.count}件（${Math.round(l.count / totalLang * 100)}%） 内訳: 高評価(★4-5) ${l.high}件 / 低評価(★1-3) ${l.low}件`).join("\n")}`;
+            // Math.round だと 2/218=0.92% が「1%」、1/218=0.46% が「0%」になり、
+            // AIが「各1〜2%」と誇張する原因になっていた（2026-07-31）。10%未満は小数1桁で渡す
+            const fmtPct = (n: number) => {
+              const p = (n / totalLang) * 100;
+              return p < 10 ? `${p.toFixed(1)}%` : `${Math.round(p)}%`;
+            };
+            langStatsText = `【口コミ言語別集計（コメント付き${totalLang}件）】\n検出言語数: ${langs.length}\n${langs.map(l => `${l.lang}（${l.country}）: ${l.count}件（${fmtPct(l.count)}） 内訳: 高評価(★4-5) ${l.high}件 / 低評価(★1-3) ${l.low}件`).join("\n")}`;
           }
         }
       } catch (langErr) {

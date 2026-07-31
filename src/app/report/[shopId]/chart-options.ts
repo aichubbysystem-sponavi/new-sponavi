@@ -27,6 +27,12 @@ export const lineOptions = {
   plugins: { legend: { display: false } },
   scales: {
     x: { grid: { display: false } },
-    y: { beginAtZero: false, grid: { color: "#f0f0f0" }, ticks: { callback: (v: string | number) => Number(v).toLocaleString() } },
+    // 目盛りを絞らないとデータ最小値起点の半端な刻み（46,53,60,…,228 の7刻み）になり読みにくい。
+    // 本数を制限するとChart.jsがキリのよい刻み（50,100,150…）を選ぶ
+    y: {
+      beginAtZero: false,
+      grid: { color: "#f0f0f0" },
+      ticks: { maxTicksLimit: 6, callback: (v: string | number) => Number(v).toLocaleString() },
+    },
   },
 };

@@ -80,6 +80,41 @@ export function monthToNum(m: string): number {
   return (parseInt(p[0]) || 0) * 100 + (parseInt(p[1]) || 0);
 }
 
+/** "2025年8月" / "2025/8" / "2025-08-01" などを "2025/8" に正規化。解釈できなければ null */
+export function parseStartMonth(s: string | null | undefined): string | null {
+  if (!s) return null;
+  const m = String(s).match(/(\d{4})\s*[年/\-.]\s*(\d{1,2})/);
+  if (!m) return null;
+  const y = Number(m[1]), mo = Number(m[2]);
+  if (!y || mo < 1 || mo > 12) return null;
+  return `${y}/${mo}`;
+}
+
+/**
+ * 前年同月比を出してよいかの判定。
+ *
+ * 【重要】対策開始前の月はGBPデータが未取得（0件）か断片的なため、
+ * そのまま比較すると「+116325.0%（4→4,657）」のような無意味な数字になる（2026-07-31 発見）。
+ * 対策開始月より前の前年同月とは比較しない。
+ *
+ * @param yoyValue  前年同月の値
+ * @param curLabel  当月ラベル "2026/6"
+ * @param startDate 対策開始日（"2025年8月" 等の表記ゆれを許容）
+ */
+export function isYoyComparable(
+  yoyValue: number | null | undefined,
+  curLabel: string,
+  startDate?: string | null,
+): boolean {
+  if (yoyValue == null || yoyValue <= 0) return false; // 0基準の増減率は定義できない
+  const parts = String(curLabel).split("/").map(Number);
+  if (!parts[0] || !parts[1]) return false;
+  const yoyMonth = `${parts[0] - 1}/${parts[1]}`;
+  const start = parseStartMonth(startDate);
+  if (start && monthToNum(yoyMonth) < monthToNum(start)) return false; // 計測開始前
+  return true;
+}
+
 /** ランク → マーカー色 */
 export function rankColor(rank: number): string {
   if (rank <= 0) return COLORS.rankOut;
@@ -104,7 +139,11 @@ export function fmtAvgRank(v: number | null | undefined): string {
   return v > 0 ? String(v) : "圏外";
 }
 
-/** 多地点平均順位の変動表示。圏外(0以下)を数値として比較しない */
+/**
+ * 多地点平均順位の変動表示。圏外(0以下)を数値として比較しない。
+ * @deprecated 隣接2値だけを見るため「当月未計測」を表現できない。
+ *   月系列がある場合は rankTrend() を使うこと（最新列基準で圏外/未計測を正しく出し分ける）
+ */
 export function avgRankDiff(
   prev: number | null | undefined,
   cur: number | null | undefined,
@@ -120,6 +159,82 @@ export function avgRankDiff(
   if (prev > 0 && cur <= 0) return { text: "圏外へ", color: RED };
   if (prev <= 0 && cur > 0) return { text: "圏内復帰", color: GREEN };
   return { text: "→", color: GRAY };
+}
+
+/**
+ * 順位系列の「変動」。
+ *
+ * 【重要】null（データなし）を除外してから末尾2件を比較してはいけない。
+ * 2026-07-31 発見のバグ: ranks=[3,7,null,1,null]（当月データなし）で
+ * null除外後の [3,7,1] の末尾2件を比較し、2月(7位)→4月(1位)の差を
+ * 当月の変動「↑6」として緑表示していた。圏外/未計測への転落が「改善」に見える。
+ * 変動は必ず「最新列」を基準にし、比較相手だけを過去に遡って探すこと。
+ *
+ * @param series  月順の順位（null=データなし、0以下=圏外）
+ * @param measured 各月に計測が存在したか。省略時は「順位>0の月のみ計測済み」とみなす
+ */
+export interface RankTrendResult {
+  text: string;
+  color: string;
+  /** 比較相手の月インデックス。見つからない場合 -1 */
+  prevIndex: number;
+  kind: "up" | "down" | "flat" | "out" | "first" | "none";
+}
+
+export function rankTrend(
+  series: (number | null | undefined)[],
+  measured?: boolean[],
+  decimals = 0,
+): RankTrendResult {
+  const GREEN = "#0a8f3c", RED = "#c0392b", GRAY = "#888";
+  const NONE: RankTrendResult = { text: "-", color: GRAY, prevIndex: -1, kind: "none" };
+  if (!series || series.length === 0) return NONE;
+
+  const last = series.length - 1;
+  const cur = series[last];
+  const curRanked = cur != null && cur > 0;
+
+  // 比較相手は「最新列より前で順位が付いている直近の月」
+  let prevIndex = -1;
+  for (let i = last - 1; i >= 0; i--) {
+    const v = series[i];
+    if (v != null && v > 0) { prevIndex = i; break; }
+  }
+  const prev = prevIndex >= 0 ? (series[prevIndex] as number) : null;
+
+  if (curRanked && prev != null) {
+    const d = prev - (cur as number);
+    const abs = Math.abs(d).toFixed(decimals);
+    if (Number(abs) === 0) return { text: "→", color: GRAY, prevIndex, kind: "flat" };
+    return d > 0
+      ? { text: `↑${abs}`, color: GREEN, prevIndex, kind: "up" }
+      : { text: `↓${abs}`, color: RED, prevIndex, kind: "down" };
+  }
+  // 初計測（過去に順位が無く今回付いた）
+  if (curRanked) return { text: "初計測", color: GRAY, prevIndex: -1, kind: "first" };
+
+  // 当月に順位が無い。計測済みなら「圏外へ」、未計測なら断定しない
+  const curMeasured = measured ? measured[last] === true : false;
+  if (prev != null) {
+    return curMeasured
+      ? { text: "圏外へ", color: RED, prevIndex, kind: "out" }
+      : { text: "未計測", color: GRAY, prevIndex, kind: "none" };
+  }
+  return curMeasured ? { text: "圏外", color: GRAY, prevIndex: -1, kind: "none" } : NONE;
+}
+
+/**
+ * 多地点計測の圏内率。
+ * avgRank は圏内地点のみの平均（report-api.ts / spreadsheet.ts で rank>0 のみを平均）なので、
+ * 「49地点中45地点が圏外でも平均26.5位」と表示されてしまう。
+ * 平均順位を出す場所では必ずこの圏内率を併記すること。
+ */
+export function rankCoverage(
+  results: { rank: number }[] | null | undefined,
+): { ranked: number; total: number; pct: number } | null {
+  if (!results || results.length === 0) return null;
+  const ranked = results.filter(r => r.rank > 0).length;
+  return { ranked, total: results.length, pct: Math.round((ranked / results.length) * 100) };
 }
 
 /** ランク → モーダル用の背景色+テキスト色 */
