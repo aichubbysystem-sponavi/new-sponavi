@@ -45,3 +45,25 @@ export function generate4Points(
     };
   });
 }
+
+/**
+ * 店舗中心＋外周4地点の計5地点を生成する（2026-07-31 中心計測を復活）。
+ * 3×3グリッドの奇数スロットとして保存する: 中心=(1,1)、外周4点=四隅(0,0)(0,2)(2,0)(2,2)。
+ * 奇数グリッドにすることで centerCell() がそのまま中心=店舗位置を返し、
+ * レポート側の「中心順位」がシートフォールバックではなく実測値になる。
+ * 1点目は必ず中心（呼び出し側が center フラグ＝place_id失効チェックのトリガーにする）。
+ */
+export function generate5Points(
+  centerLat: number,
+  centerLng: number,
+  radiusM: number,
+  angleDeg: number = 0,
+): GeneratedPoint[] {
+  const center: GeneratedPoint = { row: 1, col: 1, lat: centerLat, lng: centerLng, rank: 0 };
+  const outer = generate4Points(centerLat, centerLng, radiusM, angleDeg).map((p) => ({
+    ...p,
+    row: p.row * 2, // 2×2スロット(0,1) → 3×3の四隅(0,2)
+    col: p.col * 2,
+  }));
+  return [center, ...outer];
+}
