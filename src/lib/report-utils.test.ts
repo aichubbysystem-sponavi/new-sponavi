@@ -455,8 +455,13 @@ describe("isYoyComparable（前年比を出してよいか）", () => {
     expect(isYoyComparable(null, "2026/6", "2024年1月")).toBe(false);
   });
 
-  it("対策開始月と同月なら比較可", () => {
-    expect(isYoyComparable(100, "2026/8", "2025年8月")).toBe(true);
+  it("【回帰】対策開始月と同月は比較しない（開始月は途中稼働の不完全データ。旧: +3989.4%）", () => {
+    // CHILLRI堀江店: 対策開始2025年6月・前年同月2025/6=1,632（月の途中から）→ +3989.4%と誇張された
+    expect(isYoyComparable(1632, "2026/6", "2025年6月")).toBe(false);
+  });
+
+  it("対策開始の翌月以降（フル計測月）なら比較可", () => {
+    expect(isYoyComparable(100, "2026/9", "2025年8月")).toBe(true);
   });
 
   it("対策開始より後の前年同月は比較可", () => {
@@ -469,5 +474,31 @@ describe("isYoyComparable（前年比を出してよいか）", () => {
 
   it("当月ラベルが不正なら比較しない", () => {
     expect(isYoyComparable(100, "", "2024/1")).toBe(false);
+  });
+});
+
+describe("rankTrend: 圏内復帰と初計測の区別", () => {
+  it("【回帰】過去に計測して圏外→今回順位獲得は「圏内復帰」（緑）", () => {
+    // CHILLRI堀江店「堀江 冷麺」: 1〜4月計測圏外→6月1位が「初計測」と中立表示されていた
+    const r = rankTrend([null, null, null, null, 1], [true, true, true, true, true]);
+    expect(r.text).toBe("圏内復帰");
+    expect(r.color).toBe("#0a8f3c");
+    expect(r.kind).toBe("up");
+  });
+
+  it("過去が未計測のみなら従来どおり「初計測」", () => {
+    const r = rankTrend([null, null, 1], [false, false, true]);
+    expect(r.text).toBe("初計測");
+    expect(r.kind).toBe("first");
+  });
+
+  it("measured未指定なら「初計測」（圏内復帰と断定しない）", () => {
+    expect(rankTrend([null, null, 2]).text).toBe("初計測");
+  });
+
+  it("圏内復帰のprevIndexは直近の計測月を指す", () => {
+    const r = rankTrend([null, null, null, null, 3], [true, false, true, false, true]);
+    expect(r.text).toBe("圏内復帰");
+    expect(r.prevIndex).toBe(2);
   });
 });

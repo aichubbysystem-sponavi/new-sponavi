@@ -111,7 +111,11 @@ export function isYoyComparable(
   if (!parts[0] || !parts[1]) return false;
   const yoyMonth = `${parts[0] - 1}/${parts[1]}`;
   const start = parseStartMonth(startDate);
-  if (start && monthToNum(yoyMonth) < monthToNum(start)) return false; // 計測開始前
+  // 対策開始月「以前」は比較しない（< でなく <=）。
+  // 開始月は月の途中から計測が始まる不完全データのため、そこと比較すると
+  // 「+3989.4%（1,632→66,739）」のような誇張された前年比になる（2026-08-01 CHILLRI堀江店）。
+  // 開始翌月以降＝フルに計測された月とだけ比較する
+  if (start && monthToNum(yoyMonth) <= monthToNum(start)) return false;
   return true;
 }
 
@@ -210,8 +214,17 @@ export function rankTrend(
       ? { text: `↑${abs}`, color: GREEN, prevIndex, kind: "up" }
       : { text: `↓${abs}`, color: RED, prevIndex, kind: "down" };
   }
-  // 初計測（過去に順位が無く今回付いた）
-  if (curRanked) return { text: "初計測", color: GRAY, prevIndex: -1, kind: "first" };
+  if (curRanked) {
+    // 過去に順位は無いが計測はしていた（＝圏外だった）なら「初計測」ではなく「圏内復帰」。
+    // 圏外→1位の大躍進を中立の「初計測」と表示していた（2026-08-01 CHILLRI堀江店で発覚）
+    if (measured) {
+      for (let i = last - 1; i >= 0; i--) {
+        if (measured[i]) return { text: "圏内復帰", color: GREEN, prevIndex: i, kind: "up" };
+      }
+    }
+    // 本当に今回が最初の計測
+    return { text: "初計測", color: GRAY, prevIndex: -1, kind: "first" };
+  }
 
   // 当月に順位が無い。計測済みなら「圏外へ」、未計測なら断定しない
   const curMeasured = measured ? measured[last] === true : false;

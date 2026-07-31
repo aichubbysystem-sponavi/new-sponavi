@@ -841,6 +841,23 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
                   const r = ds ? ds.ranks[mi] : null;
                   return r && r > 0 ? r : 0;
                 };
+                // グリッドに前回計測が無くても、シート側に過去の計測記録
+                // （順位 or 明示的な「圏外」）があれば「初計測」ではない。
+                // 圏外→1位の復帰を「初計測」と伝えるとAIも中立に書いてしまい、
+                // P6カードの「圏外→↑1位」表示と食い違う（2026-08-01 CHILLRI堀江店）
+                const sheetPrior = (kwWord: string, beforeMonth: string): { rank: number; measured: boolean } => {
+                  if (!rh?.labels?.length) return { rank: 0, measured: false };
+                  const bi = rh.labels.indexOf(beforeMonth);
+                  const end = bi >= 0 ? bi : rh.labels.length;
+                  const ds = (rh.datasets || []).find((d: any) => normalizeKw(d.word) === normalizeKw(kwWord));
+                  if (!ds) return { rank: 0, measured: false };
+                  for (let i = end - 1; i >= 0; i--) {
+                    const r = ds.ranks[i];
+                    if (r && r > 0) return { rank: r, measured: true };
+                    if (ds.outOfRange?.[i] === true) return { rank: 0, measured: true };
+                  }
+                  return { rank: 0, measured: false };
+                };
                 for (const snap of (latest.snapshots || [])) {
                   // centerCell: 偶数グリッド（斜め4地点計測）は中心なし→シート順位フォールバック
                   const center = centerCell(snap.results as any[], snap.gridSize);
@@ -857,9 +874,14 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
                       if (prevRank === 0) prevRank = sheetRankAt(snap.keyword, prev.month);
                     }
                   }
+                  let first = !hasPrevSnap;
+                  if (first) {
+                    const prior = sheetPrior(snap.keyword, latest.month);
+                    if (prior.measured) { first = false; prevRank = prior.rank; } // rank=0なら「前回圏外」として渡る
+                  }
                   // 圏外(rank=0)も含める: 圏外転落はAIコメントで言及すべき重要な変動のため
                   // 前回計測なし＝初計測（prevRank=rankのフォールバックを「維持」と誤読させない）
-                  kwData.push({ word: snap.keyword, rank, prevRank: prevRank || rank, first: !hasPrevSnap });
+                  kwData.push({ word: snap.keyword, rank, prevRank: first ? (prevRank || rank) : prevRank, first });
                 }
                 // 全KWが圏外のみの月でもkwDataは有効（後続のシートフォールバックに落とさない）
               }
@@ -1016,8 +1038,12 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
           try {
             const { loadCompetitorComparison } = await import("@/lib/competitor-fetch");
             const comp = await loadCompetitorComparison(shop.name, curMonth);
-            if (comp && comp.competitors.length > 0) {
-              const others = comp.competitors.filter((_, i) => i !== ((comp.self?.rank ?? 0) - 1));
+            // others.length===0（検索結果が自店のみ）は比較として成立しない。
+            // データを渡すと「リスト1位で優位な立ち位置」という比較相手ゼロの総評が生成される
+            // （2026-08-01 CHILLRI堀江店）。フロント側もこの場合ページ自体を出さない
+            const compOthers = comp ? comp.competitors.filter((_, i) => i !== ((comp.self?.rank ?? 0) - 1)) : [];
+            if (comp && compOthers.length > 0) {
+              const others = compOthers;
               const top3 = [...others].sort((a, b) => b.reviewCount - a.reviewCount).slice(0, 3);
               const top3Avg = top3.length ? Math.round(top3.reduce((s, c) => s + c.reviewCount, 0) / top3.length) : 0;
               // 【重要】自店が検索上位圏外(comp.self=null)でも口コミ数は officialCount にある。

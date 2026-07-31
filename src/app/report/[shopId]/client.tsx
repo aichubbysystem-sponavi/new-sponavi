@@ -618,11 +618,25 @@ export default function ReportClient({
         const r = ds.ranks[i];
         if (r !== null && r > 0) { prevRank = r; prevMonth = unifiedRankingHistory.labels[i]; break; }
       }
-      // 過去に一度も順位が無い＝今回が初計測（prevRank=rankのフォールバック表示と区別する）
-      const firstMeasure = prevRank === 0 && (rank || 0) > 0;
+      // 過去に順位は無いが計測はしていた（＝圏外）月があるなら「初計測」ではなく圏外からの復帰。
+      // 圏外→1位を中立の「初計測」と表示しない（2026-08-01 CHILLRI堀江店で発覚）
+      let prevOutMonth = "";
+      if (prevRank === 0) {
+        for (let i = lastIdx - 1; i >= 0; i--) {
+          if (ds.measured?.[i]) { prevOutMonth = unifiedRankingHistory.labels[i]; break; }
+        }
+      }
+      const prevWasOut = prevRank === 0 && prevOutMonth !== "";
+      // 過去に順位も計測も無い＝今回が初計測（prevRank=rankのフォールバック表示と区別する）
+      const firstMeasure = prevRank === 0 && (rank || 0) > 0 && !prevWasOut;
       // 当月に順位が無い場合、計測済みなら「圏外」・未計測なら「未計測」と表示を分ける
       const curMeasured = ds.measured?.[lastIdx] === true;
-      return { word: ds.word, rank: rank || 0, prevRank: prevRank || rank || 0, prevMonth, firstMeasure, curMeasured };
+      return {
+        word: ds.word, rank: rank || 0,
+        // 圏外からの復帰時は prevRank=0 のまま渡す（rankへのフォールバックだと「前回1位」と誤表示になる）
+        prevRank: prevWasOut ? 0 : (prevRank || rank || 0),
+        prevMonth: prevWasOut ? prevOutMonth : prevMonth, firstMeasure, curMeasured,
+      };
     });
   }, [unifiedRankingHistory, keywords]);
 
@@ -654,7 +668,11 @@ export default function ReportClient({
   const showRankingHistory = mounted && sectionVisibility.rankingHistory !== false && unifiedRankingHistory.labels.length > 0;
   const showSearchQueries = mounted && sectionVisibility.searchQueries !== false && hasSearchQueries;
   const showGridRanking = mounted && sectionVisibility.gridRanking !== false && hasGridRanking && (visibleGridRanking?.keywords.length ?? 0) > 0;
-  const showCompetitors = mounted && sectionVisibility.competitors !== false && (competitorComparison?.competitors?.length ?? 0) > 0;
+  // 「自店以外の店」が1件も無い場合は比較として成立しないためページごと出さない
+  // （ニッチKWで検索結果が自店1件のみ→1行の表と「エリア内で優位」という無意味な総評が出ていた。2026-08-01）
+  const competitorRivalCount = (competitorComparison?.competitors ?? [])
+    .filter((_, i) => i !== ((competitorComparison?.self?.rank ?? 0) - 1)).length;
+  const showCompetitors = mounted && sectionVisibility.competitors !== false && competitorRivalCount > 0;
 
   // グリッドマップ用: 現在表示中のスナップショットを取得
   const activeGridKw = visibleGridRanking?.keywords[gridKwIdx] || visibleGridRanking?.keywords[0] || "";
@@ -1624,8 +1642,9 @@ export default function ReportClient({
               // 対策開始前・0件の前年同月とは比較しない（"+116325.0%（4→4,657）"のような無意味な表示を防ぐ）
               const yoyOk = isYoyComparable(kpi.yoyValue, curLabel, shop.startDate);
               const yoyC = yoyOk ? pctChange(kpi.value, kpi.yoyValue!) : null;
-              // 「データが無い」のか「計測開始前で比較にならない」のかを書き分ける
-              const yoyNote = kpi.yoyValue == null ? "前年比 なし" : "前年比 なし（前年は計測前）";
+              // 「データが無い」のか「計測開始前後で比較にならない」のかを書き分ける
+              // （対策開始月は月の途中からの不完全データなので、開始前と同様に比較対象外）
+              const yoyNote = kpi.yoyValue == null ? "前年比 なし" : "前年比 なし（前年データが不完全なため）";
               const badgeStyle = (isUp: boolean, isFlat?: boolean): React.CSSProperties => ({ display: "inline-block", padding: "2px 7px", borderRadius: 16, fontSize: 16, fontWeight: 600, background: isFlat ? "#f0f0f0" : isUp ? "#e6f9ee" : "#fde8e8", color: isFlat ? "#888" : isUp ? "#0a8f3c" : "#c0392b" });
               const arrow = (c: { isUp: boolean; isFlat: boolean }) => c.isFlat ? "→" : c.isUp ? "▲" : "▼";
               return (
