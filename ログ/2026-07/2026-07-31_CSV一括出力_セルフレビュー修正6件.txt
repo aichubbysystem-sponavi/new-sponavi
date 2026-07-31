@@ -1,0 +1,37 @@
+■ 2026-07-31 CSV一括出力: セルフレビュー指摘6件の修正
+
+【経緯】
+本番反映後にユーザー依頼で「自分が書いたと思わず厳しくレビュー」を実施。
+6件の指摘（重要度順）→ すべて修正。ブランチ feature/csv-export-review-fixes。
+
+【修正内容】
+1. CSVインジェクション対策（セキュリティ・最重要）
+   - esc() に数式インジェクションガードを追加。= + @ タブ で始まるセルは先頭に ' を付与。
+   - "-" は負数（-1, -5.2, -3% 等の数値形式）と区別し、数値形式以外のみガード。
+   - 口コミ本文・AI総評・検索語句など外部由来文字列がExcelで数式実行される穴を閉じた
+2. 監査ログ追加
+   - requireRole → requirePermission("STAFF_VIEW") + writeAudit に変更。
+   - 全ダウンロードが audit_logs に記録される（action="CSV一括出力"、detail=type/month/rows）
+3. 解約店舗の除外
+   - shops.cancelled_at を全typeで除外（名前照合はNFKC+空白除去+lower=verifyShopAccess方式）。
+   - grid-ranking は shop_id で除外。P-MAXは広告名由来のためベストエフォート照合と明記。
+   - ページ注記に「解約済み店舗は除外」「操作ログに記録」を追加
+4. grid-ranking: 空results の順序バグ
+   - seen登録前に空チェックへ移動。最新ログが空でも同月の古い正常計測が出力されるように
+5. gridLayoutLabel のDRY化
+   - インライン再実装を report-utils の gridLayoutLabel() 呼び出しに置換。
+   - 店舗名解決も共通の店舗マスタ（shopNameMap）に統一（shops二重取得を解消）
+6. review-language: 「評価なし」列を追加
+   - star_rating が不明形式の口コミを noStar として集計し、★内訳合計=件数を保証
+
+【その他】
+- fetchAll の50万行上限到達時、静かに切り捨てず明示的にエラーを返すよう変更
+- posts の種別ラベルを日本語化（STANDARD=通常/EVENT=イベント/OFFER=特典/PHOTO=写真）
+
+【裏取りメモ】
+- pmax の ctr は比率(0-1)、average_cpc はマイクロ円 — pmax-report-view.tsx の
+  formatCtr(ctr*100)・averageCpc=costMicros/clicks で確認。export の変換は正しい
+- RoleGuard は app-shell.tsx で全ページ適用 → /csv-export もroles.tsの登録でバイト遮断済み
+
+【検証】
+- next build 成功。Preview確認後にマージ予定
