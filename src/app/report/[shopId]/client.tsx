@@ -36,7 +36,6 @@ import {
 } from "@/lib/report-utils";
 import {
   slideStyle, slideBarStyle, slideBodyStyle, stitleStyle,
-  SECTION_COLORS, slideBar, stitle, sectionBarBg,
   kpiTopColors,
 } from "./report-styles";
 
@@ -875,7 +874,7 @@ export default function ReportClient({
 
         // ヘッダーバー（他スライドと統一）
         const header = document.createElement("div");
-        header.style.cssText = `background:${sectionBarBg(SECTION_COLORS.ranking)};color:#fff;padding:12px 9px;font-size:16px;font-weight:700;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;letter-spacing:0.5px;`;
+        header.style.cssText = `background:linear-gradient(135deg,#1a1a2e,#0f3460);color:#fff;padding:12px 9px;font-size:16px;font-weight:700;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;letter-spacing:0.5px;`;
         const headerLeft = document.createElement("span");
         headerLeft.textContent = `${shop.name} — 多地点順位計測`;
         const headerRight = document.createElement("span");
@@ -896,7 +895,7 @@ export default function ReportClient({
           mapSlot.style.cssText = `flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:8px 12px;overflow:hidden;`;
           // タイトル
           const title = document.createElement("div");
-          title.style.cssText = `font-size:18px;font-weight:700;color:#0f3460;border-left:5px solid ${SECTION_COLORS.ranking};padding-left:12px;margin-bottom:8px;align-self:flex-start;`;
+          title.style.cssText = `font-size:18px;font-weight:700;color:#0f3460;border-left:5px solid #e94560;padding-left:12px;margin-bottom:8px;align-self:flex-start;`;
           title.textContent = `多地点順位 —「${kwName}」`;
           mapSlot.appendChild(title);
           // マップ（html2canvasでここだけキャプチャ）
@@ -1585,8 +1584,7 @@ export default function ReportClient({
 
       {/* ════ P1: ヘッダー + KPI ════ */}
       <div style={slideStyle} className="slide">
-        {/* 表紙はサマリー色。他ページのヘッダーと同じ系統に揃える */}
-        <div style={{ background: `linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,${SECTION_COLORS.summary} 100%)`, color: "#fff", padding: "28px 9px 20px", flexShrink: 0, position: "relative" }}>
+        <div style={{ background: "linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%)", color: "#fff", padding: "28px 9px 20px", flexShrink: 0, position: "relative" }}>
           <h1 style={{ margin: 0, fontSize: 26, fontWeight: 900, letterSpacing: 1 }}>{shop.name}</h1>
           <div style={{ fontSize: 16, opacity: 0.7, marginTop: 2 }}>MEO対策 レポート報告</div>
           <div style={{ fontSize: 16, opacity: 0.5, marginTop: 6 }}>{shop.address}</div>
@@ -1601,10 +1599,8 @@ export default function ReportClient({
             </div>
           ))}
         </div>
-        {/* 色の凡例は置かない: ヘッダーバーに必ずセクション名が併記されるので色の意味は自明。
-            表紙は余白がほぼ無く、1行足すとKPIカードが溢れる */}
         <div style={{ flex: 1, padding: "16px 9px 20px", display: "flex", flexDirection: "column", justifyContent: "stretch", overflow: "hidden" }}>
-          <div style={stitle(SECTION_COLORS.summary, { marginBottom: 14 })}>主要指標サマリー（{curLabel}）</div>
+          <div style={{ ...stitleStyle, marginBottom: 14 }}>主要指標サマリー（{curLabel}）</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6, flex: 1 }}>
             {kpis.map((kpi, i) => {
               const isLastKpi = i === kpis.length - 1;
@@ -1659,9 +1655,9 @@ export default function ReportClient({
       {/* ════ P2: 月次テーブル ════ */}
       {(() => { pageNum = 2; return null; })()}
       <div style={slideStyle} className="slide">
-        <div style={slideBar(SECTION_COLORS.summary)}><span>{shop.name} — 月次推移データ</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBarStyle}><span>{shop.name} — 月次推移データ</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
-          <div style={stitle(SECTION_COLORS.summary)}>月次推移データ（直近{dispLabels.length}ヶ月）</div>
+          <div style={stitleStyle}>月次推移データ（直近{dispLabels.length}ヶ月）</div>
           <div style={{ overflow: "hidden", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1, display: "flex", flexDirection: "column" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", fontSize: 16, flex: 1 }}>
               <thead><tr>
@@ -1703,7 +1699,7 @@ export default function ReportClient({
       {/* ════ P3: Googleマップ表示数推移 ════ */}
       {(() => { pageNum = 3; return null; })()}
       <div style={slideStyle} className="slide">
-        <div style={slideBar(SECTION_COLORS.map)}><span>{shop.name} — Googleマップ表示数推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBarStyle}><span>{shop.name} — Googleマップ表示数推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={{ width: "95%", margin: "0 auto" }}>
             <Bar data={{ labels: dispLabels, datasets: [
@@ -1732,7 +1728,7 @@ export default function ReportClient({
       {/* ════ P4: Google検索数推移 ════ */}
       {(() => { pageNum = 4; return null; })()}
       <div style={slideStyle} className="slide">
-        <div style={slideBar(SECTION_COLORS.search)}><span>{shop.name} — Google検索数推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBarStyle}><span>{shop.name} — Google検索数推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={{ width: "95%", margin: "0 auto" }}>
             <Bar data={{ labels: dispLabels, datasets: [
@@ -1761,7 +1757,7 @@ export default function ReportClient({
       {/* ════ P5: ユーザー反応数推移 ════ */}
       {(() => { pageNum = 5; return null; })()}
       <div style={slideStyle} className="slide">
-        <div style={slideBar(SECTION_COLORS.actions)}><span>{shop.name} — ユーザー反応数推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBarStyle}><span>{shop.name} — ユーザー反応数推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
           <div style={{ width: "95%", margin: "0 auto" }}>
             <Bar data={{ labels: dispLabels, datasets: [
@@ -1804,10 +1800,10 @@ export default function ReportClient({
       {/* ════ P7: キーワード順位 (データある場合のみ) ════ */}
       {showKeywords && (() => { pageNum = 6; return (
         <div style={slideStyle} className="slide">
-          <div style={slideBar(SECTION_COLORS.ranking)}><span>{shop.name} — キーワード順位変動</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+          <div style={slideBarStyle}><span>{shop.name} — キーワード順位変動</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={slideBodyStyle}>
             {/* 比較元は前月とは限らない（5月に計測が無ければ4月と比較になる）ため注記する */}
-            <div style={stitle(SECTION_COLORS.ranking)}>
+            <div style={stitleStyle}>
               キーワード順位変動（{curLabel}）
               <span style={{ fontSize: 13, fontWeight: 400, color: "#999", marginLeft: 10 }}>※左側は直近で計測できた月との比較です</span>
             </div>
@@ -1846,11 +1842,11 @@ export default function ReportClient({
       {/* ════ P7.5: キーワード順位推移テーブル ════ */}
       {showRankingHistory && (() => { pageNum++; return (
         <div style={slideStyle} className="slide">
-          <div style={slideBar(SECTION_COLORS.ranking)}><span>{shop.name} — キーワード順位推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+          <div style={slideBarStyle}><span>{shop.name} — キーワード順位推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={{ ...slideBodyStyle, display: "flex", flexDirection: "column", justifyContent: "center" }}>
             {/* labelsは「計測実績のある月」だけを並べたもので連続月とは限らない
                 （例: 5月に計測が無いと 1月/2月/3月/4月/6月 になる）。連続月と誤読されないよう明示する */}
-            <div style={stitle(SECTION_COLORS.ranking)}>
+            <div style={stitleStyle}>
               キーワード順位推移（計測実績のある直近{unifiedRankingHistory.labels.length}ヶ月）
               <span style={{ fontSize: 13, fontWeight: 400, color: "#999", marginLeft: 10 }}>※計測が無い月は列に含まれません</span>
             </div>
@@ -1940,12 +1936,12 @@ export default function ReportClient({
         const summarySlide = (
           <div key="grid-summary" className="grid-summary-slide">
             <div style={slideStyle} className="slide">
-              <div style={slideBar(SECTION_COLORS.ranking)}>
+              <div style={slideBarStyle}>
                 <span>{shop.name} — 多地点順位計測 サマリー</span>
                 <span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(summaryPageNum)}</span>
               </div>
               <div style={{ ...slideBodyStyle, padding: "16px 24px", gap: 16 }}>
-                <div style={stitle(SECTION_COLORS.ranking)}>多地点順位 総合レポート（{latestMonth?.month || curLabel}）</div>
+                <div style={stitleStyle}>多地点順位 総合レポート（{latestMonth?.month || curLabel}）</div>
                 <div style={{ display: "flex", gap: 24, flex: 1, minHeight: 0 }}>
                 {/* 左: 全KW比較テーブル */}
                 <div style={{ flex: "0 0 480px", display: "flex", flexDirection: "column" }}>
@@ -2068,7 +2064,7 @@ export default function ReportClient({
               });
               return (
               <div key={`grid-${kwI}`} style={slideStyle} className={`slide grid-kw-slide${!isActive ? " grid-kw-hidden" : ""}`}>
-                <div style={slideBar(SECTION_COLORS.ranking)} className="grid-kw-header">
+                <div style={slideBarStyle} className="grid-kw-header">
                   <span>{shop.name} — 多地点順位計測</span>
                   <span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(gridKwPageNum)}</span>
                 </div>
@@ -2096,7 +2092,7 @@ export default function ReportClient({
                       </button>
                     ))}
                   </div>
-                  <div style={stitle(SECTION_COLORS.ranking)} className="grid-kw-title">多地点順位 —「{loopKw}」{monthData ? ` (${monthData.month})` : ""}</div>
+                  <div style={stitleStyle} className="grid-kw-title">多地点順位 —「{loopKw}」{monthData ? ` (${monthData.month})` : ""}</div>
                   <div style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }} className="grid-kw-content">
                     <div style={{ flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6 }} className="grid-kw-map-area">
                       {snapshot ? (
@@ -2365,13 +2361,13 @@ export default function ReportClient({
         return (<>
         {/* 検索語句 ページ1 */}
         <div style={slideStyle} className="slide">
-          <div style={slideBar(SECTION_COLORS.queries)}>
+          <div style={slideBarStyle}>
             <span>{shop.name} — 検索語句</span>
             {sqNavBar}
             <span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
           </div>
           <div style={{ ...slideBodyStyle, padding: "10px 9px", display: "flex", flexDirection: "column" }}>
-            <div style={stitle(SECTION_COLORS.queries)}>検索語句ランキング（{sqCurrent?.month || ""}）1〜{Math.min(PER_PAGE, currentKeywords.length)}位</div>
+            <div style={stitleStyle}>検索語句ランキング（{sqCurrent?.month || ""}）1〜{Math.min(PER_PAGE, currentKeywords.length)}位</div>
             {sqSummary}
             {renderSqTable(page1, 0)}
             {renderPageComment("searchQuery", "AI総評")}
@@ -2384,7 +2380,7 @@ export default function ReportClient({
       {(() => { pageNum++; return null; })()}
       {hasReviews && (
         <div style={slideStyle} className="slide">
-          <div style={slideBar(SECTION_COLORS.reviews)}><span>{shop.name} — 口コミ件数推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+          <div style={slideBarStyle}><span>{shop.name} — 口コミ件数推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={{ ...slideBodyStyle, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <div style={{ width: "95%", maxHeight: 600 }}>
               <Line data={{ labels: reviewLabels, datasets: [{
@@ -2414,7 +2410,7 @@ export default function ReportClient({
       {(() => { pageNum++; return null; })()}
       {hasReviews && (
         <div style={slideStyle} className="slide">
-          <div style={slideBar(SECTION_COLORS.reviews)}><span>{shop.name} — 月間口コミ増加数</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+          <div style={slideBarStyle}><span>{shop.name} — 月間口コミ増加数</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={{ ...slideBodyStyle, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <div style={{ width: "95%", maxHeight: 600 }}>
               {(() => {
@@ -2480,9 +2476,9 @@ export default function ReportClient({
       {/* ════ P10: 口コミ分析 ════ */}
       {(() => { pageNum++; return null; })()}
       <div style={slideStyle} className="slide">
-        <div style={slideBar(SECTION_COLORS.reviews)}><span>{shop.name} — AIによる口コミ分析</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+        <div style={slideBarStyle}><span>{shop.name} — AIによる口コミ分析</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
-          <div style={stitle(SECTION_COLORS.reviews)}>口コミ分析（直近1年）</div>
+          <div style={stitleStyle}>口コミ分析（直近1年）</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "auto 1fr", gap: 16, flex: 1 }}>
             <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", display: "flex", flexDirection: "column", justifyContent: "center" }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, color: "#27ae60", marginBottom: 14 }}>よく挙がる好評ポイント</h3>
@@ -2563,12 +2559,12 @@ export default function ReportClient({
         const selfIdx = comp.self ? comp.self.rank - 1 : -1;
         return (
         <div style={slideStyle} className="slide">
-          <div style={slideBar(SECTION_COLORS.reviews)}><span>{shop.name} — 口コミの競合比較</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+          <div style={slideBarStyle}><span>{shop.name} — 口コミの競合比較</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           {/* 20行の表で中身が詰まっているページ。justifyContent:center のままだと
               溢れた時に上下両方が切れてタイトルごと消えるため、上詰めにして
               万一溢れても見出しは必ず残るようにする */}
           <div style={{ ...slideBodyStyle, padding: "16px 24px", justifyContent: "flex-start" }}>
-            <div style={stitle(SECTION_COLORS.reviews, { marginBottom: 10, flexShrink: 0 })}>
+            <div style={{ ...stitleStyle, marginBottom: 10, flexShrink: 0 }}>
               口コミの競合比較（同エリア）
               <span style={{ fontSize: 14, fontWeight: 400, color: "#999", marginLeft: 10 }}>
                 「{comp.keyword}」検索の上位{comp.competitors.length}店舗
@@ -2624,9 +2620,9 @@ export default function ReportClient({
       {/* ════ 口コミ言語別分析 ════ */}
       {langStats.length > 1 && (() => { pageNum++; return (
         <div style={slideStyle} className="slide">
-          <div style={slideBar(SECTION_COLORS.reviews)}><span>{shop.name} — 口コミ言語別分析</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+          <div style={slideBarStyle}><span>{shop.name} — 口コミ言語別分析</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={slideBodyStyle}>
-            <div style={stitle(SECTION_COLORS.reviews)}>口コミ言語別集計 <span style={{ fontSize: 16, fontWeight: 400, color: "#999" }}>※コメント付き口コミのみ対象（{shop.totalReviews}件中{langStats.reduce((s, st) => s + st.total, 0)}件）</span></div>
+            <div style={stitleStyle}>口コミ言語別集計 <span style={{ fontSize: 16, fontWeight: 400, color: "#999" }}>※コメント付き口コミのみ対象（{shop.totalReviews}件中{langStats.reduce((s, st) => s + st.total, 0)}件）</span></div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 20 }}>
               <div style={{ background: "#fff", borderRadius: 10, padding: "16px 20px", boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
                 <div style={{ fontSize: 16, color: "#888" }}>口コミ総数</div>
@@ -2683,9 +2679,9 @@ export default function ReportClient({
       {/* ════ 総括 ════ */}
       {(() => { pageNum++; const isEditingActions = pcEditingKey === "actions"; return (
         <div style={slideStyle} className="slide">
-          <div style={slideBar(SECTION_COLORS.wrapup)}><span>{shop.name} — 総括</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+          <div style={slideBarStyle}><span>{shop.name} — 総括</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={slideBodyStyle}>
-            <div style={stitle(SECTION_COLORS.wrapup)}>{curLabel} 総括</div>
+            <div style={stitleStyle}>{curLabel} 総括</div>
             {/* 当月サマリー: 「総括」ページに総括が無く改善策だけ、という構成を解消する */}
             {pageComments.monthly && (
               <div style={{ background: "#fff", border: "1px solid #dbe3ef", borderRadius: 12, padding: "14px 20px", marginBottom: 12 }}>
@@ -2739,9 +2735,9 @@ export default function ReportClient({
           最終ページなので他ページの番号はずれず、印刷時は分母のみ handlePdfDownload で調整する */}
       {(() => { pageNum++; return (
         <div style={slideStyle} className={memo ? "slide" : "slide no-print"}>
-          <div style={slideBar(SECTION_COLORS.wrapup)}><span>{shop.name} — メモ</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
+          <div style={slideBarStyle}><span>{shop.name} — メモ</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={{ ...slideBodyStyle, display: "flex", flexDirection: "column" }}>
-            <div style={stitle(SECTION_COLORS.wrapup)}>メモ<span className="no-print" style={{ fontSize: 16, fontWeight: 400, color: "#999" }}>（担当者用）</span></div>
+            <div style={stitleStyle}>メモ<span className="no-print" style={{ fontSize: 16, fontWeight: 400, color: "#999" }}>（担当者用）</span></div>
             <div className={memo && !memoEditing ? undefined : "no-print"} style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", boxShadow: "0 1px 6px rgba(0,0,0,.04)", flex: 1 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", marginBottom: 10 }}>
                 <div className="no-print" style={{ display: "flex", gap: 6 }}>

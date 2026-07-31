@@ -28,51 +28,6 @@ export const stitleStyle: React.CSSProperties = {
   borderLeft: `4px solid ${COLORS.accent}`, paddingLeft: 12, marginBottom: 16,
 };
 
-/**
- * セクション別カラー。
- * 全ページ同じ紺色だとページを開いても何の話か分からないため、
- * 指標グループごとに色を割り当てる。グラフの系列色と対応させてある
- * （マップ=緑／検索=青／ユーザー反応=オレンジ）。
- * ヘッダーバーと見出しアクセントを同色にして1ページ1色に揃える。
- */
-export const SECTION_COLORS = {
-  summary: "#0f3460", // 表紙・月次推移（従来の紺）
-  map:     "#1b5e20", // Googleマップ表示数
-  search:  "#01579b", // Google検索数
-  actions: "#b34700", // ユーザー反応数
-  ranking: "#00695c", // キーワード順位・多地点順位
-  queries: "#283593", // 検索語句
-  reviews: "#ad1457", // 口コミ各種
-  wrapup:  "#37474f", // 総括・メモ
-} as const;
-
-export type SectionColorKey = keyof typeof SECTION_COLORS;
-
-/** #rrggbb を暗くする（ヘッダーのグラデーション始点用） */
-function darken(hex: string, ratio: number): string {
-  const m = hex.replace("#", "");
-  const n = parseInt(m, 16);
-  const r = Math.round(((n >> 16) & 255) * (1 - ratio));
-  const g = Math.round(((n >> 8) & 255) * (1 - ratio));
-  const b = Math.round((n & 255) * (1 - ratio));
-  return `#${[r, g, b].map(v => v.toString(16).padStart(2, "0")).join("")}`;
-}
-
-/** セクション色のヘッダーバー背景（CSSのbackground値） */
-export function sectionBarBg(color: string): string {
-  return `linear-gradient(135deg,${darken(color, 0.55)},${color})`;
-}
-
-/** セクション色を反映したヘッダーバー */
-export function slideBar(color: string = SECTION_COLORS.summary): React.CSSProperties {
-  return { ...slideBarStyle, background: sectionBarBg(color) };
-}
-
-/** セクション色を反映した見出し（左のアクセント線をヘッダーと同色にする） */
-export function stitle(color: string = COLORS.accent, extra?: React.CSSProperties): React.CSSProperties {
-  return { ...stitleStyle, borderLeft: `4px solid ${color}`, ...extra };
-}
-
 export const footerStyle: React.CSSProperties = {
   background: "#1a1a2e", color: "rgba(255,255,255,0.3)", textAlign: "center",
   padding: 8, fontSize: 16, flexShrink: 0,
