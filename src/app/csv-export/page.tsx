@@ -161,6 +161,8 @@ export default function CsvExportPage() {
       <p className="text-xs text-slate-400 mt-6">
         ※ CSVはExcelでそのまま開けます（UTF-8 BOM付き）。データが0行の月はヘッダーのみのファイルになります。
         <br />
+        ※ 解約済み店舗のデータは除外されます。ダウンロード操作は操作ログに記録されます。
+        <br />
         ※ 店舗診断・店舗パフォーマンスは店舗ごとに外部APIを呼ぶ構造のため一括出力に対応していません。
       </p>
     </div>
