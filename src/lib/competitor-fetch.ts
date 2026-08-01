@@ -26,13 +26,15 @@ const GCP_API_KEY = process.env.GCP_API_KEY || "";
 export { COMPETITOR_FETCH_MONTHS_BACK, isCompetitorFetchAllowed } from "./month-utils";
 import { isCompetitorFetchAllowed } from "./month-utils";
 
+/**
+ * レポート表示用の読み込み。**課金しない**（保存済みのみ）。
+ *
+ * 以前はここで自動取得していたが、レポートを開くだけで ¥4.8 が発生していた。
+ * 611店舗を開けば約¥2,900が意図せず走る。取得は明示的なボタン操作に限定する
+ * （POST /api/report/competitors）。
+ */
 export async function loadCompetitorComparison(shopName: string, displayMonth?: string): Promise<CompetitorComparison | null> {
   if (!displayMonth) return null;
-  const jst = new Date(Date.now() + 9 * 3600 * 1000);
-  if (isCompetitorFetchAllowed(displayMonth, jst)) {
-    return await fetchAndStoreCompetitors(shopName, displayMonth);
-  }
-  // 範囲外は保存済みのみ（課金しない）。無ければページ非表示
   return await getStoredCompetitors(shopName, displayMonth);
 }
 
@@ -89,17 +91,29 @@ export async function fetchAndStoreCompetitors(shopName: string, month: string):
   // 先頭固定だと、シート側の並びが変わっただけで競合比較の対象キーワードが
   // 黙って変わってしまうため、管理画面から指定できるようにした。
   let keyword = "";
-  try {
-    const { data: kwRow } = await supabase
+  {
+    // main_keyword 列が未作成の環境でも壊れないよう、keywords だけは必ず取得する。
+    // 1クエリにまとめると、列が無いときPostgRESTがエラーを返して data が null になり、
+    // keywords まで空になってキーワード解決に失敗する（＝競合比較のページが消える）
+    const { data: kwRow, error } = await supabase
       .from("shop_keywords")
-      .select("keywords, main_keyword")
+      .select("keywords")
       .eq("shop_id", shop.id)
       .maybeSingle();
+    if (error) console.error("[competitor] shop_keywords select failed:", error.message);
     const list: string[] = kwRow?.keywords || [];
-    const main = (kwRow as any)?.main_keyword || "";
+
+    let main = "";
+    const { data: mkRow } = await supabase
+      .from("shop_keywords")
+      .select("main_keyword")
+      .eq("shop_id", shop.id)
+      .maybeSingle();
+    main = (mkRow as any)?.main_keyword || ""; // 列が無い場合は null → ""
+
     // 指定が実際のKW一覧に残っている場合のみ採用（KWが差し替わった後の亡霊を防ぐ）
     keyword = main && list.includes(main) ? main : (list[0] || "");
-  } catch {}
+  }
   if (!keyword) keyword = shop.gbp_main_category || "";
   if (!keyword) return null;
 

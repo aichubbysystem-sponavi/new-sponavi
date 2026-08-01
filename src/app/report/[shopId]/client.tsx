@@ -288,6 +288,8 @@ export default function ReportClient({
   const gridMarkersRefs = useRef<Record<string, any[]>>({});
   const curLabel = monthlyLabels[monthlyLabels.length - 1] || "";
   const [pdfGenerating, setPdfGenerating] = useState(false);
+  // 口コミ競合比較の取得中フラグ（課金操作のため二重実行を防ぐ）
+  const [compFetching, setCompFetching] = useState(false);
   const [memo, setMemo] = useState("");
   const [memoSaved, setMemoSaved] = useState(false);
   const [memoEditing, setMemoEditing] = useState(false);
@@ -1347,6 +1349,39 @@ export default function ReportClient({
         <Link href="/report" style={{ color: "rgba(255,255,255,0.8)", textDecoration: "none", fontSize: 16 }}>← レポート一覧に戻る</Link>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {dataSource === "mock" && <span style={{ fontSize: 16, color: "#ffd54f", background: "rgba(255,213,79,0.15)", padding: "4px 12px", borderRadius: 20, border: "1px solid rgba(255,213,79,0.3)" }}>デモデータ</span>}
+          {/* 口コミ競合比較の取得。レポートを開くだけで課金しないよう明示操作にしている */}
+          {!competitorComparison && canPaid && (
+            <button
+              onClick={async () => {
+                const month = targetMonth || monthlyLabels[monthlyLabels.length - 1] || "";
+                if (!month) return;
+                if (!confirm(
+                  `「口コミ競合比較」を取得します（${month}）。\n\n`
+                  + `Google Places APIで同エリア上位20店舗の評価・口コミ数を取得します。\n`
+                  + `費用: 約¥4.8（この店舗・この月につき1回のみ。再取得は無料）\n\n`
+                  + `※競合の口コミ数は過去に遡れないため、取得時点の値が保存されます。\n\nよろしいですか？`
+                )) return;
+                setCompFetching(true);
+                try {
+                  const headers = await getAuthHeaders();
+                  const res = await fetch("/api/report/review-competitors", {
+                    method: "POST",
+                    headers: { ...headers, "Content-Type": "application/json" },
+                    body: JSON.stringify({ shopName: shop.name, month }),
+                  });
+                  const body = await res.json().catch(() => ({}));
+                  if (res.ok && body?.data) location.reload();
+                  else alert(body?.error || "取得できませんでした");
+                } catch {
+                  alert("取得に失敗しました（通信エラー）");
+                } finally { setCompFetching(false); }
+              }}
+              disabled={compFetching}
+              style={{ background: "rgba(255,255,255,0.15)", color: "#fff", border: "1px solid rgba(255,255,255,0.3)", padding: "10px 16px", borderRadius: 8, fontSize: 16, fontWeight: 600, cursor: compFetching ? "wait" : "pointer" }}
+            >
+              {compFetching ? "取得中..." : "競合比較を取得（¥4.8）"}
+            </button>
+          )}
           <button onClick={() => setShowSettings(!showSettings)} style={{ background: "rgba(255,255,255,0.15)", color: "#fff", border: "1px solid rgba(255,255,255,0.3)", padding: "10px 16px", borderRadius: 8, fontSize: 16, fontWeight: 600, cursor: "pointer" }}>
             表示設定
           </button>
