@@ -153,6 +153,13 @@ export default function GridRankingPage() {
   // 全店舗パネル
   const [showAllShopsPanel, setShowAllShopsPanel] = useState(false);
   const [rankDisabledIds, setRankDisabledIds] = useState<Set<string>>(new Set());
+  // 計測状況の一覧（どの店舗が計測済みか / 未計測なら何が足りないか）
+  const [shopStatus, setShopStatus] = useState<{
+    id: string; name: string; measured: boolean; lastMeasuredAt: string | null;
+    keywordCount: number; hasCoord: boolean; reasons: string[];
+  }[]>([]);
+  const [statusTab, setStatusTab] = useState<"unmeasured" | "measured" | "all">("unmeasured");
+  const [statusFilter, setStatusFilter] = useState("");
   const [allShopsBatchRunning, setAllShopsBatchRunning] = useState(false);
   const [allShopsBatchProgress, setAllShopsBatchProgress] = useState("");
   const [allShopsCoordSyncing, setAllShopsCoordSyncing] = useState(false);
@@ -224,7 +231,13 @@ export default function GridRankingPage() {
       setGridStats(res.data);
     } catch {}
   }, []);
-  useEffect(() => { refreshKwMissing(); refreshGridStats(); }, [refreshKwMissing, refreshGridStats]);
+  const refreshShopStatus = useCallback(async () => {
+    try {
+      const res = await api.get("/api/report/grid-shop-status");
+      setShopStatus(res.data?.shops || []);
+    } catch {}
+  }, []);
+  useEffect(() => { refreshKwMissing(); refreshGridStats(); refreshShopStatus(); }, [refreshKwMissing, refreshGridStats, refreshShopStatus]);
 
   // プリセットに追加（シートからKW自動取得）
   const [addingPreset, setAddingPreset] = useState(false);
@@ -1449,6 +1462,7 @@ export default function GridRankingPage() {
                   setAllShopsBatchProgress(`✓ ${completed}店舗 × ${totalKws}KWの計測完了${allSkipMsg.length > 0 ? `（${allSkipMsg.join("・")}スキップ）` : ""}`);
                   refreshKwMissing();
                   refreshGridStats();
+                  refreshShopStatus();
                 }}
                 disabled={!can(role, "PAID_OP") || allShopsBatchRunning}
                 title={!can(role, "PAID_OP") ? PERMISSION_DENIED_HINT.PAID_OP : undefined}
@@ -1481,6 +1495,57 @@ export default function GridRankingPage() {
               )}
 
               {/* KW未取得一覧 */}
+              {/* 計測状況の一覧。数字だけでは「どの店舗が計測できていないか」が分からない */}
+              {shopStatus.length > 0 && (
+                <div className="mt-4 border border-slate-200 rounded-lg">
+                  <div className="px-4 py-2.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-1">
+                      {([
+                        ["unmeasured", `未計測 (${shopStatus.filter(s => !s.measured).length})`],
+                        ["measured", `計測済み (${shopStatus.filter(s => s.measured).length})`],
+                        ["all", `すべて (${shopStatus.length})`],
+                      ] as ["unmeasured" | "measured" | "all", string][]).map(([val, label]) => (
+                        <button key={val} onClick={() => setStatusTab(val)}
+                          className={`px-2.5 py-1 rounded text-[11px] font-semibold ${statusTab === val ? "bg-[#003D6B] text-white" : "bg-slate-50 text-slate-500 hover:bg-slate-100"}`}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <input value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+                      placeholder="店舗名で絞り込み"
+                      className="px-2 py-1 border border-slate-200 rounded text-xs w-44" />
+                  </div>
+                  <div className="max-h-72 overflow-y-auto divide-y divide-slate-50">
+                    {shopStatus
+                      .filter(s => statusTab === "all" || (statusTab === "measured" ? s.measured : !s.measured))
+                      .filter(s => !statusFilter || s.name.toLowerCase().includes(statusFilter.toLowerCase()))
+                      .map(s => (
+                        <div key={s.id} className="px-4 py-1.5 text-xs flex items-center justify-between gap-3">
+                          <span className="text-slate-700 truncate">{s.name}</span>
+                          <span className="flex items-center gap-2 flex-shrink-0 text-[10px]">
+                            <span className="text-slate-400">{s.keywordCount}KW</span>
+                            {s.measured ? (
+                              <span className="text-emerald-600">
+                                ✓ {s.lastMeasuredAt ? new Date(s.lastMeasuredAt).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" }) : ""}
+                              </span>
+                            ) : (
+                              s.reasons.map(r => (
+                                <span key={r} className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">{r}</span>
+                              ))
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                    {shopStatus
+                      .filter(s => statusTab === "all" || (statusTab === "measured" ? s.measured : !s.measured))
+                      .filter(s => !statusFilter || s.name.toLowerCase().includes(statusFilter.toLowerCase()))
+                      .length === 0 && (
+                      <p className="px-4 py-6 text-xs text-slate-400 text-center">該当する店舗はありません</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {kwMissingLoaded && kwMissingShops.length > 0 && (
                 <div className="mt-4 border border-amber-200 rounded-lg bg-amber-50">
                   <div className="px-4 py-2.5 border-b border-amber-200 flex items-center justify-between">
