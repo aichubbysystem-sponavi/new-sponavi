@@ -4,6 +4,7 @@ import {
   validateMonthlyAverage,
   validatePageComments,
   buildKeywordFacts,
+  validateContinuityClaims,
 } from "./comment-validation";
 
 /**
@@ -155,5 +156,103 @@ describe("buildKeywordFacts", () => {
 
   it("順位が1つも無いキーワードは対象外（検証しようがない）", () => {
     expect(buildKeywordFacts([{ word: "KW", rank: 0, prevRank: 0 }], null)).toHaveLength(0);
+  });
+});
+
+/**
+ * 2026-08-01 _WHITE 鳳店のレポートP7で実際に出た誤り。
+ * 表: 鳳 美容室 = 1月圏外 / 2月1位 / 3月圏外 / 4月1位 / 5月1位 / 6月1位
+ * AI: 「一度も1位を下げることなく安定している」
+ * 3月に圏外へ落ちているが、文中の「1位」は実在するため数値照合では通らない。
+ */
+const HOU_FACTS = buildKeywordFacts(
+  [
+    { word: "鳳 美容室", rank: 1, prevRank: 1 },
+    { word: "鳳 美容院", rank: 1, prevRank: 1 },
+  ],
+  {
+    labels: ["2026/1", "2026/2", "2026/3", "2026/4", "2026/5", "2026/6"],
+    datasets: [
+      // 1月圏外 / 3月圏外（outOfRangeで明示）
+      {
+        word: "鳳 美容室",
+        ranks: [null, 1, null, 1, 1, 1],
+        outOfRange: [true, false, true, false, false, false],
+      } as any,
+      // こちらは1月と3月が未計測（圏外ではない）
+      {
+        word: "鳳 美容院",
+        ranks: [null, 1, null, 1, 1, 1],
+        outOfRange: [false, false, false, false, false, false],
+      } as any,
+    ],
+  },
+);
+
+describe("継続性の主張の検証（2026-08-01 P7の実例）", () => {
+  it("圏外の月があるのに「一度も下げていない」と書いた誤りを検出する", () => {
+    const text = "「鳳 美容室」は2026年2月の計測開始以降、一度も1位を下げることなく安定している";
+    const bad = validateContinuityClaims(text, HOU_FACTS);
+    expect(bad).toHaveLength(1);
+    expect(bad[0].word).toBe("鳳 美容室");
+    expect(bad[0].reason).toBe("計測期間中に圏外の月がある");
+  });
+
+  it("未計測の月があるだけなら誤りとしない（未計測は「下がった」ではない）", () => {
+    const text = "「鳳 美容院」は一度も1位を下げていない";
+    expect(validateContinuityClaims(text, HOU_FACTS)).toHaveLength(0);
+  });
+
+  it("順位が下がった月があれば検出する", () => {
+    const facts = buildKeywordFacts([{ word: "テストKW", rank: 3, prevRank: 5 }], {
+      labels: ["2026/4", "2026/5", "2026/6"],
+      datasets: [{ word: "テストKW", ranks: [1, 5, 3] }],
+    });
+    const bad = validateContinuityClaims("「テストKW」は常に上位を維持している", facts);
+    expect(bad).toHaveLength(1);
+    expect(bad[0].reason).toBe("計測期間中に順位が下がった月がある");
+  });
+
+  it("本当に一度も下がっていなければ違反にしない", () => {
+    const facts = buildKeywordFacts([{ word: "安定KW", rank: 1, prevRank: 1 }], {
+      labels: ["2026/4", "2026/5", "2026/6"],
+      datasets: [{ word: "安定KW", ranks: [1, 1, 1] }],
+    });
+    expect(validateContinuityClaims("「安定KW」は一度も1位を下げていない", facts)).toHaveLength(0);
+  });
+
+  it("順位が改善し続けている場合も違反にしない", () => {
+    const facts = buildKeywordFacts([{ word: "改善KW", rank: 1, prevRank: 3 }], {
+      labels: ["2026/4", "2026/5", "2026/6"],
+      datasets: [{ word: "改善KW", ranks: [5, 3, 1] }],
+    });
+    expect(validateContinuityClaims("「改善KW」は常に改善している", facts)).toHaveLength(0);
+  });
+
+  it("断定表現でなければ対象外（多少の上下でも自然に使える表現）", () => {
+    // 「安定している」単体は許容する。厳しくすると正しい文まで弾いてしまう
+    const text = "「鳳 美容室」は安定している";
+    expect(validateContinuityClaims(text, HOU_FACTS)).toHaveLength(0);
+  });
+
+  it("キーワードが登場しない文は検証しない（帰属先が決められない）", () => {
+    expect(validateContinuityClaims("全体として一度も下がっていない", HOU_FACTS)).toHaveLength(0);
+  });
+
+  it("計測が1回しかない場合は継続性を判定しない", () => {
+    const facts = buildKeywordFacts([{ word: "初回KW", rank: 1, prevRank: 0 }], {
+      labels: ["2026/6"],
+      datasets: [{ word: "初回KW", ranks: [1] }],
+    });
+    expect(validateContinuityClaims("「初回KW」は常に1位", facts)).toHaveLength(0);
+  });
+
+  it("pageComments経由でも検出される", () => {
+    const violations = validatePageComments(
+      { rankingHistory: "「鳳 美容室」は一度も1位を下げることなく安定している" },
+      { keywordFacts: HOU_FACTS, reviewDeltas: [] },
+    );
+    expect(violations).toHaveLength(1);
+    expect(violations[0].kind).toBe("continuity_mismatch");
   });
 });

@@ -25,13 +25,18 @@ export interface KeywordRankFacts {
   word: string;
   /** そのキーワードについて言及が許される順位の集合（当月・前回・推移の全月） */
   allowedRanks: number[];
+  /**
+   * 順位の時系列（古い順）。null=未計測 / 0=圏外 / 1以上=順位。
+   * 「一度も下げていない」のような継続性の主張を検証するために使う。
+   */
+  series?: (number | null)[];
 }
 
 export interface CommentViolation {
   /** 違反が見つかったページ（pageCommentsのキー） */
   field: string;
   /** 違反の種類 */
-  kind: "rank_mismatch" | "average_mismatch";
+  kind: "rank_mismatch" | "average_mismatch" | "continuity_mismatch";
   /** 人間が読める説明。再生成時にAIへ渡す */
   message: string;
 }
@@ -160,6 +165,67 @@ export function validateMonthlyAverage(
   return bad;
 }
 
+/**
+ * 「一度も下げていない」のような継続性の主張を、順位の時系列と突き合わせる。
+ *
+ * 【なぜ必要か】
+ * 2026-08-01 _WHITE 鳳店のレポートP7で発生:
+ *   表: 鳳 美容室 = 1月圏外 / 2月1位 / 3月圏外 / 4月1位 / 5月1位 / 6月1位
+ *   AI: 「一度も1位を下げることなく安定している」
+ * 3月に圏外へ落ちているので事実と違う。
+ * ただし文中の「1位」は実データに存在するため、数値照合では通過してしまう。
+ * 誤っているのは数字ではなく「ずっと続いている」という主張の方。
+ *
+ * 【誤検知を避ける方針】
+ * 断定的な表現（一度も〜ない / 常に / 全期間）だけを対象にする。
+ * 「安定している」「維持」単体は、多少の上下でも自然に使える表現なので対象外。
+ * 対象キーワードが特定できない文も検証しない。
+ */
+export function validateContinuityClaims(
+  text: string,
+  facts: KeywordRankFacts[],
+): { word: string; claim: string; reason: string }[] {
+  if (!text || facts.length === 0) return [];
+  const normalized = toHalfWidthDigits(text);
+  const mentions = findKeywordMentions(normalized, facts);
+  if (mentions.length === 0) return [];
+
+  // 「一度も」「常に」「全期間」など、例外を許さない断定表現のみ拾う
+  const ABSOLUTE = /(一度も|常に|全期間|終始|ずっと)/g;
+  const bad: { word: string; claim: string; reason: string }[] = [];
+
+  let m: RegExpExecArray | null;
+  while ((m = ABSOLUTE.exec(normalized)) !== null) {
+    // 直前に登場したキーワードのものとみなす（数値照合と同じ帰属ルール）
+    let owner: KeywordRankFacts | null = null;
+    for (const mention of mentions) {
+      if (mention.index < m.index) owner = mention.fact;
+      else break;
+    }
+    if (!owner || !owner.series || owner.series.length === 0) continue;
+
+    // 計測済みの月だけを見る（未計測は「下がった」ではない）
+    const measured = owner.series.filter((r): r is number => r !== null);
+    if (measured.length < 2) continue;
+
+    const hasOutOfRange = measured.some((r) => r === 0);
+    const ranks = measured.filter((r) => r > 0);
+    const worsened = ranks.some((r, i) => i > 0 && r > ranks[i - 1]);
+
+    if (hasOutOfRange || worsened) {
+      const claim = normalized.slice(Math.max(0, m.index - 20), m.index + 30).trim();
+      bad.push({
+        word: owner.word,
+        claim,
+        reason: hasOutOfRange
+          ? "計測期間中に圏外の月がある"
+          : "計測期間中に順位が下がった月がある",
+      });
+    }
+  }
+  return bad;
+}
+
 /** pageComments 全体を検証して違反リストを返す */
 export function validatePageComments(
   pageComments: Record<string, unknown> | null | undefined,
@@ -173,6 +239,13 @@ export function validatePageComments(
   for (const field of rankFields) {
     const v = pageComments[field];
     if (typeof v !== "string" || !v) continue;
+    for (const b of validateContinuityClaims(v, ctx.keywordFacts)) {
+      violations.push({
+        field,
+        kind: "continuity_mismatch",
+        message: `「${b.word}」について「${b.claim}」と書いているが、${b.reason}`,
+      });
+    }
     for (const b of validateRankMentions(v, ctx.keywordFacts)) {
       violations.push({
         field,
@@ -201,13 +274,22 @@ export function validatePageComments(
 /** 違反内容を、再生成時にAIへ渡す修正指示文にする */
 export function buildCorrectionPrompt(violations: CommentViolation[]): string {
   const lines = violations.map((v) => `- ${v.field}: ${v.message}`);
+  const hasContinuity = violations.some((v) => v.kind === "continuity_mismatch");
   return [
-    "直前の出力に、提供データと一致しない数値が含まれていた。以下を必ず修正すること。",
+    "直前の出力に、提供データと一致しない記述が含まれていた。以下を必ず修正すること。",
     ...lines,
     "",
     "重要: 順位・件数は提供データに書かれている数字をそのまま使うこと。",
     "似た名前のキーワードが複数ある場合、別のキーワードの数字を混同しないよう、",
     "各キーワードの行を1つずつ確認してから書くこと。",
+    ...(hasContinuity
+      ? [
+          "",
+          "「一度も下げていない」「常に」「全期間」のような例外を許さない表現は、",
+          "推移データの全ての月を確認し、圏外や順位低下が1つも無い場合にだけ使うこと。",
+          "1か月でも圏外や下落があるなら、その事実を含めて書くこと。",
+        ]
+      : []),
   ].join("\n");
 }
 
@@ -227,10 +309,25 @@ export function buildKeywordFacts(
     put(k.word, k.rank);
     put(k.word, k.prevRank);
   }
+  // 継続性の主張を検証するため、順位の時系列も保持する
+  // （null=未計測 / 0=圏外 / 1以上=順位。outOfRangeがあれば圏外を0で表す）
+  const seriesByNorm = new Map<string, (number | null)[]>();
   for (const ds of history?.datasets || []) {
     for (const r of ds.ranks || []) put(ds.word, r);
+    const oor = (ds as { outOfRange?: boolean[] }).outOfRange;
+    const series = (ds.ranks || []).map((r, i) => {
+      if (typeof r === "number" && r > 0) return r;
+      if (oor?.[i] === true) return 0; // 明示的な圏外
+      return null; // 未計測
+    });
+    seriesByNorm.set(normalizeKw(ds.word), series);
   }
-  return Array.from(byNorm.values())
-    .filter((v) => v.ranks.size > 0)
-    .map((v) => ({ word: v.word, allowedRanks: Array.from(v.ranks).sort((a, b) => a - b) }));
+
+  return Array.from(byNorm.entries())
+    .filter(([, v]) => v.ranks.size > 0)
+    .map(([key, v]) => ({
+      word: v.word,
+      allowedRanks: Array.from(v.ranks).sort((a, b) => a - b),
+      series: seriesByNorm.get(key),
+    }));
 }
