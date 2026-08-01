@@ -73,6 +73,8 @@ export default function ShopStatusPanel() {
   const [filter, setFilter] = useState("");
   const [keyword, setKeyword] = useState("エミナル");
   const [error, setError] = useState<string | null>(null);
+  // 口コミ(RPA)シートとDBの照合結果（読み取りのみ）
+  const [sheetCheck, setSheetCheck] = useState<any>(null);
 
   const loadState = useCallback(async () => {
     try {
@@ -121,6 +123,19 @@ export default function ShopStatusPanel() {
       if (apply) await loadState();
     } catch (e: any) {
       setError(e?.response?.data?.error || "設定に失敗しました");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function runSheetCheck() {
+    setBusy("sheet-check");
+    setError(null);
+    try {
+      const res = await api.get("/api/report/rpa-sheet-check");
+      setSheetCheck(res.data);
+    } catch (e: any) {
+      setError(e?.response?.data?.error || "シートの照合に失敗しました");
     } finally {
       setBusy(null);
     }
@@ -280,6 +295,79 @@ export default function ShopStatusPanel() {
               <p className="mt-3 text-[11px] text-red-700 bg-white border border-red-200 rounded-lg p-3">
                 更新に失敗した店舗が {syncResult.failed!.length} 件あります。
               </p>
+            )}
+          </ResultBox>
+        )}
+      </div>
+
+      {/* 口コミ(RPA)シートの照合 */}
+      <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
+        <h3 className="text-sm font-semibold text-slate-500 mb-1">口コミ(RPA)シートの照合</h3>
+        <p className="text-xs text-slate-400 mb-4">
+          シートに月次の評価・件数を書き込む前の確認です。読み取りのみで、シートは変更しません。
+        </p>
+        <button onClick={runSheetCheck} disabled={!!busy}
+          className="px-4 py-2 rounded-lg text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50 mb-4">
+          {busy === "sheet-check" ? "照合中..." : "シートとDBを照合する"}
+        </button>
+
+        {sheetCheck && (
+          <ResultBox applied={false} title={`照合しました — 7月列: ${sheetCheck.header?.julColumn || "?"} / 8月列: ${sheetCheck.header?.augColumn || "?"}`}>
+            <div className="flex flex-wrap gap-2 text-[11px] mb-3">
+              <span className="px-2 py-1 bg-white border border-slate-200 rounded">シート {sheetCheck.summary.sheetShops}店舗</span>
+              <span className="px-2 py-1 bg-white border border-slate-200 rounded">DB {sheetCheck.summary.dbShops}店舗</span>
+              <span className="px-2 py-1 bg-white border border-slate-200 rounded">照合できた {sheetCheck.summary.matched}</span>
+              <span className="px-2 py-1 bg-white border border-amber-200 text-amber-700 rounded">DBに無い {sheetCheck.summary.unmatched}</span>
+              <span className="px-2 py-1 bg-white border border-amber-200 text-amber-700 rounded">DBに評価が無い {sheetCheck.summary.noRatingInDb}</span>
+              {sheetCheck.summary.augAlreadyFilled > 0 && (
+                <span className="px-2 py-1 bg-red-50 border border-red-200 text-red-700 rounded font-semibold">
+                  8月に既に値あり {sheetCheck.summary.augAlreadyFilled}
+                </span>
+              )}
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-lg p-3 text-xs">
+              <p className="font-semibold text-slate-700 mb-1">7月値とDB現在値の一致度（同じ定義かの判断）</p>
+              <p className="text-slate-600">
+                比較できた {sheetCheck.summary.compared}店舗のうち、評価差0.1以内が{" "}
+                <b className={sheetCheck.summary.within01Pct >= 80 ? "text-emerald-600" : "text-amber-700"}>
+                  {sheetCheck.summary.within01}件（{sheetCheck.summary.within01Pct}%）
+                </b>
+                、差の中央値は {sheetCheck.summary.medianRatingDiff ?? "-"}
+              </p>
+              <p className="text-slate-400 mt-1">
+                ほとんど一致していれば、シートはGoogleマップ掲載値で入力されています。
+                その場合はDBの現在値をそのまま8月列に書けば整合します。
+              </p>
+            </div>
+
+            {(sheetCheck.topDiffs?.length ?? 0) > 0 && (
+              <details className="mt-3 border border-slate-200 bg-white rounded-lg">
+                <summary className="px-3 py-2 text-[11px] font-semibold text-slate-600 cursor-pointer">
+                  乖離が大きい店舗（上位{sheetCheck.topDiffs.length}件）
+                </summary>
+                <div className="max-h-56 overflow-y-auto divide-y divide-slate-50">
+                  {sheetCheck.topDiffs.map((d: any) => (
+                    <div key={d.name} className="px-3 py-1.5 text-xs flex justify-between gap-3">
+                      <span className="text-slate-700 truncate">{d.name}</span>
+                      <span className="flex-shrink-0 text-slate-500">
+                        7月 {d.julRating}／{d.julCount ?? "-"}件 → DB {d.dbRating}／{d.dbCount ?? "-"}件
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+
+            {(sheetCheck.unmatchedShops?.length ?? 0) > 0 && (
+              <details className="mt-3 border border-amber-200 bg-white rounded-lg">
+                <summary className="px-3 py-2 text-[11px] font-semibold text-amber-700 cursor-pointer">
+                  DBに見つからない店舗（{sheetCheck.summary.unmatched}件）— 書き込めません
+                </summary>
+                <div className="max-h-48 overflow-y-auto px-3 py-2 text-xs text-slate-600 space-y-1">
+                  {sheetCheck.unmatchedShops.map((n: string) => <div key={n}>{n}</div>)}
+                </div>
+              </details>
             )}
           </ResultBox>
         )}
