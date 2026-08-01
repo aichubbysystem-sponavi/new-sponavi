@@ -57,6 +57,7 @@ const navSections = [
   {
     title: "システム管理",
     children: [
+      { href: "/admin", label: "契約状態・計測対象" },
       { href: "/user-management", label: "ユーザー・権限管理" },
       { href: "/audit-log", label: "操作ログ" },
       { href: "/group-management", label: "グループ管理" },
