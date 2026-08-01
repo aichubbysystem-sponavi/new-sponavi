@@ -369,6 +369,32 @@ export function gridLayoutLabel(gridSize: number, pointCount: number): string {
   return `${gridSize}×${gridSize}`;
 }
 
+/**
+ * 計測範囲（店舗中心から外周地点までの距離）の表示文字列。
+ *
+ * 【なぜ表示が必要か】
+ * 距離を変えると計測エリアの広さが変わり、平均順位が動く。
+ * 1km→500mでは対象面積が1/4になり、店舗近くだけを見るため順位は上がりやすい。
+ * 距離を出しておかないと「急に改善した」と誤読される（2026-08-01 に既定を500mへ変更）。
+ */
+export function intervalLabel(intervalM: number | null | undefined): string {
+  if (!intervalM || intervalM <= 0) return "";
+  return intervalM >= 1000
+    ? `${Number((intervalM / 1000).toFixed(1))}km`
+    : `${intervalM}m`;
+}
+
+/** 「5地点 / 半径500m」のような、地点数と計測範囲をまとめた表示 */
+export function gridLayoutWithRange(
+  gridSize: number,
+  pointCount: number,
+  intervalM: number | null | undefined,
+): string {
+  const layout = gridLayoutLabel(gridSize, pointCount);
+  const range = intervalLabel(intervalM);
+  return range ? `${layout}／半径${range}` : layout;
+}
+
 /** diff表示の色 */
 export function diffColor(d: number | null): string {
   if (d === null) return "#ccc";

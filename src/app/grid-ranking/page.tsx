@@ -13,7 +13,7 @@ import {
   generate5Points, GRID_ANGLES,
   summarizeGridRanks, formatAvgRank, formatCoverage,
 } from "@/lib/grid-utils";
-import { gridLayoutLabel } from "@/lib/report-utils";
+import { gridLayoutLabel, intervalLabel } from "@/lib/report-utils";
 
 interface GridPoint {
   row: number;
@@ -2053,9 +2053,8 @@ export default function GridRankingPage() {
                         })()}
                       </td>
                       <td className="px-4 py-2.5">{gridLayoutLabel(log.grid_size, log.results?.length ?? 0)}</td>
-                      <td className="px-4 py-2.5">
-                        {log.interval_m >= 1000 ? `${log.interval_m / 1000}km` : `${log.interval_m}m`}
-                      </td>
+                      {/* 距離の表記はレポートと同じ関数に揃える（1500m→1.5km等のゆれ防止） */}
+                      <td className="px-4 py-2.5">{intervalLabel(log.interval_m)}</td>
                       <td className={`px-4 py-2.5 font-semibold ${summary.avg == null ? "text-slate-400" : ""}`}>
                         {formatAvgRank(summary)}
                       </td>

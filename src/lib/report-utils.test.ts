@@ -11,6 +11,8 @@ import {
   splitCommentPages,
   centerCell,
   gridLayoutLabel,
+  intervalLabel,
+  gridLayoutWithRange,
   diffColor,
   formatDiff,
   COLORS,
@@ -500,5 +502,35 @@ describe("rankTrend: 圏内復帰と初計測の区別", () => {
     const r = rankTrend([null, null, null, null, 3], [true, false, true, false, true]);
     expect(r.text).toBe("圏内復帰");
     expect(r.prevIndex).toBe(2);
+  });
+});
+
+describe("計測範囲の表示（距離変更を読み取れるようにする）", () => {
+  it.each([
+    [500, "500m"],
+    [1000, "1km"],
+    [1500, "1.5km"],
+    [3000, "3km"],
+    [5000, "5km"],
+  ])("%im → %s", (input, expected) => {
+    expect(intervalLabel(input)).toBe(expected);
+  });
+
+  it("未設定・0・負値は空文字（表示しない）", () => {
+    expect(intervalLabel(null)).toBe("");
+    expect(intervalLabel(undefined)).toBe("");
+    expect(intervalLabel(0)).toBe("");
+    expect(intervalLabel(-100)).toBe("");
+  });
+
+  it("地点数と範囲をまとめて表示する", () => {
+    expect(gridLayoutWithRange(3, 5, 500)).toBe("5地点／半径500m");
+    expect(gridLayoutWithRange(7, 49, 1000)).toBe("7×7／半径1km");
+    expect(gridLayoutWithRange(2, 4, 500)).toBe("4地点／半径500m");
+  });
+
+  it("距離が無いデータは従来どおり地点数だけ（過去データが壊れない）", () => {
+    expect(gridLayoutWithRange(3, 5, null)).toBe("5地点");
+    expect(gridLayoutWithRange(7, 49, 0)).toBe("7×7");
   });
 });

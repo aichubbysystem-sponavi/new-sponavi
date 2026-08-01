@@ -32,7 +32,7 @@ import {
   SEARCH_QUERIES_PER_PAGE,
   pctChange, monthToNum, rankColor, rankColorModal, rankTextColor,
   fmtAvgRank, rankTrend, rankCoverage, isYoyComparable, parseStartMonth,
-  reorderKpis, centerCell, gridLayoutLabel,
+  reorderKpis, centerCell, gridLayoutLabel, gridLayoutWithRange, intervalLabel,
 } from "@/lib/report-utils";
 import {
   slideStyle, slideBarStyle, slideBodyStyle, stitleStyle,
@@ -1138,7 +1138,10 @@ export default function ReportClient({
             const cov = rankCoverage(latestSnap?.results);
             if (covEl && cov) {
               const c = cov.pct >= 80 ? "#15803d" : cov.pct >= 50 ? "#b45309" : "#c0392b";
-              covEl.innerHTML = `圏内 <span style="font-weight:800;color:${c};">${cov.ranked}</span><span style="color:#999;"> / ${cov.total}地点（${cov.pct}%）</span>`;
+              // 計測範囲も併記（画面側と同じ内容にする。片方だけだとPDFと画面で食い違う）
+              const range = intervalLabel(latestSnap?.intervalM);
+              covEl.innerHTML = `圏内 <span style="font-weight:800;color:${c};">${cov.ranked}</span><span style="color:#999;"> / ${cov.total}地点（${cov.pct}%）</span>`
+                + (range ? `<span style="color:#999;"> ／ 半径${range}</span>` : "");
             }
           }
         }
@@ -2038,7 +2041,9 @@ export default function ReportClient({
                                     color: diff.color }}>
                                     {diff.text}
                                   </td>
-                                  <td style={{ padding: "8px 10px", textAlign: "center", fontSize: 15, color: "#888", borderBottom: "1px solid #eee" }}>{s ? gridLayoutLabel(s.gridSize, s.results?.length ?? 0) : "-"}</td>
+                                  {/* 計測範囲（距離）も出す。距離が変わると平均順位が動くため、
+                                      これが無いと「急に改善した」と誤読される */}
+                                  <td style={{ padding: "8px 10px", textAlign: "center", fontSize: 15, color: "#888", borderBottom: "1px solid #eee" }}>{s ? gridLayoutWithRange(s.gridSize, s.results?.length ?? 0, s.intervalM) : "-"}</td>
                                 </tr>
                               );
                             })}
@@ -2188,6 +2193,10 @@ export default function ReportClient({
                               <div className="grid-kw-cov" style={{ fontSize: 16, color: "#666", textAlign: "center", width: 440 }}>
                                 圏内 <span style={{ fontWeight: 800, color: cov.pct >= 80 ? "#15803d" : cov.pct >= 50 ? "#b45309" : "#c0392b" }}>{cov.ranked}</span>
                                 <span style={{ color: "#999" }}> / {cov.total}地点（{cov.pct}%）</span>
+                                {/* 計測範囲。距離が変わると平均順位が動くので必ず併記する */}
+                                {intervalLabel(snapshot.intervalM) && (
+                                  <span style={{ color: "#999" }}> ／ 半径{intervalLabel(snapshot.intervalM)}</span>
+                                )}
                               </div>
                             );
                           })()}
@@ -2275,7 +2284,7 @@ export default function ReportClient({
                                         {diff.text}
                                       </td>
                                       <td style={{ padding: "8px 10px", textAlign: "center", fontSize: 16, color: "#888", borderBottom: "1px solid #eee" }}>
-                                        {gridLayoutLabel(s.gridSize, s.results?.length ?? 0)}
+                                        {gridLayoutWithRange(s.gridSize, s.results?.length ?? 0, s.intervalM)}
                                       </td>
                                     </tr>
                                   );
