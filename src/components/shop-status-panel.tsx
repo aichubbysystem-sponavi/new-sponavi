@@ -68,13 +68,15 @@ export default function ShopStatusPanel() {
   const [counts, setCounts] = useState<Counts | null>(null);
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
   const [syncAt, setSyncAt] = useState<string>("");
-  const [rankResult, setRankResult] = useState<{ applied: boolean; count: number; shops?: Shop[]; label: string } | null>(null);
+  const [rankResult, setRankResult] = useState<{ applied: boolean; count: number; shops?: Shop[]; label: string; keyword?: string } | null>(null);
   const [disabledShops, setDisabledShops] = useState<Shop[]>([]);
   const [filter, setFilter] = useState("");
   const [keyword, setKeyword] = useState("エミナル");
   const [error, setError] = useState<string | null>(null);
   // 口コミ(RPA)シートとDBの照合結果（読み取りのみ）
   const [sheetCheck, setSheetCheck] = useState<any>(null);
+  // 409（変更が多すぎる）のとき強制適用の導線を出す
+  const [needsForce, setNeedsForce] = useState(false);
 
   const loadState = useCallback(async () => {
     try {
@@ -91,17 +93,31 @@ export default function ShopStatusPanel() {
 
   useEffect(() => { loadState(); }, [loadState]);
 
-  async function runSync(apply: boolean) {
+  async function runSync(apply: boolean, force = false) {
     setBusy(apply ? "sync-apply" : "sync-dry");
     setError(null);
+    setNeedsForce(false);
     try {
-      const res = await api.post("/api/report/sync-contract-status", { apply, force: false });
+      // apply は時間がかかる（シート取得30秒＋店舗ごとの逐次UPDATE）。
+      // axiosの既定10秒だと画面だけ失敗扱いになり、サーバーは適用を続けてしまう
+      const res = await api.post(
+        "/api/report/sync-contract-status",
+        { apply, force },
+        { timeout: apply ? 180000 : 90000 },
+      );
       setSyncResult(res.data);
       setSyncAt(nowLabel());
       if (apply) await loadState();
     } catch (e: any) {
-      setError(e?.response?.data?.error || "同期に失敗しました");
-      if (e?.response?.data?.summary) setSyncResult(e.response.data);
+      const status = e?.response?.status;
+      const data = e?.response?.data;
+      setError(data?.error || (e?.code === "ECONNABORTED"
+        ? "応答待ちがタイムアウトしました。サーバー側で処理が続いている可能性があるため、状態を確認してから再実行してください"
+        : "同期に失敗しました"));
+      // 409（変更が多すぎる）は差分を見せたうえで強制適用の導線を出す。
+      // これが無いと「確認しました」と出たまま適用ボタンが無効で詰む
+      if (status === 409) setNeedsForce(true);
+      if (data?.summary) setSyncResult(data);
     } finally {
       setBusy(null);
     }
@@ -119,6 +135,10 @@ export default function ShopStatusPanel() {
         count: apply ? (d.updated ?? 0) : (d.matched ?? 0),
         shops: d.shops,
         label: disabled ? "計測対象外" : "計測対象",
+        // 確認したときの条件を保持する。
+        // これが無いと、確認後に入力欄を書き換えてから適用でき、
+        // 画面に出ている一覧と実際に変更される店舗が食い違う
+        keyword: keyword.trim(),
       });
       if (apply) await loadState();
     } catch (e: any) {
@@ -203,6 +223,22 @@ export default function ShopStatusPanel() {
             className="px-4 py-2 rounded-lg text-sm font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-40">
             {busy === "sync-apply" ? "適用中..." : "② 適用する"}
           </button>
+          {/* 409で止まったときの逃げ道。無いと差分を見ても適用できず詰む */}
+          {needsForce && (
+            <button
+              onClick={() => {
+                if (!confirm(
+                  "変更対象が多いため通常の適用は止められています。\n\n"
+                  + "内容を確認したうえで強制的に適用しますか？\n"
+                  + "（マスタの取得内容が壊れている場合、多数の店舗が解約・計測停止になります）"
+                )) return;
+                runSync(true, true);
+              }}
+              disabled={!!busy}
+              className="px-4 py-2 rounded-lg text-sm font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50">
+              強制的に適用する
+            </button>
+          )}
         </div>
 
         {syncResult && (
@@ -388,14 +424,37 @@ export default function ShopStatusPanel() {
             className="px-4 py-2 rounded-lg text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50">
             {busy === "rank-dry" ? "確認中..." : "① 対象を確認"}
           </button>
-          <button onClick={() => runRankBulk(true, true)} disabled={!!busy || !(rankResult && !rankResult.applied)}
-            title={!(rankResult && !rankResult.applied) ? "先に「対象を確認」を実行してください" : ""}
+          <button onClick={() => runRankBulk(true, true)} disabled={!!busy || !(rankResult && !rankResult.applied && rankResult.keyword === keyword.trim())}
+            title={!(rankResult && !rankResult.applied) ? "先に「対象を確認」を実行してください" : rankResult.keyword !== keyword.trim() ? "入力が変わりました。もう一度「対象を確認」を実行してください" : ""}
             className="px-4 py-2 rounded-lg text-sm font-semibold bg-[#003D6B] text-white hover:bg-[#002a4a] disabled:opacity-40">
             {busy === "rank-apply" ? "適用中..." : "② 対象外にする"}
           </button>
-          <button onClick={() => runRankBulk(true, false)} disabled={!!busy}
+          {/* 対象に戻す＝計測が再開し課金対象が増える操作。
+              以前は確認なしのapply直送で、1クリックで122件が戻せてしまった */}
+          <button
+            onClick={async () => {
+              if (!keyword.trim()) { setError("対象の文字列を入力してください"); return; }
+              setBusy("rank-restore-dry");
+              setError(null);
+              try {
+                const res = await api.post("/api/report/rank-tracking", {
+                  namePrefix: keyword.trim(), disabled: false, apply: false,
+                });
+                const n = res.data?.matched ?? 0;
+                if (n === 0) { setError(`「${keyword}」に該当する対象外の店舗はありません`); return; }
+                if (!confirm(
+                  `「${keyword}」を含む ${n}店舗 を順位計測の対象に戻します。\n\n`
+                  + `対象に戻すと一括計測に含まれ、API費用が発生するようになります。\n`
+                  + `（1KWにつき5地点。place_id取得済みなら1店舗あたり約¥8）\n\nよろしいですか？`
+                )) return;
+                await runRankBulk(true, false);
+              } catch (e: any) {
+                setError(e?.response?.data?.error || "確認に失敗しました");
+              } finally { setBusy(null); }
+            }}
+            disabled={!!busy}
             className="px-4 py-2 rounded-lg text-sm font-semibold bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50">
-            この条件をまとめて対象に戻す
+            {busy === "rank-restore-dry" ? "確認中..." : "この条件をまとめて対象に戻す"}
           </button>
         </div>
 

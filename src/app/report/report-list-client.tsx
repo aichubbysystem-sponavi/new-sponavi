@@ -227,7 +227,7 @@ export default function ReportListClient({
 
     if (!(await gate(`口コミ競合比較の一括取得（${ids.length}店舗・API費用が発生します）`))) return;
 
-    let ok = 0, charged = 0, failed = 0;
+    let ok = 0, charged = 0, failed = 0, aborted = false;
     const failedNames: string[] = [];
     for (let i = 0; i < ids.length; i++) {
       setCompProgress(`取得中 ${i + 1}/${ids.length}`);
@@ -240,16 +240,29 @@ export default function ReportListClient({
           body: JSON.stringify({ shopName: ids[i], month }),
         });
         const body = await res.json().catch(() => ({}));
-        if (res.ok && body?.data) { ok++; if (body.charged) charged++; }
-        else { failed++; failedNames.push(ids[i]); }
+        // 失敗でも課金されている場合があるため charged は常に数える
+        if (body?.charged) charged++;
+        if (res.ok && body?.data) { ok++; }
+        else {
+          failed++;
+          failedNames.push(`${ids[i]}（${body?.error || res.status}）`);
+          // 認証切れ・権限・レート制限は残り全件も同じ結果になる。
+          // 投げ続けても無駄なうえ、課金が伴う操作なので即座に止める
+          if (res.status === 401 || res.status === 403 || res.status === 429) {
+            aborted = true;
+            break;
+          }
+        }
       } catch { failed++; failedNames.push(ids[i]); }
       await new Promise((r) => setTimeout(r, 300));
     }
     setCompProgress("");
+    setSelected(new Set()); // 他の一括処理と同様に選択を解除する
     showToast(
-      `完了: ${ok}件取得（新規${charged}件・約¥${Math.round(charged * 4.8).toLocaleString()}）`
-      + (failed > 0 ? ` / 失敗${failed}件: ${failedNames.slice(0, 3).join("、")}${failed > 3 ? " 他" : ""}` : ""),
+      `${aborted ? "中断" : "完了"}: ${ok}件取得（課金${charged}件・約¥${Math.round(charged * 4.8).toLocaleString()}）`
+      + (failed > 0 ? ` / 失敗${failed}件: ${failedNames.slice(0, 2).join(" / ")}${failed > 2 ? " 他" : ""}` : ""),
     );
+    if (failedNames.length > 0) console.error("[競合比較] 失敗した店舗:", failedNames);
   }
 
   /** ★の付け外し。共有状態なので、失敗したら元に戻す */

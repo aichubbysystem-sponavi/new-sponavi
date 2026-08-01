@@ -14,7 +14,7 @@ import { requireShopAccess } from "@/lib/supabase";
 import { withAudit, requireCtxShopAccess } from "@/lib/audit";
 import {
   getStoredCompetitors,
-  fetchAndStoreCompetitors,
+  fetchAndStoreCompetitorsDetailed,
   isCompetitorFetchAllowed,
   COMPETITOR_FETCH_MONTHS_BACK,
 } from "@/lib/competitor-fetch";
@@ -67,15 +67,34 @@ export const POST = withAudit("口コミ競合比較の取得", "PAID_OP", async
     return NextResponse.json({ data: already, charged: false });
   }
 
-  const data = await fetchAndStoreCompetitors(shopName, month);
-  if (!data) {
-    // 座標なし・KWなし・API失敗のいずれか。理由が分からないと対処できない
+  const outcome = await fetchAndStoreCompetitorsDetailed(shopName, month);
+
+  // 失敗時も「課金されたかどうか」を必ず返す。
+  // 以前は課金後にnullを返す経路があり、画面は「¥0・失敗」と報告していた
+  const REASON_TEXT: Record<string, string> = {
+    no_api_key: "GCP_API_KEYが未設定です",
+    no_coords: "店舗の座標が未設定です（座標取得を先に実行してください）",
+    no_keyword: "キーワードが未設定です（シートから反映するか、GBPカテゴリをご確認ください）",
+    api_error: "Places APIがエラーを返しました",
+    no_results: "検索結果が0件でした（キーワードをご確認ください）",
+    save_failed: "取得できましたが保存に失敗しました。再実行すると再課金になるため、先に原因をご確認ください",
+    exception: "取得中に予期しないエラーが発生しました",
+  };
+
+  if (!outcome.data || outcome.reason === "save_failed") {
+    const reason = outcome.reason || "exception";
+    ctx.detail = `${shopName} ${month}: 失敗(${reason})${outcome.charged ? " ※課金あり" : " ※課金なし"}`;
     return NextResponse.json(
-      { error: "取得できませんでした（座標・キーワードの設定、またはPlaces APIの応答をご確認ください）" },
+      {
+        error: REASON_TEXT[reason] || "取得できませんでした",
+        reason,
+        charged: outcome.charged, // 課金の事実を隠さない
+      },
       { status: 502 },
     );
   }
 
-  ctx.detail = `${shopName} ${month}: 競合${data.competitors.length}件を取得（KW「${data.keyword}」）`;
-  return NextResponse.json({ data, charged: true });
+  const data = outcome.data;
+  ctx.detail = `${shopName} ${month}: 競合${data.competitors.length}件を取得（KW「${data.keyword}」）${outcome.charged ? "" : "・課金なし"}`;
+  return NextResponse.json({ data, charged: outcome.charged });
 });

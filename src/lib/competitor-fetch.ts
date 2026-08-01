@@ -61,18 +61,31 @@ export async function getStoredCompetitors(shopName: string, month: string): Pro
   }
 }
 
+/** 取得の結果。課金の有無と失敗理由を必ず返す（¥0と報告してしまう事故を防ぐ） */
+export interface CompetitorFetchOutcome {
+  data: CompetitorComparison | null;
+  /** Places API を実際に呼んだか（＝課金が発生したか） */
+  charged: boolean;
+  /** data が null のときの理由。画面に出して対処できるようにする */
+  reason?: "no_api_key" | "no_coords" | "no_keyword" | "api_error" | "no_results" | "save_failed" | "exception";
+}
+
 /**
  * 対象月のデータを取得。未保存ならPlaces APIで取得して保存する（¥4.8/回）。
- * 座標なし・KWなし・API失敗時は null（レポート側はページ非表示で対応）。
+ * 課金の有無と失敗理由を返す。
  */
-export async function fetchAndStoreCompetitors(shopName: string, month: string): Promise<CompetitorComparison | null> {
+export async function fetchAndStoreCompetitorsDetailed(
+  shopName: string,
+  month: string,
+): Promise<CompetitorFetchOutcome> {
+  const outcome: CompetitorFetchOutcome = { data: null, charged: false };
   const normalized = shopName.normalize("NFC");
 
   // 1. 保存済みなら即返す（月1回課金ガード）
   const stored = await getStoredCompetitors(normalized, month);
-  if (stored) return stored;
+  if (stored) return { data: stored, charged: false };
 
-  if (!GCP_API_KEY) return null;
+  if (!GCP_API_KEY) return { ...outcome, reason: "no_api_key" };
 
   const supabase = getSupabase();
 
@@ -83,7 +96,7 @@ export async function fetchAndStoreCompetitors(shopName: string, month: string):
     .eq("name", normalized)
     .limit(1)
     .maybeSingle();
-  if (!shop?.gbp_latitude || !shop?.gbp_longitude) return null;
+  if (!shop?.gbp_latitude || !shop?.gbp_longitude) return { ...outcome, reason: "no_coords" };
 
   // 3. 検索KW: メインKW（順位計測と同じ軸）→ 無ければGBPカテゴリ
   //
@@ -115,9 +128,15 @@ export async function fetchAndStoreCompetitors(shopName: string, month: string):
     keyword = main && list.includes(main) ? main : (list[0] || "");
   }
   if (!keyword) keyword = shop.gbp_main_category || "";
-  if (!keyword) return null;
+  if (!keyword) return { ...outcome, reason: "no_keyword" };
 
   // 4. Places Text Search（評価・口コミ数込み = Pro SKU ¥4.8/回）
+  //
+  // ここから先は「APIを呼んだ＝課金された」区間。
+  // 以前はこの中で null を返す経路が3つあり、課金済みなのに呼び出し側は
+  // 失敗として扱い「¥0・失敗」と報告していた（実課金と表示の乖離）。
+  // 課金の事実は outcome.charged で必ず返す。
+  outcome.charged = true;
   try {
     const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
       method: "POST",
@@ -135,11 +154,11 @@ export async function fetchAndStoreCompetitors(shopName: string, month: string):
     });
     if (!res.ok) {
       console.error("[competitor-fetch] Places API error:", res.status, await res.text().catch(() => ""));
-      return null;
+      return { ...outcome, reason: "api_error" };
     }
     const data = await res.json();
     const places: { id?: string; displayName?: { text?: string }; rating?: number; userRatingCount?: number }[] = data.places || [];
-    if (places.length === 0) return null;
+    if (places.length === 0) return { ...outcome, reason: "no_results" };
 
     const entries: CompetitorEntry[] = places.map(p => ({
       name: p.displayName?.text || "",
@@ -180,11 +199,28 @@ export async function fetchAndStoreCompetitors(shopName: string, month: string):
         },
         { onConflict: "shop_name,month" }
       );
-    if (upErr) console.error("[competitor-fetch] upsert error:", upErr.message);
+    if (upErr) {
+      // 保存に失敗したのに成功として返すと、次回も未保存と判定されて
+      // Places APIを再度叩き、同じ店舗に何度でも課金が発生する。
+      // データは返しつつ「保存できていない」ことを呼び出し側へ伝える
+      console.error("[competitor-fetch] upsert error:", upErr.message);
+      return { data: result, charged: true, reason: "save_failed" };
+    }
 
-    return result;
+    return { data: result, charged: true };
   } catch (e: any) {
     console.error("[competitor-fetch] error:", e?.message || e);
-    return null;
+    return { ...outcome, reason: "exception" };
   }
+}
+
+/**
+ * 後方互換のラッパー。データだけが必要な呼び出し元向け。
+ * 課金の有無を扱う場合は fetchAndStoreCompetitorsDetailed を使うこと。
+ */
+export async function fetchAndStoreCompetitors(
+  shopName: string,
+  month: string,
+): Promise<CompetitorComparison | null> {
+  return (await fetchAndStoreCompetitorsDetailed(shopName, month)).data;
 }
