@@ -172,6 +172,11 @@ export default function GridRankingPage() {
     withKw: number; kwNotFound: number;
     measuredThisMonth: number; unmeasuredThisMonth: number;
     lastMeasuredAt: string | null;
+    cost?: {
+      billableShops: number; totalKeywords: number;
+      withPlaceId: number; withoutPlaceId: number;
+      max: number; typical: number;
+    };
   } | null>(null);
 
   // プリセット読み込み（空データで上書きしないよう保護）
@@ -1440,6 +1445,26 @@ export default function GridRankingPage() {
               >
                 {allShopsBatchRunning ? allShopsBatchProgress : `未計測のみ一括計測（${allShopsFiltered.length}店舗 — いつもの店舗を除く）`}
               </button>
+
+              {/* 押す前に費用が分かるようにする（実データのKW数とplace_id有無から算出） */}
+              {gridStats?.cost && gridStats.cost.billableShops > 0 && (
+                <div className="border border-amber-200 bg-amber-50/60 rounded-lg px-3 py-2 text-[11px] text-slate-600">
+                  <p className="font-semibold text-amber-800 mb-1">
+                    想定費用: 最大 ¥{gridStats.cost.max.toLocaleString()}
+                    <span className="font-normal text-slate-500">（通常 ¥{gridStats.cost.typical.toLocaleString()} 程度）</span>
+                  </p>
+                  <p>
+                    計測が走るのは{gridStats.cost.billableShops}店舗・{gridStats.cost.totalKeywords}KW（座標とKWが揃っているもの）。
+                    1KWにつき5地点、1地点1〜4リクエスト。
+                    {gridStats.cost.withoutPlaceId > 0 && (
+                      <>単価はplace_idありが¥0.75、なし{gridStats.cost.withoutPlaceId}店舗が¥4.8。</>
+                    )}
+                  </p>
+                  <p className="text-slate-400 mt-0.5">
+                    最大は全地点が圏外で4ページ使い切った場合。順位が見つかれば途中で打ち切られ、同月内の再計測と共有キャッシュ命中は¥0。
+                  </p>
+                </div>
+              )}
               {allShopsBatchProgress && !allShopsBatchRunning && allShopsBatchProgress.startsWith("✓") && (
                 <p className="text-sm text-emerald-600 font-medium text-center">{allShopsBatchProgress}</p>
               )}
