@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("shops")
-    .select("id, name")
+    .select("id, name, rank_tracking_reason")
     .eq("rank_tracking_disabled", true)
     .order("name");
 
@@ -110,7 +110,8 @@ export const POST = withAudit("順位計測対象の変更", "DATA_OP", async (r
       const chunk = targets.slice(i, i + 100);
       const { error } = await supabase
         .from("shops")
-        .update({ rank_tracking_disabled: disabled })
+        // この画面からの操作は手動指定。同期に上書きされないよう reason を立てる
+        .update({ rank_tracking_disabled: disabled, rank_tracking_reason: disabled ? "manual" : null })
         .in("id", chunk.map((s) => s.id));
       if (error) {
         for (const s of chunk) failed.push({ name: s.name, error: error.message });
@@ -141,7 +142,8 @@ export const POST = withAudit("順位計測対象の変更", "DATA_OP", async (r
 
   const { error } = await supabase
     .from("shops")
-    .update({ rank_tracking_disabled: disabled })
+    // この画面からの操作は手動指定。同期に上書きされないよう reason を立てる
+    .update({ rank_tracking_disabled: disabled, rank_tracking_reason: disabled ? "manual" : null })
     .in("id", shopIds);
   if (error) {
     return NextResponse.json({ error: "更新に失敗しました", _error: error.message }, { status: 500 });

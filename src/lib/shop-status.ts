@@ -48,6 +48,23 @@ export interface DbShop {
   name: string;
   cancelled_at: string | null;
   paused_at?: string | null;
+  rank_tracking_disabled?: boolean | null;
+  /** 'manual' = 人が指定（同期で触らない） / 'master' = マスタ由来（同期が管理） */
+  rank_tracking_reason?: string | null;
+}
+
+/** 順位計測の対象外にする理由 */
+export type RankExclusionReason = "manual" | "master";
+
+export interface RankChange {
+  shopId: string;
+  shopName: string;
+  /** true = 対象外にする / false = 対象に戻す */
+  disable: boolean;
+  /** 対象外にする理由（戻す場合は null） */
+  reason: RankExclusionReason | null;
+  /** 画面表示用の理由ラベル */
+  detail: string;
 }
 
 export interface StatusChange {
@@ -130,6 +147,55 @@ export function diffContractStatus(master: MasterRow[], shops: DbShop[]): Status
   }
 
   return { changes, unmatched, duplicatedInMaster, duplicatedInDb };
+}
+
+/**
+ * 「MEOマスタに契約中として載っている店舗だけ順位計測する」方針に基づき、
+ * 順位計測フラグの変更点を洗い出す。
+ *
+ * 【重要】手動指定（reason='manual'、エミナル等）は絶対に触らない。
+ * ここを触ると、同期のたびに手動で外した店舗が計測対象に戻ってしまう。
+ *
+ * マスタに載っていない店舗は「契約中ではない」とみなして対象外にする。
+ * DB608件に対しマスタは398行なので、この扱いで約220件が対象外になる。
+ */
+export function diffRankTracking(master: MasterRow[], shops: DbShop[]): RankChange[] {
+  const masterStatus = new Map<string, ContractStatus>();
+  for (const row of master) {
+    const key = normalizeShopName(row.shopName);
+    if (!key) continue;
+    // 同名でステータスが割れている場合は、安全側（契約中でない方）を採る
+    const prev = masterStatus.get(key);
+    if (prev && prev !== row.status) {
+      masterStatus.set(key, prev === "active" ? row.status : prev);
+    } else {
+      masterStatus.set(key, row.status);
+    }
+  }
+
+  const changes: RankChange[] = [];
+  for (const shop of shops) {
+    const disabled = shop.rank_tracking_disabled === true;
+    const reason = shop.rank_tracking_reason || null;
+
+    // 手動指定は同期の管理外
+    if (disabled && reason === "manual") continue;
+
+    const status = masterStatus.get(normalizeShopName(shop.name));
+    const shouldExclude = status !== "active"; // 未掲載(undefined)も対象外
+
+    if (shouldExclude && !disabled) {
+      const detail =
+        status === "cancelled" ? "マスタで解約"
+        : status === "paused" ? "マスタで停止中"
+        : "マスタ未掲載";
+      changes.push({ shopId: shop.id, shopName: shop.name, disable: true, reason: "master", detail });
+    } else if (!shouldExclude && disabled && reason === "master") {
+      // マスタが契約中に戻った → 計測対象へ復帰
+      changes.push({ shopId: shop.id, shopName: shop.name, disable: false, reason: null, detail: "マスタで契約中" });
+    }
+  }
+  return changes;
 }
 
 /** ステータスに対応するDB更新値 */

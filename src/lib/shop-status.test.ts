@@ -3,6 +3,7 @@ import {
   parseContractStatus,
   normalizeShopName,
   diffContractStatus,
+  diffRankTracking,
   currentStatus,
   statusToColumns,
   parseMasterCsv,
@@ -116,6 +117,99 @@ describe("diffContractStatus", () => {
     );
     expect(diff.changes).toHaveLength(0);
     expect(diff.duplicatedInMaster).toEqual(["ゆれ店"]);
+  });
+});
+
+describe("diffRankTracking（マスタの契約中だけを計測対象にする）", () => {
+  const master = [
+    { shopName: "契約中の店", status: "active" as const },
+    { shopName: "解約した店", status: "cancelled" as const },
+    { shopName: "停止中の店", status: "paused" as const },
+    { shopName: "エミナルクリニック 札幌院", status: "active" as const },
+  ];
+
+  it("解約・停止中・マスタ未掲載を対象外にする", () => {
+    const changes = diffRankTracking(master, [
+      { id: "1", name: "契約中の店", cancelled_at: null },
+      { id: "2", name: "解約した店", cancelled_at: null },
+      { id: "3", name: "停止中の店", cancelled_at: null },
+      { id: "4", name: "マスタに無い店", cancelled_at: null },
+    ]);
+    expect(changes.map((c) => c.shopId).sort()).toEqual(["2", "3", "4"]);
+    expect(changes.every((c) => c.disable && c.reason === "master")).toBe(true);
+    expect(changes.find((c) => c.shopId === "2")!.detail).toBe("マスタで解約");
+    expect(changes.find((c) => c.shopId === "3")!.detail).toBe("マスタで停止中");
+    expect(changes.find((c) => c.shopId === "4")!.detail).toBe("マスタ未掲載");
+  });
+
+  it("契約中の店は対象のまま（変更なし）", () => {
+    const changes = diffRankTracking(master, [
+      { id: "1", name: "契約中の店", cancelled_at: null, rank_tracking_disabled: false },
+    ]);
+    expect(changes).toHaveLength(0);
+  });
+
+  it("【最重要】手動指定（エミナル）は同期で対象に戻さない", () => {
+    // マスタでは契約中だが、人が手動で対象外にしている。
+    // ここを戻してしまうと、せっかく外した122件が毎回復活する
+    const changes = diffRankTracking(master, [
+      {
+        id: "e1",
+        name: "エミナルクリニック 札幌院",
+        cancelled_at: null,
+        rank_tracking_disabled: true,
+        rank_tracking_reason: "manual",
+      },
+    ]);
+    expect(changes).toHaveLength(0);
+  });
+
+  it("マスタ由来で外した店舗は、契約中に戻れば対象に復帰する", () => {
+    const changes = diffRankTracking(master, [
+      {
+        id: "1",
+        name: "契約中の店",
+        cancelled_at: null,
+        rank_tracking_disabled: true,
+        rank_tracking_reason: "master",
+      },
+    ]);
+    expect(changes).toEqual([
+      { shopId: "1", shopName: "契約中の店", disable: false, reason: null, detail: "マスタで契約中" },
+    ]);
+  });
+
+  it("既に対象外のものを重複して対象外にしない", () => {
+    const changes = diffRankTracking(master, [
+      {
+        id: "2",
+        name: "解約した店",
+        cancelled_at: null,
+        rank_tracking_disabled: true,
+        rank_tracking_reason: "master",
+      },
+    ]);
+    expect(changes).toHaveLength(0);
+  });
+
+  it("表記ゆれ（全角/半角スペース）を吸収する", () => {
+    const changes = diffRankTracking(master, [
+      { id: "e2", name: "エミナルクリニック　札幌院", cancelled_at: null, rank_tracking_disabled: false },
+    ]);
+    // マスタで契約中なので対象外にはしない
+    expect(changes).toHaveLength(0);
+  });
+
+  it("マスタに同名でステータスが割れている場合は安全側（契約中でない方）を採る", () => {
+    const changes = diffRankTracking(
+      [
+        { shopName: "ゆれ店", status: "active" },
+        { shopName: "ゆれ店", status: "cancelled" },
+      ],
+      [{ id: "x", name: "ゆれ店", cancelled_at: null, rank_tracking_disabled: false }],
+    );
+    expect(changes).toHaveLength(1);
+    expect(changes[0].disable).toBe(true);
   });
 });
 

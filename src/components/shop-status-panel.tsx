@@ -25,13 +25,20 @@ type SyncResult = {
   dryRun: boolean;
   summary: Record<string, number>;
   changes?: Change[];
+  rankChanges?: RankChange[];
   unmatched?: { shopName: string; status: string }[];
   duplicatedInDb?: string[];
   duplicatedInMaster?: string[];
   failed?: { shopName: string; error: string }[];
 };
 type Counts = { total: number; active: number; cancelled: number; paused: number; rankDisabled: number };
-type Shop = { id: string; name: string };
+type Shop = { id: string; name: string; rank_tracking_reason?: string | null };
+type RankChange = { shopId: string; shopName: string; disable: boolean; detail: string };
+
+const REASON_LABEL: Record<string, string> = {
+  manual: "手動指定",
+  master: "マスタ由来",
+};
 
 const STATUS_LABEL: Record<string, string> = { active: "契約中", cancelled: "解約", paused: "停止中" };
 const STATUS_COLOR: Record<string, string> = {
@@ -220,6 +227,29 @@ export default function ShopStatusPanel() {
               <p className="text-xs text-slate-500">変更が必要な店舗はありませんでした（マスタとDBは一致しています）。</p>
             )}
 
+            {(syncResult.rankChanges?.length ?? 0) > 0 && (
+              <details className="mt-3 border border-slate-200 bg-white rounded-lg">
+                <summary className="px-3 py-2 text-[11px] font-semibold text-slate-600 cursor-pointer">
+                  順位計測の対象{syncResult.dryRun ? "が変わります" : "を変更しました"}
+                  （対象外に {s.rankDisable ?? 0}件 / 対象に戻す {s.rankEnable ?? 0}件）
+                </summary>
+                <p className="px-3 pt-2 text-[10px] text-slate-400">
+                  マスタで契約中でない店舗（解約・停止中・マスタ未掲載）は順位計測の対象外になります。
+                  手動で対象外にした店舗（エミナル等）はここでは変更されません。
+                </p>
+                <div className="max-h-56 overflow-y-auto px-3 py-2 text-xs text-slate-600 space-y-1">
+                  {syncResult.rankChanges!.map((rc) => (
+                    <div key={rc.shopId} className="flex justify-between gap-2">
+                      <span className="truncate">{rc.shopName}</span>
+                      <span className={`flex-shrink-0 ${rc.disable ? "text-slate-500" : "text-emerald-600"}`}>
+                        {rc.disable ? `対象外（${rc.detail}）` : "対象に復帰"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+
             {(syncResult.unmatched?.length ?? 0) > 0 && (
               <details className="mt-3 border border-amber-200 bg-white rounded-lg">
                 <summary className="px-3 py-2 text-[11px] font-semibold text-amber-700 cursor-pointer">
@@ -316,10 +346,19 @@ export default function ShopStatusPanel() {
               {visibleDisabled.map((x) => (
                 <div key={x.id} className="px-3 py-1.5 text-xs flex items-center justify-between gap-2">
                   <span className="text-slate-700 truncate">{x.name}</span>
-                  <button onClick={() => restoreOne(x)} disabled={!!busy}
-                    className="flex-shrink-0 px-2 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40">
-                    {busy === `restore-${x.id}` ? "..." : "対象に戻す"}
-                  </button>
+                  <span className="flex items-center gap-2 flex-shrink-0">
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] ${
+                      x.rank_tracking_reason === "manual"
+                        ? "bg-slate-100 text-slate-600"
+                        : "bg-amber-50 text-amber-700"
+                    }`}>
+                      {REASON_LABEL[x.rank_tracking_reason || ""] || "理由未設定"}
+                    </span>
+                    <button onClick={() => restoreOne(x)} disabled={!!busy}
+                      className="px-2 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40">
+                      {busy === `restore-${x.id}` ? "..." : "対象に戻す"}
+                    </button>
+                  </span>
                 </div>
               ))}
               {visibleDisabled.length === 0 && (

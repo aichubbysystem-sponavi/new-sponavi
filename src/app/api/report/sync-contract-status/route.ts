@@ -19,6 +19,7 @@ import { withAudit } from "@/lib/audit";
 import {
   parseMasterCsv,
   diffContractStatus,
+  diffRankTracking,
   statusToColumns,
   type DbShop,
 } from "@/lib/shop-status";
@@ -144,7 +145,7 @@ export const POST = withAudit("契約ステータス同期", "DATA_OP", async (r
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from("shops")
-      .select("id, name, cancelled_at, paused_at")
+      .select("id, name, cancelled_at, paused_at, rank_tracking_disabled, rank_tracking_reason")
       .order("id")
       .range(from, from + 999);
     if (error) {
@@ -160,6 +161,12 @@ export const POST = withAudit("契約ステータス同期", "DATA_OP", async (r
   }
 
   const diff = diffContractStatus(master, shops);
+  // 「マスタに契約中として載っている店舗だけ順位計測する」方針の適用差分。
+  // 手動指定（エミナル等）は触らない
+  const rankChanges = diffRankTracking(master, shops);
+  const rankDisable = rankChanges.filter((c) => c.disable);
+  const rankEnable = rankChanges.filter((c) => !c.disable);
+
   const summary = {
     masterRows: master.length,
     dbShops: shops.length,
@@ -170,11 +177,13 @@ export const POST = withAudit("契約ステータス同期", "DATA_OP", async (r
     unmatched: diff.unmatched.length,
     duplicatedInMaster: diff.duplicatedInMaster.length,
     duplicatedInDb: diff.duplicatedInDb.length,
+    rankDisable: rankDisable.length,
+    rankEnable: rankEnable.length,
   };
 
   if (!apply) {
-    ctx.detail = `dry-run: 変更予定${summary.changes}件（解約${summary.cancelled}/停止${summary.paused}/復活${summary.reactivated}）`;
-    return NextResponse.json({ dryRun: true, summary, ...diff });
+    ctx.detail = `dry-run: 契約${summary.changes}件 / 計測対象外化${summary.rankDisable}件`;
+    return NextResponse.json({ dryRun: true, summary, ...diff, rankChanges });
   }
 
   if (shops.length > 0 && diff.changes.length / shops.length > MAX_CHANGE_RATIO && !force) {
@@ -204,11 +213,33 @@ export const POST = withAudit("契約ステータス同期", "DATA_OP", async (r
     }
   }
 
-  ctx.detail = `${updated}件更新（解約${summary.cancelled}/停止${summary.paused}/復活${summary.reactivated}）${failed.length > 0 ? ` / 失敗${failed.length}件` : ""}`;
+  // 順位計測フラグの更新（100件ずつ。手動指定は diffRankTracking が除外済み）
+  let rankUpdated = 0;
+  const applyRank = async (ids: string[], disabled: boolean, reason: string | null) => {
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100);
+      const { error } = await supabase
+        .from("shops")
+        .update({ rank_tracking_disabled: disabled, rank_tracking_reason: reason })
+        .in("id", chunk);
+      if (error) {
+        for (const id of chunk) {
+          failed.push({ shopName: id, error: `順位計測フラグ: ${error.message}` });
+        }
+      } else {
+        rankUpdated += chunk.length;
+      }
+    }
+  };
+  await applyRank(rankDisable.map((c) => c.shopId), true, "master");
+  await applyRank(rankEnable.map((c) => c.shopId), false, null);
+
+  ctx.detail = `契約${updated}件 / 計測対象外化${rankDisable.length}件 / 計測対象へ復帰${rankEnable.length}件${failed.length > 0 ? ` / 失敗${failed.length}件` : ""}`;
   return NextResponse.json({
     dryRun: false,
-    summary: { ...summary, updated, failed: failed.length },
+    summary: { ...summary, updated, rankUpdated, failed: failed.length },
     changes: diff.changes,
+    rankChanges,
     failed,
     unmatched: diff.unmatched,
     duplicatedInMaster: diff.duplicatedInMaster,
