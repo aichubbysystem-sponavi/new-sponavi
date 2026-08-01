@@ -137,23 +137,73 @@ export default function ReportListClient({
     fetchAllowedShops().then(setAllowedShops);
   }, []);
 
-  // お気に入り・対象月をlocalStorageから読み込み
+  // ★は全ユーザー共有（サーバー保存）。対象月は個人設定なのでlocalStorageのまま。
+  //
+  // 以前は★もlocalStorageにしか無く、他ユーザーに共有されないどころか
+  // 端末・ブラウザ・サブドメイン(report. とメインドメイン)が変わるだけで消えていた。
+  // 既存の★を失わないよう、初回だけlocalStorageの内容をサーバーへ移行する。
   useEffect(() => {
-    const saved = localStorage.getItem("report-favorites");
-    if (saved) setFavorites(new Set(JSON.parse(saved)));
     const savedMonth = localStorage.getItem("report-target-month");
     if (savedMonth) setReportMonth(savedMonth);
+
+    (async () => {
+      try {
+        const headers = await getAuthHeaders();
+
+        // 初回のみ: このブラウザに残っている★をサーバーへ引き継ぐ（和集合）
+        const MIGRATED_KEY = "report-favorites-migrated";
+        if (!localStorage.getItem(MIGRATED_KEY)) {
+          const legacy = localStorage.getItem("report-favorites");
+          const names: string[] = legacy ? JSON.parse(legacy) : [];
+          if (Array.isArray(names) && names.length > 0) {
+            const res = await fetch("/api/report/favorites", {
+              method: "POST",
+              headers: { ...headers, "Content-Type": "application/json" },
+              body: JSON.stringify({ shopNames: names, favorite: true }),
+            });
+            // 失敗した場合はフラグを立てない（次回また移行を試みる）
+            if (res.ok) localStorage.setItem(MIGRATED_KEY, "1");
+          } else {
+            localStorage.setItem(MIGRATED_KEY, "1");
+          }
+        }
+
+        const res = await fetch("/api/report/favorites", { headers });
+        if (!res.ok) {
+          console.error("[favorites] 取得失敗", res.status);
+          return;
+        }
+        const data = await res.json();
+        setFavorites(new Set(data.favorites || []));
+      } catch (e) {
+        console.error("[favorites] 読み込みエラー", e);
+      }
+    })();
   }, []);
 
-  const saveFavorites = useCallback((next: Set<string>) => {
-    setFavorites(next);
-    localStorage.setItem("report-favorites", JSON.stringify(Array.from(next)));
-  }, []);
-
-  function toggleFavorite(id: string) {
+  /** ★の付け外し。共有状態なので、失敗したら元に戻す */
+  async function toggleFavorite(id: string) {
+    const willFavorite = !favorites.has(id);
     const next = new Set(favorites);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    saveFavorites(next);
+    if (willFavorite) next.add(id); else next.delete(id);
+    setFavorites(next); // 楽観更新（クリックの反応を待たせない）
+
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch("/api/report/favorites", {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ shopName: id, favorite: willFavorite }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setFavorites(favorites); // 失敗したら戻す（共有状態と画面がズレるのを防ぐ）
+        showToast(res.status === 403 ? "お気に入りの変更は社員以上のみ可能です" : (body.error || "お気に入りの保存に失敗しました"));
+      }
+    } catch {
+      setFavorites(favorites);
+      showToast("お気に入りの保存に失敗しました（通信エラー）");
+    }
   }
 
   // エリア一覧を抽出
