@@ -120,6 +120,24 @@ export const POST = withAudit("計測プリセット追加", "DATA_OP", async (r
   }
 
   const supabase = getSupabase();
+
+  // 順位計測の対象外に指定された店舗は「いつもの店舗」に入れない。
+  // ここで止めないと、一括計測で1店舗あたり5地点×KW数の課金が発生する
+  // （エミナル122店舗を誤って追加した場合の被害が大きい）
+  const { data: disabledRows } = await supabase
+    .from("shops")
+    .select("id, name")
+    .eq("rank_tracking_disabled", true)
+    .in("id", shops.map((s) => s.shopId));
+  if (disabledRows && disabledRows.length > 0) {
+    return NextResponse.json(
+      {
+        error: `順位計測の対象外に設定されている店舗が含まれています: ${disabledRows.map((r) => r.name).join("、")}`,
+        disabledShops: disabledRows,
+      },
+      { status: 400 },
+    );
+  }
   const rows = shops.map(s => ({
     shop_id: s.shopId,
     shop_name: s.shopName,

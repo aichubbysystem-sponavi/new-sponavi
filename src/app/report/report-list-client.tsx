@@ -15,6 +15,11 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+/** 店舗名の正規化（全角/半角スペースのゆれを吸収。実データに両方の表記が存在する） */
+function normName(s: string): string {
+  return (s || "").normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
+}
+
 /** ユーザーがアクセス可能な店舗名を取得 */
 async function fetchAllowedShops(): Promise<string[] | "all"> {
   try {
@@ -99,6 +104,9 @@ export default function ReportListClient({
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
   const [showOnlyAlert, setShowOnlyAlert] = useState(false);
+  // 順位計測の対象外店舗（エミナル等）。名前で保持し、"all"=未取得
+  const [rankDisabled, setRankDisabled] = useState<Set<string>>(new Set());
+  const [rankFilter, setRankFilter] = useState<"all" | "exclude" | "only">("all");
   const [sourceFilter, setSourceFilter] = useState<"all" | "both" | "sheet_only">("all");
   const [accountFilter, setAccountFilter] = useState<string>("all");
   const [reportMonth, setReportMonth] = useState("");
@@ -135,6 +143,19 @@ export default function ReportListClient({
   // アクセス権のある店舗を取得
   useEffect(() => {
     fetchAllowedShops().then(setAllowedShops);
+  }, []);
+
+  // 順位計測の対象外店舗を取得（正規化した名前で保持）
+  useEffect(() => {
+    (async () => {
+      try {
+        const headers = await getAuthHeaders();
+        const res = await fetch("/api/report/rank-tracking", { headers });
+        if (!res.ok) return;
+        const data = await res.json();
+        setRankDisabled(new Set((data.shops || []).map((s: { name: string }) => normName(s.name))));
+      } catch {}
+    })();
   }, []);
 
   // ★は全ユーザー共有（サーバー保存）。対象月は個人設定なのでlocalStorageのまま。
@@ -252,6 +273,10 @@ export default function ReportListClient({
     // アラートフィルタ
     if (showOnlyAlert) result = result.filter(isAlertShop);
 
+    // 順位計測の対象外（エミナル等）の絞り込み
+    if (rankFilter === "exclude") result = result.filter((s) => !rankDisabled.has(normName(s.name)));
+    else if (rankFilter === "only") result = result.filter((s) => rankDisabled.has(normName(s.name)));
+
     // テキスト検索
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -300,7 +325,7 @@ export default function ReportListClient({
       return sortDir === "asc" ? cmp : -cmp;
     });
     return result;
-  }, [shops, search, sortKey, sortDir, ratingFilter, areaFilter, favorites, showOnlyFavorites, showOnlyAlert, sourceFilter, accountFilter, clientLocToAccount, allowedShops]);
+  }, [shops, search, sortKey, sortDir, ratingFilter, areaFilter, favorites, showOnlyFavorites, showOnlyAlert, sourceFilter, accountFilter, clientLocToAccount, allowedShops, rankFilter, rankDisabled]);
 
   const totalPages = Math.ceil(filtered.length / perPage);
   const paged = filtered.slice((page - 1) * perPage, page * perPage);
@@ -617,6 +642,18 @@ export default function ReportListClient({
                 className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold ${showOnlyAlert ? "bg-red-100 text-red-700" : "bg-red-50 text-red-400 hover:bg-red-100"}`}>
                 ⚠ 要注意 ({alertCount})
               </button>
+            )}
+
+            {/* 順位計測の対象外（エミナル等）の絞り込み */}
+            {rankDisabled.size > 0 && (
+              <div className="flex gap-0.5 border border-slate-200 rounded-lg overflow-hidden" title={`順位計測の対象外に設定されている店舗: ${rankDisabled.size}件`}>
+                {([["all", "すべて"], ["exclude", "計測対象のみ"], ["only", "計測対象外のみ"]] as ["all" | "exclude" | "only", string][]).map(([val, label]) => (
+                  <button key={val} onClick={() => { setRankFilter(val); setPage(1); }}
+                    className={`px-2 py-1 text-[10px] font-semibold ${rankFilter === val ? "bg-[#003D6B] text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}>
+                    {label}{val === "only" ? ` (${rankDisabled.size})` : ""}
+                  </button>
+                ))}
+              </div>
             )}
 
             {/* データソースフィルタ */}

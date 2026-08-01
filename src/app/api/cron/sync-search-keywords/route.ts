@@ -27,7 +27,8 @@ export async function GET(request: NextRequest) {
     .select("id, name, gbp_location_name")
     .not("gbp_location_name", "is", null)
     .neq("gbp_location_name", "")
-    .is("cancelled_at", null);
+    .is("cancelled_at", null)
+    .is("paused_at", null); // 停止中も対象外（解約とは別管理）
 
   if (error || !shops || shops.length === 0) {
     return NextResponse.json({ error: "No shops found", detail: error?.message }, { status: 200 });
