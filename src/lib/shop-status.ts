@@ -159,7 +159,12 @@ export function diffContractStatus(master: MasterRow[], shops: DbShop[]): Status
  * マスタに載っていない店舗は「契約中ではない」とみなして対象外にする。
  * DB608件に対しマスタは398行なので、この扱いで約220件が対象外になる。
  */
-export function diffRankTracking(master: MasterRow[], shops: DbShop[]): RankChange[] {
+export function diffRankTracking(
+  master: MasterRow[],
+  shops: DbShop[],
+  /** ステータスを解釈できなかった店舗（正規化名）。判定から除外して現状維持する */
+  unknownNames?: Set<string>,
+): RankChange[] {
   const masterStatus = new Map<string, ContractStatus>();
   for (const row of master) {
     const key = normalizeShopName(row.shopName);
@@ -178,10 +183,16 @@ export function diffRankTracking(master: MasterRow[], shops: DbShop[]): RankChan
     const disabled = shop.rank_tracking_disabled === true;
     const reason = shop.rank_tracking_reason || null;
 
-    // 手動指定は同期の管理外
-    if (disabled && reason === "manual") continue;
+    // 手動指定は同期の管理外。
+    // disabled の真偽で判定すると、人が手動で「対象に戻した」店舗(disabled=false, manual)が
+    // 素通りして再び対象外にされ、reason も master で上書きされて手動の意思が消える
+    if (reason === "manual") continue;
 
-    const status = masterStatus.get(normalizeShopName(shop.name));
+    const key = normalizeShopName(shop.name);
+    // ステータスを解釈できなかった店舗は現状維持（表記ゆれで計測を止めない）
+    if (unknownNames?.has(key)) continue;
+
+    const status = masterStatus.get(key);
     const shouldExclude = status !== "active"; // 未掲載(undefined)も対象外
 
     if (shouldExclude && !disabled) {
@@ -214,14 +225,39 @@ export function statusToColumns(status: ContractStatus, now: string): {
  * ヘッダー行と、ステータスまたは店舗名が空の行は落とす。
  */
 export function parseMasterCsv(rows: string[][]): MasterRow[] {
+  return parseMasterCsvDetailed(rows).rows;
+}
+
+/**
+ * マスタCSVの解析結果。未知ステータスの行を捨てずに返す。
+ *
+ * 【なぜ分けるか】
+ * 「契約中（2026/4〜）」のような表記ゆれがあると parseContractStatus が null を返し、
+ * 行ごと捨てられる。すると diffRankTracking からは「マスタ未掲載」に見えるため、
+ * 契約中の店舗が黙って順位計測の対象外になる。
+ * parseContractStatus 単体は「勝手に解約扱いにしない」ため安全だが、
+ * パイプライン全体では解約より強い扱い（計測停止）になってしまう。
+ * 捨てた行を呼び出し側へ返し、画面で気づけるようにする。
+ */
+export function parseMasterCsvDetailed(rows: string[][]): {
+  rows: MasterRow[];
+  /** ステータスを解釈できず除外した行（店舗名と元の表記） */
+  unknownStatus: { shopName: string; raw: string }[];
+} {
   const out: MasterRow[] = [];
+  const unknownStatus: { shopName: string; raw: string }[] = [];
   for (const r of rows) {
     if (!r || r.length < 3) continue;
-    const status = parseContractStatus(r[1]);
+    const raw = (r[1] || "").trim();
     const shopName = (r[2] || "").trim();
-    if (!status || !shopName) continue;
+    if (!shopName) continue;
     if (shopName === "店舗名" || shopName.startsWith("店舗名")) continue; // ヘッダー
+    const status = parseContractStatus(raw);
+    if (!status) {
+      if (raw) unknownStatus.push({ shopName, raw });
+      continue;
+    }
     out.push({ shopName, status });
   }
-  return out;
+  return { rows: out, unknownStatus };
 }

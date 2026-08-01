@@ -17,7 +17,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, requireRole } from "@/lib/supabase";
 import { withAudit } from "@/lib/audit";
 import {
-  parseMasterCsv,
+  parseMasterCsvDetailed,
+  normalizeShopName,
   diffContractStatus,
   diffRankTracking,
   statusToColumns,
@@ -63,7 +64,9 @@ function parseCSV(text: string): string[][] {
 }
 
 async function fetchMasterRows(): Promise<string[][] | null> {
-  const url = `https://docs.google.com/spreadsheets/d/${MASTER_SHEET_ID}/gviz/tq?tqx=out:csv&gid=${MASTER_GID}&range=A1:C400`;
+  // 範囲はA列〜C列の全行。以前は A1:C400 固定だったが、マスタは既に400行に達しており
+  // 1店舗追加した時点で新規店が「マスタ未掲載」＝計測対象外と誤判定される状態だった
+  const url = `https://docs.google.com/spreadsheets/d/${MASTER_SHEET_ID}/gviz/tq?tqx=out:csv&gid=${MASTER_GID}&range=A:C`;
   try {
     const res = await fetch(url, {
       cache: "no-store",
@@ -134,10 +137,26 @@ export const POST = withAudit("契約ステータス同期", "DATA_OP", async (r
     );
   }
 
-  const master = parseMasterCsv(rawRows);
+  const { rows: master, unknownStatus } = parseMasterCsvDetailed(rawRows);
   if (master.length === 0) {
     return NextResponse.json({ error: "MEOマスタから有効な行を読み取れませんでした" }, { status: 500 });
   }
+  // 解析できた行が極端に少ない場合も中断する。
+  // 行数(MIN_EXPECTED_ROWS)だけ見ていると、B列の内容が壊れて全行が
+  // 「未知ステータス」になっても素通りし、全店舗が計測停止になる
+  if (master.length < MIN_EXPECTED_ROWS) {
+    return NextResponse.json(
+      {
+        error: `ステータスを解釈できた行が${master.length}件しかありません（B列の表記をご確認ください）`,
+        unknownStatus: unknownStatus.slice(0, 30),
+      },
+      { status: 500 },
+    );
+  }
+
+  // ステータスを解釈できなかった店舗は、順位計測の判定から除外する。
+  // 「マスタ未掲載」と同じ扱いにすると、表記ゆれ1つで契約中の店の計測が止まる
+  const unknownNames = new Set(unknownStatus.map((u) => normalizeShopName(u.shopName)));
 
   const supabase = getSupabase();
   // PostgRESTの1000行上限を避けてページングで全件取得
@@ -163,7 +182,7 @@ export const POST = withAudit("契約ステータス同期", "DATA_OP", async (r
   const diff = diffContractStatus(master, shops);
   // 「マスタに契約中として載っている店舗だけ順位計測する」方針の適用差分。
   // 手動指定（エミナル等）は触らない
-  const rankChanges = diffRankTracking(master, shops);
+  const rankChanges = diffRankTracking(master, shops, unknownNames);
   const rankDisable = rankChanges.filter((c) => c.disable);
   const rankEnable = rankChanges.filter((c) => !c.disable);
 
@@ -186,15 +205,28 @@ export const POST = withAudit("契約ステータス同期", "DATA_OP", async (r
     return NextResponse.json({ dryRun: true, summary, ...diff, rankChanges });
   }
 
-  if (shops.length > 0 && diff.changes.length / shops.length > MAX_CHANGE_RATIO && !force) {
-    return NextResponse.json(
-      {
-        error: `変更対象が全店舗の${Math.round((diff.changes.length / shops.length) * 100)}%と多すぎます。内容を確認のうえ force:true で再実行してください`,
-        summary,
-        ...diff,
-      },
-      { status: 409 },
-    );
+  // 比率ガードは契約ステータスだけでなく順位計測の停止にも掛ける。
+  // 掛けないと、マスタの解析が少し劣化しただけで全店舗が一撃で計測停止になる
+  // （diffRankTracking は「マスタ未掲載＝対象外」のため）。
+  if (shops.length > 0 && !force) {
+    const contractPct = (diff.changes.length / shops.length) * 100;
+    const rankPct = (rankDisable.length / shops.length) * 100;
+    if (contractPct > MAX_CHANGE_RATIO * 100 || rankPct > MAX_CHANGE_RATIO * 100) {
+      const reasons: string[] = [];
+      if (contractPct > MAX_CHANGE_RATIO * 100) reasons.push(`契約ステータスの変更が${Math.round(contractPct)}%`);
+      if (rankPct > MAX_CHANGE_RATIO * 100) reasons.push(`順位計測の対象外化が${Math.round(rankPct)}%`);
+      return NextResponse.json(
+        {
+          // 409でも画面が「確認しました」と誤表示しないよう dryRun を明示する
+          dryRun: true,
+          error: `${reasons.join("、")}と多すぎます。内容を確認のうえ「強制的に適用」で再実行してください`,
+          summary,
+          ...diff,
+          rankChanges,
+        },
+        { status: 409 },
+      );
+    }
   }
 
   const now = new Date().toISOString();

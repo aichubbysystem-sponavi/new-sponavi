@@ -7,6 +7,7 @@ import {
   currentStatus,
   statusToColumns,
   parseMasterCsv,
+  parseMasterCsvDetailed,
 } from "./shop-status";
 
 describe("parseContractStatus", () => {
@@ -262,5 +263,56 @@ describe("parseMasterCsv", () => {
       ["MJS013"],
     ];
     expect(parseMasterCsv(rows)).toEqual([]);
+  });
+});
+
+describe("計測が黙って止まる経路を塞ぐ（2026-08-01 レビュー指摘）", () => {
+  it("手動で計測対象に戻した店舗を、同期が再び対象外にしない", () => {
+    // 修正前は disabled && reason==='manual' で判定していたため、
+    // disabled=false かつ manual（人が手動で戻した）が素通りして再度落とされ、
+    // reason も master で上書きされ手動の意思が消えていた
+    const changes = diffRankTracking(
+      [{ shopName: "手動で戻した店", status: "cancelled" }],
+      [{
+        id: "m1", name: "手動で戻した店", cancelled_at: null,
+        rank_tracking_disabled: false, rank_tracking_reason: "manual",
+      }],
+    );
+    expect(changes).toHaveLength(0);
+  });
+
+  it("ステータスを解釈できない行は捨てずに返す（黙って計測を止めない）", () => {
+    const { rows, unknownStatus } = parseMasterCsvDetailed([
+      ["顧客ID", "ステータス管理", "店舗名"],
+      ["MJS1", "契約中", "正常な店"],
+      ["MJS2", "契約中（2026/4〜）", "表記ゆれの店"],
+      ["MJS3", "", "空欄の店"],
+    ]);
+    expect(rows).toEqual([{ shopName: "正常な店", status: "active" }]);
+    // 表記ゆれは報告される。空欄は「未記入」なので報告しない
+    expect(unknownStatus).toEqual([{ shopName: "表記ゆれの店", raw: "契約中（2026/4〜）" }]);
+  });
+
+  it("解釈できなかった店舗は現状維持にする（表記ゆれで計測を止めない）", () => {
+    const unknown = new Set([normalizeShopName("表記ゆれの店")]);
+    const changes = diffRankTracking(
+      [{ shopName: "正常な店", status: "active" }], // 表記ゆれの店はmasterに載らない
+      [
+        { id: "a", name: "正常な店", cancelled_at: null, rank_tracking_disabled: false },
+        { id: "b", name: "表記ゆれの店", cancelled_at: null, rank_tracking_disabled: false },
+      ],
+      unknown,
+    );
+    // unknownを渡さなければ「マスタ未掲載」として対象外にされてしまう
+    expect(changes).toHaveLength(0);
+  });
+
+  it("unknownNameを渡さない場合は従来どおりマスタ未掲載として扱う", () => {
+    const changes = diffRankTracking(
+      [{ shopName: "正常な店", status: "active" }],
+      [{ id: "b", name: "マスタに無い店", cancelled_at: null, rank_tracking_disabled: false }],
+    );
+    expect(changes).toHaveLength(1);
+    expect(changes[0].detail).toBe("マスタ未掲載");
   });
 });
