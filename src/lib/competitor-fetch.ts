@@ -24,7 +24,7 @@ const GCP_API_KEY = process.env.GCP_API_KEY || "";
  */
 // 取得可否の判定は month-utils.ts（依存なし・テスト可能）に置く
 export { COMPETITOR_FETCH_MONTHS_BACK, isCompetitorFetchAllowed } from "./month-utils";
-import { isCompetitorFetchAllowed } from "./month-utils";
+import { isCompetitorFetchAllowed, normalizeMonthLabel } from "./month-utils";
 
 /**
  * レポート表示用の読み込み。**課金しない**（保存済みのみ）。
@@ -38,6 +38,18 @@ export async function loadCompetitorComparison(shopName: string, displayMonth?: 
   return await getStoredCompetitors(shopName, displayMonth);
 }
 
+/**
+ * 月キーを "YYYY/M" に統一する。
+ *
+ * DBのUNIQUEは (shop_name, month) なので、"2026/06" と "2026/6" は別行になる。
+ * レポート側は normalizedMonth でゼロ埋めを落としてから読むのに、
+ * 取得側は画面から来た値をそのまま保存していたため、
+ * 「取得済みなのにレポートに出ない」「同じ月に2回課金される」が起きていた。
+ */
+function normalizeMonthKey(month: string): string {
+  return normalizeMonthLabel(month) || month;
+}
+
 /** 保存済みの月次データを取得（fetchしない・課金なし） */
 export async function getStoredCompetitors(shopName: string, month: string): Promise<CompetitorComparison | null> {
   try {
@@ -46,7 +58,7 @@ export async function getStoredCompetitors(shopName: string, month: string): Pro
       .from("competitor_reviews")
       .select("month, keyword, self, competitors, created_at")
       .eq("shop_name", shopName.normalize("NFC"))
-      .eq("month", month)
+      .eq("month", normalizeMonthKey(month))
       .maybeSingle();
     if (!data) return null;
     return {
@@ -76,9 +88,12 @@ export interface CompetitorFetchOutcome {
  */
 export async function fetchAndStoreCompetitorsDetailed(
   shopName: string,
-  month: string,
+  monthRaw: string,
 ): Promise<CompetitorFetchOutcome> {
   const outcome: CompetitorFetchOutcome = { data: null, charged: false };
+  // 保存キーは必ず正規化する。画面から "2026/06" が来ると、レポートが読む
+  // "2026/6" とは別行になり、取得済みなのにページが出ない／再課金される
+  const month = normalizeMonthKey(monthRaw);
   const normalized = shopName.normalize("NFC");
 
   // 1. 保存済みなら即返す（月1回課金ガード）
