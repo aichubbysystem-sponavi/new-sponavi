@@ -1,5 +1,67 @@
 import { describe, it, expect } from "vitest";
-import { generate4Points, generate5Points, GRID_ANGLES } from "./grid-utils";
+import {
+  generate4Points,
+  generate5Points,
+  GRID_ANGLES,
+  summarizeGridRanks,
+  formatAvgRank,
+  formatCoverage,
+} from "./grid-utils";
+
+describe("多地点平均順位の集計（圏外を数値に混ぜない）", () => {
+  it("全地点圏外は「圏外」。101.0位という架空の順位を出さない", () => {
+    // 実際に管理画面が「101.0位」と表示していたケース（2026-08-01 発見）
+    const s = summarizeGridRanks([{ rank: 0 }, { rank: 0 }, { rank: 0 }, { rank: 0 }, { rank: 0 }]);
+    expect(s).toEqual({ inRange: 0, total: 5, avg: null });
+    expect(formatAvgRank(s)).toBe("圏外");
+    expect(formatCoverage(s)).toBe("0/5");
+  });
+
+  it("一部だけ圏内なら、圏内地点のみで平均する", () => {
+    // 旧実装では (101*4 + 10) / 5 = 82.8位 となり「82位くらいには入っている」と誤読させていた
+    const s = summarizeGridRanks([{ rank: 10 }, { rank: 0 }, { rank: 0 }, { rank: 0 }, { rank: 0 }]);
+    expect(s.avg).toBe(10);
+    expect(formatAvgRank(s)).toBe("10.0位");
+    // 平均だけでは実態が伝わらないので圏内率を必ず併記する
+    expect(formatCoverage(s)).toBe("1/5");
+  });
+
+  it("全地点圏内なら通常の平均", () => {
+    const s = summarizeGridRanks([{ rank: 10 }, { rank: 12 }, { rank: 14 }]);
+    expect(s.avg).toBe(12);
+    expect(formatAvgRank(s)).toBe("12.0位");
+    expect(formatCoverage(s)).toBe("3/3");
+  });
+
+  it("小数第1位まで表示する", () => {
+    const s = summarizeGridRanks([{ rank: 12 }, { rank: 13 }]);
+    expect(formatAvgRank(s)).toBe("12.5位");
+  });
+
+  it("計測地点が無い場合は「-」", () => {
+    expect(formatAvgRank(summarizeGridRanks([]))).toBe("-");
+    expect(formatCoverage(summarizeGridRanks([]))).toBe("-");
+    expect(formatAvgRank(summarizeGridRanks(null))).toBe("-");
+    expect(formatAvgRank(summarizeGridRanks(undefined))).toBe("-");
+  });
+
+  it("負の順位や不正値は圏外として扱う", () => {
+    const s = summarizeGridRanks([{ rank: -1 }, { rank: 5 }, { rank: NaN as unknown as number }]);
+    expect(s.inRange).toBe(1);
+    expect(s.avg).toBe(5);
+  });
+
+  it("プリセット側APIと同じ規則になっている（圏内のみ平均・全圏外はnull）", () => {
+    // grid-ranking-presets/route.ts は元から圏内のみ平均だった。
+    // 画面側だけ101混入で、同一画面に2つの計算が混在していた
+    const results = [{ rank: 0 }, { rank: 20 }];
+    const presetsStyle = (() => {
+      const ranked = results.filter((r) => r.rank > 0);
+      return ranked.length > 0 ? ranked.reduce((a, r) => a + r.rank, 0) / ranked.length : null;
+    })();
+    expect(summarizeGridRanks(results).avg).toBe(presetsStyle);
+  });
+});
 
 // 2点間の概算距離（メートル）— テスト内検算用
 function distanceM(lat1: number, lng1: number, lat2: number, lng2: number): number {

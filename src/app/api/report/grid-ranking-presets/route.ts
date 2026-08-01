@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
         .in("shop_id", shopIds)
         .order("measured_at", { ascending: false })
     : { data: [] };
-  const logMap = new Map<string, { measured_at: string; keyword: string; avg_rank: number | null; top3: number; total: number }>();
+  const logMap = new Map<string, { measured_at: string; keyword: string; avg_rank: number | null; in_range: number; top3: number; total: number }>();
   for (const log of (latestLogs || [])) {
     if (!logMap.has(log.shop_id)) {
       const results = log.results || [];
@@ -67,6 +67,9 @@ export async function GET(request: NextRequest) {
         measured_at: log.measured_at,
         keyword: log.keyword,
         avg_rank: avgRank ? parseFloat(avgRank.toFixed(1)) : null,
+        // 平均順位だけでは実態が分からないため圏内地点数も返す
+        // （avg_rank は圏内地点のみの平均なので、圏内率が無いと誤読される）
+        in_range: ranked.length,
         top3: results.filter((r: any) => r.rank > 0 && r.rank <= 3).length,
         total: results.length,
       });

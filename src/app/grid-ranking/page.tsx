@@ -9,7 +9,10 @@ import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
 import { usePasswordGate } from "@/components/password-gate";
 import DateRangePicker, { useDateRange } from "@/components/date-range-picker";
 import { jstToday } from "@/lib/jst-date";
-import { generate5Points, GRID_ANGLES } from "@/lib/grid-utils";
+import {
+  generate5Points, GRID_ANGLES,
+  summarizeGridRanks, formatAvgRank, formatCoverage,
+} from "@/lib/grid-utils";
 import { gridLayoutLabel } from "@/lib/report-utils";
 
 interface GridPoint {
@@ -63,11 +66,9 @@ function rankBg(rank: number): string {
   return "bg-red-100 text-red-700";
 }
 
-function avgRank(results: GridPoint[]): string {
-  if (results.length === 0) return "-";
-  const total = results.reduce((a, b) => a + (b.rank > 0 ? b.rank : 101), 0);
-  return (total / results.length).toFixed(1);
-}
+// 平均順位の集計は src/lib/grid-utils.ts に集約（圏外を数値に混ぜない）。
+// 以前はここで圏外を101として平均に足しており、全地点圏外で「101.0位」、
+// 5地点中1地点だけ圏内でも「82.8位」と実在しない順位を表示していた。
 
 /** 今月計測済みかどうか判定 */
 function isMeasuredThisMonth(measuredAt: string | undefined | null): boolean {
@@ -110,6 +111,7 @@ interface Preset {
     measured_at: string;
     keyword: string;
     avg_rank: number | null;
+    in_range?: number;
     top3: number;
     total: number;
   } | null;
@@ -800,8 +802,12 @@ export default function GridRankingPage() {
                     <div className="w-[140px] text-center">
                       {lm ? (
                         <div className="flex items-center justify-center gap-1.5">
-                          <span className={`text-xs font-bold ${lm.avg_rank && lm.avg_rank <= 10 ? "text-emerald-600" : lm.avg_rank && lm.avg_rank <= 20 ? "text-blue-600" : "text-orange-600"}`}>
-                            平均{lm.avg_rank ?? "-"}位
+                          {/* 全地点圏外(avg_rank=null)を「平均-位」ではなく「圏外」と出す */}
+                          <span className={`text-xs font-bold ${lm.avg_rank == null ? "text-slate-400" : lm.avg_rank <= 10 ? "text-emerald-600" : lm.avg_rank <= 20 ? "text-blue-600" : "text-orange-600"}`}>
+                            {lm.avg_rank == null ? "圏外" : `平均${lm.avg_rank}位`}
+                            {lm.avg_rank != null && lm.in_range != null && lm.in_range < lm.total && (
+                              <span className="ml-1 font-normal text-orange-500">({lm.in_range}/{lm.total})</span>
+                            )}
                           </span>
                           <span className="text-xs text-slate-400">
                             {daysSince === 0 ? "今日" : daysSince === 1 ? "昨日" : `${daysSince}日前`}
@@ -1817,7 +1823,7 @@ export default function GridRankingPage() {
               順位グリッド
               {displayResults.length > 0 && (
                 <span className="ml-2 text-gray-400 font-normal">
-                  検出: {rankedCount}/{displayResults.length}地点 ／ 平均: {avgRank(displayResults)}位
+                  圏内: {formatCoverage(summarizeGridRanks(displayResults))}地点 ／ 平均: {formatAvgRank(summarizeGridRanks(displayResults))}
                 </span>
               )}
             </h3>
@@ -1863,8 +1869,8 @@ export default function GridRankingPage() {
           {displayResults.length > 0 && rankedCount > 0 && (
             <div className="p-4 border-t grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="text-center">
-                <p className="text-xs text-gray-500">平均順位</p>
-                <p className="text-xl font-bold text-[#003D6B]">{avgRank(displayResults)}</p>
+                <p className="text-xs text-gray-500">平均順位<span className="ml-1 text-[10px] text-gray-400">（圏内のみ）</span></p>
+                <p className="text-xl font-bold text-[#003D6B]">{formatAvgRank(summarizeGridRanks(displayResults))}</p>
               </div>
               <div className="text-center">
                 <p className="text-xs text-gray-500">TOP3地点</p>
@@ -1911,6 +1917,8 @@ export default function GridRankingPage() {
                   <th className="text-left px-4 py-2">グリッド</th>
                   <th className="text-left px-4 py-2">間隔</th>
                   <th className="text-left px-4 py-2">平均順位</th>
+                  {/* 平均順位だけでは実態が分からないため圏内率を必ず併記する */}
+                  <th className="text-left px-4 py-2">圏内</th>
                   <th className="text-left px-4 py-2">TOP3</th>
                   <th className="text-left px-4 py-2"></th>
                 </tr>
@@ -1918,7 +1926,7 @@ export default function GridRankingPage() {
               <tbody>
                 {filtered.map((log) => {
                   const results = log.results || [];
-                  const avg = avgRank(results);
+                  const summary = summarizeGridRanks(results);
                   const top3 = results.filter((r) => r.rank > 0 && r.rank <= 3).length;
                   const isSelected = selectedHistory?.id === log.id;
                   return (
@@ -1951,7 +1959,12 @@ export default function GridRankingPage() {
                       <td className="px-4 py-2.5">
                         {log.interval_m >= 1000 ? `${log.interval_m / 1000}km` : `${log.interval_m}m`}
                       </td>
-                      <td className="px-4 py-2.5 font-semibold">{avg}位</td>
+                      <td className={`px-4 py-2.5 font-semibold ${summary.avg == null ? "text-slate-400" : ""}`}>
+                        {formatAvgRank(summary)}
+                      </td>
+                      <td className={`px-4 py-2.5 ${summary.inRange === 0 ? "text-slate-400" : summary.inRange < summary.total ? "text-orange-600" : "text-emerald-600"}`}>
+                        {formatCoverage(summary)}
+                      </td>
                       <td className="px-4 py-2.5">
                         <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-medium">
                           {top3}地点
