@@ -32,6 +32,29 @@ export function compareMonths(a: string, b: string): number {
   return monthToNum(a) - monthToNum(b);
 }
 
+/**
+ * 競合比較の取得を許可する遡り月数（当月を0として何か月前まで）。
+ *
+ * 以前は当月と前月だけだった。しかしパフォーマンスデータの提供が数日遅れるため、
+ * 8月初旬に作る「最新の確定月」レポートは6月になる。当月・前月だけだと
+ * その6月レポートで競合比較のページだけが消えていた（2026-08-01 発見）。
+ *
+ * 一方で無制限にすると、古いレポートを開くたびに ¥4.8 の課金が発生する。
+ * (shop, month) 単位の保存ガードに加えて、遡れる範囲自体でも歯止めをかける。
+ */
+export const COMPETITOR_FETCH_MONTHS_BACK = 3;
+
+/** 表示月が競合比較の取得を許可する範囲内か（now はJST基準の日時） */
+export function isCompetitorFetchAllowed(displayMonth: string, now: Date): boolean {
+  const n = monthToNum(displayMonth);
+  if (!n) return false;
+  const target = Math.floor(n / 100) * 12 + ((n % 100) - 1);
+  const cur = now.getUTCFullYear() * 12 + now.getUTCMonth();
+  const diff = cur - target;
+  // 未来月は取得しない。過去は COMPETITOR_FETCH_MONTHS_BACK まで
+  return diff >= 0 && diff <= COMPETITOR_FETCH_MONTHS_BACK;
+}
+
 /** 月ラベルを "YYYY/M" に正規化（"2026/09" / "2026-09" / "2026年9月" → "2026/9"）。解釈できなければ空文字 */
 export function normalizeMonthLabel(m: string | null | undefined): string {
   const n = monthToNum(m || "");

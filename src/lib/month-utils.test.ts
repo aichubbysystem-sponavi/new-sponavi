@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { monthToNum, compareMonths, normalizeMonthLabel } from "./month-utils";
+import {
+  monthToNum,
+  compareMonths,
+  normalizeMonthLabel,
+  isCompetitorFetchAllowed,
+  COMPETITOR_FETCH_MONTHS_BACK,
+} from "./month-utils";
 
 /**
  * このテストが守っているもの:
@@ -84,5 +90,46 @@ describe("normalizeMonthLabel", () => {
   it("解釈できない値は空文字", () => {
     expect(normalizeMonthLabel("")).toBe("");
     expect(normalizeMonthLabel(null)).toBe("");
+  });
+});
+
+describe("競合比較の取得可否（月が変わってもページが消えないこと）", () => {
+  /** JST基準の日時を作る（内部でUTC getterを使うため、その前提で組み立てる） */
+  const jst = (y: number, m: number, d: number) => new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+
+  it("8月に6月レポートを開いても取得できる", () => {
+    // 2026-08-01 発見: パフォーマンスの提供遅れで8月初旬の「最新の確定月」は6月。
+    // 以前は当月・前月のみ取得だったため、6月レポートから競合比較が消えていた
+    expect(isCompetitorFetchAllowed("2026/6", jst(2026, 8, 1))).toBe(true);
+  });
+
+  it("当月・前月も従来どおり取得できる", () => {
+    expect(isCompetitorFetchAllowed("2026/8", jst(2026, 8, 1))).toBe(true);
+    expect(isCompetitorFetchAllowed("2026/7", jst(2026, 8, 1))).toBe(true);
+  });
+
+  it("4か月以上前は取得しない（古いレポートを開くたびに課金しない）", () => {
+    expect(isCompetitorFetchAllowed("2026/5", jst(2026, 8, 15))).toBe(true);
+    expect(isCompetitorFetchAllowed("2026/4", jst(2026, 8, 15))).toBe(false);
+    expect(isCompetitorFetchAllowed("2025/8", jst(2026, 8, 15))).toBe(false);
+  });
+
+  it("未来月は取得しない", () => {
+    expect(isCompetitorFetchAllowed("2026/9", jst(2026, 8, 1))).toBe(false);
+  });
+
+  it("年をまたいでも正しく数える", () => {
+    expect(isCompetitorFetchAllowed("2025/12", jst(2026, 1, 10))).toBe(true);
+    expect(isCompetitorFetchAllowed("2025/10", jst(2026, 1, 10))).toBe(true);
+    expect(isCompetitorFetchAllowed("2025/9", jst(2026, 1, 10))).toBe(false);
+  });
+
+  it("不正な月表記は取得しない", () => {
+    expect(isCompetitorFetchAllowed("", jst(2026, 8, 1))).toBe(false);
+    expect(isCompetitorFetchAllowed("不明", jst(2026, 8, 1))).toBe(false);
+  });
+
+  it("遡り月数の定数が意図した値", () => {
+    expect(COMPETITOR_FETCH_MONTHS_BACK).toBe(3);
   });
 });

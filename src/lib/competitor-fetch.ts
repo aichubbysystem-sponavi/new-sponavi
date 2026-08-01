@@ -22,16 +22,17 @@ const GCP_API_KEY = process.env.GCP_API_KEY || "";
  * ※競合の口コミ数は過去に遡って取れないため、保存されるのは常に「取得時点」の
  *   スナップショット（fetchedAtで明示）。表示月はレポートの紐付けキー。
  */
+// 取得可否の判定は month-utils.ts（依存なし・テスト可能）に置く
+export { COMPETITOR_FETCH_MONTHS_BACK, isCompetitorFetchAllowed } from "./month-utils";
+import { isCompetitorFetchAllowed } from "./month-utils";
+
 export async function loadCompetitorComparison(shopName: string, displayMonth?: string): Promise<CompetitorComparison | null> {
   if (!displayMonth) return null;
   const jst = new Date(Date.now() + 9 * 3600 * 1000);
-  const y = jst.getUTCFullYear();
-  const m = jst.getUTCMonth() + 1;
-  const curLabel = `${y}/${m}`;
-  const prevLabel = m === 1 ? `${y - 1}/12` : `${y}/${m - 1}`;
-  if (displayMonth === curLabel || displayMonth === prevLabel) {
+  if (isCompetitorFetchAllowed(displayMonth, jst)) {
     return await fetchAndStoreCompetitors(shopName, displayMonth);
   }
+  // 範囲外は保存済みのみ（課金しない）。無ければページ非表示
   return await getStoredCompetitors(shopName, displayMonth);
 }
 
