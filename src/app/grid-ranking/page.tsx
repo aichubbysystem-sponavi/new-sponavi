@@ -132,6 +132,12 @@ export default function GridRankingPage() {
   const { gate, PasswordGateModal } = usePasswordGate();
   const [keyword, setKeyword] = useState("");
   const [savedKeywords, setSavedKeywords] = useState<string[]>([]);
+  // 競合比較などで使うメインKW。未指定なら savedKeywords[0] が使われる
+  // （competitor-fetch.ts と同じ規則。画面とサーバーで判定を揃える）
+  const [mainKeyword, setMainKeyword] = useState<string>("");
+  const [savingMainKw, setSavingMainKw] = useState(false);
+  // 全KW一括計測の進捗（空文字なら実行中でない）
+  const [allKwProgress, setAllKwProgress] = useState("");
   // interval/angle = 選択中店舗の計測設定（shops.grid_interval_m / grid_angle_deg と同期。店舗ごとに永続化）
   const [interval, setInterval] = useState(DEFAULT_INTERVAL);
   const [angleDeg, setAngleDeg] = useState(DEFAULT_ANGLE);
@@ -372,12 +378,14 @@ export default function GridRankingPage() {
       .then((res) => {
         if (res.data?.keywords?.length > 0) {
           setSavedKeywords(res.data.keywords);
+          setMainKeyword(res.data.main_keyword || "");
           if (!keyword) setKeyword(res.data.keywords[0]);
         } else {
           setSavedKeywords([]);
+          setMainKeyword("");
         }
       })
-      .catch(() => setSavedKeywords([]));
+      .catch(() => { setSavedKeywords([]); setMainKeyword(""); });
   }, [selectedShopId]);
 
   // シートからキーワード取得してDBに保存
@@ -548,9 +556,20 @@ export default function GridRankingPage() {
   }, [gridResults, renderMarkers]);
 
   // グリッド計測実行
+  /** 実際に競合比較で使われるメインKW。未指定なら先頭（competitor-fetch.ts と同じ規則） */
+  const effectiveMainKeyword =
+    mainKeyword && savedKeywords.includes(mainKeyword) ? mainKeyword : (savedKeywords[0] || "");
+
   const startMeasure = async () => {
     if (!isPresident) { alert("計測の実行は社長アカウントのみ可能です"); return; }
     if (!selectedShopId || !keyword.trim() || !shopLat) return;
+    await runMeasureForKeyword(keyword.trim());
+  };
+
+  /** 1キーワードを5地点計測して保存する。単発・全KW一括の共通処理 */
+  const runMeasureForKeyword = async (kw: string) => {
+    if (!selectedShopId || !kw.trim() || !shopLat) return;
+    const keywordArg = kw.trim();
     setMeasuring(true);
     setError("");
     setAborted(false);
@@ -576,7 +595,7 @@ export default function GridRankingPage() {
       try {
         const res = await api.post("/api/report/grid-ranking", {
           shopId: selectedShopId,
-          keyword: keyword.trim(),
+          keyword: keywordArg,
           lat: pt.lat,
           lng: pt.lng,
           interval, // キャッシュ格子幅の調整に使用
@@ -599,7 +618,7 @@ export default function GridRankingPage() {
       try {
         await api.put("/api/report/grid-ranking", {
           shopId: selectedShopId,
-          keyword: keyword.trim(),
+          keyword: keywordArg,
           gridResults: points.map((p) => ({
             lat: p.lat,
             lng: p.lng,
@@ -616,6 +635,39 @@ export default function GridRankingPage() {
 
     setProgress(`完了: ${completed}/${total} 地点`);
     setMeasuring(false);
+  };
+
+  /**
+   * 選択中の店舗の全キーワードを順に計測する。
+   * 「計測開始」は選択中の1KWだけなので、3KWある店舗で1件しか記録されず
+   * 「計測されていない」と誤解される。単発と一括を選べるようにする。
+   */
+  const startMeasureAllKeywords = async () => {
+    if (!isPresident) { alert("計測の実行は社長アカウントのみ可能です"); return; }
+    if (!selectedShopId || savedKeywords.length === 0 || !shopLat) return;
+
+    const cost = estimateCost(pointsPerShop(savedKeywords.length));
+    if (!confirm(
+      `${savedKeywords.length}件のキーワードを順に計測します。\n${savedKeywords.map((k, i) => `${i + 1}. ${k}`).join("\n")}\n\n`
+      + `1KWにつき${POINTS_PER_KW}地点 × ${savedKeywords.length}KW = 計${pointsPerShop(savedKeywords.length)}地点\n`
+      + `💰 place_id取得済みなら 約¥${cost.afterId.toLocaleString()}／未取得なら 最大 ¥${cost.max.toLocaleString()}\n`
+      + `同月の再計測・共有キャッシュ分は¥0\n\nよろしいですか？`
+    )) return;
+
+    // 単発と同じくパスワード再確認を通す（お金がかかる操作のため）
+    if (!(await gate(`${savedKeywords.length}キーワードの一括計測（API費用が発生します）`))) return;
+
+    setAllKwProgress(`0/${savedKeywords.length}`);
+    for (let i = 0; i < savedKeywords.length; i++) {
+      if (abortRef.current) break;
+      const kw = savedKeywords[i];
+      setAllKwProgress(`${i + 1}/${savedKeywords.length}「${kw}」`);
+      setKeyword(kw);
+      // startMeasure は state の keyword を見るため、明示的に渡せる形で実行する
+      await runMeasureForKeyword(kw);
+    }
+    setAllKwProgress("");
+    fetchHistory();
   };
 
   // 履歴選択時にマップに表示
@@ -1601,7 +1653,9 @@ export default function GridRankingPage() {
                 className="w-full border rounded-lg px-3 py-2 text-sm"
               >
                 {savedKeywords.map((kw) => (
-                  <option key={kw} value={kw}>{kw}</option>
+                  <option key={kw} value={kw}>
+                    {kw}{kw === effectiveMainKeyword ? "（メイン）" : ""}
+                  </option>
                 ))}
               </select>
             ) : (
@@ -1614,14 +1668,44 @@ export default function GridRankingPage() {
                 disabled={measuring}
               />
             )}
-            <button
-              onClick={fetchFromSheet}
-              disabled={!can(role, "DATA_OP") || sheetLoading || measuring}
-              title={!can(role, "DATA_OP") ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
-              className="mt-2 px-3 py-1.5 rounded-lg text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white disabled:opacity-50 disabled:cursor-not-allowed transition"
-            >
-              {sheetLoading ? "取得中..." : "シートから反映"}
-            </button>
+            <div className="mt-2 flex flex-wrap gap-2 items-center">
+              <button
+                onClick={fetchFromSheet}
+                disabled={!can(role, "DATA_OP") || sheetLoading || measuring}
+                title={!can(role, "DATA_OP") ? PERMISSION_DENIED_HINT.DATA_OP : undefined}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white disabled:opacity-50 disabled:cursor-not-allowed transition"
+              >
+                {sheetLoading ? "取得中..." : "シートから反映"}
+              </button>
+              {/* メインKW: 競合比較（レポート）が使う1キーワード。
+                  未指定だと並び順の先頭が黙って使われるため明示できるようにする */}
+              {savedKeywords.length > 0 && keyword !== effectiveMainKeyword && (
+                <button
+                  onClick={async () => {
+                    if (!selectedShopId) return;
+                    setSavingMainKw(true);
+                    try {
+                      await api.put("/api/report/shop-keywords", { shopId: selectedShopId, mainKeyword: keyword });
+                      setMainKeyword(keyword);
+                    } catch (e: any) {
+                      setError(e?.response?.data?.error || "メインKWの保存に失敗しました");
+                    } finally { setSavingMainKw(false); }
+                  }}
+                  disabled={!can(role, "DATA_OP") || savingMainKw || measuring}
+                  title="口コミの競合比較で使うキーワードに設定します"
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-amber-300 text-amber-700 hover:bg-amber-50 disabled:opacity-50 transition"
+                >
+                  {savingMainKw ? "設定中..." : "★ このKWをメインにする"}
+                </button>
+              )}
+            </div>
+            {savedKeywords.length > 0 && (
+              <p className="mt-1.5 text-[11px] text-slate-400">
+                メインKW: <span className="text-slate-600 font-semibold">{effectiveMainKeyword || "未設定"}</span>
+                {!mainKeyword && savedKeywords.length > 0 && <>（未指定のため先頭を使用中）</>}
+                <br />口コミの競合比較はこのキーワードで検索します。
+              </p>
+            )}
           </div>
 
           {/* 距離（店舗中心から各計測地点まで。店舗ごとに保存） */}
@@ -1739,8 +1823,20 @@ export default function GridRankingPage() {
             title={!can(role, "PAID_OP") ? PERMISSION_DENIED_HINT.PAID_OP : undefined}
             className="bg-[#003D6B] text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-[#00507A] disabled:opacity-50 disabled:cursor-not-allowed transition"
           >
-            {measuring ? "計測中..." : "計測開始"}
+            {measuring ? "計測中..." : "このKWだけ計測"}
           </button>
+          {/* 全KW一括。3KWある店舗で1件しか記録されず「計測されていない」と
+              誤解されるため、単発と一括を選べるようにする */}
+          {savedKeywords.length > 1 && (
+            <button
+              onClick={startMeasureAllKeywords}
+              disabled={!can(role, "PAID_OP") || measuring || !shopLat || !!allKwProgress}
+              title={!can(role, "PAID_OP") ? PERMISSION_DENIED_HINT.PAID_OP : "この店舗の全キーワードを順に計測します"}
+              className="bg-orange-500 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition"
+            >
+              {allKwProgress ? `一括計測中 ${allKwProgress}` : `全KW一括計測（${savedKeywords.length}件）`}
+            </button>
+          )}
           {measuring && (
             <button
               onClick={() => { abortRef.current = true; }}

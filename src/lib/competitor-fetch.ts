@@ -83,14 +83,21 @@ export async function fetchAndStoreCompetitors(shopName: string, month: string):
   if (!shop?.gbp_latitude || !shop?.gbp_longitude) return null;
 
   // 3. 検索KW: メインKW（順位計測と同じ軸）→ 無ければGBPカテゴリ
+  //
+  // main_keyword に明示指定があればそれを使う。指定が無ければ従来どおり keywords[0]。
+  // 先頭固定だと、シート側の並びが変わっただけで競合比較の対象キーワードが
+  // 黙って変わってしまうため、管理画面から指定できるようにした。
   let keyword = "";
   try {
     const { data: kwRow } = await supabase
       .from("shop_keywords")
-      .select("keywords")
+      .select("keywords, main_keyword")
       .eq("shop_id", shop.id)
       .maybeSingle();
-    keyword = (kwRow?.keywords || [])[0] || "";
+    const list: string[] = kwRow?.keywords || [];
+    const main = (kwRow as any)?.main_keyword || "";
+    // 指定が実際のKW一覧に残っている場合のみ採用（KWが差し替わった後の亡霊を防ぐ）
+    keyword = main && list.includes(main) ? main : (list[0] || "");
   } catch {}
   if (!keyword) keyword = shop.gbp_main_category || "";
   if (!keyword) return null;
