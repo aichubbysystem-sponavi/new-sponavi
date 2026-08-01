@@ -917,7 +917,9 @@ export default function GridRankingPage() {
                     return sum + pointsPerShop(kwCount);
                   }, 0);
                   const cost = estimateCost(totalPoints);
-                  if (!confirm(`${steps.join(" → ")} を実行します。\n約${Math.ceil(unmeasuredPresets.length * 60 / 60)}分かかります。\n\n💰 API費用目安: 最大 ¥${cost.max.toLocaleString()}（初回店舗・圏外多めの上限）\n　　ID移行後は 約¥${cost.afterId.toLocaleString()}／同月再計測・共有キャッシュ分は¥0\n\nよろしいですか？`)) return;
+                  // 単価は place_id の有無で¥4.8/¥0.75と4倍以上違う。
+                  // どちらの前提の金額なのかを明示しないと桁を読み違える
+                  if (!confirm(`${steps.join(" → ")} を実行します。\n約${Math.ceil(unmeasuredPresets.length * 60 / 60)}分かかります。\n\n💰 API費用目安（${totalPoints / POINTS_PER_KW}KW・${totalPoints}地点）:\n　　place_id未取得の店舗なら 最大 ¥${cost.max.toLocaleString()}（単価¥4.8・全地点圏外の上限）\n　　place_id取得済みなら 約¥${cost.afterId.toLocaleString()}（単価¥0.75）\n　　同月の再計測・共有キャッシュ分は¥0\n\nよろしいですか？`)) return;
 
                   // 追加ロック: お金がかかる操作のためログインパスワードを再確認
                   if (!(await gate("多地点順位計測の一括計測（API費用が発生します）"))) return;
@@ -1289,9 +1291,18 @@ export default function GridRankingPage() {
                 onClick={async () => {
                   if (!isPresident) { alert("全店舗計測の実行は社長アカウントのみ可能です"); return; }
                   if (allShopsBatchRunning) return;
-                  // API費用目安（KW数は計測時に取得のため1店舗6KW想定で概算）
-                  const allCost = estimateCost(allShopsFiltered.length * pointsPerShop(6));
-                  if (!confirm(`全${allShopsFiltered.length}店舗（いつもの店舗を除く）を計測します。\n今月計測済みの店舗は自動スキップします。\n座標・KW未取得の店舗は自動取得します。\n約${Math.ceil(allShopsFiltered.length * 60 / 60)}分かかります。\n\n💰 API費用目安（1店舗6KW想定・スキップ前の全店分）:\n　　最大 ¥${allCost.max.toLocaleString()}（初回店舗・圏外多めの上限）\n　　ID移行後は 約¥${allCost.afterId.toLocaleString()}／今月計測済み・共有キャッシュ分は¥0\n\nよろしいですか？`)) return;
+                  // API費用目安。実データ（設定済みKW数・place_idの有無）から算出した
+                  // gridStats.cost を優先する。以前は「1店舗6KW想定・全店Pro単価」の
+                  // 固定計算で、place_id移行後の実態と大きくズレた金額が出ていた
+                  const real = gridStats?.cost;
+                  const costLines = real
+                    ? `💰 API費用目安（実データから算出）:\n`
+                      + `　　対象 ${real.billableShops}店舗 / ${real.totalKeywords}KW（座標・KWが揃っているもの）\n`
+                      + `　　最大 ¥${real.max.toLocaleString()}（全地点が圏外の上限）\n`
+                      + `　　通常 ¥${real.typical.toLocaleString()}程度／今月計測済み・共有キャッシュ分は¥0`
+                      + (real.withoutPlaceId > 0 ? `\n　　※place_id未取得${real.withoutPlaceId}店舗は単価¥4.8（他は¥0.75）` : "")
+                    : `💰 API費用目安: 算出できませんでした（統計の読み込み待ち）`;
+                  if (!confirm(`全${allShopsFiltered.length}店舗（いつもの店舗を除く）を計測します。\n今月計測済みの店舗は自動スキップします。\n座標・KW未取得の店舗は自動取得します。\n約${Math.ceil(allShopsFiltered.length * 60 / 60)}分かかります。\n\n${costLines}\n\nよろしいですか？`)) return;
 
                   setAllShopsBatchRunning(true);
 
@@ -1636,11 +1647,11 @@ export default function GridRankingPage() {
           </div>
         )}
 
-        {/* API費用目安 */}
+        {/* API費用目安（1KWあたりの単位費用。place_idの有無で単価が4倍以上違う） */}
         <p className="text-xs text-gray-400">
-          💰 API費用目安（1KW・{POINTS_PER_KW}地点）: 初回店舗 最大 ¥
-          {estimateCost(POINTS_PER_KW).max.toLocaleString()} ／ ID取得済み店舗 約¥
-          {estimateCost(POINTS_PER_KW).afterId.toLocaleString()} ／ 同月の再計測 ¥0
+          💰 1KWあたりの目安（{POINTS_PER_KW}地点）: place_id未取得 最大 ¥
+          {estimateCost(POINTS_PER_KW).max.toLocaleString()}（単価¥4.8） ／ place_id取得済み 約¥
+          {estimateCost(POINTS_PER_KW).afterId.toLocaleString()}（単価¥0.75） ／ 同月の再計測 ¥0
         </p>
 
         {!isPresident && (
