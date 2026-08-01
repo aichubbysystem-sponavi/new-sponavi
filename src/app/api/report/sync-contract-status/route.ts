@@ -13,8 +13,8 @@
  * - 変更件数が全体の3割を超える場合は force:true が無い限り中断する
  * - 店舗名は正規化した完全一致のみ。同名が複数ある場合は触らずに報告する
  */
-import { NextResponse } from "next/server";
-import { getSupabase } from "@/lib/supabase";
+import { NextRequest, NextResponse } from "next/server";
+import { getSupabase, requireRole } from "@/lib/supabase";
 import { withAudit } from "@/lib/audit";
 import {
   parseMasterCsv,
@@ -84,6 +84,33 @@ async function fetchMasterRows(): Promise<string[][] | null> {
     console.error("[sync-contract-status] sheet fetch error:", e?.message);
     return null;
   }
+}
+
+/**
+ * GET — 現在の状態のサマリー。
+ * 「今どうなっているか」が画面に常に出ていないと、
+ * 同期を実行した結果が正しいのか判断できない。
+ */
+export async function GET(request: NextRequest) {
+  const r = await requireRole(request, ["president", "executive", "manager"]);
+  if (r.error) return r.error;
+
+  const sb = getSupabase();
+  const countOf = async (build: (q: any) => any) => {
+    const { count } = await build(sb.from("shops").select("*", { count: "exact", head: true }));
+    return count || 0;
+  };
+
+  const [total, cancelled, paused, rankDisabled] = await Promise.all([
+    countOf((q: any) => q),
+    countOf((q: any) => q.not("cancelled_at", "is", null)),
+    countOf((q: any) => q.is("cancelled_at", null).not("paused_at", "is", null)),
+    countOf((q: any) => q.eq("rank_tracking_disabled", true)),
+  ]);
+
+  return NextResponse.json({
+    counts: { total, cancelled, paused, active: total - cancelled - paused, rankDisabled },
+  });
 }
 
 export const POST = withAudit("契約ステータス同期", "DATA_OP", async (request, ctx) => {
