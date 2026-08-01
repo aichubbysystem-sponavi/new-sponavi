@@ -89,6 +89,8 @@ export interface CompetitorFetchOutcome {
 export async function fetchAndStoreCompetitorsDetailed(
   shopName: string,
   monthRaw: string,
+  /** メインKWを直した後の取り直し。保存済みでも取得し直す（¥4.8が再度発生する） */
+  force = false,
 ): Promise<CompetitorFetchOutcome> {
   const outcome: CompetitorFetchOutcome = { data: null, charged: false };
   // 保存キーは必ず正規化する。画面から "2026/06" が来ると、レポートが読む
@@ -96,9 +98,11 @@ export async function fetchAndStoreCompetitorsDetailed(
   const month = normalizeMonthKey(monthRaw);
   const normalized = shopName.normalize("NFC");
 
-  // 1. 保存済みなら即返す（月1回課金ガード）
-  const stored = await getStoredCompetitors(normalized, month);
-  if (stored) return { data: stored, charged: false };
+  // 1. 保存済みなら即返す（月1回課金ガード）。force のときだけ取り直す
+  if (!force) {
+    const stored = await getStoredCompetitors(normalized, month);
+    if (stored) return { data: stored, charged: false };
+  }
 
   if (!GCP_API_KEY) return { ...outcome, reason: "no_api_key" };
 

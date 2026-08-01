@@ -1352,9 +1352,43 @@ export default function ReportClient({
           {/* 取得済みなのにページが出ない状態（競合0件）を画面上で分かるようにする。
               これが無いと「¥4.8払って完了と出たのにページが無い」理由が誰にも分からない */}
           {competitorComparison && competitorRivalCount === 0 && (
-            <span title={`KW「${competitorComparison.keyword}」の検索結果が自店のみでした。管理画面でメインKWをより一般的な語に変えて再取得してください`}
-              style={{ fontSize: 16, color: "#ffd54f", background: "rgba(255,213,79,0.15)", padding: "4px 12px", borderRadius: 20, border: "1px solid rgba(255,213,79,0.3)" }}>
+            <span style={{ fontSize: 16, color: "#ffd54f", background: "rgba(255,213,79,0.15)", padding: "4px 12px", borderRadius: 20, border: "1px solid rgba(255,213,79,0.3)", display: "inline-flex", alignItems: "center", gap: 10 }}>
               競合比較: 競合0件のため非表示（KW「{competitorComparison.keyword}」が絞り込みすぎ）
+              {canPaid && (
+                <button
+                  onClick={async () => {
+                    const month = targetMonth || monthlyLabels[monthlyLabels.length - 1] || "";
+                    if (!month) return;
+                    // 保存済みを捨てて取り直すため、必ず再課金される。金額を明示してから実行する
+                    if (!confirm(
+                      `「口コミ競合比較」を取り直します（${month}）。\n\n`
+                      + `先に多地点順位の画面でメインKWをより一般的な語に変更してください。\n`
+                      + `変更しないまま実行しても同じ結果（競合0件）になります。\n\n`
+                      + `費用: 約¥4.8（保存済みを破棄して取り直すため、再度課金されます）\n\nよろしいですか？`
+                    )) return;
+                    setCompFetching(true);
+                    try {
+                      const headers = await getAuthHeaders();
+                      const res = await fetch("/api/report/review-competitors", {
+                        method: "POST",
+                        headers: { ...headers, "Content-Type": "application/json" },
+                        body: JSON.stringify({ shopName: shop.name, month, force: true }),
+                      });
+                      const body = await res.json().catch(() => ({}));
+                      if (res.ok && body?.data) {
+                        if (body?.warning) alert(`取り直しました。ただし ${body.warning}`);
+                        location.reload();
+                      } else alert(body?.error || "取得できませんでした");
+                    } catch {
+                      alert("取得に失敗しました（通信エラー）");
+                    } finally { setCompFetching(false); }
+                  }}
+                  disabled={compFetching}
+                  style={{ background: "rgba(255,213,79,0.25)", color: "#ffd54f", border: "1px solid rgba(255,213,79,0.5)", padding: "2px 10px", borderRadius: 12, fontSize: 14, fontWeight: 600, cursor: compFetching ? "wait" : "pointer" }}
+                >
+                  {compFetching ? "取得中..." : "KW変更後に取り直す（¥4.8）"}
+                </button>
+              )}
             </span>
           )}
           {/* 口コミ競合比較の取得。レポートを開くだけで課金しないよう明示操作にしている */}

@@ -61,7 +61,12 @@ export const POST = withAudit("口コミ競合比較の取得", "PAID_OP", async
   }
 
   // 保存済みなら再取得しない（同じ月に何度押しても課金は1回）
-  const already = await getStoredCompetitors(shopName, month);
+  // force: メインKWを直した後の取り直し。保存済みでもPlaces APIを叩き直す（¥4.8が再度発生）。
+  // これが無いと、KWの絞り込みすぎで競合0件だった店舗を修正しても、
+  // 保存済みの行がそのまま返るだけで永久に直せない
+  const force = body?.force === true;
+
+  const already = force ? null : await getStoredCompetitors(shopName, month);
   if (already) {
     // 取得済みでもレポートに出ない場合がある（競合0件）。ここで黙って成功を返すと
     // 「課金0件・完了」なのにページが出ない理由が利用者に一切分からない
@@ -73,7 +78,7 @@ export const POST = withAudit("口コミ競合比較の取得", "PAID_OP", async
     return NextResponse.json({ data: already, charged: false, rivalCount: rivals, warning: warn });
   }
 
-  const outcome = await fetchAndStoreCompetitorsDetailed(shopName, month);
+  const outcome = await fetchAndStoreCompetitorsDetailed(shopName, month, force);
 
   // 失敗時も「課金されたかどうか」を必ず返す。
   // 以前は課金後にnullを返す経路があり、画面は「¥0・失敗」と報告していた
