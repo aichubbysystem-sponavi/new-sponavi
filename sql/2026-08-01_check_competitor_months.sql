@@ -1,34 +1,27 @@
 -- 口コミ競合比較が「取得済みなのにレポートに出ない」原因の確認
 --
--- 【疑い】
--- competitor_reviews の UNIQUE は (shop_name, month)。
--- レポート側は "2026/06" → "2026/6" に正規化してから読むのに、
--- 取得側は画面から来た値をそのまま保存していた。
--- 月キーの表記が違うと別行になり、取得済みでもレポートには出ない。
+-- 【確認済み】月キーの表記ゆれは無し（2026/6・2026/7 のみ）。当初の疑いは外れ。
+--
+-- 【次の疑い】競合が0件だとページごと非表示になる
+-- レポート側は「自店以外が1件も無ければ比較として成立しない」として
+-- ページを出さない（client.tsx の competitorRivalCount > 0 判定）。
+-- 検索KWが絞り込みすぎ（例:「堀江 冷麺」）だと Places の結果が自店のみになり、
+-- 保存はされている（＝再取得しても課金0件）のにレポートには出ない、という状態になる。
 
--- 1) 保存されている月キーの一覧（表記ゆれがあれば複数の形が並ぶ）
-SELECT month, COUNT(*) AS 件数
+SELECT
+  shop_name                                  AS 店舗名,
+  month                                      AS 月,
+  keyword                                    AS 検索KW,
+  jsonb_array_length(competitors)            AS 取得件数,
+  self ->> 'name'                            AS 自店,
+  (self ->> 'rank')::int                     AS 自店順位,
+  -- レポートに出る条件。false ならページは表示されない
+  (jsonb_array_length(competitors) - CASE WHEN self IS NULL THEN 0 ELSE 1 END) > 0 AS レポート表示,
+  created_at                                 AS 取得日時
 FROM competitor_reviews
-GROUP BY month
-ORDER BY month;
-
--- 2) CHILLRI 堀江店の保存状況（店舗名は適宜変更）
-SELECT shop_name, month, keyword, created_at
-FROM competitor_reviews
-WHERE shop_name LIKE '%CHILLRI%'
-ORDER BY created_at DESC;
+ORDER BY month DESC, shop_name;
 
 -- 【読み方】
--- 1) に "2026/6" と "2026/06" が両方あれば、表記ゆれが原因。
--- 2) で month が "2026/06" になっていれば、レポート（"2026/6" で読む）には出ない。
---
--- 【修正後の移行】
--- ゼロ埋めの行を正規化した形に寄せる（重複があれば新しい方を残す）:
---   UPDATE competitor_reviews
---      SET month = regexp_replace(month, '/0+(\d)$', '/\1')
---    WHERE month ~ '/0\d$'
---      AND NOT EXISTS (
---        SELECT 1 FROM competitor_reviews c2
---        WHERE c2.shop_name = competitor_reviews.shop_name
---          AND c2.month = regexp_replace(competitor_reviews.month, '/0+(\d)$', '/\1')
---      );
+-- 取得件数が 1 で自店だけ → 競合0件。KWが絞り込みすぎなので、
+--   管理画面の「メインKW」をもっと一般的な語（例:「堀江 焼肉」）に変えて再取得する。
+-- 取得件数が 20 なのに出ない → 表示条件は満たしているので別原因。月の指定を確認する。

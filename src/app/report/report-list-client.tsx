@@ -229,6 +229,7 @@ export default function ReportListClient({
 
     let ok = 0, charged = 0, failed = 0, aborted = false;
     const failedNames: string[] = [];
+    const noRivalNames: string[] = []; // 取得できたがレポートに出ない店舗（競合0件）
     for (let i = 0; i < ids.length; i++) {
       setCompProgress(`取得中 ${i + 1}/${ids.length}`);
       window.dispatchEvent(new Event("batch-activity"));
@@ -242,7 +243,12 @@ export default function ReportListClient({
         const body = await res.json().catch(() => ({}));
         // 失敗でも課金されている場合があるため charged は常に数える
         if (body?.charged) charged++;
-        if (res.ok && body?.data) { ok++; }
+        if (res.ok && body?.data) {
+          ok++;
+          // 取得できてもレポートに出ない店舗（競合0件＝KWが絞り込みすぎ）を必ず知らせる。
+          // 黙っていると「完了と出たのにページが無い」で原因を追えなくなる
+          if (body?.warning) noRivalNames.push(ids[i]);
+        }
         else {
           failed++;
           failedNames.push(`${ids[i]}（${body?.error || res.status}）`);
@@ -260,9 +266,11 @@ export default function ReportListClient({
     setSelected(new Set()); // 他の一括処理と同様に選択を解除する
     showToast(
       `${aborted ? "中断" : "完了"}: ${ok}件取得（課金${charged}件・約¥${Math.round(charged * 4.8).toLocaleString()}）`
-      + (failed > 0 ? ` / 失敗${failed}件: ${failedNames.slice(0, 2).join(" / ")}${failed > 2 ? " 他" : ""}` : ""),
+      + (failed > 0 ? ` / 失敗${failed}件: ${failedNames.slice(0, 2).join(" / ")}${failed > 2 ? " 他" : ""}` : "")
+      + (noRivalNames.length > 0 ? ` / ⚠ ${noRivalNames.length}件は競合0件のためレポートに出ません（メインKWが絞り込みすぎ）: ${noRivalNames.slice(0, 2).join(" / ")}${noRivalNames.length > 2 ? " 他" : ""}` : ""),
     );
     if (failedNames.length > 0) console.error("[競合比較] 失敗した店舗:", failedNames);
+    if (noRivalNames.length > 0) console.warn("[競合比較] 競合0件でレポート非表示:", noRivalNames);
   }
 
   /** ★の付け外し。共有状態なので、失敗したら元に戻す */

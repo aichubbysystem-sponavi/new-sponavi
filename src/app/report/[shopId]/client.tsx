@@ -1349,6 +1349,14 @@ export default function ReportClient({
         <Link href="/report" style={{ color: "rgba(255,255,255,0.8)", textDecoration: "none", fontSize: 16 }}>← レポート一覧に戻る</Link>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {dataSource === "mock" && <span style={{ fontSize: 16, color: "#ffd54f", background: "rgba(255,213,79,0.15)", padding: "4px 12px", borderRadius: 20, border: "1px solid rgba(255,213,79,0.3)" }}>デモデータ</span>}
+          {/* 取得済みなのにページが出ない状態（競合0件）を画面上で分かるようにする。
+              これが無いと「¥4.8払って完了と出たのにページが無い」理由が誰にも分からない */}
+          {competitorComparison && competitorRivalCount === 0 && (
+            <span title={`KW「${competitorComparison.keyword}」の検索結果が自店のみでした。管理画面でメインKWをより一般的な語に変えて再取得してください`}
+              style={{ fontSize: 16, color: "#ffd54f", background: "rgba(255,213,79,0.15)", padding: "4px 12px", borderRadius: 20, border: "1px solid rgba(255,213,79,0.3)" }}>
+              競合比較: 競合0件のため非表示（KW「{competitorComparison.keyword}」が絞り込みすぎ）
+            </span>
+          )}
           {/* 口コミ競合比較の取得。レポートを開くだけで課金しないよう明示操作にしている */}
           {!competitorComparison && canPaid && (
             <button
@@ -1370,7 +1378,12 @@ export default function ReportClient({
                     body: JSON.stringify({ shopName: shop.name, month }),
                   });
                   const body = await res.json().catch(() => ({}));
-                  if (res.ok && body?.data) location.reload();
+                  if (res.ok && body?.data) {
+                    // 取得できてもレポートに出ない場合がある（競合0件）。
+                    // 黙って再読込すると「取得したのにページが無い」となり原因を追えない
+                    if (body?.warning) alert(`取得しました。ただし ${body.warning}`);
+                    location.reload();
+                  }
                   else alert(body?.error || "取得できませんでした");
                 } catch {
                   alert("取得に失敗しました（通信エラー）");

@@ -63,8 +63,14 @@ export const POST = withAudit("口コミ競合比較の取得", "PAID_OP", async
   // 保存済みなら再取得しない（同じ月に何度押しても課金は1回）
   const already = await getStoredCompetitors(shopName, month);
   if (already) {
-    ctx.detail = `${shopName} ${month}: 取得済みのため課金なし`;
-    return NextResponse.json({ data: already, charged: false });
+    // 取得済みでもレポートに出ない場合がある（競合0件）。ここで黙って成功を返すと
+    // 「課金0件・完了」なのにページが出ない理由が利用者に一切分からない
+    const rivals = already.competitors.filter((_, i) => i !== ((already.self?.rank ?? 0) - 1)).length;
+    const warn = rivals === 0
+      ? `検索結果が自店のみのため、レポートには表示されません。KW「${already.keyword}」が絞り込みすぎです。メインKWをより一般的な語に変えて再取得してください`
+      : undefined;
+    ctx.detail = `${shopName} ${month}: 取得済みのため課金なし（競合${rivals}件）${warn ? " ※レポート非表示" : ""}`;
+    return NextResponse.json({ data: already, charged: false, rivalCount: rivals, warning: warn });
   }
 
   const outcome = await fetchAndStoreCompetitorsDetailed(shopName, month);
@@ -95,6 +101,13 @@ export const POST = withAudit("口コミ競合比較の取得", "PAID_OP", async
   }
 
   const data = outcome.data;
-  ctx.detail = `${shopName} ${month}: 競合${data.competitors.length}件を取得（KW「${data.keyword}」）${outcome.charged ? "" : "・課金なし"}`;
-  return NextResponse.json({ data, charged: outcome.charged });
+  // レポートは「自店以外が1件も無ければ比較として成立しない」としてページを出さない。
+  // 取得は成功・課金も発生したのにレポートに出ない、という状態を黙って作らないよう、
+  // 表示されるかどうかをここで判定して呼び出し側に返す
+  const rivalCount = data.competitors.filter((_, i) => i !== ((data.self?.rank ?? 0) - 1)).length;
+  const warning = rivalCount === 0
+    ? `検索結果が自店のみのため、レポートには表示されません。KW「${data.keyword}」が絞り込みすぎです。メインKWをより一般的な語に変えて再取得してください`
+    : undefined;
+  ctx.detail = `${shopName} ${month}: 競合${rivalCount}件を取得（KW「${data.keyword}」）${outcome.charged ? "" : "・課金なし"}${warning ? " ※レポート非表示" : ""}`;
+  return NextResponse.json({ data, charged: outcome.charged, rivalCount, warning });
 });
