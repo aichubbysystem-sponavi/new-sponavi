@@ -45,7 +45,8 @@ const INTERVALS = [
   { label: "4km", value: 4000 },
   { label: "5km", value: 5000 },
 ];
-const DEFAULT_INTERVAL = 1000;
+/** 計測地点の既定距離(m)。店舗ごとの設定(shops.grid_interval_m)が無い場合に使う */
+const DEFAULT_INTERVAL = 500;
 // 4点の回転角（grid-utils.GRID_ANGLES）。0度=斜め(NE/NW/SE/SW)、45度=十字(N/E/S/W)
 const ANGLES = GRID_ANGLES;
 const DEFAULT_ANGLE = 0;

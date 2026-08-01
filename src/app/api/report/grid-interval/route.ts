@@ -2,7 +2,7 @@
  * 多地点順位チェックの店舗ごとの計測設定（斜め4地点の半径・回転角）
  * GET  /api/report/grid-interval?shopName=xxx → { intervalM, angleDeg }
  * PUT  /api/report/grid-interval { shopName, intervalM?, angleDeg? }（どちらか必須）
- * 保存先: shops.grid_interval_m（NULL=既定1000m）/ shops.grid_angle_deg（NULL=0度=斜め）
+ * 保存先: shops.grid_interval_m（NULL=既定500m）/ shops.grid_angle_deg（NULL=0度=斜め）
  * ※キーは店舗名。フロントのselectedShopIdはGo API IDでSupabaseのshops.idと
  *   一致しないことがあるため、座標取得と同様に名前で引く（NFC正規化）
  */
@@ -15,7 +15,8 @@ export const dynamic = "force-dynamic";
 // 許可値。UIのボタンと一致させる（route.tsはハンドラ以外exportできないため非export）
 const ALLOWED_INTERVALS = [500, 1000, 2000, 3000, 4000, 5000];
 const ALLOWED_ANGLES = [0, 15, 30, 45, 60, 75]; // 4点は90度間隔のため90度で一周
-const DEFAULT_INTERVAL = 1000;
+/** 計測地点の既定距離(m)。店舗ごとの設定(shops.grid_interval_m)が無い場合に使う */
+const DEFAULT_INTERVAL = 500;
 
 export async function GET(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
