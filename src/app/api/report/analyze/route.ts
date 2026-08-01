@@ -829,6 +829,10 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
             } catch {}
             const targetNorm = (curMonth || "").replace(/\/0+(\d)/, "/$1");
             let kwData: { word: string; rank: number; prevRank: number; first?: boolean }[] = [];
+            // kwDataが実際にどの月の計測なのか。対象月が未計測なら過去月になる。
+            // これを見出しに反映しないと、P6カードが「未計測」なのにAI総評だけが
+            // 先月の順位を当月の実績として書く（表示とAIの食い違い）
+            let kwDataMonth = "";
 
             if (gridRanking?.history?.length > 0) {
               // 対象月以前のデータのみ使用
@@ -891,6 +895,7 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
                   // 前回計測なし＝初計測（prevRank=rankのフォールバックを「維持」と誤読させない）
                   kwData.push({ word: snap.keyword, rank, prevRank: first ? (prevRank || rank) : prevRank, first });
                 }
+                kwDataMonth = latest.month;
                 // 全KWが圏外のみの月でもkwDataは有効（後続のシートフォールバックに落とさない）
               }
             }
@@ -924,7 +929,14 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
               return `\n${kw.word}: ${kw.rank > 0 ? `${kw.rank}位` : "圏外"}（前回${kw.prevRank > 0 ? `${kw.prevRank}位` : "圏外"} ${arrow}）`;
             };
             if (kwData.length > 0) {
-              kpiText += `\n\n【キーワード順位（${curMonth}）】`;
+              // 対象月が未計測で過去月のデータを使っている場合は、その月を見出しに出し
+              // 「当月の実績ではない」と明示する。P6カードは同条件で「未計測」と表示される
+              const isStaleMonth = !!kwDataMonth && !!targetNorm && kwDataMonth !== targetNorm;
+              kpiText += `\n\n【キーワード順位（${isStaleMonth ? kwDataMonth : curMonth}）】`;
+              if (isStaleMonth) {
+                kpiText += `\n※${curMonth}は未計測のため、直近計測月（${kwDataMonth}）の順位。`
+                  + `${curMonth}の順位として書くことは禁止。レポート上も${curMonth}は「未計測」と表示される`;
+              }
               for (const kw of kwData) kpiText += fmtKwLine(kw);
             }
 
