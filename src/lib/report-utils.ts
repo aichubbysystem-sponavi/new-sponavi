@@ -395,6 +395,45 @@ export function gridLayoutWithRange(
   return range ? `${layout}／半径${range}` : layout;
 }
 
+/**
+ * パフォーマンス同期cronの実行日（毎月この日。vercel.json の "0 21 5 * *" と揃える）。
+ * GBPのパフォーマンスデータは即日提供されないため、月初ではなく数日空けて取得する。
+ */
+export const PERF_SYNC_DAY = 5;
+
+export type MonthDataStatus = "pending_current" | "pending_lag" | "missing";
+
+/**
+ * 対象月のデータが無いときに、その理由を判定する。
+ *
+ * 【なぜ3種類に分けるか】
+ * 以前は「当月以降＝集計中 / それ以外＝反映してください」の2分岐だった。
+ * そのため8月1日に7月を選ぶと「全店舗反映を実行してください」と出たが、
+ * 実行しても直らない。7月分の同期cronは毎月5日で、まだ走っていないため
+ * （さらにGBP側もデータ提供に数日かかる）。
+ * 実行しても直らない案内を出すと、原因を探して時間を溶かすことになる。
+ *
+ * @param targetMonth "YYYY/M"
+ * @param now JST基準の現在時刻
+ */
+export function monthDataStatus(targetMonth: string, now: Date): MonthDataStatus {
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth() + 1;
+  const day = now.getUTCDate();
+  const curNum = y * 100 + m;
+  const targetNum = monthToNum(targetMonth);
+
+  // 当月（まだ月が終わっていない）
+  if (targetNum >= curNum) return "pending_current";
+
+  // 前月かつ同期日より前 → まだ取得されていないだけ
+  const prevNum = m === 1 ? (y - 1) * 100 + 12 : y * 100 + (m - 1);
+  if (targetNum === prevNum && day < PERF_SYNC_DAY) return "pending_lag";
+
+  // それ以外は本当にデータが無い（同期漏れ・契約前など）
+  return "missing";
+}
+
 /** diff表示の色 */
 export function diffColor(d: number | null): string {
   if (d === null) return "#ccc";

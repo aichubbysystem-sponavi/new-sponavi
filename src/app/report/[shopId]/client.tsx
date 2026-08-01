@@ -33,6 +33,7 @@ import {
   pctChange, monthToNum, rankColor, rankColorModal, rankTextColor,
   fmtAvgRank, rankTrend, rankCoverage, isYoyComparable, parseStartMonth,
   reorderKpis, centerCell, gridLayoutLabel, gridLayoutWithRange, intervalLabel,
+  monthDataStatus, PERF_SYNC_DAY,
 } from "@/lib/report-utils";
 import {
   slideStyle, slideBarStyle, slideBodyStyle, stitleStyle,
@@ -1615,10 +1616,10 @@ export default function ReportClient({
 
       {/* 指定月データなしバナー */}
       {monthNotFound && (() => {
-        // 選択月が当月以降（未確定月）なら「集計中」案内、過去月なら反映案内を表示
+        // 「当月（集計期間中）」「前月だが同期前」「本当に無い」を区別する。
+        // 区別しないと、実行しても直らない「全店舗反映してください」を出してしまう
         const nowJST = new Date(Date.now() + 9 * 60 * 60 * 1000);
-        const curMonthNum = nowJST.getUTCFullYear() * 100 + (nowJST.getUTCMonth() + 1);
-        const isPendingMonth = monthToNum(targetMonth) >= curMonthNum;
+        const status = monthDataStatus(targetMonth, nowJST);
         const [ty, tm] = targetMonth.split("/").map(Number);
         const nextMonthLabel = tm === 12 ? `${ty + 1}年1月` : `${tm + 1}月`;
         const targetLabel = targetMonth.replace(/(\d{4})\/(\d{1,2})/, "$1年$2月");
@@ -1627,8 +1628,10 @@ export default function ReportClient({
         <div style={{ background: "#FEF3C7", border: "1px solid #F59E0B", borderRadius: 8, padding: "12px 20px", margin: "0 0 12px", display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 18 }}>⚠</span>
           <span style={{ fontSize: 16, color: "#92400E" }}>
-            {isPendingMonth ? (
+            {status === "pending_current" ? (
               <><strong>{targetLabel}</strong>は集計期間中のため、最新の確定月（{latestLabel}）を表示しています。{targetLabel.replace(/^\d{4}年/, "")}分は{nextMonthLabel}上旬に反映予定です。</>
+            ) : status === "pending_lag" ? (
+              <><strong>{targetLabel}</strong>分はまだ取得していません（Googleのデータ提供に数日かかるため、毎月{PERF_SYNC_DAY}日に取得しています）。最新の確定月（{latestLabel}）を表示しています。{PERF_SYNC_DAY}日以降に自動で反映されます。</>
             ) : (
               <><strong>{targetLabel}</strong>のデータがありません。最新月（{latestLabel}）のデータを表示しています。レポート管理画面で「全店舗反映」を実行してください。</>
             )}

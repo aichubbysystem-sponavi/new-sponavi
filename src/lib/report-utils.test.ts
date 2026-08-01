@@ -23,6 +23,8 @@ import {
   rankCoverage,
   parseStartMonth,
   isYoyComparable,
+  monthDataStatus,
+  PERF_SYNC_DAY,
 } from "./report-utils";
 
 describe("pctChange", () => {
@@ -532,5 +534,49 @@ describe("計測範囲の表示（距離変更を読み取れるようにする�
   it("距離が無いデータは従来どおり地点数だけ（過去データが壊れない）", () => {
     expect(gridLayoutWithRange(3, 5, null)).toBe("5地点");
     expect(gridLayoutWithRange(7, 49, 0)).toBe("7×7");
+  });
+});
+
+describe("monthDataStatus（データが無い理由の判定）", () => {
+  // JST基準の日時を作る（内部でUTC getterを使うため+9hした値を渡す）
+  const jst = (y: number, m: number, d: number) => new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+
+  it("8月1日に7月を選ぶと「まだ取得していない」（実際に出た誤案内のケース）", () => {
+    // 以前は「全店舗反映を実行してください」と出ていたが、実行しても直らない。
+    // 7月分の同期cronは毎月5日で、まだ走っていないだけ
+    expect(monthDataStatus("2026/7", jst(2026, 8, 1))).toBe("pending_lag");
+  });
+
+  it("8月4日でもまだ同期前", () => {
+    expect(monthDataStatus("2026/7", jst(2026, 8, 4))).toBe("pending_lag");
+  });
+
+  it("8月5日以降に7月が無いなら本当に問題（反映案内を出す）", () => {
+    expect(monthDataStatus("2026/7", jst(2026, 8, 5))).toBe("missing");
+    expect(monthDataStatus("2026/7", jst(2026, 8, 20))).toBe("missing");
+  });
+
+  it("当月は集計期間中", () => {
+    expect(monthDataStatus("2026/8", jst(2026, 8, 1))).toBe("pending_current");
+    expect(monthDataStatus("2026/8", jst(2026, 8, 31))).toBe("pending_current");
+  });
+
+  it("未来月も集計期間中", () => {
+    expect(monthDataStatus("2026/9", jst(2026, 8, 1))).toBe("pending_current");
+  });
+
+  it("前々月より古い月が無いのは本当の欠落", () => {
+    expect(monthDataStatus("2026/6", jst(2026, 8, 1))).toBe("missing");
+    expect(monthDataStatus("2025/12", jst(2026, 8, 1))).toBe("missing");
+  });
+
+  it("年をまたぐ前月判定（1月1日に12月を選ぶ）", () => {
+    expect(monthDataStatus("2025/12", jst(2026, 1, 1))).toBe("pending_lag");
+    expect(monthDataStatus("2025/12", jst(2026, 1, 5))).toBe("missing");
+    expect(monthDataStatus("2025/11", jst(2026, 1, 1))).toBe("missing");
+  });
+
+  it("同期日の定数がvercel.jsonの設定(毎月5日)と一致している", () => {
+    expect(PERF_SYNC_DAY).toBe(5);
   });
 });
