@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase";
 import { useRole } from "@/components/role-provider";
 import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
 import BackToTopLink from "@/components/back-to-top-link";
+import { usePasswordGate } from "@/components/password-gate";
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
@@ -99,6 +100,10 @@ export default function ReportListClient({
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
+  // 口コミ競合比較の一括取得（課金操作）。空文字なら実行中でない
+  const [compProgress, setCompProgress] = useState("");
+  // 課金操作の前にログインパスワードを再確認する（多地点計測の一括と同じ扱い）
+  const { gate, PasswordGateModal } = usePasswordGate();
   const [showMemoModal, setShowMemoModal] = useState(false);
   const [memoAdding, startMemoAdd] = useTransition();
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
@@ -201,6 +206,51 @@ export default function ReportListClient({
       }
     })();
   }, []);
+
+  /**
+   * 選択店舗の口コミ競合比較をまとめて取得する。
+   * 1店舗¥4.8の課金操作なので、件数と金額を提示し、パスワード再確認を通す。
+   * 取得済みの店舗はサーバー側で課金されない（charged:false が返る）。
+   */
+  async function handleFetchCompetitors() {
+    if (selected.size === 0) { showToast("店舗を選択してください"); return; }
+    const month = reportMonth || "";
+    if (!month) { showToast("対象月を選択してください"); return; }
+
+    const ids = Array.from(selected);
+    if (!confirm(
+      `選択した${ids.length}店舗の「口コミ競合比較」を取得します（${month}）。\n\n`
+      + `費用: 最大 約¥${(ids.length * 4.8).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+      + `（1店舗¥4.8。取得済みの店舗は課金されません）\n\n`
+      + `※競合の口コミ数は過去に遡れないため、取得時点の値が保存されます。\n\nよろしいですか？`
+    )) return;
+
+    if (!(await gate(`口コミ競合比較の一括取得（${ids.length}店舗・API費用が発生します）`))) return;
+
+    let ok = 0, charged = 0, failed = 0;
+    const failedNames: string[] = [];
+    for (let i = 0; i < ids.length; i++) {
+      setCompProgress(`取得中 ${i + 1}/${ids.length}`);
+      window.dispatchEvent(new Event("batch-activity"));
+      try {
+        const headers = await getAuthHeaders();
+        const res = await fetch("/api/report/review-competitors", {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ shopName: ids[i], month }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (res.ok && body?.data) { ok++; if (body.charged) charged++; }
+        else { failed++; failedNames.push(ids[i]); }
+      } catch { failed++; failedNames.push(ids[i]); }
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    setCompProgress("");
+    showToast(
+      `完了: ${ok}件取得（新規${charged}件・約¥${Math.round(charged * 4.8).toLocaleString()}）`
+      + (failed > 0 ? ` / 失敗${failed}件: ${failedNames.slice(0, 3).join("、")}${failed > 3 ? " 他" : ""}` : ""),
+    );
+  }
 
   /** ★の付け外し。共有状態なので、失敗したら元に戻す */
   async function toggleFavorite(id: string) {
@@ -531,6 +581,13 @@ export default function ReportListClient({
                   title={!can(role, "MEMO") ? PERMISSION_DENIED_HINT.MEMO : undefined}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${memoAdding ? "bg-slate-200 text-slate-400" : "bg-orange-500 text-white hover:bg-orange-600"}`}>
                   {memoAdding ? "追加中..." : "メモ追加"}
+                </button>
+                {/* 口コミ競合比較の一括取得。1店舗¥4.8の課金操作のため
+                    社長のみ＋パスワード再確認＋件数と金額の事前提示を行う */}
+                <button onClick={handleFetchCompetitors} disabled={!can(role, "PAID_OP") || !!compProgress}
+                  title={!can(role, "PAID_OP") ? PERMISSION_DENIED_HINT.PAID_OP : "同エリア上位20店舗の評価・口コミ数を取得します（1店舗¥4.8）"}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${compProgress ? "bg-slate-200 text-slate-400" : "bg-rose-600 text-white hover:bg-rose-700"}`}>
+                  {compProgress || `競合比較を取得（${selected.size}件）`}
                 </button>
                 <button
                   onClick={() => {
@@ -870,6 +927,9 @@ export default function ReportListClient({
             {toast}
           </div>
         )}
+
+        {/* 課金操作前のパスワード再確認モーダル */}
+        {PasswordGateModal}
       </div>
     </div>
   );
