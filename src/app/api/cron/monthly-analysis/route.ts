@@ -38,7 +38,8 @@ export async function GET(request: NextRequest) {
     .from("shops")
     .select("id, name")
     .not("gbp_location_name", "is", null)
-    .is("cancelled_at", null);
+    .is("cancelled_at", null)
+    .is("paused_at", null); // 停止中も対象外（解約とは別管理）
 
   if (!shops || shops.length === 0) {
     return NextResponse.json({ success: true, message: "店舗なし", analyzed: 0 });

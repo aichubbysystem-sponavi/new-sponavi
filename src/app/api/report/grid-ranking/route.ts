@@ -105,12 +105,21 @@ export const POST = withAudit("多地点順位実測", "PAID_OP", async (request
   const supabase = getSupabase();
   const { data: shop } = await supabase
     .from("shops")
-    .select("id, name, gbp_shop_name")
+    .select("id, name, gbp_shop_name, rank_tracking_disabled")
     .eq("id", shopId)
     .single();
 
   if (!shop) {
     return NextResponse.json({ error: "店舗が見つかりません" }, { status: 404 });
+  }
+
+  // 課金が発生する直前の最後の砦。プリセット側で弾いていても、
+  // 個別計測や古いプリセットから到達しうるためここでも止める
+  if ((shop as any).rank_tracking_disabled) {
+    return NextResponse.json(
+      { error: `${shop.name} は順位計測の対象外に設定されています` },
+      { status: 400 },
+    );
   }
 
   const targetName = shop.gbp_shop_name || shop.name;
