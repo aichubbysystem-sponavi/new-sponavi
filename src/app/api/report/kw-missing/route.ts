@@ -31,17 +31,26 @@ export async function GET(request: NextRequest) {
 
   const { data: shopRows } = await sb
     .from("shops")
-    .select("id, name")
+    .select("id, name, rank_tracking_disabled")
     .in("id", shopIds)
     .limit(1000);
 
   const nameMap = new Map((shopRows || []).map((s: { id: string; name: string }) => [s.id, s.name]));
+  // 順位計測の対象外店舗は「KW未取得」として出さない。
+  // 計測しない店舗のKW未設定を対応待ちとして並べても、対応する必要がない
+  const excluded = new Set(
+    (shopRows || [])
+      .filter((s: { rank_tracking_disabled?: boolean }) => s.rank_tracking_disabled)
+      .map((s: { id: string }) => s.id),
+  );
 
-  const shops = (data || []).map((r: { shop_id: string; updated_at: string }) => ({
-    shopId: r.shop_id,
-    shopName: nameMap.get(r.shop_id) || r.shop_id,
-    checkedAt: r.updated_at,
-  }));
+  const shops = (data || [])
+    .filter((r: { shop_id: string }) => !excluded.has(r.shop_id))
+    .map((r: { shop_id: string; updated_at: string }) => ({
+      shopId: r.shop_id,
+      shopName: nameMap.get(r.shop_id) || r.shop_id,
+      checkedAt: r.updated_at,
+    }));
 
   return NextResponse.json({ shops, count: shops.length });
 }
