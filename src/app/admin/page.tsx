@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useShop } from "@/components/shop-provider";
 import api from "@/lib/api";
+import ShopStatusPanel from "@/components/shop-status-panel";
 
 interface Setting {
   id: string;
@@ -41,7 +42,12 @@ export default function AdminPage() {
   return (
     <div className="animate-fade-in">
       <h1 className="text-2xl font-bold text-slate-800 mb-2">システム管理</h1>
-      <p className="text-sm text-slate-500 mb-6">設定・グループ管理</p>
+      <p className="text-sm text-slate-500 mb-6">契約ステータス・順位計測対象・設定・グループ管理</p>
+
+      {/* Go APIの接続状態に依存しないため、下の条件分岐の外に置く */}
+      <div className="mb-6">
+        <ShopStatusPanel />
+      </div>
 
       {!apiConnected ? (
         <div className="bg-white rounded-xl p-12 shadow-sm border border-slate-100 text-center">
