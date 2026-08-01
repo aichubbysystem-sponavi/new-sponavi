@@ -33,7 +33,7 @@ export default function ShopStatusPanel() {
   const [busy, setBusy] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
   const [rankResult, setRankResult] = useState<{ dryRun: boolean; matched?: number; updated?: number; shops?: { id: string; name: string }[] } | null>(null);
-  const [prefix, setPrefix] = useState("エミナルクリニック");
+  const [prefix, setPrefix] = useState("エミナル");
   const [error, setError] = useState<string | null>(null);
 
   async function runSync(apply: boolean) {
@@ -51,7 +51,7 @@ export default function ShopStatusPanel() {
   }
 
   async function runRank(apply: boolean, disabled: boolean) {
-    if (!prefix.trim()) { setError("店舗名の先頭を入力してください"); return; }
+    if (!prefix.trim()) { setError("対象の文字列を入力してください"); return; }
     setBusy(apply ? "rank-apply" : "rank-dry");
     setError(null);
     try {
@@ -165,7 +165,7 @@ export default function ShopStatusPanel() {
           <input
             value={prefix}
             onChange={(e) => setPrefix(e.target.value)}
-            placeholder="店舗名の先頭（3文字以上）"
+            placeholder="店舗名に含む文字列（3文字以上）"
             className="px-3 py-2 border border-slate-200 rounded-lg text-sm w-64"
           />
           <button

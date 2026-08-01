@@ -8,7 +8,8 @@
  *                                          名前の前方一致で一括（既定はdry-run）
  *
  * 【背景】
- * エミナルクリニックは122店舗あるが全店とも順位計測しない。
+ * エミナル系列は122店舗（エミナルクリニック59 + メンズエミナル63）あるが
+ * 全店とも順位計測しない。
  * 誤って「いつもの店舗」に追加され一括計測が走ると、
  * 1店舗あたり5地点×キーワード数の課金が122件分発生する。
  * 一覧のフィルタだけでは事故を防げないため、フラグで構造的に止める。
@@ -58,13 +59,17 @@ export const POST = withAudit("順位計測対象の変更", "DATA_OP", async (r
   const disabled = body.disabled === true;
   const supabase = getSupabase();
 
-  // ── 名前の前方一致で一括設定（エミナル122件のようなケース）──
-  if (typeof body.namePrefix === "string" && body.namePrefix.trim()) {
-    const prefix = normalizeShopName(body.namePrefix);
-    if (prefix.length < 3) {
+  // ── 名前に含む文字列で一括設定 ──
+  // 前方一致だと系列違いを取りこぼす。実データでは「エミナルクリニック」59件と
+  // 「メンズエミナル」63件が別系列で存在し、前方一致では片方しか当たらない。
+  // そのため部分一致にし、代わりに3文字以上必須＋dry-run必須で誤爆を防ぐ。
+  const nameQuery = typeof body.namePrefix === "string" ? body.namePrefix : body.nameContains;
+  if (typeof nameQuery === "string" && nameQuery.trim()) {
+    const needle = normalizeShopName(nameQuery);
+    if (needle.length < 3) {
       // 短すぎる指定は巻き込み事故になる
       return NextResponse.json(
-        { error: "namePrefix は3文字以上を指定してください" },
+        { error: "対象の文字列は3文字以上を指定してください" },
         { status: 400 },
       );
     }
@@ -86,11 +91,11 @@ export const POST = withAudit("順位計測対象の変更", "DATA_OP", async (r
     }
 
     const targets = all.filter(
-      (s) => normalizeShopName(s.name).startsWith(prefix) && s.rank_tracking_disabled !== disabled,
+      (s) => normalizeShopName(s.name).includes(needle) && s.rank_tracking_disabled !== disabled,
     );
 
     if (body.apply !== true) {
-      ctx.detail = `dry-run: 「${body.namePrefix}」で${targets.length}件が対象`;
+      ctx.detail = `dry-run: 「${nameQuery}」で${targets.length}件が対象`;
       return NextResponse.json({
         dryRun: true,
         matched: targets.length,
@@ -114,7 +119,7 @@ export const POST = withAudit("順位計測対象の変更", "DATA_OP", async (r
       }
     }
 
-    ctx.detail = `「${body.namePrefix}」の${updated}件を順位計測${disabled ? "対象外" : "対象"}に変更`;
+    ctx.detail = `「${nameQuery}」の${updated}件を順位計測${disabled ? "対象外" : "対象"}に変更`;
     return NextResponse.json({ dryRun: false, updated, failed });
   }
 

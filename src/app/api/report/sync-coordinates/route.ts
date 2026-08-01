@@ -142,6 +142,12 @@ export const POST = withAudit("座標一括同期", "PAID_OP", async (request, c
     .from("shops")
     .select("id, name, gbp_location_name, gbp_latitude, gbp_longitude, gbp_shop_name, state, city, address, full_address");
 
+  // 一括実行時は順位計測の対象外店舗を除く（座標取得もPlaces APIの課金対象のため）。
+  // 個別指定（targetShopId/targetShopName）のときは意図した操作なので除外しない
+  if (!targetShopId && !targetShopName) {
+    query = query.eq("rank_tracking_disabled", false);
+  }
+
   if (targetShopId) {
     query = query.eq("id", targetShopId);
   } else if (targetShopName) {

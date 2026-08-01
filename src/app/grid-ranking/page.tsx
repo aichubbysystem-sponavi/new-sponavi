@@ -152,6 +152,7 @@ export default function GridRankingPage() {
 
   // 全店舗パネル
   const [showAllShopsPanel, setShowAllShopsPanel] = useState(false);
+  const [rankDisabledIds, setRankDisabledIds] = useState<Set<string>>(new Set());
   const [allShopsBatchRunning, setAllShopsBatchRunning] = useState(false);
   const [allShopsBatchProgress, setAllShopsBatchProgress] = useState("");
   const [allShopsCoordSyncing, setAllShopsCoordSyncing] = useState(false);
@@ -192,6 +193,17 @@ export default function GridRankingPage() {
   }, []);
 
   useEffect(() => { refreshPresets(); }, [refreshPresets]);
+
+  // 順位計測の対象外店舗（エミナル等）。全店舗計測の対象から必ず除く。
+  // 除かないと、対象外店舗ぶんの座標取得・KW取得・実測が走って課金が発生する
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await api.get("/api/report/rank-tracking");
+        setRankDisabledIds(new Set(((res.data?.shops || []) as { id: string }[]).map((s) => s.id)));
+      } catch {}
+    })();
+  }, []);
 
   // KW未取得一覧 + ステータスサマリーの読み込み
   const refreshKwMissing = useCallback(async () => {
@@ -1083,18 +1095,24 @@ export default function GridRankingPage() {
           </button>
           {(() => {
             const presetIds = new Set(presets.map(p => p.shop_id));
-            const remaining = (shops || []).filter(s => !presetIds.has(s.id));
+            const remaining = (shops || []).filter(s => !presetIds.has(s.id) && !rankDisabledIds.has(s.id));
             return <span className="text-xs text-slate-500">{remaining.length}店舗</span>;
           })()}
         </div>
 
         {showAllShopsPanel && (() => {
           const presetIds = new Set(presets.map(p => p.shop_id));
-          const allShopsFiltered = (shops || []).filter(s => !presetIds.has(s.id));
+          // 順位計測の対象外（エミナル等）も必ず除く。ここを除かないと
+          // 対象外店舗ぶんの座標取得・KW取得・実測が走って課金が発生する
+          const allShopsFiltered = (shops || []).filter(s => !presetIds.has(s.id) && !rankDisabledIds.has(s.id));
 
           return (
             <div className="space-y-3">
-              <p className="text-xs text-slate-500">いつもの店舗（{presets.length}件）を除く全{allShopsFiltered.length}店舗に対して座標取得・KW取得・計測を実行します。</p>
+              <p className="text-xs text-slate-500">
+                いつもの店舗（{presets.length}件）
+                {rankDisabledIds.size > 0 && <>と計測対象外（{rankDisabledIds.size}件）</>}
+                を除く全{allShopsFiltered.length}店舗に対して座標取得・KW取得・計測を実行します。
+              </p>
 
               {/* ボタン群 */}
               <div className="flex gap-2 flex-wrap">
