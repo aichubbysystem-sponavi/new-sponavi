@@ -77,7 +77,15 @@ SPOTLIGHT NAVIGATOR 超重要ナレッジ
 - レポート: report.new-spotlight-navigator.com（同じNext.jsアプリ、ミドルウェアでルーティング）
 - Go API: Cloud Run → spotlight-api-114449938952.asia-northeast1.run.app
 - DB: Supabase (kxxwspavskhhjtiixcep) → 北東アジア（東京）
-- Cron手動実行: curl -H "Authorization: Bearer chubby-cron-secret-20261204" https://new-spotlight-navigator.com/api/cron/sync-shops
+- Cron手動実行: curl -H "Authorization: Bearer $CRON_SECRET" https://new-spotlight-navigator.com/api/cron/sync-shops
+  ※CRON_SECRETの実値はVercel環境変数から取得すること。このファイルはGit追跡対象なので値を書かない。
+
+## 秘密情報の取り扱い（絶対ルール）
+- このファイルとログ/配下はGit追跡対象＝GitHubにpushされる。秘密情報を書かないこと
+- 書いてよい: URL、プロジェクトID、テーブル名、環境変数「名」
+- 書いてはいけない: トークン、シークレット、client_secret、refresh_token、パスワード（断片も不可）
+- 手順を残す時は必ず $ENV_NAME のプレースホルダーで書く
+- 誤って書いた場合: 値をローテーションする（履歴からの削除だけでは漏れた値は無効化されない）
 
 ## 未解決の既知問題
 - [ ] 七宝麻辣湯（チーパオマーラータン）札幌大通店: sync-coordinatesで座標取得不可（Supabaseに同期済みだが名前検索で不一致、要DB直接確認）

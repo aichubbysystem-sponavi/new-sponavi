@@ -4,6 +4,8 @@
  * 月別タブ(YYYYMM): A=順位, B/C=店舗1(KW/検索数), D/E=店舗2...
  */
 
+import { compareMonths } from "./month-utils";
+
 const SHEET_ID = "1tTpqYjGju0txvr6p5E--NSEzbNmysSIodCxcSGQyeW0";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 
@@ -26,7 +28,7 @@ async function getMonthlyTabs(): Promise<Map<string, string>> {
 
   try {
     const res = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/htmlview`, {
-      headers: { "User-Agent": UA }, redirect: "follow",
+      cache: "no-store", headers: { "User-Agent": UA }, redirect: "follow",
     });
     if (!res.ok) return new Map();
     const html = await res.text();
@@ -155,7 +157,9 @@ export async function fetchSearchQueries(shopName: string): Promise<SearchQueryD
     for (const r of results) { if (r) months.push(r); }
   }
 
-  months.sort((a, b) => a.month.localeCompare(b.month));
+  // 月は必ず数値比較する。localeCompare だと "2026/10" < "2026/9" となり
+  // 10〜12月が最新月として選ばれず、latestMonth が9月に固定される
+  months.sort((a, b) => compareMonths(a.month, b.month));
   const latestMonth = months.length > 0 ? months[months.length - 1] : null;
 
   return {

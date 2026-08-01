@@ -172,11 +172,15 @@ export async function getGbpDataForShop(
   shopName: string,
   targetMonth?: string
 ): Promise<PmaxGbpRow[]> {
-  const allRows = await fetchAllRows();
   const normalizedShop = normShopName(shopName);
+  // 空文字ガード必須: normShopName が空になると includes("") が全行 true になり、
+  // 全店舗×全月のGBP行を返してしまう（shopName はクエリ経由で外部から来る）
+  if (!normalizedShop) return [];
 
+  const allRows = await fetchAllRows();
   return allRows.filter((row) => {
     const normalizedRow = normShopName(row.shopName);
+    if (!normalizedRow) return false;
     const nameMatch = normalizedRow.includes(normalizedShop) || normalizedShop.includes(normalizedRow);
     if (targetMonth) {
       return nameMatch && row.month === targetMonth;

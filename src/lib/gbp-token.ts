@@ -17,8 +17,11 @@ const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
 async function getTokenFromGoApi(): Promise<string | null> {
   if (!GO_API_URL) return null;
   try {
+    // cache:"no-store" 必須。Next.js 14 のサーバーfetchは既定でレスポンスをキャッシュするため、
+    // これが無いと期限切れのアクセストークンが返り続けGBP APIが全て401になる
     const res = await fetch(`${GO_API_URL}/api/google/token`, {
       signal: AbortSignal.timeout(20000),
+      cache: "no-store",
     });
     if (!res.ok) {
       console.log(`[gbp-token] Go API /token: HTTP ${res.status}`);
@@ -196,6 +199,9 @@ export async function callGbpApi(
   try {
     const res = await fetch(url, {
       method,
+      // GETでもキャッシュしない: 口コミ・投稿の一覧が古いまま返ると
+      // 「同期したのに反映されない」という再現しづらい不具合になる
+      cache: "no-store",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,

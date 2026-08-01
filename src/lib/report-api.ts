@@ -450,6 +450,10 @@ export async function getReportData(
           cached.comments = stored.comments;
           cached.pageComments = stored.pageComments || null;
           cached.analysisTargetMonth = stored.targetMonth || null;
+          // 分析時点も必ず差し替える。これが無いと、総評だけ最新に入れ替わったのに
+          // 日付はキャッシュ書き込み時の古い値（または未設定で非表示）のままになり、
+          // 表示中の総評と日付が食い違う。配信の主経路はこちら側
+          cached.analysisDate = stored.analyzedAt || null;
         }
       } catch {}
       // 口コミ競合比較: 当月ならDB→無ければ取得保存(¥4.8・月1回)、過去月はDB読みのみ

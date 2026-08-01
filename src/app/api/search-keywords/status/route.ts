@@ -4,7 +4,7 @@
  * v2: JST固定 / 最新月のみ取得 / 数値月比較
  */
 import { NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, verifyAuth, getUserAllowedShops } from "@/lib/supabase";
 import { getExpectedMonthJST, compareMonths } from "@/lib/gbp-search-keywords";
 
 export const dynamic = "force-dynamic";
@@ -49,10 +49,21 @@ export async function GET(request: Request) {
   const allShopsRaw = await fetchAll<{ id: string; name: string; gbp_location_name: string | null; cancelled_at: string | null }>(
     supabase, "shops", "id, name, gbp_location_name, cancelled_at", "name", true
   );
-  const allShops = allShopsRaw.filter(s => !s.cancelled_at);
+  // 閲覧権限のある店舗のみに絞る（バイトは割当店舗のみ）。
+  // これが無いと、認証さえ通れば全クライアントの店舗名・検索語句が読める。
+  const allowed = await getUserAllowedShops(auth.sub!);
+  const normName = (s: string) => (s || "").normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
+  const allowedSet = allowed === "all" ? null : new Set(allowed.map(normName));
+
+  const allShops = allShopsRaw
+    .filter(s => !s.cancelled_at)
+    .filter(s => !allowedSet || allowedSet.has(normName(s.name)));
 
   if (allShops.length === 0) {
-    return NextResponse.json({ error: "No shops found" }, { status: 500 });
+    // 権限のある店舗が無い場合は空配列（エラーではない）
+    return NextResponse.json(allowedSet ? { shops: [], expectedMonth } : { error: "No shops found" }, {
+      status: allowedSet ? 200 : 500,
+    });
   }
 
   // 2. 最新月のキャッシュのみ取得（keywordsはTOP3分だけ必要なので全件は不要）

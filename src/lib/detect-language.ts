@@ -9,22 +9,55 @@ interface LangRule {
   pattern: RegExp;
 }
 
-const LANG_RULES: LangRule[] = [
-  { lang: "日本語", country: "日本", pattern: /[\u3040-\u309F\u30A0-\u30FF]/ },           // ひらがな・カタカナ
-  { lang: "韓国語", country: "韓国", pattern: /[\uAC00-\uD7AF\u1100-\u11FF]/ },           // ハングル
-  { lang: "中国語（簡体）", country: "中国", pattern: /[\u4E00-\u9FFF]/ },                  // CJK統合漢字（日本語がない場合のみ）
-  { lang: "タイ語", country: "タイ", pattern: /[\u0E00-\u0E7F]/ },
-  { lang: "ベトナム語", country: "ベトナム", pattern: /[ăâđêôơưĂÂĐÊÔƠƯ]/ },
-  { lang: "ロシア語", country: "ロシア", pattern: /[\u0400-\u04FF]/ },
-  { lang: "アラビア語", country: "中東", pattern: /[\u0600-\u06FF\u0750-\u077F]/ },
-  { lang: "ヒンディー語", country: "インド", pattern: /[\u0900-\u097F]/ },
-  { lang: "インドネシア語", country: "インドネシア", pattern: /\b(dan|dengan|yang|untuk|dari|ini|itu|tidak|sangat|saya)\b/i },
-  { lang: "フランス語", country: "フランス", pattern: /\b(très|beaucoup|c'est|merci|avec|mais|pour|dans|sont|nous)\b/i },
-  { lang: "ドイツ語", country: "ドイツ", pattern: /\b(und|ist|nicht|sehr|aber|auch|das|die|der|ein|eine|wir)\b/i },
-  { lang: "スペイン語", country: "スペイン", pattern: /\b(muy|pero|con|para|que|los|las|una|este|esta|más)\b/i },
-  { lang: "ポルトガル語", country: "ブラジル", pattern: /\b(muito|mas|com|para|não|são|uma|este|esta|mais)\b/i },
-  { lang: "イタリア語", country: "イタリア", pattern: /\b(molto|buono|grazie|questo|questa|sono|bene|tutto|anche)\b/i },
+/**
+ * 【重要】規則は2区画に分かれており、判定方法が異なる。混ぜてはいけない。
+ * - SCRIPT_RULES: 文字種で一意に決まる規則。1文字でもマッチすれば確定してよい。
+ * - WORD_RULES:   ラテン文字圏の単語ベース規則。英語と綴りが衝突する単語
+ *                 （"die"(独) / 人名 "Dan"(尼) / "con"(西) / "sono"(伊) 等）を含むため、
+ *                 1語のマッチで確定してはいけない（2語以上を要求する）。
+ *
+ * 以前は両区画を1つのループで単発マッチ判定しており、
+ * "Dan was very helpful" がインドネシア語、"die-hard fans" がドイツ語に化けていた。
+ * 口コミ言語比率レポート・AI総評・CSV出力の全てがこの判定に依存している。
+ */
+const SCRIPT_RULES: LangRule[] = [
+  { lang: "日本語", country: "日本", pattern: /[぀-ゟ゠-ヿ]/ },           // ひらがな・カタカナ
+  { lang: "韓国語", country: "韓国", pattern: /[가-힯ᄀ-ᇿ]/ },           // ハングル
+  { lang: "中国語（簡体）", country: "中国", pattern: /[一-鿿]/ },                  // CJK統合漢字（日本語がない場合のみ）
+  { lang: "タイ語", country: "タイ", pattern: /[฀-๿]/ },
+  // â/ê/ô はフランス語・ポルトガル語にも現れるため使わない（"être" "você" が
+  // ベトナム語に化ける）。ベトナム語固有の ă đ ơ ư のみで判定する
+  { lang: "ベトナム語", country: "ベトナム", pattern: /[ăđơưĂĐƠƯ]/ },
+  { lang: "ロシア語", country: "ロシア", pattern: /[Ѐ-ӿ]/ },
+  { lang: "アラビア語", country: "中東", pattern: /[؀-ۿݐ-ݿ]/ },
+  { lang: "ヒンディー語", country: "インド", pattern: /[ऀ-ॿ]/ },
 ];
+
+/**
+ * 単語ベース規則。
+ * 件数を数えるため必ず /g を付けること。/g が無いと match() の戻り値が
+ * [全体, キャプチャ] となり長さが常に2になるため、「2語以上」の判定が素通しになる。
+ */
+const WORD_RULES: LangRule[] = [
+  { lang: "インドネシア語", country: "インドネシア", pattern: /\b(dan|dengan|yang|untuk|dari|ini|itu|tidak|sangat|saya)\b/gi },
+  { lang: "フランス語", country: "フランス", pattern: /\b(très|beaucoup|c'est|merci|avec|mais|pour|dans|sont|nous)\b/gi },
+  { lang: "ドイツ語", country: "ドイツ", pattern: /\b(und|ist|nicht|sehr|aber|auch|das|die|der|ein|eine|wir)\b/gi },
+  { lang: "スペイン語", country: "スペイン", pattern: /\b(muy|pero|con|para|que|los|las|una|este|esta|más)\b/gi },
+  { lang: "ポルトガル語", country: "ブラジル", pattern: /\b(muito|mas|com|para|não|são|uma|este|esta|mais)\b/gi },
+  { lang: "イタリア語", country: "イタリア", pattern: /\b(molto|buono|grazie|questo|questa|sono|bene|tutto|anche)\b/gi },
+];
+
+// SCRIPT_RULES 内の位置
+const RULE_JA = 0;
+const RULE_KO = 1;
+const RULE_ZH = 2;
+const RULE_NON_LATIN_START = 3; // タイ語以降（漢字判定は中国語として最後に回すため除く）
+
+/** 単語ベース規則にいくつマッチしたか（/g 前提。lastIndex を汚さないよう match を使う） */
+function countWordMatches(text: string, pattern: RegExp): number {
+  const m = text.match(pattern);
+  return m ? m.length : 0;
+}
 
 export interface LangDetectResult {
   lang: string;
@@ -51,26 +84,29 @@ export function detectLanguage(text: string | null | undefined): LangDetectResul
   if (!cleaned) return { lang: "不明", country: "不明" };
 
   // 日本語チェック（ひらがな・カタカナが1文字でもあれば日本語）
-  if (LANG_RULES[0].pattern.test(cleaned)) return { lang: "日本語", country: "日本" };
+  if (SCRIPT_RULES[RULE_JA].pattern.test(cleaned)) return { lang: "日本語", country: "日本" };
 
   // 韓国語チェック
-  if (LANG_RULES[1].pattern.test(cleaned)) return { lang: "韓国語", country: "韓国" };
+  if (SCRIPT_RULES[RULE_KO].pattern.test(cleaned)) return { lang: "韓国語", country: "韓国" };
 
-  // 非ラテン文字系チェック（タイ語、ロシア語、アラビア語、ヒンディー語）
-  for (let i = 3; i < LANG_RULES.length; i++) {
-    const rule = LANG_RULES[i];
+  // 非ラテン文字系チェック（タイ語、ベトナム語、ロシア語、アラビア語、ヒンディー語）
+  // ※ここに単語ベース規則を混ぜないこと（英語が外国語に化ける）
+  for (let i = RULE_NON_LATIN_START; i < SCRIPT_RULES.length; i++) {
+    const rule = SCRIPT_RULES[i];
     if (rule.pattern.test(cleaned)) return { lang: rule.lang, country: rule.country };
   }
 
   // CJK漢字のみ（日本語文字なし）→ 中国語
-  if (LANG_RULES[2].pattern.test(cleaned)) return { lang: "中国語（簡体）", country: "中国" };
+  if (SCRIPT_RULES[RULE_ZH].pattern.test(cleaned)) return { lang: "中国語（簡体）", country: "中国" };
 
-  // ラテン文字系の単語ベース判定
-  for (let i = 8; i < LANG_RULES.length; i++) {
-    const rule = LANG_RULES[i];
-    const matches = cleaned.match(rule.pattern);
-    if (matches && matches.length >= 2) return { lang: rule.lang, country: rule.country };
+  // ラテン文字系の単語ベース判定。
+  // 単語1つの一致は英語との綴り衝突が多いため、最も多くマッチした言語を2語以上で採用する
+  let best: { rule: LangRule; count: number } | null = null;
+  for (const rule of WORD_RULES) {
+    const count = countWordMatches(cleaned, rule.pattern);
+    if (count >= 2 && (!best || count > best.count)) best = { rule, count };
   }
+  if (best) return { lang: best.rule.lang, country: best.rule.country };
 
   // ラテン文字が主体なら英語、それ以外は不明
   if (/[a-zA-Z]/.test(cleaned)) return { lang: "英語", country: "英語圏" };
