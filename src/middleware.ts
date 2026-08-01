@@ -65,6 +65,9 @@ const PROXY_GUARD_MODE = process.env.PROXY_GUARD_MODE || "log";
 // 「承認待ち」画面を出すために自分のロールだけは取得できる必要がある。
 const PENDING_ALLOWED_PATHS = ["/api/report/my-role"];
 
+/** 遮断対象の未承認ロール。これ以外の未知ロールは締め出さない（誤ロックアウト防止） */
+const UNAPPROVED_ROLE = "pending";
+
 // ロールの短期キャッシュ（edge環境のモジュールスコープ。TTL 60秒）
 const roleCache = new Map<string, { role: AppRole; name: string; expiresAt: number }>();
 // 未承認(pending)判定の短期キャッシュ。承認直後に最大60秒ブロックが残らないよう短めにする
@@ -126,8 +129,11 @@ async function fetchUserRole(token: string, sub: string): Promise<ProfileLookup>
         roleCache.set(sub, { ...result, expiresAt: Date.now() + 60_000 });
         return { status: "ok", ...result };
       }
-      // pending 等、AppRole に含まれないロール = 未承認
-      sawUnapproved = true;
+      // 遮断するのは "pending"（承認待ち）だけに限定する。
+      // 「AppRoleでない値は全部ブロック」にすると、DBに想定外のロール文字列が
+      // 1件でも残っていた場合にそのユーザーが全APIから締め出される。
+      // pending以外の未知ロールは通し、各ルートのrequireRole等の判断に委ねる
+      if (row.role === UNAPPROVED_ROLE) sawUnapproved = true;
     }
   }
   if (sawUnapproved) {
