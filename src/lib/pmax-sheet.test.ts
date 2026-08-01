@@ -6,6 +6,12 @@ describe("normShopName", () => {
     expect(normShopName("ＣＨＩＬＬ　RI 堀江")).toBe("chillri堀江");
     expect(normShopName("  Cafe  Bar  ")).toBe("cafebar");
   });
+
+  // getGbpDataForShop はこの結果が空文字なら即 [] を返す実装になっている。
+  // 空文字を includes に渡すと全行 true になり、全店舗のGBPデータを返してしまうため
+  it.each(["", " ", "　", "   　  "])("空白のみ（%s）は空文字になる＝呼び出し側の空ガードが必要", (input) => {
+    expect(normShopName(input)).toBe("");
+  });
 });
 
 describe("pickGbpMatch", () => {

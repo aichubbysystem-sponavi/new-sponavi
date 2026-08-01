@@ -7,7 +7,7 @@
  * 解約店舗IDリストを返す
  */
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, verifyAuth, getUserAllowedShops } from "@/lib/supabase";
 import { withAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
   const supabase = getSupabase();
   const { data, error } = await supabase
@@ -25,7 +25,15 @@ export async function GET(request: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  return NextResponse.json({ cancelled: data || [] });
+  // 閲覧権限のある店舗のみ返す（バイトは割当店舗のみ）
+  const allowed = await getUserAllowedShops(auth.sub);
+  if (allowed === "all") return NextResponse.json({ cancelled: data || [] });
+
+  const normName = (s: string) => (s || "").normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
+  const allowedSet = new Set(allowed.map(normName));
+  return NextResponse.json({
+    cancelled: (data || []).filter((s: { name: string }) => allowedSet.has(normName(s.name))),
+  });
 }
 
 export const POST = withAudit("店舗解約フラグ切替", "DATA_OP", async (request, ctx) => {

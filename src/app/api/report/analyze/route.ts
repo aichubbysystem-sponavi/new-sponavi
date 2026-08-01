@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { withAudit, requireCtxShopAccess } from "@/lib/audit";
 import { normalizeKw } from "@/lib/keyword-normalize";
-import { centerCell } from "@/lib/report-utils";
+import { centerCell, isYoyComparable } from "@/lib/report-utils";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -670,7 +670,15 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
 
           // chartsから対象月のKPIを再構成
           const targetIdx0 = curMonth ? perfLabels.indexOf(curMonth) : perfLabels.length - 1;
-          const effectiveKpis = (() => {
+          // 前年比は表示側（P1カード）と同じ条件でのみAIに渡す。
+          // これが無いと、カードは「前年比なし（前年データが不完全）」なのに
+          // AI総評だけが「+3989.4%の大幅増」と書く（2026-08-01 CHILLRI堀江店で発覚した型）。
+          const shopStartDate = (report.shop as any)?.startDate as string | undefined;
+          const gateYoy = (list: any[]) =>
+            (list || []).map((k: any) =>
+              isYoyComparable(k?.yoyValue, curMonth, shopStartDate) ? k : { ...k, yoyValue: null },
+            );
+          const effectiveKpis = gateYoy((() => {
             if (targetIdx0 < 0) return kpis;
             const c = perfCharts;
             const ci = targetIdx0;
@@ -684,7 +692,7 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
               { label: "通話", value: v(c.calls, ci), momValue: pi >= 0 ? v(c.calls, pi) : null, yoyValue: ci >= 12 ? v(c.calls, ci - 12) : null, unit: "件" },
               { label: "フードメニュークリック", value: v(c.foodMenus, ci), momValue: pi >= 0 ? v(c.foodMenus, pi) : null, yoyValue: ci >= 12 ? v(c.foodMenus, ci - 12) : null, unit: "件" },
             ];
-          })();
+          })());
 
           if (effectiveKpis.length > 0) {
             hasKpiData = true;
@@ -934,12 +942,17 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
                 // （2026-07-31 Queency: 未計測の2026/5を圏外と断定するコメントが生成された）。
                 // 判定材料: シートの明示的な「圏外」記録(outOfRange) + グリッド計測があった月
                 const gridMeasured = new Map<string, Set<string>>(); // 正規化KW -> 計測があった月
+                // 正規化KW|月 -> グリッド中心順位。シートが空の月でもここに順位があれば
+                // 「圏外」ではなくその順位を渡す（P6/P7の合成順序と揃える）
+                const gridRankAt = new Map<string, number>();
                 for (const h of gridRanking?.history || []) {
                   for (const s of h.snapshots || []) {
                     if (Array.isArray(s.results) && s.results.length > 0) {
                       const k = normalizeKw(s.keyword);
                       if (!gridMeasured.has(k)) gridMeasured.set(k, new Set());
                       gridMeasured.get(k)!.add(h.month);
+                      const center = centerCell(s.results as any[], s.gridSize);
+                      if (center?.rank && center.rank > 0) gridRankAt.set(`${k}|${h.month}`, center.rank);
                     }
                   }
                 }
@@ -948,12 +961,22 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
                   // 順位推移ページ: 既定 = 系列にデータがあれば表示（client.tsx visibleRankingDatasets と同条件）
                   if (kwVisSetting(ds.word) === false) continue;
                   const ranks = ds.ranks.slice(startIdx, endIdx + 1);
-                  if (!ranks.some((r: number | null) => r !== null && r > 0)) continue;
+                  const kwKey = normalizeKw(ds.word);
+                  const gridRankFor = (l: string) => gridRankAt.get(`${kwKey}|${l}`) || 0;
+                  // シート側に順位が無くてもグリッド計測で順位が付いていれば系列として有効
+                  const hasAnyRank =
+                    ranks.some((r: number | null) => r !== null && r > 0) ||
+                    lbls.some((l: string) => gridRankFor(l) > 0);
+                  if (!hasAnyRank) continue;
                   const oor: boolean[] | undefined = (ds as any).outOfRange?.slice(startIdx, endIdx + 1);
-                  const gm = gridMeasured.get(normalizeKw(ds.word));
+                  const gm = gridMeasured.get(kwKey);
                   const cell = (l: string, i: number) => {
                     const r = ranks[i];
                     if (r && r > 0) return `${r}位`;
+                    // シートが空でもグリッドで順位が取れていればそれを使う。
+                    // これが無いと表示は「1位」なのにAIには「圏外」と渡り、総評が真逆になる
+                    const g = gridRankFor(l);
+                    if (g > 0) return `${g}位`;
                     return (oor?.[i] === true || gm?.has(l)) ? "圏外" : "未計測";
                   };
                   lines.push(`\n${ds.word}: ${lbls.map((l: string, i: number) => `${l}=${cell(l, i)}`).join(" → ")}`);

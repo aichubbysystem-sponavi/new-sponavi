@@ -17,12 +17,9 @@ export interface MonthlyKeywords {
   keywords: { word: string; count: number }[];
 }
 
-/** "YYYY/M" 形式の月文字列を数値比較（localeCompareでは10月以降が壊れるため） */
-export function compareMonths(a: string, b: string): number {
-  const [ay, am] = a.split("/").map(Number);
-  const [by, bm] = b.split("/").map(Number);
-  return ay !== by ? ay - by : am - bm;
-}
+// 月比較の実装は month-utils.ts が単一情報源（localeCompareでは10月以降が壊れる）
+export { compareMonths } from "./month-utils";
+import { compareMonths } from "./month-utils";
 
 /** JST基準で前月を "YYYY/M" 形式で返す（Vercel=UTCでも正しく動作） */
 export function getExpectedMonthJST(): string {

@@ -15,6 +15,7 @@ import type {
   ReviewAnalysis,
 } from "./report-data";
 import { getSupabase } from "@/lib/supabase";
+import { compareMonths } from "@/lib/month-utils";
 
 // ── スプレッドシート設定 ──
 
@@ -518,7 +519,8 @@ async function fetchAllExternalData(
                     }
                   }
                 }
-                history.sort((a, b) => a.month.localeCompare(b.month));
+                // 月は数値比較（localeCompare だと10〜12月が9月より前に並ぶ）
+                history.sort((a, b) => compareMonths(a.month, b.month));
               }
             } catch {}
           }
@@ -901,7 +903,7 @@ export async function getShopsFromSpreadsheet(): Promise<ShopListItem[] | null> 
           try {
             const res = await fetch(
               `https://docs.google.com/spreadsheets/d/${SHEET2_KW_ID}/gviz/tq?tqx=out:csv&gid=${gid}&range=A1`,
-              { headers: { "User-Agent": "Mozilla/5.0" }, redirect: "follow", signal: AbortSignal.timeout(10000) }
+              { cache: "no-store", headers: { "User-Agent": "Mozilla/5.0" }, redirect: "follow", signal: AbortSignal.timeout(10000) }
             );
             if (!res.ok) return null;
             const text = await res.text();

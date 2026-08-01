@@ -6,6 +6,9 @@ import { validateBody, userCreateSchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
 
+/** 承認待ちアカウントのBAN期間（承認時に "none" で解除する。実質的な無期限） */
+const PENDING_BAN_DURATION = "876000h";
+
 /**
  * GET /api/report/users — ユーザー一覧取得（社長のみ）
  */
@@ -78,10 +81,15 @@ export async function PUT(request: NextRequest) {
   }
 
   // Supabase Authにユーザー作成
+  // ban_duration: 承認されるまでサインイン自体を成立させない。
+  //   これが無いと、申請者は自分で決めたパスワードで即ログインでき、
+  //   role=pending のまま verifyAuth を通過してしまう（承認フローの意味が消える）。
+  //   PATCH action=approve で "none" にして解除する。
   const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
     email,
     password,
     email_confirm: true,
+    ban_duration: PENDING_BAN_DURATION,
     user_metadata: { name, role: "pending" },
   });
 
@@ -146,10 +154,19 @@ export const PATCH = withAudit("ユーザー管理", "ADMIN", async (request, ct
     const newName = name || target.name;
     // user_profiles更新
     await supabase.from("user_profiles").update({ role: newRole, name: newName }).eq("id", userId);
-    // Supabase Auth metadata更新
-    await supabase.auth.admin.updateUserById(userId, {
+    // Supabase Auth metadata更新 + 申請時のBANを解除（これでサインイン可能になる）
+    const { error: unbanError } = await supabase.auth.admin.updateUserById(userId, {
+      ban_duration: "none",
       user_metadata: { name: newName, role: newRole },
     });
+    if (unbanError) {
+      // BAN解除に失敗したまま成功を返すと「承認済みなのにログインできない」状態になる
+      console.error("[users] approve unban failed:", unbanError.message);
+      return NextResponse.json(
+        { error: "承認処理に失敗しました。時間をおいて再度お試しください。" },
+        { status: 500 },
+      );
+    }
     ctx.actionOverride = "登録承認";
     ctx.detail = `${newName}（${target.username}）をロール「${newRole}」で承認`;
     return NextResponse.json({ success: true });

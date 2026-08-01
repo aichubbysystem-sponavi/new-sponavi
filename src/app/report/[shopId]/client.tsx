@@ -192,14 +192,20 @@ export default function ReportClient({
     } : data.shop.period;
 
     // rankingHistoryもフィルタ
+    // 月は必ず monthToNum で数値比較する。文字列比較だと "2026/10" <= "2026/9" が true になり、
+    // 10月以降にフィルタ結果が非連続になって ranks と月の対応がずれる
+    const targetMonthNum = monthToNum(targetMonth);
+    const keepLabelCount = data.rankingHistory
+      ? data.rankingHistory.labels.filter(l => monthToNum(l) <= targetMonthNum).length
+      : 0;
     const newRankingHistory = data.rankingHistory ? {
       ...data.rankingHistory,
-      labels: data.rankingHistory.labels.filter(l => l <= targetMonth),
+      labels: data.rankingHistory.labels.filter(l => monthToNum(l) <= targetMonthNum),
       datasets: data.rankingHistory.datasets.map(ds => ({
         ...ds,
-        ranks: ds.ranks.slice(0, data.rankingHistory.labels.filter(l => l <= targetMonth).length),
+        ranks: ds.ranks.slice(0, keepLabelCount),
         // ranksと同じ長さに揃えないと月とのインデックス対応がずれる
-        outOfRange: ds.outOfRange?.slice(0, data.rankingHistory.labels.filter(l => l <= targetMonth).length),
+        outOfRange: ds.outOfRange?.slice(0, keepLabelCount),
       })),
     } : data.rankingHistory;
 
@@ -238,9 +244,9 @@ export default function ReportClient({
     // searchQueriesもフィルタ
     const newSearchQueries = data.searchQueries ? {
       ...data.searchQueries,
-      history: data.searchQueries.history.filter(h => h.month <= targetMonth),
+      history: data.searchQueries.history.filter(h => monthToNum(h.month) <= targetMonthNum),
       latest: (() => {
-        const filtered = data.searchQueries.history.filter(h => h.month <= targetMonth);
+        const filtered = data.searchQueries.history.filter(h => monthToNum(h.month) <= targetMonthNum);
         return filtered.length > 0 ? filtered[filtered.length - 1].keywords.slice(0, 30) : data.searchQueries.latest;
       })(),
       latestMonth: targetMonth,

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase, verifyAuth } from "@/lib/supabase";
+import { getSupabase, verifyAuth, getUserAllowedShops } from "@/lib/supabase";
 import { withAudit, requireCtxShopAccess } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
@@ -12,14 +12,23 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: NextRequest) {
   const auth = await verifyAuth(request.headers.get("authorization"));
-  if (!auth.valid) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  if (!auth.valid || !auth.sub) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
 
   const supabase = getSupabase();
-  const { data, error } = await supabase
+  const { data: allPresets, error } = await supabase
     .from("grid_ranking_presets")
     .select("*")
     .order("created_at", { ascending: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // 閲覧権限のある店舗のみに絞る（バイトは割当店舗のみ）。
+  // 絞り込み前に返すと、全クライアントの対策キーワードと座標が漏れる。
+  const allowed = await getUserAllowedShops(auth.sub);
+  const normName = (s: string) => (s || "").normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
+  const allowedSet = allowed === "all" ? null : new Set(allowed.map(normName));
+  const data = allowedSet
+    ? (allPresets || []).filter((p: any) => allowedSet.has(normName(p.shop_name)))
+    : allPresets;
 
   // 各店舗のshop_keywordsも取得して付与
   const shopIds = (data || []).map((p: any) => p.shop_id);

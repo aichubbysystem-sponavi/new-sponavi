@@ -61,8 +61,27 @@ const ALLOWED_ORIGINS = [
 // PROXY_GUARD_MODE: "enforce"=拒否する / "log"=記録のみ（既定） / "off"=無効
 const PROXY_GUARD_MODE = process.env.PROXY_GUARD_MODE || "log";
 
+// 未承認(pending)アカウントでもアクセスを許すAPI。
+// 「承認待ち」画面を出すために自分のロールだけは取得できる必要がある。
+const PENDING_ALLOWED_PATHS = ["/api/report/my-role"];
+
 // ロールの短期キャッシュ（edge環境のモジュールスコープ。TTL 60秒）
 const roleCache = new Map<string, { role: AppRole; name: string; expiresAt: number }>();
+// 未承認(pending)判定の短期キャッシュ。承認直後に最大60秒ブロックが残らないよう短めにする
+const unapprovedCache = new Map<string, number>();
+const UNAPPROVED_TTL_MS = 15_000;
+
+/**
+ * プロフィール照会の結果。
+ * "unapproved"（pending等の未承認ロール）と "error"（PostgREST障害）を区別しないと、
+ * 障害時に全ユーザーを締め出すか、未承認を通すかのどちらかになる。
+ */
+type ProfileLookup =
+  | { status: "ok"; role: AppRole; name: string }
+  | { status: "unapproved" }
+  | { status: "notfound" }
+  | { status: "invalid" }
+  | { status: "error" };
 
 /** JWTのペイロードからsubを取り出す（署名検証はPostgREST側で行われるためここでは無検証デコード） */
 function decodeJwtSub(token: string): string | null {
@@ -79,30 +98,43 @@ function decodeJwtSub(token: string): string | null {
  * ユーザーJWTでPostgRESTからrole/nameを取得する。
  * PostgRESTがJWTの署名・期限を検証するため、不正トークンはここで空になる。
  */
-async function fetchUserRole(token: string, sub: string): Promise<{ role: AppRole; name: string } | null> {
+async function fetchUserRole(token: string, sub: string): Promise<ProfileLookup> {
   const cached = roleCache.get(sub);
-  if (cached && cached.expiresAt > Date.now()) return { role: cached.role, name: cached.name };
+  if (cached && cached.expiresAt > Date.now()) return { status: "ok", role: cached.role, name: cached.name };
+  const unapprovedUntil = unapprovedCache.get(sub);
+  if (unapprovedUntil && unapprovedUntil > Date.now()) return { status: "unapproved" };
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-  if (!supabaseUrl || !anonKey) return null;
+  if (!supabaseUrl || !anonKey) return { status: "error" };
 
   const headers = { apikey: anonKey, Authorization: `Bearer ${token}` };
+  let sawUnapproved = false;
   for (const col of ["auth_uid", "id"]) {
     const res = await fetch(
       `${supabaseUrl}/rest/v1/user_profiles?${col}=eq.${encodeURIComponent(sub)}&select=role,name&limit=1`,
       { headers, cache: "no-store" },
     );
-    if (!res.ok) return null; // 401=トークン不正 / その他=PostgREST障害
+    // 401/403 = トークン不正、それ以外の失敗 = PostgREST障害。両者で扱いを変える
+    if (res.status === 401 || res.status === 403) return { status: "invalid" };
+    if (!res.ok) return { status: "error" };
     const rows = (await res.json().catch(() => [])) as { role?: string; name?: string }[];
     const row = rows?.[0];
-    if (row?.role && isAppRole(row.role)) {
-      const result = { role: row.role, name: row.name || "不明" };
-      roleCache.set(sub, { ...result, expiresAt: Date.now() + 60_000 });
-      return result;
+    if (row?.role) {
+      if (isAppRole(row.role)) {
+        const result = { role: row.role, name: row.name || "不明" };
+        roleCache.set(sub, { ...result, expiresAt: Date.now() + 60_000 });
+        return { status: "ok", ...result };
+      }
+      // pending 等、AppRole に含まれないロール = 未承認
+      sawUnapproved = true;
     }
   }
-  return null;
+  if (sawUnapproved) {
+    unapprovedCache.set(sub, Date.now() + UNAPPROVED_TTL_MS);
+    return { status: "unapproved" };
+  }
+  return { status: "notfound" };
 }
 
 /** Goプロキシ経由の変更操作を audit_logs に記録（service_role・fire-and-forget） */
@@ -221,6 +253,37 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
     }
   }
 
+  // === 未承認(pending)アカウントの遮断 ===
+  // verifyAuth はJWTの有効性しか見ないため、承認待ちアカウントでも
+  // verifyAuth だけで守られたルートを全て通過できてしまう。ルートごとの対応漏れを
+  // 繰り返さないよう、ここで一括して塞ぐ。
+  // 方針: トークンが無いリクエストは各ルートの認証に委ねる（既存動作を変えない）。
+  //       未承認と確定した場合のみ拒否し、障害時はフェイルオープンする。
+  if (
+    pathname.startsWith("/api/") &&
+    !pathname.startsWith("/api/cron/") &&
+    !pathname.startsWith("/api/webhook/") &&
+    !PENDING_ALLOWED_PATHS.includes(pathname)
+  ) {
+    const authHeader = request.headers.get("authorization") || "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+    const sub = token ? decodeJwtSub(token) : null;
+    if (sub) {
+      let lookup: ProfileLookup;
+      try {
+        lookup = await fetchUserRole(token, sub);
+      } catch {
+        lookup = { status: "error" };
+      }
+      if (lookup.status === "unapproved") {
+        return NextResponse.json(
+          { error: "アカウントは承認待ちです。管理者の承認をお待ちください。" },
+          { status: 403 },
+        );
+      }
+    }
+  }
+
   // === Goプロキシ経路のロールガード（変更系メソッドのみ） ===
   if (
     PROXY_GUARD_MODE !== "off" &&
@@ -237,19 +300,19 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
           return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
         }
       } else {
-        let profile: { role: AppRole; name: string } | null = null;
-        let fetchFailed = false;
+        let profile: ProfileLookup;
         try {
           profile = await fetchUserRole(token, sub);
         } catch {
-          fetchFailed = true;
+          profile = { status: "error" };
         }
-        if (fetchFailed || !profile) {
-          // PostgREST障害 or トークン不正 or プロフィール無し
+        if (profile.status !== "ok") {
+          // PostgREST障害 or トークン不正 or 未承認 or プロフィール無し
           if (PROXY_GUARD_MODE === "enforce") {
+            const isServiceFailure = profile.status === "error";
             return NextResponse.json(
-              { error: fetchFailed ? "認可サービスに接続できません" : "この操作を行う権限がありません" },
-              { status: fetchFailed ? 503 : 403 },
+              { error: isServiceFailure ? "認可サービスに接続できません" : "この操作を行う権限がありません" },
+              { status: isServiceFailure ? 503 : 403 },
             );
           }
         } else {

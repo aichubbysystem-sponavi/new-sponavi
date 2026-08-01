@@ -74,11 +74,9 @@ export function pctChange(cur: number, prev: number): PctChangeResult {
   return { pct, text: isFlat ? "+0.0%" : `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`, isUp: pct >= 0, isFlat };
 }
 
-/** "2025/10" → 202510 の数値変換（月ソート・比較用） */
-export function monthToNum(m: string): number {
-  const p = m.split("/");
-  return (parseInt(p[0]) || 0) * 100 + (parseInt(p[1]) || 0);
-}
+// 月比較の実装は month-utils.ts が単一情報源（文字列比較の罠を1箇所に閉じ込めるため）
+export { monthToNum, compareMonths, normalizeMonthLabel } from "./month-utils";
+import { monthToNum } from "./month-utils";
 
 /** "2025年8月" / "2025/8" / "2025-08-01" などを "2025/8" に正規化。解釈できなければ null */
 export function parseStartMonth(s: string | null | undefined): string | null {

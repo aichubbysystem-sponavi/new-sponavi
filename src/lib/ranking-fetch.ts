@@ -41,14 +41,14 @@ async function fetchSheetCsv(sheetId: string, param: string): Promise<{ headerTe
   try {
     const headerRes = await fetch(
       `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&${param}&range=A1:AZ1`,
-      { headers: { "User-Agent": UA }, redirect: "follow" }
+      { cache: "no-store", headers: { "User-Agent": UA }, redirect: "follow" }
     );
     if (!headerRes.ok) return null;
     const headerText = await headerRes.text();
     if (headerText.includes("<!DOCTYPE") || headerText.includes("<html")) return null;
     const dataRes = await fetch(
       `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&${param}`,
-      { headers: { "User-Agent": UA }, redirect: "follow" }
+      { cache: "no-store", headers: { "User-Agent": UA }, redirect: "follow" }
     );
     if (!dataRes.ok) return null;
     return { headerText, dataText: await dataRes.text() };
@@ -312,7 +312,7 @@ async function trySheetByName(sheetId: string, tabName: string): Promise<RankEnt
     const encoded = encodeURIComponent(tabName);
     const headerRes = await fetch(
       `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encoded}&range=A1:AZ1`,
-      { headers: { "User-Agent": UA }, redirect: "follow" }
+      { cache: "no-store", headers: { "User-Agent": UA }, redirect: "follow" }
     );
     if (!headerRes.ok) return [];
     const headerText = await headerRes.text();
@@ -326,7 +326,7 @@ async function trySheetByName(sheetId: string, tabName: string): Promise<RankEnt
 
     const dataRes = await fetch(
       `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encoded}`,
-      { headers: { "User-Agent": UA }, redirect: "follow" }
+      { cache: "no-store", headers: { "User-Agent": UA }, redirect: "follow" }
     );
     if (!dataRes.ok) return [];
     const dataText = await dataRes.text();
@@ -339,7 +339,7 @@ async function trySheetByGid(sheetId: string, gid: string, shopName: string): Pr
   try {
     const headerRes = await fetch(
       `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}&range=A1:AZ1`,
-      { headers: { "User-Agent": UA }, redirect: "follow" }
+      { cache: "no-store", headers: { "User-Agent": UA }, redirect: "follow" }
     );
     if (!headerRes.ok) return [];
     const headerText = await headerRes.text();
@@ -352,7 +352,7 @@ async function trySheetByGid(sheetId: string, gid: string, shopName: string): Pr
 
     const dataRes = await fetch(
       `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}`,
-      { headers: { "User-Agent": UA }, redirect: "follow" }
+      { cache: "no-store", headers: { "User-Agent": UA }, redirect: "follow" }
     );
     if (!dataRes.ok) return [];
     const dataText = await dataRes.text();
@@ -373,7 +373,7 @@ function decodeJsEscapes(s: string): string {
 export async function fetchTabGidMap(sheetId: string): Promise<Map<string, string>> {
   if (tabMapCache && tabMapCache.sheetId === sheetId && Date.now() - tabMapCache.ts < 1800000) return tabMapCache.map;
   const res = await fetch(`https://docs.google.com/spreadsheets/d/${sheetId}/htmlview`, {
-    headers: { "User-Agent": UA }, redirect: "follow",
+    cache: "no-store", headers: { "User-Agent": UA }, redirect: "follow",
   });
   if (!res.ok) return new Map();
   const html = await res.text();
@@ -476,14 +476,14 @@ async function trySheet3ByGid(sheetId: string, gid: string, shopName: string): P
   try {
     const headerRes = await fetch(
       `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}&range=A1:AZ1`,
-      { headers: { "User-Agent": UA }, redirect: "follow" }
+      { cache: "no-store", headers: { "User-Agent": UA }, redirect: "follow" }
     );
     if (!headerRes.ok) return [];
     const headerText = await headerRes.text();
     if (headerText.includes("<!DOCTYPE") || headerText.includes("<html")) return [];
     const dataRes = await fetch(
       `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}`,
-      { headers: { "User-Agent": UA }, redirect: "follow" }
+      { cache: "no-store", headers: { "User-Agent": UA }, redirect: "follow" }
     );
     if (!dataRes.ok) return [];
     return parseRanksSheet3(headerText, await dataRes.text());
