@@ -1,0 +1,236 @@
+/**
+ * AI総評の「数値」を元データと突き合わせて検証する。
+ *
+ * 【なぜ必要か】
+ * AIに渡すデータを正しくしても、AIが文章を書く瞬間に数字を取り違えることがある。
+ * 2026-08-01 デザインフードマーケット名古屋駅店のレポートで実際に発生:
+ *   表示: 「名古屋 バル」15位 → 10位
+ *   AI  : 「名古屋 バル」が前回15位から9位へ5ランク上昇
+ * 隣の「名古屋駅 バル」の9位を引っ張っていた（キーワード名が酷似しているため）。
+ * データ側は一貫して10位で正しく、壊れていたのは生成された文章だけだった。
+ *
+ * LLMの出力はぶれるため、テストを増やしても消えない。生成後に照合して
+ * 食い違ったら出荷しない、という関門を置くのが唯一の確実な対策。
+ *
+ * 【誤検知を出さない方針】
+ * 「確実に間違いと言えるもの」だけを違反とする。判断がつかないものは通す。
+ * 総評が過去月の順位に言及するのは正当なので、そのキーワードの
+ * 全期間の順位のどれかに一致すれば正しいとみなす。
+ */
+
+import { normalizeKw } from "./keyword-normalize";
+
+export interface KeywordRankFacts {
+  /** キーワード名（表示に使われている文字列） */
+  word: string;
+  /** そのキーワードについて言及が許される順位の集合（当月・前回・推移の全月） */
+  allowedRanks: number[];
+}
+
+export interface CommentViolation {
+  /** 違反が見つかったページ（pageCommentsのキー） */
+  field: string;
+  /** 違反の種類 */
+  kind: "rank_mismatch" | "average_mismatch";
+  /** 人間が読める説明。再生成時にAIへ渡す */
+  message: string;
+}
+
+/** 全角数字を半角に寄せる */
+function toHalfWidthDigits(s: string): string {
+  return s.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
+}
+
+/**
+ * 文中のキーワード出現位置を、長いキーワード優先で検出する。
+ * 「名古屋 バル」と「名古屋駅 バル」のように一方が他方に紛らわしい場合、
+ * 短い方に誤って帰属させないため、各位置で最長一致を採る。
+ */
+function findKeywordMentions(
+  text: string,
+  facts: KeywordRankFacts[],
+): { index: number; fact: KeywordRankFacts }[] {
+  const mentions: { index: number; fact: KeywordRankFacts }[] = [];
+  // 表記ゆれを吸収するため、空白を除去した比較用の文字列を作る。
+  // 位置対応を保つため、除去した文字ぶんのオフセット表を持つ
+  const stripped: string[] = [];
+  const offsets: number[] = [];
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (/[\s　]/.test(ch)) continue;
+    stripped.push(ch);
+    offsets.push(i);
+  }
+  const flat = stripped.join("");
+
+  const normalizedFacts = facts
+    .map((f) => ({ fact: f, key: (f.word || "").replace(/[\s　]/g, "") }))
+    .filter((f) => f.key.length > 0)
+    // 長い順に試すことで最長一致にする
+    .sort((a, b) => b.key.length - a.key.length);
+
+  const taken = new Array(flat.length).fill(false);
+  for (const { fact, key } of normalizedFacts) {
+    let from = 0;
+    while (true) {
+      const at = flat.indexOf(key, from);
+      if (at < 0) break;
+      // 既に長いキーワードが占有している範囲は飛ばす
+      let overlaps = false;
+      for (let i = at; i < at + key.length; i++) if (taken[i]) { overlaps = true; break; }
+      if (!overlaps) {
+        for (let i = at; i < at + key.length; i++) taken[i] = true;
+        mentions.push({ index: offsets[at], fact });
+      }
+      from = at + 1;
+    }
+  }
+  return mentions.sort((a, b) => a.index - b.index);
+}
+
+/**
+ * 「〜位」の記述が、そのキーワードの実データに存在する順位かを検証する。
+ *
+ * 帰属ルール: ある「N位」は、その直前に登場したキーワードのものとみなす。
+ * キーワードが一度も登場しない文中の「N位」は帰属先が決められないため検証しない。
+ */
+export function validateRankMentions(
+  text: string,
+  facts: KeywordRankFacts[],
+): { rank: number; word: string }[] {
+  if (!text || facts.length === 0) return [];
+  const normalized = toHalfWidthDigits(text);
+  const mentions = findKeywordMentions(normalized, facts);
+  if (mentions.length === 0) return [];
+
+  const bad: { rank: number; word: string }[] = [];
+  const rankRe = /(\d{1,3})\s*位/g;
+  let m: RegExpExecArray | null;
+  while ((m = rankRe.exec(normalized)) !== null) {
+    const pos = m.index;
+    // 直前のキーワード出現を探す
+    let owner: KeywordRankFacts | null = null;
+    for (const mention of mentions) {
+      if (mention.index < pos) owner = mention.fact;
+      else break;
+    }
+    if (!owner) continue; // 帰属先不明 → 検証しない
+    const rank = parseInt(m[1], 10);
+    if (!Number.isFinite(rank)) continue;
+    // 「10位以内」「3位以内」のような閾値表現は実順位ではないので除外
+    const after = normalized.slice(m.index + m[0].length, m.index + m[0].length + 3);
+    if (/^以[内上下]/.test(after)) continue;
+    if (!owner.allowedRanks.includes(rank)) {
+      bad.push({ rank, word: owner.word });
+    }
+  }
+  return bad;
+}
+
+/**
+ * 「直近Nヶ月の月平均は+X件」形式の主張を検証する。
+ *
+ * 2026-08-01 に「直近6ヶ月の月平均は+4.3件」と書かれたが、
+ * 実際の直近6ヶ月は +19,+1,+1,-1,+1,+2 = 23件 → 3.8件だった。
+ * 明示的なパターンなので誤検知が起きにくく、機械的に検証できる。
+ *
+ * @param deltas 月次増減（古い順）
+ */
+export function validateMonthlyAverage(
+  text: string,
+  deltas: number[],
+): { claimed: number; actual: number; months: number }[] {
+  if (!text || deltas.length === 0) return [];
+  const normalized = toHalfWidthDigits(text);
+  const re = /直近\s*(\d{1,2})\s*[ヶかケ]?月[^。]{0,12}?月?平均[^0-9+\-]{0,8}([+\-]?\d+(?:\.\d+)?)\s*件/g;
+  const bad: { claimed: number; actual: number; months: number }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(normalized)) !== null) {
+    const months = parseInt(m[1], 10);
+    const claimed = parseFloat(m[2]);
+    if (!Number.isFinite(months) || months <= 0 || !Number.isFinite(claimed)) continue;
+    if (deltas.length < months) continue; // 期間ぶんのデータが無い → 検証しない
+    const window = deltas.slice(-months);
+    const actual = window.reduce((a, b) => a + b, 0) / months;
+    // 小数第1位までの表記ゆれを許容（3.83 と +3.8 は一致とみなす）
+    if (Math.abs(actual - claimed) > 0.15) {
+      bad.push({ claimed, actual: Math.round(actual * 10) / 10, months });
+    }
+  }
+  return bad;
+}
+
+/** pageComments 全体を検証して違反リストを返す */
+export function validatePageComments(
+  pageComments: Record<string, unknown> | null | undefined,
+  ctx: { keywordFacts: KeywordRankFacts[]; reviewDeltas: number[] },
+): CommentViolation[] {
+  if (!pageComments) return [];
+  const violations: CommentViolation[] = [];
+
+  // 順位に言及しうるページのみ対象にする（口コミ系の文中の「位」は順位ではない可能性がある）
+  const rankFields = ["keyword", "rankingHistory", "grid", "summary", "monthly"];
+  for (const field of rankFields) {
+    const v = pageComments[field];
+    if (typeof v !== "string" || !v) continue;
+    for (const b of validateRankMentions(v, ctx.keywordFacts)) {
+      violations.push({
+        field,
+        kind: "rank_mismatch",
+        message: `「${b.word}」を${b.rank}位と書いているが、そのキーワードの計測値に${b.rank}位は存在しない（実際の値: ${
+          ctx.keywordFacts.find((f) => f.word === b.word)?.allowedRanks.join("位, ") || "不明"
+        }位）`,
+      });
+    }
+  }
+
+  const deltaText = pageComments["reviewDelta"];
+  if (typeof deltaText === "string" && deltaText) {
+    for (const b of validateMonthlyAverage(deltaText, ctx.reviewDeltas)) {
+      violations.push({
+        field: "reviewDelta",
+        kind: "average_mismatch",
+        message: `直近${b.months}ヶ月の月平均を${b.claimed}件と書いているが、実際は${b.actual}件`,
+      });
+    }
+  }
+
+  return violations;
+}
+
+/** 違反内容を、再生成時にAIへ渡す修正指示文にする */
+export function buildCorrectionPrompt(violations: CommentViolation[]): string {
+  const lines = violations.map((v) => `- ${v.field}: ${v.message}`);
+  return [
+    "直前の出力に、提供データと一致しない数値が含まれていた。以下を必ず修正すること。",
+    ...lines,
+    "",
+    "重要: 順位・件数は提供データに書かれている数字をそのまま使うこと。",
+    "似た名前のキーワードが複数ある場合、別のキーワードの数字を混同しないよう、",
+    "各キーワードの行を1つずつ確認してから書くこと。",
+  ].join("\n");
+}
+
+/** キーワードの許容順位集合を、当月データと推移データから組み立てる */
+export function buildKeywordFacts(
+  current: { word: string; rank: number; prevRank: number }[],
+  history?: { labels: string[]; datasets: { word: string; ranks: (number | null)[] }[] } | null,
+): KeywordRankFacts[] {
+  const byNorm = new Map<string, { word: string; ranks: Set<number> }>();
+  const put = (word: string, rank: number | null | undefined) => {
+    if (!word) return;
+    const key = normalizeKw(word);
+    if (!byNorm.has(key)) byNorm.set(key, { word, ranks: new Set() });
+    if (typeof rank === "number" && rank > 0) byNorm.get(key)!.ranks.add(rank);
+  };
+  for (const k of current || []) {
+    put(k.word, k.rank);
+    put(k.word, k.prevRank);
+  }
+  for (const ds of history?.datasets || []) {
+    for (const r of ds.ranks || []) put(ds.word, r);
+  }
+  return Array.from(byNorm.values())
+    .filter((v) => v.ranks.size > 0)
+    .map((v) => ({ word: v.word, allowedRanks: Array.from(v.ranks).sort((a, b) => a - b) }));
+}

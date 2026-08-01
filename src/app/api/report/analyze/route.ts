@@ -3,6 +3,12 @@ import { getSupabase } from "@/lib/supabase";
 import { withAudit, requireCtxShopAccess } from "@/lib/audit";
 import { normalizeKw } from "@/lib/keyword-normalize";
 import { centerCell, isYoyComparable } from "@/lib/report-utils";
+import {
+  validatePageComments,
+  buildCorrectionPrompt,
+  buildKeywordFacts,
+  type KeywordRankFacts,
+} from "@/lib/comment-validation";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -96,7 +102,9 @@ async function analyzeWithClaude(
   totalReviewCount: number,
   ratingDistribution?: Record<number, number>,
   kpiText?: string,
-  langStatsText?: string
+  langStatsText?: string,
+  /** 生成後の数値照合に使う元データ。未指定なら照合をスキップする */
+  verifyCtx?: { keywordFacts: KeywordRankFacts[]; reviewDeltas: number[] }
 ): Promise<{
   positiveWords: string[];
   negativeWords: string[];
@@ -116,10 +124,65 @@ async function analyzeWithClaude(
 
   for (const limit of limits) {
     const result = await tryAnalyze(shopName, allFiltered.slice(0, limit), averageRating, totalReviewCount, ratingDistribution, kpiText, langStatsText);
-    if (result) return result;
+    if (result) {
+      return verifyCtx
+        ? await enforceNumericAccuracy(shopName, result, verifyCtx, (correction) =>
+            tryAnalyze(shopName, allFiltered.slice(0, limit), averageRating, totalReviewCount, ratingDistribution, kpiText, langStatsText, correction),
+          )
+        : result;
+    }
     console.log(`[analyze] ${shopName}: ${limit}件で失敗、リトライ...`);
   }
   return null;
+}
+
+type AnalyzeResult = NonNullable<Awaited<ReturnType<typeof tryAnalyze>>>;
+
+/**
+ * 生成された総評の数値を元データと突き合わせ、食い違いがあれば再生成する。
+ *
+ * 「AIに渡すデータを正しくする」だけでは、AIが書く瞬間の取り違えは防げない。
+ * 2026-08-01に「名古屋 バル」を実際は10位なのに9位と書いた例が出たため、
+ * 出荷前の関門としてここで照合する。
+ * 再生成しても直らない場合は、誤った数値を含むページの総評を破棄する。
+ * 空欄になるのは痛いが、クライアントに誤った順位を出すよりはるかにましと判断した。
+ */
+async function enforceNumericAccuracy(
+  shopName: string,
+  first: AnalyzeResult,
+  ctx: { keywordFacts: KeywordRankFacts[]; reviewDeltas: number[] },
+  regenerate: (correction: string) => Promise<AnalyzeResult | null>,
+): Promise<AnalyzeResult> {
+  const MAX_RETRY = 2;
+  let current = first;
+
+  for (let attempt = 0; attempt <= MAX_RETRY; attempt++) {
+    const violations = validatePageComments(current.pageComments as Record<string, unknown>, ctx);
+    if (violations.length === 0) {
+      if (attempt > 0) console.log(`[analyze] ${shopName}: 数値照合OK（再生成${attempt}回）`);
+      return current;
+    }
+    for (const v of violations) {
+      console.warn(`[analyze] ${shopName}: 数値不一致(${v.field}) ${v.message}`);
+    }
+    if (attempt === MAX_RETRY) {
+      // 直らなかったページの総評を落とす（誤った数値は出荷しない）
+      const dropped = Array.from(new Set(violations.map((v) => v.field)));
+      const pc = { ...(current.pageComments as Record<string, unknown>) };
+      for (const f of dropped) pc[f] = "";
+      console.error(
+        `[analyze] ${shopName}: 再生成${MAX_RETRY}回でも数値が一致せず、該当ページの総評を空にした: ${dropped.join(", ")}`,
+      );
+      return { ...current, pageComments: pc as AnalyzeResult["pageComments"] };
+    }
+    const retried = await regenerate(buildCorrectionPrompt(violations));
+    if (!retried) {
+      console.error(`[analyze] ${shopName}: 数値修正の再生成に失敗（APIエラー）`);
+      return current;
+    }
+    current = retried;
+  }
+  return current;
 }
 
 async function tryAnalyze(
@@ -129,7 +192,9 @@ async function tryAnalyze(
   totalReviewCount: number,
   ratingDistribution?: Record<number, number>,
   kpiText?: string,
-  langStatsText?: string
+  langStatsText?: string,
+  /** 数値照合で不一致が出た場合の修正指示（再生成時のみ指定） */
+  correction?: string
 ): Promise<any | null> {
   const reviewTexts = filteredReviews
     .map((r) => `[${r.createTime?.slice(0, 10) || ""}] ${r.comment.slice(0, 300)}`)
@@ -252,6 +317,9 @@ ${langStatsText || ""}
 - 評価は必ず${averageRating}を使用
 ${langStatsText ? "- 口コミ言語は上記集計に記載された言語のみ言及。外国語口コミに言及する場合は言語別集計の評価内訳と矛盾しないこと（低評価が中心の言語を「海外から支持」等と書かない）" : ""}`;
 
+  // 数値照合で弾かれた場合の修正指示を最後に置く（直前の指示ほど効きやすいため）
+  const finalPrompt = correction ? `${prompt}\n\n【必ず守ること・最優先】\n${correction}` : prompt;
+
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 120000); // 120秒タイムアウト（Sonnet用）
@@ -267,7 +335,7 @@ ${langStatsText ? "- 口コミ言語は上記集計に記載された言語の�
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
         max_tokens: 4096,
-        messages: [{ role: "user", content: prompt }],
+        messages: [{ role: "user", content: finalPrompt }],
       }),
     });
 
@@ -612,6 +680,9 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
 
       // KPIデータとグループ平均を取得
       let kpiText = "";
+      // 生成後の数値照合に使う元データ（AIに渡したのと同じ値から組み立てる）
+      let verifyKeywordFacts: KeywordRankFacts[] = [];
+      let verifyReviewDeltas: number[] = [];
       let hasKpiData = false;
       let curMonth = overrideTargetMonth; // フロント指定があればそれを使う
       try {
@@ -928,6 +999,12 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
                 : kw.prevRank <= 0 && kw.rank > 0 ? "圏内に復帰" : "→";
               return `\n${kw.word}: ${kw.rank > 0 ? `${kw.rank}位` : "圏外"}（前回${kw.prevRank > 0 ? `${kw.prevRank}位` : "圏外"} ${arrow}）`;
             };
+            // 数値照合用: AIに渡すのと同じ順位データから許容値を組み立てる。
+            // ここで作らないと「AIには渡したが照合には無い順位」が偽陽性になる
+            verifyKeywordFacts = buildKeywordFacts(kwData, report.rankingHistory);
+            verifyReviewDeltas = (report.reviewDelta || [])
+              .filter((d: number | null) => typeof d === "number") as number[];
+
             if (kwData.length > 0) {
               // 対象月が未計測で過去月のデータを使っている場合は、その月を見出しに出し
               // 「当月の実績ではない」と明示する。P6カードは同条件で「未計測」と表示される
@@ -1224,7 +1301,8 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
         officialCount,
         reviewData.ratingDistribution,
         kpiText,
-        langStatsText
+        langStatsText,
+        { keywordFacts: verifyKeywordFacts, reviewDeltas: verifyReviewDeltas }
       );
 
       if (!analysis) {
