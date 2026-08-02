@@ -36,7 +36,7 @@ export interface CommentViolation {
   /** 違反が見つかったページ（pageCommentsのキー） */
   field: string;
   /** 違反の種類 */
-  kind: "rank_mismatch" | "average_mismatch" | "continuity_mismatch" | "exclusivity_mismatch";
+  kind: "rank_mismatch" | "average_mismatch" | "continuity_mismatch" | "exclusivity_mismatch" | "out_of_range_mismatch";
   /** 人間が読める説明。再生成時にAIへ渡す */
   message: string;
 }
@@ -303,6 +303,102 @@ export function validateExclusivityClaims(
   return bad;
 }
 
+/**
+ * 「圏外へ転落」「圏外が継続」のような圏外の主張を、順位の時系列と突き合わせる。
+ *
+ * 【なぜ必要か】
+ * 2026-08-02 patty rôtiのレポートP6で実際に発生:
+ *   表: 一社 イタリアン = 前回1位 → 当月「未計測」 / 名東区 パスタ = 前回1位 → 当月「圏外」
+ *   AI: 「一社 イタリアン」が前回1位から圏外へ転落しており、同様に「名東区 パスタ」も圏外が継続している
+ * 転落したのはパスタ、イタリアンは未計測なのに、2つのキーワードの状態が入れ替わっていた。
+ * 「1位」は両KWの実データに存在するため数値照合(validateRankMentions)では通過してしまう。
+ * 誤っているのは順位ではなく「圏外」という状態の帰属の方。
+ *
+ * 【誤検知を避ける方針】
+ * - series（未計測=null / 圏外=0 / 順位=正数）を持つキーワードだけ検証する
+ * - 同じ文の中でキーワードの直後に出た「圏外」だけをそのキーワードの主張とみなす
+ * - 「圏外転落を防ぐ」「圏外にならないよう」等の予防・仮定表現は主張ではないので除外
+ * - 確実に矛盾するものだけ違反にする:
+ *   a) 全計測に圏外の月が1つも無いのに圏外と書いた
+ *   b) 「転落」と書いたが「順位→圏外」の推移が計測上存在しない
+ *   c) 「継続」と書いたが直近2計測が圏外×2になっていない
+ */
+export function validateOutOfRangeClaims(
+  text: string,
+  facts: KeywordRankFacts[],
+): { word: string; claim: string; reason: string }[] {
+  if (!text || facts.length === 0) return [];
+  const normalized = toHalfWidthDigits(text);
+  const mentions = findKeywordMentions(normalized, facts);
+  if (mentions.length === 0) return [];
+
+  const bad: { word: string; claim: string; reason: string }[] = [];
+  const re = /圏外/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(normalized)) !== null) {
+    const pos = m.index;
+    const sentStart = Math.max(normalized.lastIndexOf("。", pos), normalized.lastIndexOf("\n", pos)) + 1;
+    let sentEnd = normalized.indexOf("。", pos);
+    if (sentEnd < 0) sentEnd = normalized.length;
+
+    // 予防・仮定・否定の文脈は「圏外である」という主張ではない
+    const around = normalized.slice(Math.max(sentStart, pos - 12), Math.min(sentEnd, pos + 16));
+    if (/(防|回避|避け|リスク|懸念|恐れ|注意|可能性|ないよう|しないよう|せず|なければ)/.test(around)) continue;
+
+    // 帰属: 同じ文の中で直前に登場したキーワード
+    let owner: KeywordRankFacts | null = null;
+    let ownerIndex = -1;
+    for (const mention of mentions) {
+      if (mention.index >= sentStart && mention.index < pos) { owner = mention.fact; ownerIndex = mention.index; }
+      if (mention.index >= pos) break;
+    }
+    if (!owner || !owner.series || owner.series.length === 0) continue;
+    // キーワードと圏外の間に別のキーワードが挟まっていないことは
+    // 「直前に登場したもの」を採ることで保証される（最後の出現が帰属先）
+
+    const measured = owner.series.filter((r): r is number => r !== null);
+    if (measured.length === 0) continue;
+    const claim = normalized.slice(Math.max(sentStart, ownerIndex), Math.min(sentEnd, pos + 12)).trim();
+
+    // a) 計測データに圏外の月が1つも無い（未計測を圏外扱いした典型パターン）
+    if (!measured.some((r) => r === 0)) {
+      const last = measured[measured.length - 1];
+      bad.push({
+        word: owner.word,
+        claim,
+        reason: `計測データに圏外の月が存在しない（未計測はデータが無いだけで圏外ではない。直近の計測値は${last > 0 ? `${last}位` : "不明"}）`,
+      });
+      continue;
+    }
+
+    const after = normalized.slice(pos, Math.min(sentEnd, pos + 10));
+    // b) 「圏外へ転落」: 順位→圏外の推移が計測上存在するか
+    if (/^圏外[へにと]?\s*(転落|後退|沈|落ち)/.test(after)) {
+      const fell = measured.some((r, i) => i > 0 && measured[i - 1] > 0 && r === 0);
+      if (!fell) {
+        bad.push({ word: owner.word, claim, reason: "順位から圏外に落ちた推移が計測上存在しない" });
+      }
+      continue;
+    }
+    // c) 「圏外が継続/圏外のまま」: 直近2計測がともに圏外か
+    if (/^圏外(が|の|状態)?\s*(継続|まま|続い|続き)/.test(after) || /(引き続き|依然|変わらず)/.test(normalized.slice(Math.max(sentStart, pos - 12), pos))) {
+      const lastTwo = measured.slice(-2);
+      if (!(lastTwo.length === 2 && lastTwo[0] === 0 && lastTwo[1] === 0)) {
+        const prev = lastTwo.length === 2 ? lastTwo[0] : null;
+        bad.push({
+          word: owner.word,
+          claim,
+          reason: prev !== null && prev > 0
+            ? `前回の計測は${prev}位であり、圏外の継続ではない（今回が転落）`
+            : "直近2計測がともに圏外になっていないため「継続」とは言えない",
+        });
+      }
+      continue;
+    }
+  }
+  return bad;
+}
+
 /** pageComments 全体を検証して違反リストを返す */
 export function validatePageComments(
   pageComments: Record<string, unknown> | null | undefined,
@@ -350,6 +446,20 @@ export function validatePageComments(
     }
   }
 
+  // 圏外の主張はキーワードの状態を語るページのみ対象にする。
+  // grid（多地点）ページの「9地点中圏外が5地点」は地点の話であり、KWの中心順位系列とは別物なので対象外
+  for (const field of ["keyword", "rankingHistory"]) {
+    const v = pageComments[field];
+    if (typeof v !== "string" || !v) continue;
+    for (const b of validateOutOfRangeClaims(v, ctx.keywordFacts)) {
+      violations.push({
+        field,
+        kind: "out_of_range_mismatch",
+        message: `「${b.word}」について「${b.claim}」と書いているが、${b.reason}`,
+      });
+    }
+  }
+
   const deltaText = pageComments["reviewDelta"];
   if (typeof deltaText === "string" && deltaText) {
     for (const b of validateMonthlyAverage(deltaText, ctx.reviewDeltas)) {
@@ -368,6 +478,7 @@ export function validatePageComments(
 export function buildCorrectionPrompt(violations: CommentViolation[]): string {
   const lines = violations.map((v) => `- ${v.field}: ${v.message}`);
   const hasContinuity = violations.some((v) => v.kind === "continuity_mismatch");
+  const hasOutOfRange = violations.some((v) => v.kind === "out_of_range_mismatch");
   return [
     "直前の出力に、提供データと一致しない記述が含まれていた。以下を必ず修正すること。",
     ...lines,
@@ -375,6 +486,14 @@ export function buildCorrectionPrompt(violations: CommentViolation[]): string {
     "重要: 順位・件数は提供データに書かれている数字をそのまま使うこと。",
     "似た名前のキーワードが複数ある場合、別のキーワードの数字を混同しないよう、",
     "各キーワードの行を1つずつ確認してから書くこと。",
+    ...(hasOutOfRange
+      ? [
+          "",
+          "「圏外」と書いてよいのは、提供データでそのキーワードに「圏外」と明記されている場合だけ。",
+          "「未計測」は計測データが無いだけで圏外という意味ではない。未計測のキーワードの当月変動には言及しないこと。",
+          "「圏外へ転落」はデータ上で順位→圏外の推移があるキーワードにだけ、「圏外が継続」は直近2計測とも圏外のキーワードにだけ使うこと。",
+        ]
+      : []),
     ...(hasContinuity
       ? [
           "",

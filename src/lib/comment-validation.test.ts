@@ -5,6 +5,7 @@ import {
   validatePageComments,
   buildKeywordFacts,
   validateContinuityClaims,
+  validateOutOfRangeClaims,
 } from "./comment-validation";
 
 /**
@@ -352,5 +353,76 @@ describe("validateExclusivityClaims（唯一の◯◯）", () => {
     );
     expect(violations).toHaveLength(1);
     expect(violations[0].kind).toBe("exclusivity_mismatch");
+  });
+});
+
+describe("validateOutOfRangeClaims 圏外主張の照合（2026-08-02 patty rôtiで実際に出た誤り）", () => {
+  // 表: 一社 イタリアン = 前回1位 → 当月「未計測」 / 名東区 パスタ = 前回1位 → 当月「圏外」
+  const FACTS = buildKeywordFacts(
+    [{ word: "名東区 パスタ", rank: 0, prevRank: 1 }],
+    {
+      labels: ["2026/1", "2026/4", "2026/6"],
+      datasets: [
+        { word: "一社 イタリアン", ranks: [1, 1, null], outOfRange: [false, false, false] } as any,
+        { word: "名東区 パスタ", ranks: [2, 1, null], outOfRange: [false, false, true] } as any,
+      ],
+    },
+  );
+
+  it("未計測のキーワードを「圏外へ転落」と書いた誤りを検出する", () => {
+    const text = "「一社 イタリアン」が前回1位から圏外へ転落しており、検索流入への影響が懸念される";
+    const bad = validateOutOfRangeClaims(text, FACTS);
+    expect(bad).toHaveLength(1);
+    expect(bad[0].word).toBe("一社 イタリアン");
+  });
+
+  it("転落したキーワードを「圏外が継続」と書いた誤りを検出する", () => {
+    const text = "「名東区 パスタ」も圏外が継続している";
+    const bad = validateOutOfRangeClaims(text, FACTS);
+    expect(bad).toHaveLength(1);
+    expect(bad[0].word).toBe("名東区 パスタ");
+    expect(bad[0].reason).toContain("1位");
+  });
+
+  it("実際に出た誤り（2主張が1文に混在）を両方検出する", () => {
+    const text =
+      "「一社 イタリアン」が前回1位から圏外へ転落しており、同様に「名東区 パスタ」も圏外が継続している。最優先で原因を特定し回復施策に着手する必要がある";
+    const bad = validateOutOfRangeClaims(text, FACTS);
+    expect(bad).toHaveLength(2);
+    expect(bad.map((b) => b.word).sort()).toEqual(["一社 イタリアン", "名東区 パスタ"]);
+  });
+
+  it("正しい記述（パスタ=転落）は誤検知しない", () => {
+    const text = "「名東区 パスタ」が前回1位から圏外へ転落しており、早期の回復施策が必要となる";
+    expect(validateOutOfRangeClaims(text, FACTS)).toHaveLength(0);
+  });
+
+  it("予防・仮定の表現（圏外転落を防ぐ）は主張ではないので検証しない", () => {
+    const text = "「一社 イタリアン」の上位維持を図り、圏外転落を防ぐ施策を継続したい";
+    expect(validateOutOfRangeClaims(text, FACTS)).toHaveLength(0);
+  });
+
+  it("seriesを持たないキーワードは検証しない", () => {
+    const noSeries = buildKeywordFacts([{ word: "一社 ランチ", rank: 2, prevRank: 2 }], null);
+    const text = "「一社 ランチ」は圏外へ転落した";
+    expect(validateOutOfRangeClaims(text, noSeries)).toHaveLength(0);
+  });
+
+  it("validatePageComments経由でkeywordページの圏外誤りを検出する", () => {
+    const violations = validatePageComments(
+      { keyword: "「一社 イタリアン」が前回1位から圏外へ転落した" },
+      { keywordFacts: FACTS, reviewDeltas: [] },
+    );
+    expect(violations).toHaveLength(1);
+    expect(violations[0].kind).toBe("out_of_range_mismatch");
+    expect(violations[0].field).toBe("keyword");
+  });
+
+  it("gridページの「9地点中圏外が5地点」は対象外（地点の話でありKWの状態ではない）", () => {
+    const violations = validatePageComments(
+      { grid: "「一社 イタリアン」は9地点中圏外が5地点あり、北側の商圏を取りこぼしている" },
+      { keywordFacts: FACTS, reviewDeltas: [] },
+    );
+    expect(violations).toHaveLength(0);
   });
 });
