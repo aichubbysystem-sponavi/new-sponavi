@@ -9,13 +9,9 @@ import {
   buildKeywordFacts,
 } from "./comment-validation";
 
-// TODO(2026-08-02 レビュー指摘 M-2): 未修正のため skip。
-// validateOutOfRangeClaims の「不在主張」判定(comment-validation.ts:351付近)が、
-// 予防表現の除外(同375付近)より先に評価され continue するため、
-// 「転落しないよう」の "ない" が不在主張の alternation に部分一致して違反になる。
-// 実害: 転落KWが実在する月に正しい総評を書いても、keywordページの総評が空欄化される。
-// 修正時にこの skip を外すこと。
-describe.skip("[レビュー指摘] 圏外の予防表現を不在主張と誤検知しないこと", () => {
+// 2026-08-02 レビュー指摘 M-2 の再現テスト（修正済み）。
+// 予防表現の除外を不在主張判定より先に評価するよう順序を入れ替えた。
+describe("[レビュー指摘] 圏外の予防表現を不在主張と誤検知しないこと", () => {
   // 「名東区 パスタ」は直近で 1位→圏外 に転落済み（fellNow=true の状態）
   const FACTS = buildKeywordFacts(
     [{ word: "名東区 パスタ", rank: 0, prevRank: 1 }],

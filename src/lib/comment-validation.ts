@@ -342,6 +342,15 @@ export function validateOutOfRangeClaims(
     let sentEnd = normalized.indexOf("。", pos);
     if (sentEnd < 0) sentEnd = normalized.length;
 
+    // 予防・仮定・否定の文脈は「圏外である/圏外が無い」という事実主張ではない。
+    // 【判定順が重要】2026-08-02のレビューで発覚: この除外を下の不在主張チェックより
+    // 後ろに置いていたため、「圏外に転落しないよう対策を継続する」という正しい予防文が、
+    // 不在主張の alternation「ない」に部分一致して違反になっていた
+    // （転落KWが実在する月に、正しい総評ごとkeywordページが空欄化される実害があった）。
+    // 事実主張でないものは、どの判定より先に落とす
+    const around = normalized.slice(Math.max(sentStart, pos - 12), Math.min(sentEnd, pos + 20));
+    if (/(防|回避|避け|リスク|懸念|恐れ|注意|可能性|ないよう|しないよう|せず|なければ|しないため|ないため)/.test(around)) continue;
+
     // 「圏外転落のキーワードはなく」のような不在の主張。
     // 2026-08-02 patty rôti再分析で発生: 「名東区 パスタ」が4月1位→当月圏外なのに
     // 「今月は圏外転落のキーワードはなく、全キーワードが順位圏内を維持」と書かれた。
@@ -369,10 +378,6 @@ export function validateOutOfRangeClaims(
       }
       continue;
     }
-
-    // 予防・仮定・否定の文脈は「圏外である」という主張ではない
-    const around = normalized.slice(Math.max(sentStart, pos - 12), Math.min(sentEnd, pos + 16));
-    if (/(防|回避|避け|リスク|懸念|恐れ|注意|可能性|ないよう|しないよう|せず|なければ)/.test(around)) continue;
 
     // 帰属: 同じ文の中で直前に登場したキーワード
     let owner: KeywordRankFacts | null = null;

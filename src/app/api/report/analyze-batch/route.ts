@@ -9,7 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, requireRole } from "@/lib/supabase";
 import { withAudit } from "@/lib/audit";
-import { pollAnalysisBatches } from "@/lib/analyze-batch-lib";
+import { pollAnalysisBatches, rescueFailedItems } from "@/lib/analyze-batch-lib";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -49,11 +49,33 @@ export async function GET(request: NextRequest) {
   });
 }
 
-export const POST = withAudit("AI口コミ分析(Batch取込)", "PAID_OP", async (_request, ctx) => {
+export const POST = withAudit("AI口コミ分析(Batch取込)", "PAID_OP", async (request, ctx) => {
   const supabase = getSupabase();
+  const body = await request.json().catch(() => ({}));
+
+  // 失敗・取り残しアイテムの再投入（復旧操作）
+  if (body?.action === "rescue") {
+    try {
+      const r = await rescueFailedItems(supabase);
+      ctx.detail = r.rescued > 0 ? `失敗分を再投入: ${r.rescued}件` : "再投入対象なし";
+      return NextResponse.json({ success: true, ...r });
+    } catch (e: any) {
+      console.error("[analyze-batch] rescueエラー:", e);
+      return NextResponse.json({ error: e?.message || "再投入に失敗しました" }, { status: 500 });
+    }
+  }
+
   try {
     const summary = await pollAnalysisBatches(supabase);
-    ctx.detail = `保存${summary.saved}件（空欄化${summary.blanked}）/ 失敗${summary.failed} / 再投入${summary.retried} / 処理中${summary.stillProcessing}バッチ`;
+    if (summary.lockBusy) {
+      ctx.detail = "別の取り込みが実行中のためスキップ（課金なし）";
+      return NextResponse.json({
+        success: true,
+        ...summary,
+        message: "別の取り込み処理が実行中です。完了までお待ちください（重複実行による二重課金を防いでいます）",
+      });
+    }
+    ctx.detail = `保存${summary.saved}件（空欄化${summary.blanked}）/ 失敗${summary.failed} / 再投入${summary.retried} / 処理中${summary.stillProcessing}バッチ${summary.deadBatches ? ` / 対象外${summary.deadBatches}バッチ` : ""}`;
     return NextResponse.json({ success: true, ...summary });
   } catch (e: any) {
     console.error("[analyze-batch] pollエラー:", e);

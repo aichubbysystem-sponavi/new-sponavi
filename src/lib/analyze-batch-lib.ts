@@ -37,6 +37,60 @@ const API_HEADERS = {
 };
 /** 照合違反時の修正再生成の上限（同期版 enforceNumericAccuracy の MAX_RETRY と同じ） */
 const MAX_CORRECTIONS = 2;
+/** pollの排他ロックが自動的に切れるまでの時間。サーバのmaxDuration(300秒)より長くする */
+const LOCK_TTL_MS = 6 * 60 * 1000;
+/** ステータス取得に連続失敗したバッチを「死にバッチ」として除外する閾値 */
+const MAX_POLL_ATTEMPTS = 20;
+
+/**
+ * pollの排他ロックを取る。取れなければfalse。
+ * 【なぜ必要か】UIのクライアントタイムアウト(280秒)がサーバのmaxDuration(300秒)より短いため、
+ * 大きい取り込みでは「クライアントだけエラー→ユーザーが再クリック」が起きる。
+ * ロックが無いと、旧pollが走行中に新pollが同じpendingアイテムを読み、
+ * 修正ラウンドのバッチを二重にAnthropicへ投入する＝二重課金になる。
+ */
+async function acquireLock(supabase: SupabaseClient, by: string): Promise<boolean> {
+  const now = Date.now();
+  const { data } = await supabase
+    .from("analysis_batch_lock")
+    .select("locked_at")
+    .eq("id", 1)
+    .maybeSingle();
+  const lockedAt = data?.locked_at ? new Date(data.locked_at).getTime() : 0;
+  if (lockedAt && now - lockedAt < LOCK_TTL_MS) return false; // 実行中
+
+  // TTL切れ or 未ロックなら奪う。競合時は「自分が見た値と同じ場合のみ更新」で防ぐ
+  const q = supabase
+    .from("analysis_batch_lock")
+    .update({ locked_at: new Date(now).toISOString(), locked_by: by })
+    .eq("id", 1);
+  const { data: updated } = data?.locked_at
+    ? await q.eq("locked_at", data.locked_at).select("id")
+    : await q.is("locked_at", null).select("id");
+  return !!(updated && updated.length > 0);
+}
+
+async function releaseLock(supabase: SupabaseClient): Promise<void> {
+  await supabase.from("analysis_batch_lock").update({ locked_at: null, locked_by: null }).eq("id", 1);
+}
+
+/**
+ * 指定店舗のうち、まだ結果待ち（pending）のものを返す。
+ * 【なぜ必要か】Batchは投入から取り込みまで最大1時間 report_analysis に行が出ないため、
+ * 「押したか不安→リロード→もう一度押す」で全店が二重投入され、そのまま二重課金になる。
+ */
+export async function findPendingShopNames(
+  supabase: SupabaseClient,
+  shopNames: string[],
+): Promise<Set<string>> {
+  if (shopNames.length === 0) return new Set();
+  const { data } = await supabase
+    .from("analysis_batch_items")
+    .select("shop_name")
+    .eq("state", "pending")
+    .in("shop_name", shopNames);
+  return new Set((data || []).map((r: { shop_name: string }) => r.shop_name));
+}
 
 export interface AnalysisPayload {
   reviews: GBPReview[];
@@ -68,6 +122,8 @@ interface BatchItemRow {
   payload: AnalysisPayload;
   state: string;
   note: string | null;
+  /** 投入時刻。取り込み時に「投入後に作り直された結果」を上書きしないための基準 */
+  submitted_at?: string;
 }
 
 function promptForItem(item: {
@@ -107,6 +163,9 @@ export async function submitAnalysisBatch(
   const batchDbId = batchRow.id as string;
 
   // 2. アイテム行を作成（custom_idの順序依存を避けるためIDをクライアント側で発行）
+  // payloadの口コミ本文はプロンプトと同じ300字に切って保存する。
+  // 全文のまま入れると数千件の店でpayloadが数MBになり、insertが失敗して
+  // 同じリクエストの他店まで巻き添えで投入失敗する（2026-08-02 レビュー指摘 M-5）
   const rows = items.map((it) => ({
     id: crypto.randomUUID(),
     batch_id: batchDbId,
@@ -117,14 +176,34 @@ export async function submitAnalysisBatch(
     corrections: 0,
     review_limit: "all" as const,
     correction: null,
-    payload: it.payload,
+    payload: {
+      ...it.payload,
+      reviews: (it.payload.reviews || []).map((r) => ({
+        ...r,
+        comment: (r.comment || "").slice(0, 300),
+      })),
+    },
     state: "pending",
   }));
-  const { error: itemsErr } = await supabase.from("analysis_batch_items").insert(rows);
-  if (itemsErr) {
-    await supabase.from("analysis_batches").update({ status: "submit_failed" }).eq("id", batchDbId);
-    throw new Error(`アイテム行の作成に失敗: ${itemsErr.message}`);
+  // 1件ずつinsertし、巨大な1店の失敗が他店を巻き込まないようにする
+  const inserted: typeof rows = [];
+  for (const row of rows) {
+    const { error } = await supabase.from("analysis_batch_items").insert(row);
+    if (error) {
+      console.error(`[analyze-batch] ${row.shop_name}: アイテム行の作成に失敗（この店舗のみスキップ）:`, error.message);
+      continue;
+    }
+    inserted.push(row);
   }
+  if (inserted.length === 0) {
+    await supabase.from("analysis_batches").update({ status: "submit_failed" }).eq("id", batchDbId);
+    throw new Error("アイテム行を1件も作成できませんでした");
+  }
+  if (inserted.length !== rows.length) {
+    await supabase.from("analysis_batches").update({ item_total: inserted.length }).eq("id", batchDbId);
+  }
+  rows.length = 0;
+  rows.push(...inserted);
 
   // 3. Anthropicへ投入
   const anthropicBatchId = await postBatchRequests(supabase, batchDbId, rows);
@@ -187,7 +266,27 @@ export interface PollSummary {
   blanked: number;
   failed: number;
   retried: number;
+  /** 取り残されたpendingを救済して再投入した件数 */
+  rescued: number;
+  /** ステータス取得に失敗し続けて対象外にしたバッチ数 */
+  deadBatches: number;
   resubmittedBatchId: string | null;
+  /** 別のpollが実行中でスキップした場合true */
+  lockBusy: boolean;
+}
+
+/** 死にバッチを対象外にし、配下のpendingを失敗として確定させる */
+async function markBatchDead(supabase: SupabaseClient, batchId: string, reason: string): Promise<void> {
+  await supabase
+    .from("analysis_batch_items")
+    .update({ state: "failed", note: reason, updated_at: new Date().toISOString() })
+    .eq("batch_id", batchId)
+    .eq("state", "pending");
+  await supabase
+    .from("analysis_batches")
+    .update({ status: "dead", updated_at: new Date().toISOString() })
+    .eq("id", batchId);
+  console.error(`[analyze-batch] バッチ${batchId}を対象外にしました: ${reason}`);
 }
 
 /**
@@ -203,99 +302,211 @@ export async function pollAnalysisBatches(supabase: SupabaseClient): Promise<Pol
     blanked: 0,
     failed: 0,
     retried: 0,
+    rescued: 0,
+    deadBatches: 0,
     resubmittedBatchId: null,
+    lockBusy: false,
   };
 
-  const { data: batches, error } = await supabase
-    .from("analysis_batches")
-    .select("id, anthropic_batch_id, round, status")
-    .eq("status", "submitted")
-    .order("created_at", { ascending: true })
-    .limit(5); // 1回のpollで処理するバッチ数上限（maxDuration対策）
-  if (error) throw new Error(`バッチ一覧の取得に失敗: ${error.message}`);
-
-  const retryItems: BatchItemRow[] = [];
-  let maxRound = 0;
-
-  for (const b of batches || []) {
-    summary.checkedBatches++;
-    const st = await fetch(`https://api.anthropic.com/v1/messages/batches/${b.anthropic_batch_id}`, {
-      headers: API_HEADERS,
-    });
-    if (!st.ok) continue; // 一時エラーは次回のpollに任せる
-    const stData = await st.json();
-    if (stData.processing_status !== "ended") {
-      summary.stillProcessing++;
-      continue;
-    }
-    if (!stData.results_url) continue;
-
-    const resRes = await fetch(stData.results_url, { headers: API_HEADERS });
-    if (!resRes.ok) continue;
-    const jsonl = await resRes.text();
-
-    const { data: itemRows } = await supabase
-      .from("analysis_batch_items")
-      .select("*")
-      .eq("batch_id", b.id);
-    const byId = new Map<string, BatchItemRow>(((itemRows || []) as BatchItemRow[]).map((r) => [r.id, r]));
-
-    for (const line of jsonl.split("\n")) {
-      if (!line.trim()) continue;
-      let rec: any;
-      try {
-        rec = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      const item = byId.get(rec.custom_id);
-      if (!item || item.state !== "pending") continue;
-      maxRound = Math.max(maxRound, item.round);
-      await processItemResult(supabase, item, rec, retryItems, summary);
-    }
-
-    await supabase
-      .from("analysis_batches")
-      .update({ status: "processed", updated_at: new Date().toISOString() })
-      .eq("id", b.id);
-    summary.processedBatches++;
+  // 二重実行（＝修正ラウンドの二重投入＝二重課金）を防ぐ
+  const lockId = `poll-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  if (!(await acquireLock(supabase, lockId))) {
+    summary.lockBusy = true;
+    return summary;
   }
 
-  // 再投入（修正指示付き・またはロコミ50件版）
-  if (retryItems.length > 0) {
-    const round = maxRound + 1;
-    const { data: newBatch, error: nbErr } = await supabase
+  try {
+    const { data: batches, error } = await supabase
       .from("analysis_batches")
-      .insert({ status: "creating", round, item_total: retryItems.length })
-      .select("id")
-      .single();
-    if (!nbErr && newBatch) {
-      const newBatchId = newBatch.id as string;
-      for (const it of retryItems) {
+      .select("id, anthropic_batch_id, round, status, poll_attempts")
+      .eq("status", "submitted")
+      // 死にバッチ（ステータス取得に失敗し続けるもの）が先頭5件を占有して
+      // 新しいバッチが永久に処理されなくなるのを防ぐため、試行回数が少ない順に見る
+      .lt("poll_attempts", MAX_POLL_ATTEMPTS)
+      .order("poll_attempts", { ascending: true })
+      .order("created_at", { ascending: true })
+      .limit(5); // 1回のpollで処理するバッチ数上限（maxDuration対策）
+    if (error) throw new Error(`バッチ一覧の取得に失敗: ${error.message}`);
+
+    const retryItems: BatchItemRow[] = [];
+    let maxRound = 0;
+
+    for (const b of batches || []) {
+      summary.checkedBatches++;
+      // 先に試行回数を進める（このpollがタイムアウトで落ちても、死にバッチは必ず脱落していく）
+      await supabase
+        .from("analysis_batches")
+        .update({ poll_attempts: (b.poll_attempts || 0) + 1, updated_at: new Date().toISOString() })
+        .eq("id", b.id);
+
+      const st = await fetch(`https://api.anthropic.com/v1/messages/batches/${b.anthropic_batch_id}`, {
+        headers: API_HEADERS,
+      });
+      if (!st.ok) {
+        // 401/404などが続くバッチはMAX_POLL_ATTEMPTSで自動的に対象外になる
+        if ((b.poll_attempts || 0) + 1 >= MAX_POLL_ATTEMPTS) {
+          summary.deadBatches++;
+          await markBatchDead(supabase, b.id, `ステータス取得に${MAX_POLL_ATTEMPTS}回失敗（HTTP ${st.status}）`);
+        }
+        continue;
+      }
+      const stData = await st.json();
+      if (stData.processing_status !== "ended") {
+        summary.stillProcessing++;
+        continue;
+      }
+      if (!stData.results_url) {
+        if ((b.poll_attempts || 0) + 1 >= MAX_POLL_ATTEMPTS) {
+          summary.deadBatches++;
+          await markBatchDead(supabase, b.id, "完了しているがresults_urlが取得できない（29日経過で失効した可能性）");
+        }
+        continue;
+      }
+
+      const resRes = await fetch(stData.results_url, { headers: API_HEADERS });
+      if (!resRes.ok) continue;
+      const jsonl = await resRes.text();
+
+      const { data: itemRows } = await supabase
+        .from("analysis_batch_items")
+        .select("*")
+        .eq("batch_id", b.id);
+      const byId = new Map<string, BatchItemRow>(((itemRows || []) as BatchItemRow[]).map((r) => [r.id, r]));
+
+      for (const line of jsonl.split("\n")) {
+        if (!line.trim()) continue;
+        let rec: any;
+        try {
+          rec = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        const item = byId.get(rec.custom_id);
+        if (!item || item.state !== "pending") continue;
+        maxRound = Math.max(maxRound, item.round);
+        await processItemResult(supabase, item, rec, retryItems, summary);
+      }
+
+      // 【重要】この時点で「結果に載っていなかった」等でpendingのまま残ったアイテムは、
+      // バッチをprocessedにすると二度と拾われない（pollはsubmittedしか見ない）。
+      // 取りこぼしを失敗として確定させ、UIから見える状態にする
+      const { data: leftovers } = await supabase
+        .from("analysis_batch_items")
+        .select("id")
+        .eq("batch_id", b.id)
+        .eq("state", "pending");
+      const leftoverIds = (leftovers || []).map((r: { id: string }) => r.id);
+      // 再投入予定のアイテムは別バッチへ移すのでここでは触らない
+      const retryIdSet = new Set(retryItems.map((r) => r.id));
+      const orphanIds = leftoverIds.filter((id) => !retryIdSet.has(id));
+      if (orphanIds.length > 0) {
         await supabase
           .from("analysis_batch_items")
           .update({
-            batch_id: newBatchId,
-            round,
-            corrections: it.corrections,
-            review_limit: it.review_limit,
-            correction: it.correction,
-            state: "pending",
+            state: "failed",
+            note: "バッチ結果に該当レコードが無く取り込めなかった（再投入が必要）",
             updated_at: new Date().toISOString(),
           })
-          .eq("id", it.id);
+          .in("id", orphanIds);
+        summary.failed += orphanIds.length;
       }
-      try {
-        summary.resubmittedBatchId = await postBatchRequests(supabase, newBatchId, retryItems);
-      } catch (e) {
-        console.error("[analyze-batch] 再投入エラー:", e);
-        // postBatchRequests内でsubmit_failedにマーク済み。アイテムはpendingのまま残るため
-        // 次回pollでは拾われない（submitted以外のバッチは対象外）。手動で再投入し直す想定
+
+      await supabase
+        .from("analysis_batches")
+        .update({ status: "processed", updated_at: new Date().toISOString() })
+        .eq("id", b.id);
+      summary.processedBatches++;
+    }
+
+    // 再投入（修正指示付き・またはロコミ50件版）
+    if (retryItems.length > 0) {
+      const round = maxRound + 1;
+      const ok = await resubmit(supabase, retryItems, round, summary);
+      if (!ok) {
+        // 再投入に失敗したアイテムは失敗として確定させる（pendingのまま宙に浮かせない）
+        await supabase
+          .from("analysis_batch_items")
+          .update({
+            state: "failed",
+            note: "修正ラウンドの再投入に失敗（対象店舗を再度Batch投入するか、同期分析で処理してください）",
+            updated_at: new Date().toISOString(),
+          })
+          .in("id", retryItems.map((r) => r.id));
+        summary.failed += retryItems.length;
+        summary.retried -= retryItems.length;
       }
     }
-  }
 
-  return summary;
+    return summary;
+  } finally {
+    // 例外・タイムアウトでもロックは必ず解放する（TTLでも切れるが即時解放が望ましい）
+    await releaseLock(supabase).catch(() => {});
+  }
+}
+
+/** retryItemsを新しいバッチとして投入する。成功時true */
+async function resubmit(
+  supabase: SupabaseClient,
+  retryItems: BatchItemRow[],
+  round: number,
+  summary: PollSummary,
+): Promise<boolean> {
+  const { data: newBatch, error: nbErr } = await supabase
+    .from("analysis_batches")
+    .insert({ status: "creating", round, item_total: retryItems.length })
+    .select("id")
+    .single();
+  if (nbErr || !newBatch) {
+    console.error("[analyze-batch] 再投入バッチの作成に失敗:", nbErr?.message);
+    return false;
+  }
+  const newBatchId = newBatch.id as string;
+  for (const it of retryItems) {
+    await supabase
+      .from("analysis_batch_items")
+      .update({
+        batch_id: newBatchId,
+        round,
+        corrections: it.corrections,
+        review_limit: it.review_limit,
+        correction: it.correction,
+        state: "pending",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", it.id);
+  }
+  try {
+    summary.resubmittedBatchId = await postBatchRequests(supabase, newBatchId, retryItems);
+    return true;
+  } catch (e) {
+    console.error("[analyze-batch] 再投入エラー:", e);
+    return false;
+  }
+}
+
+/**
+ * 取り残された/失敗したアイテムを新しいバッチとして投入し直す（救済）。
+ * poll がタイムアウトで落ちた場合や再投入に失敗した場合の復旧手段。
+ * UIの「失敗分を再投入」ボタンから呼ぶ。
+ */
+export async function rescueFailedItems(supabase: SupabaseClient): Promise<{ rescued: number; batchId: string | null }> {
+  const { data: rows } = await supabase
+    .from("analysis_batch_items")
+    .select("*")
+    .eq("state", "failed")
+    .order("updated_at", { ascending: true })
+    .limit(200);
+  const items = (rows || []) as BatchItemRow[];
+  if (items.length === 0) return { rescued: 0, batchId: null };
+
+  // corrections/review_limitは前回の状態を引き継ぐ（無限に再生成しないため上限も維持）
+  const targets = items.filter((it) => it.corrections <= MAX_CORRECTIONS);
+  if (targets.length === 0) return { rescued: 0, batchId: null };
+
+  const summary = { resubmittedBatchId: null } as PollSummary;
+  const round = Math.max(...targets.map((t) => t.round)) + 1;
+  const ok = await resubmit(supabase, targets, round, summary);
+  return { rescued: ok ? targets.length : 0, batchId: summary.resubmittedBatchId };
 }
 
 /** 1アイテムの結果を処理: 保存 / リトライ登録 / 失敗マーク */
@@ -313,6 +524,18 @@ async function processItemResult(
       .update({ state, note, updated_at: new Date().toISOString() })
       .eq("id", item.id);
 
+  // 投入後に同期分析や人手編集で作り直されていたら、古い結果で上書きしない
+  const { data: existing } = await supabase
+    .from("report_analysis")
+    .select("analyzed_at")
+    .eq("shop_name", item.shop_name)
+    .eq("target_month", item.target_month)
+    .maybeSingle();
+  if (existing?.analyzed_at && item.submitted_at && new Date(existing.analyzed_at) > new Date(item.submitted_at)) {
+    await mark("skipped", "投入後に新しい分析結果が保存されていたため取り込みをスキップ");
+    return;
+  }
+
   const succeeded = rec.result?.type === "succeeded";
   const text = succeeded
     ? ((rec.result.message?.content || []) as any[])
@@ -320,16 +543,36 @@ async function processItemResult(
         .map((c) => c.text)
         .join("")
     : "";
-  const analysis = succeeded ? parseAnalyzeText(text, payload.reviews) : null;
+  // 【重要】パースに渡す口コミは、プロンプトに載せたものと同じ範囲にする。
+  // 全件を渡すと、AIが読んでいない51件目以降の口コミがワードの登場回数ランキングや
+  // 出典に混入し、同期版と結果が変わる（2026-08-02 レビュー指摘 M-2）
+  const promptReviews = item.review_limit === "50" ? (payload.reviews || []).slice(0, 50) : (payload.reviews || []);
+  const analysis = succeeded ? parseAnalyzeText(text, promptReviews) : null;
 
   if (!analysis) {
+    // 恒久エラー（リクエスト自体が不正）は縮小リトライしても直らないので即failed。
+    // expired/canceled は内容に問題が無いため、口コミ件数に関わらず1回だけ再投入する
+    const errType = rec.result?.type as string | undefined;
+    const permanentError = errType === "errored";
+    const retryableWithoutShrink = errType === "expired" || errType === "canceled";
+
+    if (retryableWithoutShrink && item.corrections <= MAX_CORRECTIONS) {
+      retryItems.push({ ...item });
+      summary.retried++;
+      return;
+    }
     // 生成失敗: 同期版の段階的リトライ（全件→50件）を踏襲して1回だけ再試行
-    if (item.review_limit === "all" && (payload.reviews?.length || 0) > 50) {
+    if (!permanentError && item.review_limit === "all" && (payload.reviews?.length || 0) > 50) {
       retryItems.push({ ...item, review_limit: "50" });
       summary.retried++;
       return;
     }
-    await mark("failed", succeeded ? "応答のパースに失敗" : `生成失敗: ${rec.result?.type || "unknown"}`);
+    const detail = permanentError
+      ? `リクエストエラー: ${rec.result?.error?.type || "errored"}`
+      : succeeded
+        ? "応答のパースに失敗"
+        : `生成失敗: ${errType || "unknown"}`;
+    await mark("failed", detail);
     summary.failed++;
     return;
   }

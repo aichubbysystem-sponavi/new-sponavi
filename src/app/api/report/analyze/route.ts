@@ -11,7 +11,7 @@ import {
   ANALYZE_MODEL,
   ANALYZE_MAX_TOKENS,
 } from "@/lib/analyze-core";
-import { submitAnalysisBatch, type PreparedAnalysisItem } from "@/lib/analyze-batch-lib";
+import { submitAnalysisBatch, findPendingShopNames, type PreparedAnalysisItem } from "@/lib/analyze-batch-lib";
 import {
   validatePageComments,
   buildCorrectionPrompt,
@@ -280,6 +280,13 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
   ctx.detail = `対象${shopIds.length}店舗: ${shopIds.map(s => s.name).filter(Boolean).slice(0, 5).join("、")}${shopIds.length > 5 ? ` 他${shopIds.length - 5}店舗` : ""}`;
 
   const supabase = getSupabase();
+
+  // 【二重課金の防止】Batchは投入から取り込みまで最大1時間 report_analysis に行が出ないため、
+  // 「押したか不安→リロード→もう一度押す」で全店が二重投入されうる。
+  // 結果待ちの店舗はここで除外する（2026-08-02 レビュー指摘 H-3）
+  const pendingNames = batchPrepare
+    ? await findPendingShopNames(supabase, shopIds.map((s) => s.name).filter(Boolean))
+    : new Set<string>();
   const results: { shopId: string; shopName: string; status: string; reason?: string }[] = [];
 
   // 今月分析済み店舗を取得（スキップ用）
@@ -403,6 +410,12 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
 
   // 各店舗を逐次処理（Claude API呼び出しのみ逐次、DBクエリはバッチ済み）
   for (const shop of shopIds) {
+    // Batch結果待ちの店舗は再投入しない（二重課金の防止）
+    if (batchPrepare && pendingNames.has(shop.name)) {
+      results.push({ shopId: shop.id, shopName: shop.name, status: "batch_pending", reason: "前回のBatch投入分が結果待ちのためスキップしました" });
+      continue;
+    }
+
     // 分析済みならスキップ（forceの場合は再分析）
     if (!forceReanalyze && analyzedNames.has(shop.name)) {
       results.push({ shopId: shop.id, shopName: shop.name, status: "already_done" });

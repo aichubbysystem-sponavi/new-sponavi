@@ -181,7 +181,11 @@ export default function ReportClient({
         // 前年同月の口コミ累計
         const trimmedCounts = data.reviewCounts.slice(0, trimmedDelta.length);
         const curCount = trimmedCounts.length > 0 ? trimmedCounts[trimmedCounts.length - 1] : null;
-        const yoyCount = trimmedCounts.length >= 13 ? trimmedCounts[trimmedCounts.length - 13] : (trimmedCounts.length > 0 ? trimmedCounts[0] : null);
+        // 13ヶ月分そろっている場合だけ「前年同月」を出す。
+        // 以前は不足時に先頭月(=単に系列の最初)へフォールバックしていたため、
+        // 口コミ同期が1年未満の店舗で「前年ではない月との差」が前年比バッジとして
+        // 表紙に出ていた（2026-08-02 レビュー指摘 H-1）
+        const yoyCount = trimmedCounts.length >= 13 ? trimmedCounts[trimmedCounts.length - 13] : null;
         return { ...kpi, label: `口コミ増減【${m[1]}/${m[2]}】`, value: deltaValue, yoyValue: yoyCount };
       }
       return kpi;
@@ -278,7 +282,14 @@ export default function ReportClient({
 
   const hasKeywords = keywords.length > 0 || !!(gridRanking && gridRanking.history.length > 0);
   const hasReviews = reviewCounts.length > 0;
-  const hasSearchQueries = searchQueries && searchQueries.latest.length > 0;
+  // 描画条件（history非空）と揃える。latestだけで判定すると、対象月以前の履歴が無い店で
+  // totalPagesだけ+1されて分母がズレる（2026-08-02 レビュー指摘 M-11）
+  const hasSearchQueries = !!(
+    searchQueries &&
+    searchQueries.latest.length > 0 &&
+    Array.isArray(searchQueries.history) &&
+    searchQueries.history.length > 0
+  );
   const hasGridRanking = !!(gridRanking && gridRanking.keywords.length > 0 && gridRanking.history.length > 0);
   const [sqMonthIdx, setSqMonthIdx] = useState(-1); // -1 = 最新月
   const [gridKwIdx, setGridKwIdx] = useState(0);
@@ -852,7 +863,12 @@ export default function ReportClient({
         if (cancelled) return;
         if (res.ok) {
           const data = await res.json();
-          if (!cancelled && data.memo) setMemo(data.memo);
+          // 【必ず代入する】以前は data.memo が空のときに何もしていなかったため、
+          // メモのある月→無い月へ切り替えると前月のメモが残り、そのまま翌月のPDFに載り、
+          // 保存すると誤った月に書き込まれていた（2026-08-02 レビュー指摘 H-2）
+          if (!cancelled) setMemo(data.memo || "");
+        } else if (!cancelled) {
+          setMemo("");
         }
       } catch (e) {
         console.error("[memo] fetch error:", e);
@@ -2429,9 +2445,13 @@ export default function ReportClient({
       })()}
 
       {/* ════ 検索語句（月切り替え対応） ════ */}
-      {showSearchQueries && (() => { pageNum++;
+      {showSearchQueries && (() => {
         const sqHistory: { month: string; keywords: { word: string; count: number }[] }[] = Array.isArray(searchQueries.history) ? searchQueries.history : [];
+        // 履歴が空ならページ自体を描画しないので、番号も進めない。
+        // 以前はpageNum++の後にreturn nullしていたため、非表示なのに番号が1つ飛んでいた
+        // （2026-08-02 レビュー指摘 M-11）
         if (sqHistory.length === 0) return null;
+        pageNum++;
         const activeIdx = sqMonthIdx < 0 || sqMonthIdx >= sqHistory.length ? sqHistory.length - 1 : sqMonthIdx;
         const sqCurrent = sqHistory[activeIdx];
         const sqPrev = activeIdx > 0 ? sqHistory[activeIdx - 1] : null;
@@ -2566,7 +2586,10 @@ export default function ReportClient({
       })()}
 
       {/* ════ P8: 口コミ件数推移 ════ */}
-      {(() => { pageNum++; return null; })()}
+      {/* pageNum++ は hasReviews の中で行う。外に置くと非表示ページ分まで番号が進み、
+          totalPages（条件付き加算）と食い違って「10 / 8」のような表示になる
+          （2026-08-02 レビュー指摘 H-4） */}
+      {hasReviews && (() => { pageNum++; return null; })()}
       {hasReviews && (
         <div style={slideStyle} className="slide">
           <div style={slideBarStyle}><span>{shop.name} — 口コミ件数推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
@@ -2596,7 +2619,7 @@ export default function ReportClient({
       )}
 
       {/* ════ P9: 月間口コミ増加数 ════ */}
-      {(() => { pageNum++; return null; })()}
+      {hasReviews && (() => { pageNum++; return null; })()}
       {hasReviews && (
         <div style={slideStyle} className="slide">
           <div style={slideBarStyle}><span>{shop.name} — 月間口コミ増加数</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>

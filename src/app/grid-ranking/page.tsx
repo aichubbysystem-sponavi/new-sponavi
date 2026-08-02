@@ -1038,6 +1038,7 @@ export default function GridRankingPage() {
                   if (!(await gate("多地点順位計測の一括計測（API費用が発生します）"))) return;
 
                   setBatchRunning(true);
+                  abortRef.current = false; // 前回の中断状態を持ち越さない
 
                   // Phase 1: 座標なし店舗の座標を取得
                   if (noCoord > 0) {
@@ -1108,6 +1109,8 @@ export default function GridRankingPage() {
                     await new Promise(r => setTimeout(r, 1000));
                   }
                   for (let i = 0; i < targetPresets.length; i++) {
+                    // 非常停止: 誤った設定・対象で走り始めた計測を止める唯一の手段
+                    if (abortRef.current) { setBatchProgress(`中断しました（${i}/${targetPresets.length}店舗で停止）`); break; }
                     const p = targetPresets[i];
                     try {
                       let lat = 0, lng = 0;
@@ -1131,10 +1134,13 @@ export default function GridRankingPage() {
 
                       // 全KW共通: 店舗設定の距離・向きで5地点計測（中心＋外周4点。メイン/サブの区別なし）
                       for (let ki = 0; ki < keywords.length; ki++) {
+                        if (abortRef.current) break;
                         const kw = keywords[ki];
                         const points = generate5Points(lat, lng, shopInterval, shopAngle);
                         let kwFailedPoints = 0; // 計測失敗（≠圏外）。1つでもあればこのKWのログは保存しない
                         for (let j = 0; j < points.length; j++) {
+                          // 中断時は未計測の点が残るため、このKWのログは保存させない（欠けたデータを圏外として残さない）
+                          if (abortRef.current) { kwFailedPoints++; break; }
                           const pt = points[j];
                           setBatchProgress(`${i + 1}/${targetPresets.length} ${p.shop_name} [KW ${ki + 1}/${keywords.length} 5地点] (${j + 1}/${points.length})`);
                           window.dispatchEvent(new Event("batch-activity"));
@@ -1147,14 +1153,17 @@ export default function GridRankingPage() {
                                   interval: shopInterval,
                                   // 1点目=店舗中心（place_id失効チェックのトリガーを兼ねる）
                                   center: j === 0,
-                                }, { timeout: 15000 });
+                                }, { timeout: 60000 }); // サーバ処理(最大4ページ検索+DB)より長くする。短いとサーバ継続中に再送して二重課金になる
                                 break;
                               } catch (e: any) {
                                 if (e?.response?.status === 429 && retry < 2) {
                                   setBatchProgress(`${i + 1}/${targetPresets.length} ${p.shop_name} [KW ${ki + 1}/${keywords.length}] レート制限待機中...`);
                                   await new Promise(r => setTimeout(r, 10000 * (retry + 1)));
-                                } else if (retry < 2) {
-                                  // 一時的な失敗（API瞬断・タイムアウト）も再試行する
+                                } else if (retry < 2 && !e?.response?.status) {
+                                  // ネットワーク瞬断のみ再試行。タイムアウト(ECONNABORTED)は
+                                  // サーバがまだ計測中の可能性があり、再送すると同一地点で二重課金になる。
+                                  // 4xx/5xxはリトライしても直らないので即座に失敗させる
+                                  if (e?.code === "ECONNABORTED") { throw e; }
                                   await new Promise(r => setTimeout(r, 3000));
                                 } else { throw e; }
                               }
@@ -1212,6 +1221,15 @@ export default function GridRankingPage() {
                     : `未計測のみ一括計測（${unmeasured}/${presets.length}店舗）`;
                 })()}
               </button>
+              {/* 非常停止。走り出した計測を止める唯一の手段（従来はタブを閉じるしかなかった） */}
+              {batchRunning && (
+                <button
+                  onClick={() => { abortRef.current = true; setBatchProgress("中断しています（進行中の地点の完了を待っています）..."); }}
+                  className="w-full py-2 rounded-lg text-sm font-bold bg-red-500 text-white hover:bg-red-600 transition"
+                >
+                  計測を中断する
+                </button>
+              )}
               {batchProgress && !batchRunning && batchProgress.startsWith("✓") && (
                 <p className="text-sm text-emerald-600 font-medium text-center">{batchProgress}</p>
               )}
@@ -1434,6 +1452,7 @@ export default function GridRankingPage() {
                   if (!confirm(`全${allShopsFiltered.length}店舗（いつもの店舗を除く）を計測します。\n今月計測済みの店舗は自動スキップします。\n座標・KW未取得の店舗は自動取得します。\n約${Math.ceil(allShopsFiltered.length * 60 / 60)}分かかります。\n\n${costLines}\n\nよろしいですか？`)) return;
 
                   setAllShopsBatchRunning(true);
+                  abortRef.current = false; // 前回の中断状態を持ち越さない
 
                   // Phase 1: 座標取得（未取得の店舗がある場合のみ）
                   setAllShopsBatchProgress("Phase 1/3: 座標を確認中...");
@@ -1514,6 +1533,9 @@ export default function GridRankingPage() {
                   const allFailedKwLogs: string[] = []; // 計測失敗で保存しなかったKW（失敗を圏外として保存しない）
 
                   for (let i = 0; i < allTargetShops.length; i++) {
+                    // 非常停止: 全店舗一括は数百店舗×KW×5地点と規模が大きいため、
+                    // 設定ミスに気づいた時点で止められないと課金が積み上がる
+                    if (abortRef.current) { setAllShopsBatchProgress(`中断しました（${i}/${allTargetShops.length}店舗で停止）`); break; }
                     const s = allTargetShops[i];
                     const shopName = s.name || s.id;
                     try {
@@ -1532,10 +1554,13 @@ export default function GridRankingPage() {
 
                       // 全KW共通: 店舗設定の距離・向きで5地点計測（中心＋外周4点。メイン/サブの区別なし）
                       for (let ki = 0; ki < keywords.length; ki++) {
+                        if (abortRef.current) break;
                         const kw = keywords[ki];
                         const points = generate5Points(lat, lng, shopInterval, shopAngle);
                         let kwFailedPoints = 0; // 計測失敗（≠圏外）。1つでもあればこのKWのログは保存しない
                         for (let j = 0; j < points.length; j++) {
+                          // 中断時は未計測の点が残るため、このKWのログは保存させない（欠けたデータを圏外として残さない）
+                          if (abortRef.current) { kwFailedPoints++; break; }
                           const pt = points[j];
                           setAllShopsBatchProgress(`${i + 1}/${allTargetShops.length} ${shopName} [KW ${ki + 1}/${keywords.length} 5地点] (${j + 1}/${points.length})`);
                           window.dispatchEvent(new Event("batch-activity"));
@@ -1548,14 +1573,17 @@ export default function GridRankingPage() {
                                   interval: shopInterval,
                                   // 1点目=店舗中心（place_id失効チェックのトリガーを兼ねる）
                                   center: j === 0,
-                                }, { timeout: 15000 });
+                                }, { timeout: 60000 }); // サーバ処理(最大4ページ検索+DB)より長くする。短いとサーバ継続中に再送して二重課金になる
                                 break;
                               } catch (e: any) {
                                 if (e?.response?.status === 429 && retry < 2) {
                                   setAllShopsBatchProgress(`${i + 1}/${allTargetShops.length} ${shopName} レート制限待機中...`);
                                   await new Promise(r => setTimeout(r, 10000 * (retry + 1)));
-                                } else if (retry < 2) {
-                                  // 一時的な失敗（API瞬断・タイムアウト）も再試行する
+                                } else if (retry < 2 && !e?.response?.status) {
+                                  // ネットワーク瞬断のみ再試行。タイムアウト(ECONNABORTED)は
+                                  // サーバがまだ計測中の可能性があり、再送すると同一地点で二重課金になる。
+                                  // 4xx/5xxはリトライしても直らないので即座に失敗させる
+                                  if (e?.code === "ECONNABORTED") { throw e; }
                                   await new Promise(r => setTimeout(r, 3000));
                                 } else { throw e; }
                               }
@@ -1621,6 +1649,15 @@ export default function GridRankingPage() {
                     最大は全地点が圏外で4ページ使い切った場合。順位が見つかれば途中で打ち切られ、同月内の再計測と共有キャッシュ命中は¥0。
                   </p>
                 </div>
+              )}
+              {/* 非常停止。全店舗一括は規模が大きいため、設定ミスに気づいた時点で止められるようにする */}
+              {allShopsBatchRunning && (
+                <button
+                  onClick={() => { abortRef.current = true; setAllShopsBatchProgress("中断しています（進行中の地点の完了を待っています）..."); }}
+                  className="w-full py-2 rounded-lg text-sm font-bold bg-red-500 text-white hover:bg-red-600 transition"
+                >
+                  計測を中断する
+                </button>
               )}
               {allShopsBatchProgress && !allShopsBatchRunning && allShopsBatchProgress.startsWith("✓") && (
                 <p className="text-sm text-emerald-600 font-medium text-center">{allShopsBatchProgress}</p>
@@ -1830,8 +1867,9 @@ export default function GridRankingPage() {
             </div>
             <p className="mt-1 text-xs text-gray-400">
               距離・向きは店舗ごとに保存され、一括計測でも使用されます。
-              ※計測点は約500mの格子に丸められます。15度単位の向きの差が反映されるのは距離2km以上が目安です
-              （それ未満は斜め⇔十字の45度単位が有効）。斜め配置では2.5kmと3kmが同一地点になる場合があります
+              ※計測点は約500mの格子に丸められるため、隣り合う刻み（例: 1.5km↔2km）では
+              店舗の位置によってごく稀に同じ地点になり、結果が変わらないことがあります（実測1〜3%程度）。
+              15度単位の向きの差が反映されるのは距離2km以上が目安です（それ未満は斜め⇔十字の45度単位が有効）
             </p>
           </div>
         </div>

@@ -211,7 +211,7 @@ export default function ReviewAnalysisPage() {
     setError(null);
     const selectedShops = shops.filter((s) => selected.has(s.id)).map((s) => ({ id: s.id, name: s.name }));
     const CHUNK = 10; // 1回のPOSTでデータ準備する店舗数（Claudeは呼ばないため冷却不要）
-    let submitted = 0, skipped = 0, failed = 0;
+    let submitted = 0, skipped = 0, failed = 0, pendingSkipped = 0;
     for (let i = 0; i < selectedShops.length; i += CHUNK) {
       if (cancelRef.current) { setBatchMsg(`中断しました（投入済み${submitted}店舗）`); break; }
       const chunk = selectedShops.slice(i, i + CHUNK);
@@ -223,14 +223,17 @@ export default function ReviewAnalysisPage() {
           { timeout: 280000 },
         );
         submitted += res.data?.submitted || 0;
-        skipped += (res.data?.results || []).filter((r: AnalysisResult) => r.status !== "prepared").length;
+        const rs = (res.data?.results || []) as AnalysisResult[];
+        skipped += rs.filter((r) => r.status !== "prepared").length;
+        pendingSkipped += rs.filter((r) => r.status === "batch_pending").length;
       } catch (err: any) {
         failed += chunk.length;
         setError(safeStr(err?.response?.data?.error || err?.message || "投入エラー"));
       }
     }
     if (!cancelRef.current) {
-      setBatchMsg(`投入完了: ${submitted}店舗（対象外スキップ${skipped}件${failed > 0 ? `・失敗${failed}件` : ""}）。結果は通常1時間以内に「結果を取り込む」で反映できます`);
+      const pendNote = pendingSkipped > 0 ? `・結果待ちのため除外${pendingSkipped}件（二重投入防止）` : "";
+      setBatchMsg(`投入完了: ${submitted}店舗（対象外スキップ${skipped}件${pendNote}${failed > 0 ? `・失敗${failed}件` : ""}）。結果は通常1時間以内に「結果を取り込む」で反映できます`);
     }
     setBatchSubmitting(false);
     fetchBatchStatus();
@@ -243,12 +246,34 @@ export default function ReviewAnalysisPage() {
     try {
       const res = await api.post("/api/report/analyze-batch", {}, { timeout: 280000 });
       const d = res.data || {};
-      setBatchMsg(
-        `取り込み: 保存${d.saved || 0}件${d.blanked ? `（うち照合違反で一部空欄${d.blanked}件）` : ""} / 失敗${d.failed || 0}件 / 再生成へ${d.retried || 0}件 / 未完了${d.stillProcessing || 0}バッチ`,
-      );
+      if (d.lockBusy) {
+        setBatchMsg(d.message || "別の取り込みが実行中です。完了までお待ちください");
+      } else {
+        setBatchMsg(
+          `取り込み: 保存${d.saved || 0}件${d.blanked ? `（うち照合違反で一部空欄${d.blanked}件）` : ""} / 失敗${d.failed || 0}件 / 再生成へ${d.retried || 0}件 / 未完了${d.stillProcessing || 0}バッチ${d.deadBatches ? ` / 対象外${d.deadBatches}バッチ` : ""}`,
+        );
+      }
       if ((d.saved || 0) > 0) setResults((r) => [...r]); // 分析済みバッジを更新
     } catch (err: any) {
       setError(safeStr(err?.response?.data?.error || err?.message || "取り込みエラー"));
+    }
+    setBatchPolling(false);
+    fetchBatchStatus();
+  }, [canPaid, fetchBatchStatus]);
+
+  // 失敗・取り残しアイテムの再投入（復旧操作）
+  const runBatchRescue = useCallback(async () => {
+    if (!canPaid) return;
+    setBatchPolling(true);
+    setBatchMsg(null);
+    try {
+      const res = await api.post("/api/report/analyze-batch", { action: "rescue" }, { timeout: 280000 });
+      const d = res.data || {};
+      setBatchMsg(d.rescued > 0
+        ? `失敗分を再投入しました: ${d.rescued}件。約1時間後に「結果を取り込む」を押してください`
+        : "再投入できる失敗アイテムはありません");
+    } catch (err: any) {
+      setError(safeStr(err?.response?.data?.error || err?.message || "再投入エラー"));
     }
     setBatchPolling(false);
     fetchBatchStatus();
@@ -260,6 +285,9 @@ export default function ReviewAnalysisPage() {
     const t = setInterval(fetchBatchStatus, 90000);
     return () => clearInterval(t);
   }, [batchHasActive, fetchBatchStatus]);
+
+  // 失敗アイテムの有無（救済ボタンの表示判定）
+  const batchFailedCount = batchRows.reduce((n, b) => n + (b.stateCounts?.["failed"] || 0), 0);
 
   const successCount = results.filter((r) => r.status === "success").length;
   const failedResults = results.filter((r) => r.status === "error" || r.status === "analysis_failed" || r.status === "db_error");
@@ -360,7 +388,7 @@ export default function ReviewAnalysisPage() {
           <button
             data-run-analysis
             onClick={runAnalysis}
-            disabled={running || selected.size === 0 || !apiConnected || !canPaid}
+            disabled={running || batchSubmitting || selected.size === 0 || !apiConnected || !canPaid}
             title={!canPaid ? PERMISSION_DENIED_HINT.PAID_OP : undefined}
             className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
               running || selected.size === 0 || !apiConnected || !canPaid
@@ -419,17 +447,33 @@ export default function ReviewAnalysisPage() {
               Batch分析の状況
               {batchHasActive && <span className="ml-2 text-xs text-emerald-600">処理中のバッチあり（通常1時間以内に完了）</span>}
             </h3>
-            <button
-              onClick={runBatchPoll}
-              disabled={batchPolling || !canPaid}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                batchPolling || !canPaid
-                  ? "bg-slate-200 text-slate-400 cursor-not-allowed"
-                  : "bg-[#003D6B] text-white hover:bg-[#002a4a] cursor-pointer"
-              }`}
-            >
-              {batchPolling ? "取り込み中..." : "結果を取り込む"}
-            </button>
+            <div className="flex gap-2">
+              {batchFailedCount > 0 && (
+                <button
+                  onClick={runBatchRescue}
+                  disabled={batchPolling || !canPaid}
+                  title="取り込みに失敗した店舗を新しいバッチとして投入し直します"
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                    batchPolling || !canPaid
+                      ? "bg-slate-200 text-slate-400 cursor-not-allowed"
+                      : "bg-orange-600 text-white hover:bg-orange-700 cursor-pointer"
+                  }`}
+                >
+                  失敗{batchFailedCount}件を再投入
+                </button>
+              )}
+              <button
+                onClick={runBatchPoll}
+                disabled={batchPolling || !canPaid}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  batchPolling || !canPaid
+                    ? "bg-slate-200 text-slate-400 cursor-not-allowed"
+                    : "bg-[#003D6B] text-white hover:bg-[#002a4a] cursor-pointer"
+                }`}
+              >
+                {batchPolling ? "取り込み中..." : "結果を取り込む"}
+              </button>
+            </div>
           </div>
           {batchMsg && <p className="text-xs text-slate-600 mb-2">{batchMsg}</p>}
           {batchRows.length > 0 && (
