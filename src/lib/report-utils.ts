@@ -396,10 +396,12 @@ export function gridLayoutWithRange(
 }
 
 /**
- * パフォーマンス同期cronの実行日（毎月この日。vercel.json の "0 21 5 * *" と揃える）。
- * GBPのパフォーマンスデータは即日提供されないため、月初ではなく数日空けて取得する。
+ * パフォーマンス同期cronが完了する日（JST）。
+ * vercel.json の "0 21 5 * *" はUTC 5日21:00 = JST 6日06:00 に実行されるため、
+ * JST基準では「6日から取得済み」になる。5にすると6日朝の実行前なのに
+ * 「同期済みのはずなのにデータが無い」と誤判定する。
  */
-export const PERF_SYNC_DAY = 5;
+export const PERF_SYNC_DAY = 6;
 
 export type MonthDataStatus = "pending_current" | "pending_lag" | "missing";
 
@@ -448,4 +450,35 @@ export function formatDiff(d: number | null): string {
   if (d > 0) return `+${d.toLocaleString()}`;
   if (d === 0) return "→";
   return d.toLocaleString();
+}
+
+/**
+ * 前年比の基準（前年同月）が異常値かどうかを判定する。
+ *
+ * 【なぜ必要か】
+ * Queencyのマップ表示数は2025/6だけ39,490で、前後の月（約5,000前後）の8倍近い。
+ * Googleの集計仕様変更やスパイクをそのまま前年比の分母にすると
+ * 「前年比-67.4%」のような過度に悲観的な数字がレポートの顔になる。
+ * 値は改変せず、「参考値」の注記を出すための判定に使う。
+ *
+ * 判定: 対象値が、前後3ヶ月（対象自身を除く・正の値のみ）の中央値の3倍を超えたら異常値。
+ * 比較材料が2ヶ月未満しか無い場合は判定しない（誤検知防止）。
+ */
+export function isAnomalousYoyBase(
+  series: (number | null | undefined)[],
+  idx: number,
+): boolean {
+  const v = series[idx];
+  if (typeof v !== "number" || v <= 0) return false;
+  const neighbors: number[] = [];
+  for (let i = idx - 3; i <= idx + 3; i++) {
+    if (i === idx || i < 0 || i >= series.length) continue;
+    const n = series[i];
+    if (typeof n === "number" && n > 0) neighbors.push(n);
+  }
+  if (neighbors.length < 2) return false;
+  const sorted = [...neighbors].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  if (median <= 0) return false;
+  return v > median * 3;
 }

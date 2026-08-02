@@ -110,7 +110,8 @@ export interface GridPoint {
 export interface GridRankingSnapshot {
   keyword: string;
   gridSize: number;
-  intervalM: number;
+  /** 計測地点の間隔(m)。推定・手動データ（overrides）は間隔不明のため null（表示側は半径を出さない） */
+  intervalM: number | null;
   results: GridPoint[];
   measuredAt: string; // ISO string
   avgRank: number;

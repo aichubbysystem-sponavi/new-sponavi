@@ -500,7 +500,8 @@ async function fetchAllExternalData(
             const ranked = (o.results || []).filter((r: any) => r.rank > 0);
             const avg = ranked.length > 0 ? Math.round(ranked.reduce((s: number, r: any) => s + r.rank, 0) / ranked.length * 10) / 10 : 0;
             monthMap.get(month)!.push({
-              keyword: o.keyword, gridSize: o.grid_size || 7, intervalM: 1000,
+              // overridesは計測間隔を持たない。1000と偽ると「半径1km」という架空の実測条件が表示される
+              keyword: o.keyword, gridSize: o.grid_size || 7, intervalM: null,
               results: o.results || [], measuredAt: o.updated_at, avgRank: avg,
             });
           }

@@ -287,12 +287,18 @@ export default function GridRankingPage() {
   const [aborted, setAborted] = useState(false);
   const [sheetLoading, setSheetLoading] = useState(false);
   const abortRef = useRef(false);
+  // 計測ループ中の店舗切替を検知するための現在値ミラー
+  // （ループはヘッダーの店舗セレクタを止められないため、切替されたら中断する）
+  const selectedShopIdRef = useRef<string | null>(null);
   const mapRef = useRef<HTMLDivElement>(null);
   const googleMapRef = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
 
   const [shopLat, setShopLat] = useState(0);
   const [shopLng, setShopLng] = useState(0);
+
+  // 計測ループの店舗切替検知用（refは常に最新値を持つ）
+  useEffect(() => { selectedShopIdRef.current = selectedShopId; }, [selectedShopId]);
 
   // 店舗座標を取得（Go API → Supabase fallback）
   useEffect(() => {
@@ -571,41 +577,62 @@ export default function GridRankingPage() {
   const runMeasureForKeyword = async (kw: string) => {
     if (!selectedShopId || !kw.trim() || !shopLat) return;
     const keywordArg = kw.trim();
+    const shopIdAtStart = selectedShopId; // 計測中の店舗切替を検知する基準
     setMeasuring(true);
     setError("");
     setAborted(false);
     abortRef.current = false;
     setSelectedHistory(null);
 
+    try {
     const points = generate5Points(shopLat, shopLng, interval, angleDeg);
     setGridResults(points);
     renderMarkers(points);
 
     const total = points.length;
     let completed = 0;
+    let failedPoints = 0; // 計測失敗（≠圏外）の地点数。1つでもあればログは保存しない
 
     for (let i = 0; i < points.length; i++) {
       if (abortRef.current) {
         setAborted(true);
         break;
       }
+      // 店舗が切り替えられたら中断（旧店舗の結果を新店舗の画面に描くのを防ぐ）
+      if (selectedShopIdRef.current !== shopIdAtStart) {
+        abortRef.current = true;
+        setAborted(true);
+        setError("計測中に店舗が切り替えられたため中断しました");
+        break;
+      }
 
       const pt = points[i];
       setProgress(`計測中: ${completed + 1}/${total} 地点`);
 
-      try {
-        const res = await api.post("/api/report/grid-ranking", {
-          shopId: selectedShopId,
-          keyword: keywordArg,
-          lat: pt.lat,
-          lng: pt.lng,
-          interval, // キャッシュ格子幅の調整に使用
-          // 1点目=店舗中心（place_id失効チェックのトリガーを兼ねる）
-          center: i === 0,
-        });
-        pt.rank = res.data.rank || 0; // 0 = 圏外（バッチ計測と同じセンチネルに統一）
-      } catch {
+      // 一時的な失敗（ネットワーク・API瞬断）に備えて1回だけ再試行する
+      let ok = false;
+      for (let attempt = 0; attempt < 2 && !ok; attempt++) {
+        try {
+          const res = await api.post("/api/report/grid-ranking", {
+            shopId: selectedShopId,
+            keyword: keywordArg,
+            lat: pt.lat,
+            lng: pt.lng,
+            interval, // キャッシュ格子幅の調整に使用
+            // 1点目=店舗中心（place_id失効チェックのトリガーを兼ねる）
+            center: i === 0,
+          });
+          pt.rank = res.data.rank || 0; // 0 = 圏外（バッチ計測と同じセンチネルに統一）
+          ok = true;
+        } catch {
+          if (attempt === 0) await new Promise((r) => setTimeout(r, 2000));
+        }
+      }
+      if (!ok) {
+        // 【失敗と圏外の区別】以前は失敗を rank=0（圏外）として保存していた。
+        // APIエラーの日は「全地点圏外」の偽データがレポートに載る事故になる
         pt.rank = 0;
+        failedPoints++;
       }
 
       completed++;
@@ -614,28 +641,35 @@ export default function GridRankingPage() {
       renderMarkers(updated);
     }
 
-    // 結果をDB保存
+    // 結果をDB保存（計測失敗が1地点でもあれば保存しない。欠けたログは誤解のもと）
     if (!abortRef.current) {
-      try {
-        await api.put("/api/report/grid-ranking", {
-          shopId: selectedShopId,
-          keyword: keywordArg,
-          gridResults: points.map((p) => ({
-            lat: p.lat,
-            lng: p.lng,
-            rank: p.rank,
-            row: p.row,
-            col: p.col,
-          })),
-          gridSize: GRID_SIZE_5POINT,
-          interval,
-        });
-        fetchHistory();
-      } catch {}
+      if (failedPoints > 0) {
+        setError(`${failedPoints}/${total}地点で計測に失敗したため、このログは保存していません（圏外ではなく計測エラー）。再計測してください`);
+      } else {
+        try {
+          await api.put("/api/report/grid-ranking", {
+            shopId: selectedShopId,
+            keyword: keywordArg,
+            gridResults: points.map((p) => ({
+              lat: p.lat,
+              lng: p.lng,
+              rank: p.rank,
+              row: p.row,
+              col: p.col,
+            })),
+            gridSize: GRID_SIZE_5POINT,
+            interval,
+          });
+          fetchHistory();
+        } catch {}
+      }
     }
 
-    setProgress(`完了: ${completed}/${total} 地点`);
-    setMeasuring(false);
+    setProgress(`完了: ${completed}/${total} 地点${failedPoints > 0 ? `（失敗${failedPoints}地点・未保存）` : ""}`);
+    } finally {
+      // 例外時にも必ず解除する（trueのまま残ると計測ボタンが永久に押せなくなる）
+      setMeasuring(false);
+    }
   };
 
   /**
@@ -659,15 +693,19 @@ export default function GridRankingPage() {
     if (!(await gate(`${savedKeywords.length}キーワードの一括計測（API費用が発生します）`))) return;
 
     setAllKwProgress(`0/${savedKeywords.length}`);
-    for (let i = 0; i < savedKeywords.length; i++) {
-      if (abortRef.current) break;
-      const kw = savedKeywords[i];
-      setAllKwProgress(`${i + 1}/${savedKeywords.length}「${kw}」`);
-      setKeyword(kw);
-      // startMeasure は state の keyword を見るため、明示的に渡せる形で実行する
-      await runMeasureForKeyword(kw);
+    try {
+      for (let i = 0; i < savedKeywords.length; i++) {
+        if (abortRef.current) break;
+        const kw = savedKeywords[i];
+        setAllKwProgress(`${i + 1}/${savedKeywords.length}「${kw}」`);
+        setKeyword(kw);
+        // startMeasure は state の keyword を見るため、明示的に渡せる形で実行する
+        await runMeasureForKeyword(kw);
+      }
+    } finally {
+      // 例外時にも必ず解除する（残ると「一括計測中」のままボタンが死ぬ）
+      setAllKwProgress("");
     }
-    setAllKwProgress("");
     fetchHistory();
   };
 
@@ -1060,6 +1098,7 @@ export default function GridRankingPage() {
                   }
                   const targetPresets = latestPresets.filter((p: any) => !measuredThisMonthIds.has(p.shop_id));
                   let completed = 0, skipped = 0, totalKws = 0;
+                  const failedKwLogs: string[] = []; // 計測失敗で保存しなかったKW（失敗を圏外として保存しない）
                   const skippedCount = latestPresets.length - targetPresets.length;
                   if (skippedCount > 0) {
                     setBatchProgress(`Phase 3/3: 今月計測済み${skippedCount}店舗をスキップ`);
@@ -1091,6 +1130,7 @@ export default function GridRankingPage() {
                       for (let ki = 0; ki < keywords.length; ki++) {
                         const kw = keywords[ki];
                         const points = generate5Points(lat, lng, shopInterval, shopAngle);
+                        let kwFailedPoints = 0; // 計測失敗（≠圏外）。1つでもあればこのKWのログは保存しない
                         for (let j = 0; j < points.length; j++) {
                           const pt = points[j];
                           setBatchProgress(`${i + 1}/${targetPresets.length} ${p.shop_name} [KW ${ki + 1}/${keywords.length} 5地点] (${j + 1}/${points.length})`);
@@ -1110,19 +1150,31 @@ export default function GridRankingPage() {
                                 if (e?.response?.status === 429 && retry < 2) {
                                   setBatchProgress(`${i + 1}/${targetPresets.length} ${p.shop_name} [KW ${ki + 1}/${keywords.length}] レート制限待機中...`);
                                   await new Promise(r => setTimeout(r, 10000 * (retry + 1)));
+                                } else if (retry < 2) {
+                                  // 一時的な失敗（API瞬断・タイムアウト）も再試行する
+                                  await new Promise(r => setTimeout(r, 3000));
                                 } else { throw e; }
                               }
                             }
                             points[j] = { ...pt, rank: res?.data?.rank || 0 };
-                          } catch { points[j] = { ...pt, rank: 0 }; }
+                          } catch {
+                            // 【失敗と圏外の区別】rank=0（圏外）として記録すると
+                            // 「全地点圏外」の偽データがレポートに載る。失敗として数える
+                            points[j] = { ...pt, rank: 0 };
+                            kwFailedPoints++;
+                          }
                           // キャッシュ命中(¥0)時は待機を短縮（一括の再実行を高速化）
                           await new Promise(r => setTimeout(r, res?.data?.cached ? 50 : 1000));
                         }
 
-                        await api.put("/api/report/grid-ranking", {
-                          shopId: p.shop_id, keyword: kw, gridResults: points, gridSize: GRID_SIZE_5POINT, interval: shopInterval,
-                        });
-                        totalKws++;
+                        if (kwFailedPoints > 0) {
+                          failedKwLogs.push(`${p.shop_name}「${kw}」(${kwFailedPoints}地点失敗)`);
+                        } else {
+                          await api.put("/api/report/grid-ranking", {
+                            shopId: p.shop_id, keyword: kw, gridResults: points, gridSize: GRID_SIZE_5POINT, interval: shopInterval,
+                          });
+                          totalKws++;
+                        }
                       }
                       completed++;
                     } catch {}
@@ -1136,7 +1188,9 @@ export default function GridRankingPage() {
                   const skipMsg = [];
                   if (skippedCount > 0) skipMsg.push(`計測済み${skippedCount}件`);
                   if (skipped > 0) skipMsg.push(`座標/KWなし${skipped}件`);
-                  setBatchProgress(`✓ ${completed}店舗 × ${totalKws}KWの計測完了${skipMsg.length > 0 ? `（${skipMsg.join("・")}スキップ）` : ""}`);
+                  if (failedKwLogs.length > 0) skipMsg.push(`⚠計測失敗・未保存${failedKwLogs.length}KW`);
+                  setBatchProgress(`✓ ${completed}店舗 × ${totalKws}KWの計測完了${skipMsg.length > 0 ? `（${skipMsg.join("・")}）` : ""}`);
+                  if (failedKwLogs.length > 0) console.warn("[一括計測] 失敗で未保存:", failedKwLogs);
                 }}
                 disabled={!can(role, "PAID_OP") || batchRunning || presets.filter(p => !isMeasuredThisMonth(p.last_measurement?.measured_at)).length === 0}
                 title={!can(role, "PAID_OP") ? PERMISSION_DENIED_HINT.PAID_OP : undefined}
@@ -1454,6 +1508,7 @@ export default function GridRankingPage() {
                     await new Promise(r => setTimeout(r, 1000));
                   }
                   let completed = 0, skipped = 0, totalKws = 0;
+                  const allFailedKwLogs: string[] = []; // 計測失敗で保存しなかったKW（失敗を圏外として保存しない）
 
                   for (let i = 0; i < allTargetShops.length; i++) {
                     const s = allTargetShops[i];
@@ -1476,6 +1531,7 @@ export default function GridRankingPage() {
                       for (let ki = 0; ki < keywords.length; ki++) {
                         const kw = keywords[ki];
                         const points = generate5Points(lat, lng, shopInterval, shopAngle);
+                        let kwFailedPoints = 0; // 計測失敗（≠圏外）。1つでもあればこのKWのログは保存しない
                         for (let j = 0; j < points.length; j++) {
                           const pt = points[j];
                           setAllShopsBatchProgress(`${i + 1}/${allTargetShops.length} ${shopName} [KW ${ki + 1}/${keywords.length} 5地点] (${j + 1}/${points.length})`);
@@ -1495,19 +1551,31 @@ export default function GridRankingPage() {
                                 if (e?.response?.status === 429 && retry < 2) {
                                   setAllShopsBatchProgress(`${i + 1}/${allTargetShops.length} ${shopName} レート制限待機中...`);
                                   await new Promise(r => setTimeout(r, 10000 * (retry + 1)));
+                                } else if (retry < 2) {
+                                  // 一時的な失敗（API瞬断・タイムアウト）も再試行する
+                                  await new Promise(r => setTimeout(r, 3000));
                                 } else { throw e; }
                               }
                             }
                             points[j] = { ...pt, rank: res?.data?.rank || 0 };
-                          } catch { points[j] = { ...pt, rank: 0 }; }
+                          } catch {
+                            // 【失敗と圏外の区別】rank=0（圏外）として記録すると
+                            // 「全地点圏外」の偽データがレポートに載る。失敗として数える
+                            points[j] = { ...pt, rank: 0 };
+                            kwFailedPoints++;
+                          }
                           // キャッシュ命中(¥0)時は待機を短縮（一括の再実行を高速化）
                           await new Promise(r => setTimeout(r, res?.data?.cached ? 50 : 1000));
                         }
 
-                        await api.put("/api/report/grid-ranking", {
-                          shopId: s.id, keyword: kw, gridResults: points, gridSize: GRID_SIZE_5POINT, interval: shopInterval,
-                        });
-                        totalKws++;
+                        if (kwFailedPoints > 0) {
+                          allFailedKwLogs.push(`${shopName}「${kw}」(${kwFailedPoints}地点失敗)`);
+                        } else {
+                          await api.put("/api/report/grid-ranking", {
+                            shopId: s.id, keyword: kw, gridResults: points, gridSize: GRID_SIZE_5POINT, interval: shopInterval,
+                          });
+                          totalKws++;
+                        }
                       }
                       completed++;
                     } catch {}
@@ -1518,7 +1586,9 @@ export default function GridRankingPage() {
                   const allSkipMsg = [];
                   if (allSkippedMeasured > 0) allSkipMsg.push(`計測済み${allSkippedMeasured}件`);
                   if (skipped > 0) allSkipMsg.push(`座標/KWなし${skipped}件`);
-                  setAllShopsBatchProgress(`✓ ${completed}店舗 × ${totalKws}KWの計測完了${allSkipMsg.length > 0 ? `（${allSkipMsg.join("・")}スキップ）` : ""}`);
+                  if (allFailedKwLogs.length > 0) allSkipMsg.push(`⚠計測失敗・未保存${allFailedKwLogs.length}KW`);
+                  setAllShopsBatchProgress(`✓ ${completed}店舗 × ${totalKws}KWの計測完了${allSkipMsg.length > 0 ? `（${allSkipMsg.join("・")}）` : ""}`);
+                  if (allFailedKwLogs.length > 0) console.warn("[全店舗計測] 失敗で未保存:", allFailedKwLogs);
                   refreshKwMissing();
                   refreshGridStats();
                   refreshShopStatus();
@@ -1947,7 +2017,8 @@ export default function GridRankingPage() {
                           title={`(${pt.lat.toFixed(4)}, ${pt.lng.toFixed(4)})${pt.estimated ? " [推定]" : ""}`}
                           style={pt.estimated ? { backgroundImage: "repeating-linear-gradient(135deg, transparent, transparent 3px, rgba(0,0,0,0.06) 3px, rgba(0,0,0,0.06) 4px)" } : undefined}
                         >
-                          {pt.rank > 0 ? pt.rank : pt.rank === 0 ? "" : "-"}
+                          {/* 圏外は空欄ではなく「圏外」と明示する（空欄は未計測と区別がつかない） */}
+                          {pt.rank > 0 ? pt.rank : pt.rank === 0 ? <span className="text-[10px] font-normal text-gray-500">圏外</span> : "-"}
                         </td>
                         )
                       )}

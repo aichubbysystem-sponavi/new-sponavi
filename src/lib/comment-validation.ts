@@ -36,9 +36,18 @@ export interface CommentViolation {
   /** 違反が見つかったページ（pageCommentsのキー） */
   field: string;
   /** 違反の種類 */
-  kind: "rank_mismatch" | "average_mismatch" | "continuity_mismatch";
+  kind: "rank_mismatch" | "average_mismatch" | "continuity_mismatch" | "exclusivity_mismatch";
   /** 人間が読める説明。再生成時にAIへ渡す */
   message: string;
+}
+
+/** KPI指標の前月比・前年比（%）。「唯一の前年超え」等の排他的主張の検証に使う */
+export interface MetricFact {
+  label: string;
+  /** 前月比% (例: +14.2 → 14.2)。前月データなしは null */
+  momPct: number | null;
+  /** 前年比%。前年データなしは null */
+  yoyPct: number | null;
 }
 
 /** 全角数字を半角に寄せる */
@@ -113,6 +122,10 @@ export function validateRankMentions(
   let m: RegExpExecArray | null;
   while ((m = rankRe.exec(normalized)) !== null) {
     const pos = m.index;
+    // 「12.4位」「平均17.3位」のような小数の順位は、正規表現が小数点以下だけを
+    // 拾って「4位」「3位」と誤検知する。数字の直前が数字か小数点なら実順位ではない
+    const before = pos > 0 ? normalized[pos - 1] : "";
+    if (/[\d.．]/.test(before)) continue;
     // 直前のキーワード出現を探す
     let owner: KeywordRankFacts | null = null;
     for (const mention of mentions) {
@@ -122,9 +135,11 @@ export function validateRankMentions(
     if (!owner) continue; // 帰属先不明 → 検証しない
     const rank = parseInt(m[1], 10);
     if (!Number.isFinite(rank)) continue;
-    // 「10位以内」「3位以内」のような閾値表現は実順位ではないので除外
-    const after = normalized.slice(m.index + m[0].length, m.index + m[0].length + 3);
-    if (/^以[内上下]/.test(after)) continue;
+    const after = normalized.slice(m.index + m[0].length, m.index + m[0].length + 4);
+    // 「10位以内」のような閾値表現は実順位ではないので除外。
+    // 「5位上昇」「3位下落」のような変動幅表現も順位ではない（実例: 15位→10位を
+    // 「5位上昇」と書いた文で、5位が実データに無いとして誤検知した）
+    if (/^(以[内上下]|上昇|上げ|アップ|改善|浮上|回復|下落|下降|低下|ダウン|後退|悪化|下げ|転落|分)/.test(after)) continue;
     if (!owner.allowedRanks.includes(rank)) {
       bad.push({ rank, word: owner.word });
     }
@@ -196,11 +211,23 @@ export function validateContinuityClaims(
 
   let m: RegExpExecArray | null;
   while ((m = ABSOLUTE.exec(normalized)) !== null) {
-    // 直前に登場したキーワードのものとみなす（数値照合と同じ帰属ルール）
+    // 断定表現を含む「文」を特定する（。または改行区切り）
+    const sentStart = Math.max(normalized.lastIndexOf("。", m.index), normalized.lastIndexOf("\n", m.index)) + 1;
+    let sentEnd = normalized.indexOf("。", m.index);
+    if (sentEnd < 0) sentEnd = normalized.length;
+    const sentence = normalized.slice(sentStart, sentEnd);
+
+    // 順位の話をしている文だけを対象にする。
+    // 「口コミは常に増加している」のような順位と無関係な文を、
+    // 直前に出たキーワードの順位主張として誤検知していた（2026-08-01）
+    if (!/(順位|\d\s*位|上位|下位|首位|圏内|圏外|ランク)/.test(sentence)) continue;
+
+    // キーワードは同じ文の中に登場している場合のみ帰属させる。
+    // 文をまたいだ帰属は「別の話題の断定表現」を拾う誤検知のもと
     let owner: KeywordRankFacts | null = null;
     for (const mention of mentions) {
-      if (mention.index < m.index) owner = mention.fact;
-      else break;
+      if (mention.index >= sentStart && mention.index < m.index) owner = mention.fact;
+      if (mention.index >= m.index) break;
     }
     if (!owner || !owner.series || owner.series.length === 0) continue;
 
@@ -226,13 +253,79 @@ export function validateContinuityClaims(
   return bad;
 }
 
+/**
+ * 「唯一の前年超え」のような排他的主張を、全指標の実データと突き合わせる。
+ *
+ * 【なぜ必要か】
+ * 2026-08-02 Queencyのレポートで実際に発生:
+ *   AI: 「ウェブサイトクリックは前年同月比+12%と唯一の前年超え」
+ *   実際: フードメニュークリックも前年比+43.7%で前年超え（しかも伸び率はこちらが上）
+ * 「唯一」はAIが全指標を数えた結果の主張であり、数え間違えると
+ * レポート内の他ページ（KPIカード）と矛盾してクライアントの信頼を損なう。
+ *
+ * 【誤検知を避ける方針】
+ * 「唯一」を含む文のうち、比較基準（前年/前月）と方向（超え/プラス/増 等）が
+ * 明確に読み取れるものだけを検証する。判断がつかない文は通す。
+ */
+export function validateExclusivityClaims(
+  text: string,
+  metrics: MetricFact[],
+): { claim: string; others: string[] }[] {
+  if (!text || metrics.length === 0) return [];
+  const normalized = toHalfWidthDigits(text);
+  const bad: { claim: string; others: string[] }[] = [];
+
+  const re = /唯一/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(normalized)) !== null) {
+    const sentStart = Math.max(normalized.lastIndexOf("。", m.index), normalized.lastIndexOf("\n", m.index)) + 1;
+    let sentEnd = normalized.indexOf("。", m.index);
+    if (sentEnd < 0) sentEnd = normalized.length;
+    const sentence = normalized.slice(sentStart, sentEnd);
+
+    // 比較基準: 前年 or 前月。どちらも無い文は検証しない
+    const basis: "yoy" | "mom" | null = /前年/.test(sentence) ? "yoy" : /前月/.test(sentence) ? "mom" : null;
+    if (!basis) continue;
+    // 方向: プラス系のみ対象（「唯一のマイナス」等は稀で、誤検知リスクの方が大きい）
+    if (!/(超え|上回|プラス|増加|増)/.test(sentence)) continue;
+
+    const positives = metrics.filter((mt) => {
+      const pct = basis === "yoy" ? mt.yoyPct : mt.momPct;
+      return typeof pct === "number" && pct > 0;
+    });
+    if (positives.length >= 2) {
+      bad.push({
+        claim: sentence.trim().slice(0, 60),
+        others: positives.map((p) => `${p.label}(${basis === "yoy" ? "前年比" : "前月比"}${(basis === "yoy" ? p.yoyPct : p.momPct)!.toFixed(1)}%)`),
+      });
+    }
+  }
+  return bad;
+}
+
 /** pageComments 全体を検証して違反リストを返す */
 export function validatePageComments(
   pageComments: Record<string, unknown> | null | undefined,
-  ctx: { keywordFacts: KeywordRankFacts[]; reviewDeltas: number[] },
+  ctx: { keywordFacts: KeywordRankFacts[]; reviewDeltas: number[]; metricFacts?: MetricFact[] },
 ): CommentViolation[] {
   if (!pageComments) return [];
   const violations: CommentViolation[] = [];
+
+  // 排他的主張（「唯一の前年超え」等）はKPIに言及しうる全ページで検証する
+  if (ctx.metricFacts && ctx.metricFacts.length > 0) {
+    const kpiFields = ["monthly", "map", "search", "reactions", "summary"];
+    for (const field of kpiFields) {
+      const v = pageComments[field];
+      if (typeof v !== "string" || !v) continue;
+      for (const b of validateExclusivityClaims(v, ctx.metricFacts)) {
+        violations.push({
+          field,
+          kind: "exclusivity_mismatch",
+          message: `「${b.claim}」と書いているが、条件を満たす指標は複数ある: ${b.others.join(" / ")}。「唯一」は使えない`,
+        });
+      }
+    }
+  }
 
   // 順位に言及しうるページのみ対象にする（口コミ系の文中の「位」は順位ではない可能性がある）
   const rankFields = ["keyword", "rankingHistory", "grid", "summary", "monthly"];

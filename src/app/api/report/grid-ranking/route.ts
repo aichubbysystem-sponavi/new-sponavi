@@ -213,6 +213,7 @@ export const POST = withAudit("多地点順位実測", "PAID_OP", async (request
     const allIds: string[] = [];   // 順位順のプレイスID（キャッシュ保存用）
     const allNames: string[] = []; // 順位順の店名（店名モード時のみ取得）
     let complete = false;
+    let apiError = false; // Places APIがエラーを返したページがあるか
 
     // FieldMaskがSKU（単価）を決める:
     //  - places.id のみ → Text Search Essentials (IDs Only) ¥0.75/回
@@ -247,7 +248,15 @@ export const POST = withAudit("多地点順位実測", "PAID_OP", async (request
         body: JSON.stringify(reqBody),
       });
 
-      if (!res.ok) break;
+      if (!res.ok) {
+        // 【失敗と圏外の区別】以前はここで break → rank=0 を正常応答として返していた。
+        // APIエラー（キー制限・クォータ超過・障害）が「圏外」としてログに残り、
+        // レポートに「49地点すべて圏外」という誤データが載る事故につながる。
+        // エラーは必ずエラーとして返し、判定はしない。
+        apiError = true;
+        console.error("[grid-ranking] Places API error:", res.status, await res.text().catch(() => ""));
+        break;
+      }
 
       const data = await res.json();
       const places = data.places || [];
@@ -265,6 +274,16 @@ export const POST = withAudit("多地点順位実測", "PAID_OP", async (request
       if (isLastPage) break;
 
       pageToken = data.nextPageToken;
+    }
+
+    // 【失敗と圏外の区別】発見できず、かつ最後まで検索しきれていない場合は
+    // 「圏外」と断定できない。0を返すとログ・レポートに圏外として残るため、
+    // 必ずエラーで返して呼び出し側に失敗と伝える（地点は再計測すればよい）
+    if (rank === 0 && (apiError || !complete)) {
+      return NextResponse.json(
+        { error: "Places APIの検索に失敗しました。この地点は圏外ではなく計測失敗です。再計測してください", measurementFailed: true },
+        { status: 502 },
+      );
     }
 
     // 【IDの鮮度チェック】IDモードで中心地点すら圏外の場合、IDの失効を疑って確認する
@@ -344,7 +363,37 @@ export const PUT = withAudit("順位実測値保存", "DATA_OP", async (request,
   const shopResPut = await requireCtxShopAccessById(ctx, shopId);
   if (shopResPut.error) return shopResPut.error;
 
-  ctx.detail = `${shopResPut.shopName}: 「${keyword}」${gridSize}×${gridSize}グリッド ${Array.isArray(gridResults) ? gridResults.length : 0}地点を保存`;
+  // 【入力の門番】このログはレポートにそのまま載る。検証なしで保存すると、
+  // 不正な形のJSONや異常な順位（-5位・9999位・NaN座標）がクライアント向け
+  // レポートを直接汚染する。形式が正しくないものは全部拒否する
+  if (typeof keyword !== "string" || !keyword.trim() || keyword.length > 100) {
+    return NextResponse.json({ error: "keywordが不正です" }, { status: 400 });
+  }
+  if (!Number.isInteger(gridSize) || gridSize < 1 || gridSize > 13) {
+    return NextResponse.json({ error: "gridSizeが不正です（1〜13）" }, { status: 400 });
+  }
+  if (interval !== undefined && (!Number.isFinite(interval) || interval < 50 || interval > 10000)) {
+    return NextResponse.json({ error: "intervalが不正です（50〜10000m）" }, { status: 400 });
+  }
+  if (!Array.isArray(gridResults) || gridResults.length === 0 || gridResults.length > 169) {
+    return NextResponse.json({ error: "gridResultsが不正です（1〜169地点）" }, { status: 400 });
+  }
+  for (const p of gridResults) {
+    const okPoint =
+      p && typeof p === "object" &&
+      Number.isFinite(p.lat) && p.lat >= -90 && p.lat <= 90 &&
+      Number.isFinite(p.lng) && p.lng >= -180 && p.lng <= 180 &&
+      Number.isInteger(p.rank) && p.rank >= 0 && p.rank <= 200 &&
+      Number.isInteger(p.row) && p.row >= 0 && p.row < 13 &&
+      Number.isInteger(p.col) && p.col >= 0 && p.col < 13;
+    if (!okPoint) {
+      return NextResponse.json({ error: "gridResultsに不正な地点があります（lat/lng/rank/row/colの型・範囲）" }, { status: 400 });
+    }
+  }
+  // 余計なフィールドを持ち込ませない（保存する形をここで確定させる）
+  const cleanResults = gridResults.map((p) => ({ lat: p.lat, lng: p.lng, rank: p.rank, row: p.row, col: p.col }));
+
+  ctx.detail = `${shopResPut.shopName}: 「${keyword}」${gridSize}×${gridSize}グリッド ${cleanResults.length}地点を保存`;
 
   const supabase = getSupabase();
   const { error: insertErr } = await supabase.from("grid_ranking_logs").insert({
@@ -353,7 +402,7 @@ export const PUT = withAudit("順位実測値保存", "DATA_OP", async (request,
     keyword,
     grid_size: gridSize,
     interval_m: interval,
-    results: gridResults,
+    results: cleanResults,
     measured_at: new Date().toISOString(),
   });
 

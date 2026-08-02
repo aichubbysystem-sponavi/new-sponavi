@@ -121,7 +121,8 @@ export async function fetchGridRankingLive(shopIds: string[], shopName?: string)
           const ranked = (o.results || []).filter((r: any) => r.rank > 0);
           const avg = ranked.length > 0 ? ranked.reduce((s: number, r: any) => s + r.rank, 0) / ranked.length : 0;
           monthMap.get(month)!.push({
-            keyword: kw, gridSize: o.grid_size || 7, intervalM: 1000,
+            // overridesは計測間隔を持たない。1000と偽ると「半径1km」という架空の実測条件が表示される
+            keyword: kw, gridSize: o.grid_size || 7, intervalM: null,
             results: o.results || [], measuredAt: o.updated_at, avgRank: Math.round(avg * 10) / 10,
           });
         }
@@ -246,7 +247,7 @@ export function supplementGridFromRanking(
       snapshots.push({
         keyword: word,
         gridSize: 7,
-        intervalM: 1000,
+        intervalM: null, // シート順位からの推定グリッド。実測間隔は存在しない（半径表記を出さない）
         results,
         measuredAt: new Date().toISOString(),
         avgRank: Math.round(avg * 10) / 10,

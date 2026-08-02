@@ -2,12 +2,13 @@ import { NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { withAudit, requireCtxShopAccess } from "@/lib/audit";
 import { normalizeKw } from "@/lib/keyword-normalize";
-import { centerCell, isYoyComparable } from "@/lib/report-utils";
+import { centerCell, isYoyComparable, isAnomalousYoyBase } from "@/lib/report-utils";
 import {
   validatePageComments,
   buildCorrectionPrompt,
   buildKeywordFacts,
   type KeywordRankFacts,
+  type MetricFact,
 } from "@/lib/comment-validation";
 
 export const dynamic = "force-dynamic";
@@ -104,7 +105,7 @@ async function analyzeWithClaude(
   kpiText?: string,
   langStatsText?: string,
   /** 生成後の数値照合に使う元データ。未指定なら照合をスキップする */
-  verifyCtx?: { keywordFacts: KeywordRankFacts[]; reviewDeltas: number[] }
+  verifyCtx?: { keywordFacts: KeywordRankFacts[]; reviewDeltas: number[]; metricFacts?: MetricFact[] }
 ): Promise<{
   positiveWords: string[];
   negativeWords: string[];
@@ -150,7 +151,7 @@ type AnalyzeResult = NonNullable<Awaited<ReturnType<typeof tryAnalyze>>>;
 async function enforceNumericAccuracy(
   shopName: string,
   first: AnalyzeResult,
-  ctx: { keywordFacts: KeywordRankFacts[]; reviewDeltas: number[] },
+  ctx: { keywordFacts: KeywordRankFacts[]; reviewDeltas: number[]; metricFacts?: MetricFact[] },
   regenerate: (correction: string) => Promise<AnalyzeResult | null>,
 ): Promise<AnalyzeResult> {
   const MAX_RETRY = 2;
@@ -288,6 +289,7 @@ ${langStatsText || ""}
 - 対応するデータが【】ブロックとして提供されていない項目は、推測で書かず必ず空文字""を返す
 - mapComment/searchComment/reactionComment: ${hasKpi ? "各KPIの前月比傾向を1文ずつ。同業種平均やグループ平均のデータがあれば「同業種平均を上回っている」「平均を下回る」等の比較を含める" : "口コミから推定した概況を1文ずつ"}。絶対値（147,422回等）は書かない
 - monthlyComment: 個別指標ではなく全体を俯瞰した1文。最も重要な変化または課題を1つだけ挙げる
+- 「唯一の前年超え」「唯一のプラス」のような排他的表現は、提供された全指標の前月比・前年比を数えて、条件を満たす指標が本当に1つだけの場合にのみ使う。2つ以上あるなら「唯一」は使わない
 - keywordComment: ${hasKeywordData ? "【キーワード順位】の当月変動について。**「圏外へ転落」したキーワードがあれば、他の変動より最優先で必ず言及する**（3ランク下落より圏外転落の方が重大）。圏外転落が無い場合のみ、下落幅の大きいものに言及する" : "キーワードデータが提供されていないため必ず空文字\"\"を返す"}
 - rankingHistoryComment: ${hasKeywordData ? "【キーワード順位の推移】の系列**のみ**を根拠に、複数月にわたるトレンド（連続下降/底打ち/安定/回復）を述べる。月名を1つ以上含めること。**当月だけの変動には触れない**（それはkeywordCommentの担当）。「下落が確認された」「監視が必要」のような、keywordCommentと区別がつかない表現は禁止" : "キーワードデータが提供されていないため必ず空文字\"\"を返す"}
 - gridComment: 【多地点グリッド計測】がある場合のみ。平均順位・圏外地点数から商圏の取りこぼし具合に言及
@@ -683,6 +685,7 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
       // 生成後の数値照合に使う元データ（AIに渡したのと同じ値から組み立てる）
       let verifyKeywordFacts: KeywordRankFacts[] = [];
       let verifyReviewDeltas: number[] = [];
+      let verifyMetricFacts: MetricFact[] = [];
       let hasKpiData = false;
       let curMonth = overrideTargetMonth; // フロント指定があればそれを使う
       try {
@@ -764,6 +767,34 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
               { label: "フードメニュークリック", value: v(c.foodMenus, ci), momValue: pi >= 0 ? v(c.foodMenus, pi) : null, yoyValue: ci >= 12 ? v(c.foodMenus, ci - 12) : null, unit: "件" },
             ];
           })());
+
+          // 前年同月が異常値（前後の中央値の3倍超）のKPIは前年比をAIに渡さない。
+          // カード側は「参考値」の注記付きで表示するが、AIは注記を付けずに
+          // 「前年比-67.4%と大幅減」のような断定的な総評を書いてしまうため
+          if (targetIdx0 >= 12) {
+            const c2 = perfCharts;
+            const yi = targetIdx0 - 12;
+            const sum2 = (a: number[], b: number[]) => (a || []).map((v: number, i: number) => (v || 0) + (b?.[i] || 0));
+            const seriesFor = (label: string): number[] | null =>
+              label.includes("ルート") ? c2.routes
+              : label.includes("検索") ? sum2(c2.searchMobile, c2.searchPC)
+              : label.includes("マップ") ? sum2(c2.mapMobile, c2.mapPC)
+              : label.includes("ウェブ") ? c2.websites
+              : label.includes("通話") ? c2.calls
+              : label.includes("メニュー") ? c2.foodMenus
+              : null;
+            for (const k of effectiveKpis as any[]) {
+              const s = seriesFor(k.label || "");
+              if (s && k.yoyValue != null && isAnomalousYoyBase(s, yi)) k.yoyValue = null;
+            }
+          }
+
+          // 「唯一の前年超え」等の排他的主張の照合用。AIに渡すのと同じ値から計算する
+          verifyMetricFacts = effectiveKpis.map((k: any) => ({
+            label: k.label,
+            momPct: k.momValue != null && k.momValue !== 0 ? ((k.value - k.momValue) / k.momValue) * 100 : null,
+            yoyPct: k.yoyValue != null && k.yoyValue !== 0 ? ((k.value - k.yoyValue) / k.yoyValue) * 100 : null,
+          }));
 
           if (effectiveKpis.length > 0) {
             hasKpiData = true;
@@ -1046,6 +1077,10 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
                   }
                 }
                 const lines: string[] = [];
+                // 照合用: AIに渡す系列（表示ウィンドウ＋グリッド補完後）をそのまま持つ。
+                // report.rankingHistory 全期間で照合すると、AIが見ていない過去月を根拠に
+                // 「一度も下げていない」等を誤検知する（タスク#17）
+                const mergedDatasets: { word: string; ranks: (number | null)[]; outOfRange: boolean[] }[] = [];
                 for (const ds of rh2.datasets) {
                   // 順位推移ページ: 既定 = 系列にデータがあれば表示（client.tsx visibleRankingDatasets と同条件）
                   if (kwVisSetting(ds.word) === false) continue;
@@ -1068,11 +1103,28 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
                     if (g > 0) return `${g}位`;
                     return (oor?.[i] === true || gm?.has(l)) ? "圏外" : "未計測";
                   };
+                  // cell() と同じ判定で照合用系列を作る（number=順位 / 0=圏外 / null=未計測）
+                  mergedDatasets.push({
+                    word: ds.word,
+                    ranks: lbls.map((l: string, i: number) => {
+                      const r = ranks[i];
+                      if (r && r > 0) return r;
+                      const g = gridRankFor(l);
+                      return g > 0 ? g : null;
+                    }),
+                    outOfRange: lbls.map((l: string, i: number) => {
+                      const r = ranks[i];
+                      if ((r && r > 0) || gridRankFor(l) > 0) return false;
+                      return oor?.[i] === true || gm?.has(l) === true;
+                    }),
+                  });
                   lines.push(`\n${ds.word}: ${lbls.map((l: string, i: number) => `${l}=${cell(l, i)}`).join(" → ")}`);
                 }
                 if (lines.length > 0) {
                   kpiText += `\n\n【キーワード順位の推移（直近${lbls.length}計測）】${lines.join("")}`;
                   kpiText += `\n※「未計測」はデータが無いだけで圏外という意味ではない。未計測の月を「圏外に沈んだ」「転落した」等と書くことは禁止。当月単体ではなく複数月の傾向（連続下降/底打ち/安定）を読むための系列`;
+                  // 照合の許容順位・系列をAIが実際に見たものに揃える
+                  verifyKeywordFacts = buildKeywordFacts(kwData, { labels: lbls, datasets: mergedDatasets });
                 }
               }
             } catch {}
@@ -1302,7 +1354,7 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
         reviewData.ratingDistribution,
         kpiText,
         langStatsText,
-        { keywordFacts: verifyKeywordFacts, reviewDeltas: verifyReviewDeltas }
+        { keywordFacts: verifyKeywordFacts, reviewDeltas: verifyReviewDeltas, metricFacts: verifyMetricFacts }
       );
 
       if (!analysis) {

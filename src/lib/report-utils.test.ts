@@ -551,8 +551,10 @@ describe("monthDataStatus（データが無い理由の判定）", () => {
     expect(monthDataStatus("2026/7", jst(2026, 8, 4))).toBe("pending_lag");
   });
 
-  it("8月5日以降に7月が無いなら本当に問題（反映案内を出す）", () => {
-    expect(monthDataStatus("2026/7", jst(2026, 8, 5))).toBe("missing");
+  it("8月6日以降に7月が無いなら本当に問題（反映案内を出す）", () => {
+    // cronはUTC 5日21:00 = JST 6日06:00 実行。5日はまだ実行前なので取得待ち
+    expect(monthDataStatus("2026/7", jst(2026, 8, 5))).toBe("pending_lag");
+    expect(monthDataStatus("2026/7", jst(2026, 8, 6))).toBe("missing");
     expect(monthDataStatus("2026/7", jst(2026, 8, 20))).toBe("missing");
   });
 
@@ -572,11 +574,45 @@ describe("monthDataStatus（データが無い理由の判定）", () => {
 
   it("年をまたぐ前月判定（1月1日に12月を選ぶ）", () => {
     expect(monthDataStatus("2025/12", jst(2026, 1, 1))).toBe("pending_lag");
-    expect(monthDataStatus("2025/12", jst(2026, 1, 5))).toBe("missing");
+    expect(monthDataStatus("2025/12", jst(2026, 1, 5))).toBe("pending_lag");
+    expect(monthDataStatus("2025/12", jst(2026, 1, 6))).toBe("missing");
     expect(monthDataStatus("2025/11", jst(2026, 1, 1))).toBe("missing");
   });
 
-  it("同期日の定数がvercel.jsonの設定(毎月5日)と一致している", () => {
-    expect(PERF_SYNC_DAY).toBe(5);
+  it("同期日の定数がvercel.jsonのcron(UTC 5日21:00 = JST 6日06:00)と一致している", () => {
+    expect(PERF_SYNC_DAY).toBe(6);
+  });
+});
+
+describe("isAnomalousYoyBase（前年比基準の異常値判定）", () => {
+  it("Queency型: 前後の月の8倍近い突出値を異常値と判定する", async () => {
+    const { isAnomalousYoyBase } = await import("./report-utils");
+    // 2025/6=39,490 だけ突出（実データ）
+    const series = [39490, 5231, 4543, 4857, 4983, 6454, 6520];
+    expect(isAnomalousYoyBase(series, 0)).toBe(true);
+  });
+
+  it("正常な変動（2倍程度）は異常値としない", async () => {
+    const { isAnomalousYoyBase } = await import("./report-utils");
+    const series = [8000, 5000, 6000, 5500, 4900];
+    expect(isAnomalousYoyBase(series, 0)).toBe(false);
+  });
+
+  it("比較材料が1ヶ月しか無ければ判定しない", async () => {
+    const { isAnomalousYoyBase } = await import("./report-utils");
+    expect(isAnomalousYoyBase([30000, 5000], 0)).toBe(false);
+  });
+
+  it("値が0やnullなら判定しない", async () => {
+    const { isAnomalousYoyBase } = await import("./report-utils");
+    expect(isAnomalousYoyBase([0, 100, 100, 100], 0)).toBe(false);
+    expect(isAnomalousYoyBase([null, 100, 100, 100], 0)).toBe(false);
+  });
+
+  it("系列の途中の異常値も判定できる", async () => {
+    const { isAnomalousYoyBase } = await import("./report-utils");
+    const series = [5000, 5200, 40000, 4800, 5100, 4700];
+    expect(isAnomalousYoyBase(series, 2)).toBe(true);
+    expect(isAnomalousYoyBase(series, 3)).toBe(false);
   });
 });

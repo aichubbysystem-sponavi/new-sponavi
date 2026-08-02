@@ -256,3 +256,101 @@ describe("継続性の主張の検証（2026-08-01 P7の実例）", () => {
     expect(violations[0].kind).toBe("continuity_mismatch");
   });
 });
+
+// ── 2026-08-02 実レポートで見つかった誤検知・誤りの再発防止 ──
+import { validateExclusivityClaims, type MetricFact } from "./comment-validation";
+
+describe("validateRankMentions 誤検知の再発防止", () => {
+  const FACTS = buildKeywordFacts([{ word: "名古屋 バル", rank: 10, prevRank: 15 }], {
+    labels: ["2026/5", "2026/6"],
+    datasets: [{ word: "名古屋 バル", ranks: [15, 10] }],
+  });
+
+  it("「5位上昇」のような変動幅は順位として検証しない", () => {
+    expect(validateRankMentions("「名古屋 バル」は前回15位から10位へ5位上昇した", FACTS)).toHaveLength(0);
+  });
+
+  it("「3位下落」も変動幅として除外する", () => {
+    expect(validateRankMentions("「名古屋 バル」は前回から3位下落し", FACTS)).toHaveLength(0);
+  });
+
+  it("小数の平均順位「12.4位」の小数点以下を順位として拾わない", () => {
+    expect(validateRankMentions("「名古屋 バル」の平均順位は12.4位だった", FACTS)).toHaveLength(0);
+  });
+
+  it("「平均17.3位」も誤検知しない", () => {
+    expect(validateRankMentions("「名古屋 バル」は49地点中 平均17.3位", FACTS)).toHaveLength(0);
+  });
+
+  it("本物の誤り（存在しない9位）は引き続き検出する", () => {
+    expect(validateRankMentions("「名古屋 バル」が9位へ上昇", FACTS)).toHaveLength(1);
+  });
+});
+
+describe("validateContinuityClaims 話題違いの誤検知防止", () => {
+  const FACTS = buildKeywordFacts([{ word: "鳳 美容室", rank: 1, prevRank: 1 }], {
+    labels: ["2026/1", "2026/2", "2026/3", "2026/4"],
+    datasets: [{ word: "鳳 美容室", ranks: [null, 1, null, 1], outOfRange: [true, false, true, false] } as any],
+  });
+
+  it("順位と無関係な文の「常に」は検証しない（口コミの話題）", () => {
+    // 前の文に順位キーワードがあっても、「常に」の文が口コミの話なら対象外
+    const text = "「鳳 美容室」は1位を維持。口コミは常に増加しており好調である";
+    expect(validateContinuityClaims(text, FACTS)).toHaveLength(0);
+  });
+
+  it("同じ文で順位の継続性を偽って主張したら検出する", () => {
+    const text = "「鳳 美容室」は常に1位を維持している";
+    expect(validateContinuityClaims(text, FACTS)).toHaveLength(1);
+  });
+
+  it("別の文のキーワードには帰属させない", () => {
+    const text = "「鳳 美容室」は好調。エリア全体では常に上位表示が続く order";
+    // キーワードが「常に」と別の文にあるため帰属先なし → 検証しない
+    expect(validateContinuityClaims(text, FACTS)).toHaveLength(0);
+  });
+});
+
+describe("validateExclusivityClaims（唯一の◯◯）", () => {
+  // 2026-08-02 Queency: Web +12.1% と メニュー +43.7% の両方が前年超えなのに
+  // 「ウェブサイトクリックは唯一の前年超え」と書かれた
+  const METRICS: MetricFact[] = [
+    { label: "Google検索 合計", momPct: 14.2, yoyPct: -15.1 },
+    { label: "Googleマップ 合計", momPct: -2.4, yoyPct: -67.4 },
+    { label: "ウェブサイトクリック", momPct: -1.2, yoyPct: 12.1 },
+    { label: "フードメニュークリック", momPct: 5.4, yoyPct: 43.7 },
+    { label: "通話", momPct: -20.9, yoyPct: -20.3 },
+  ];
+
+  it("前年超えが2つあるのに「唯一の前年超え」と書いたら検出する", () => {
+    const bad = validateExclusivityClaims("ウェブサイトクリックは前年同月比+12%と唯一の前年超えを示す", METRICS);
+    expect(bad).toHaveLength(1);
+    expect(bad[0].others.join()).toContain("フードメニュークリック");
+  });
+
+  it("本当に唯一なら通す", () => {
+    const only: MetricFact[] = [
+      { label: "A", momPct: 3, yoyPct: 5 },
+      { label: "B", momPct: -1, yoyPct: -2 },
+    ];
+    expect(validateExclusivityClaims("Aは唯一の前年超えとなった", only)).toHaveLength(0);
+  });
+
+  it("比較基準が読み取れない「唯一」は検証しない", () => {
+    expect(validateExclusivityClaims("唯一の強みは接客である", METRICS)).toHaveLength(0);
+  });
+
+  it("前月比の「唯一のプラス」も複数あれば検出する", () => {
+    const bad = validateExclusivityClaims("Google検索は前月比で唯一のプラスとなった", METRICS);
+    expect(bad).toHaveLength(1); // 検索+14.2 とメニュー+5.4 の2つある
+  });
+
+  it("pageComments経由（metricFacts付き）でも検出される", () => {
+    const violations = validatePageComments(
+      { reactions: "ウェブサイトクリックは前年同月比+12%と唯一の前年超えを示す" },
+      { keywordFacts: [], reviewDeltas: [], metricFacts: METRICS },
+    );
+    expect(violations).toHaveLength(1);
+    expect(violations[0].kind).toBe("exclusivity_mismatch");
+  });
+});

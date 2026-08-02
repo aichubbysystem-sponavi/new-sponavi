@@ -103,3 +103,18 @@ describe("starToNum", () => {
     expect(starToNum("UNKNOWN")).toBe(0);
   });
 });
+
+describe("ベトナム語の声調符号付き母音（U+1EA0-1EF9）", () => {
+  it("ă/đ/ơ/ư を含まない声調符号のみの文もベトナム語と判定する", () => {
+    // 2026-08-01のレビューで英語と誤判定されていた実例
+    expect(detectLanguage("Rất ngon và sạch sẽ").lang).toBe("ベトナム語");
+  });
+
+  it("ạ ế ộ などの声調符号付き母音で判定する", () => {
+    expect(detectLanguage("Món ăn rất tuyệt vời, phục vụ tốt").lang).toBe("ベトナム語");
+  });
+
+  it("フランス語の â/ê は引き続きベトナム語と誤判定しない", () => {
+    expect(detectLanguage("C'était une très bonne expérience").lang).not.toBe("ベトナム語");
+  });
+});

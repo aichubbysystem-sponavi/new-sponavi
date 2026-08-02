@@ -31,7 +31,7 @@ import {
   SLIDE_W, SLIDE_H, COLORS,
   SEARCH_QUERIES_PER_PAGE,
   pctChange, monthToNum, rankColor, rankColorModal, rankTextColor,
-  fmtAvgRank, rankTrend, rankCoverage, isYoyComparable, parseStartMonth,
+  fmtAvgRank, rankTrend, rankCoverage, isYoyComparable, parseStartMonth, isAnomalousYoyBase,
   reorderKpis, centerCell, gridLayoutLabel, gridLayoutWithRange, intervalLabel,
   monthDataStatus, PERF_SYNC_DAY,
 } from "@/lib/report-utils";
@@ -287,6 +287,32 @@ export default function ReportClient({
   const gridGoogleMapRefs = useRef<Record<string, any>>({});
   const gridMarkersRefs = useRef<Record<string, any[]>>({});
   const curLabel = monthlyLabels[monthlyLabels.length - 1] || "";
+
+  // 前年比の基準（前年同月）が異常値のKPIラベル集合。
+  // Queencyのマップ2025/6=39,490（前後の8倍）のような値を分母にした
+  // 「前年比-67.4%」を、値は変えずに「参考値」と注記するための判定
+  const yoyAnomalyLabels = useMemo(() => {
+    const set = new Set<string>();
+    const idx = monthlyLabels.length - 1;
+    const yoyIdx = idx - 12;
+    if (yoyIdx < 0) return set;
+    const sum2 = (a: number[], b: number[]) => a.map((v, i) => (v || 0) + (b[i] || 0));
+    // trimmedDataのKPI再計算（138-154行）と同じラベル判定・同じ系列を使う
+    const rules: { test: (l: string) => boolean; series: number[] }[] = [
+      { test: (l) => l.includes("ルート"), series: charts.routes },
+      { test: (l) => l.includes("検索"), series: sum2(charts.searchMobile, charts.searchPC) },
+      { test: (l) => l.includes("マップ"), series: sum2(charts.mapMobile, charts.mapPC) },
+      { test: (l) => l.includes("ウェブ"), series: charts.websites },
+      { test: (l) => l.includes("通話"), series: charts.calls },
+      { test: (l) => l.includes("メニュー"), series: charts.foodMenus },
+      { test: (l) => l.includes("予約"), series: charts.bookings },
+    ];
+    for (const kpi of rawKpis) {
+      const rule = rules.find((r) => r.test(kpi.label));
+      if (rule && isAnomalousYoyBase(rule.series, yoyIdx)) set.add(kpi.label);
+    }
+    return set;
+  }, [rawKpis, charts, monthlyLabels]);
   const [pdfGenerating, setPdfGenerating] = useState(false);
   // 口コミ競合比較の取得中フラグ（課金操作のため二重実行を防ぐ）
   const [compFetching, setCompFetching] = useState(false);
@@ -1784,6 +1810,9 @@ export default function ReportClient({
                       {mom && <span style={badgeStyle(mom.isUp, mom.isFlat)}>{arrow(mom)} {mom.text}（{kpi.momValue!.toLocaleString()}→{kpi.value.toLocaleString()}）前月比</span>}
                       {yoyC ? <span style={badgeStyle(yoyC.isUp, yoyC.isFlat)}>{arrow(yoyC)} {yoyC.text}（{kpi.yoyValue!.toLocaleString()}→{kpi.value.toLocaleString()}）前年比</span>
                         : <span style={{ fontSize: 16, color: "#bbb" }}>{yoyNote}</span>}
+                      {yoyC && yoyAnomalyLabels.has(kpi.label) && (
+                        <span style={{ fontSize: 12, color: "#b8860b" }}>※前年同月は前後の月と比べ突出した値のため参考値（集計仕様変更等の可能性）</span>
+                      )}
                     </>)}
                   </div>
                 </div>

@@ -276,9 +276,19 @@ export default function ReportListClient({
   /** ★の付け外し。共有状態なので、失敗したら元に戻す */
   async function toggleFavorite(id: string) {
     const willFavorite = !favorites.has(id);
-    const next = new Set(favorites);
-    if (willFavorite) next.add(id); else next.delete(id);
-    setFavorites(next); // 楽観更新（クリックの反応を待たせない）
+    setFavorites(prev => {
+      const next = new Set(prev);
+      if (willFavorite) next.add(id); else next.delete(id);
+      return next; // 楽観更新（クリックの反応を待たせない）
+    });
+
+    // 失敗時はこの1件だけを反転して戻す。スナップショット(setFavorites(favorites))で
+    // 戻すと、連打や他店舗の同時操作の結果まで巻き戻してしまう
+    const rollback = () => setFavorites(prev => {
+      const next = new Set(prev);
+      if (willFavorite) next.delete(id); else next.add(id);
+      return next;
+    });
 
     try {
       const headers = await getAuthHeaders();
@@ -289,11 +299,11 @@ export default function ReportListClient({
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        setFavorites(favorites); // 失敗したら戻す（共有状態と画面がズレるのを防ぐ）
+        rollback();
         showToast(res.status === 403 ? "お気に入りの変更は社員以上のみ可能です" : (body.error || "お気に入りの保存に失敗しました"));
       }
     } catch {
-      setFavorites(favorites);
+      rollback();
       showToast("お気に入りの保存に失敗しました（通信エラー）");
     }
   }
