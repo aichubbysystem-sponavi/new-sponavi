@@ -426,3 +426,56 @@ describe("validateOutOfRangeClaims 圏外主張の照合（2026-08-02 patty rôt
     expect(violations).toHaveLength(0);
   });
 });
+
+describe("validateOutOfRangeClaims 不在の主張（2026-08-02 patty rôti再分析で実際に出た誤り）", () => {
+  // 名東区 パスタ: 推移 圏外,圏外,圏外,1位,圏外（当月グリッド未計測でもシート系列では転落が確定している）
+  const FACTS = buildKeywordFacts(
+    [{ word: "名東区 モーニング", rank: 4, prevRank: 1 }],
+    {
+      labels: ["2026/1", "2026/2", "2026/3", "2026/4", "2026/6"],
+      datasets: [
+        { word: "名東区 モーニング", ranks: [3, 5, null, 1, 4], outOfRange: [false, false, false, false, false] } as any,
+        { word: "名東区 パスタ", ranks: [null, null, null, 1, null], outOfRange: [true, true, true, false, true] } as any,
+      ],
+    },
+  );
+
+  it("転落KWがいるのに「圏外転落のキーワードはなく」と書いた誤りを検出する", () => {
+    const text = "今月は圏外転落のキーワードはなく、全キーワードが順位圏内を維持している";
+    const bad = validateOutOfRangeClaims(text, FACTS);
+    expect(bad).toHaveLength(1);
+    expect(bad[0].word).toContain("名東区 パスタ");
+  });
+
+  it("「圏外への転落は見られなかった」表現も検出する", () => {
+    const text = "当月、圏外への転落は見られなかった";
+    expect(validateOutOfRangeClaims(text, FACTS)).toHaveLength(1);
+  });
+
+  it("転落していないKW限定の不在主張は誤検知しない", () => {
+    const text = "「名東区 モーニング」は圏外転落しておらず、4位を維持している";
+    expect(validateOutOfRangeClaims(text, FACTS)).toHaveLength(0);
+  });
+
+  it("誰も転落していなければ不在の主張は正しいので通す", () => {
+    const noFall = buildKeywordFacts([{ word: "名東区 モーニング", rank: 4, prevRank: 1 }], {
+      labels: ["2026/4", "2026/6"],
+      datasets: [{ word: "名東区 モーニング", ranks: [1, 4], outOfRange: [false, false] } as any],
+    });
+    const text = "今月は圏外転落のキーワードはなく、全キーワードが順位圏内を維持している";
+    expect(validateOutOfRangeClaims(text, noFall)).toHaveLength(0);
+  });
+
+  it("数ヶ月前から圏外のままのKWしかいない場合は「当月の転落なし」を誤検知しない", () => {
+    const stayOut = buildKeywordFacts([{ word: "名東区 モーニング", rank: 4, prevRank: 1 }], {
+      labels: ["2026/1", "2026/4", "2026/6"],
+      datasets: [
+        { word: "名東区 モーニング", ranks: [3, 1, 4], outOfRange: [false, false, false] } as any,
+        { word: "名東区 パスタ", ranks: [1, null, null], outOfRange: [false, true, true] } as any,
+      ],
+    });
+    // パスタは4月に転落済みで当月は圏外継続 → 「今月の転落なし」は直近2計測が[0,0]なので矛盾しない
+    const text = "今月は圏外転落のキーワードはなく、順位は安定している";
+    expect(validateOutOfRangeClaims(text, stayOut)).toHaveLength(0);
+  });
+});

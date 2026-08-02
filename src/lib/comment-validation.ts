@@ -329,8 +329,9 @@ export function validateOutOfRangeClaims(
 ): { word: string; claim: string; reason: string }[] {
   if (!text || facts.length === 0) return [];
   const normalized = toHalfWidthDigits(text);
+  // 注意: mentionsが空でも早期returnしない。「圏外転落のキーワードはなく」のような
+  // 全体への不在の主張はキーワード名を含まないため、ここで返すと検証できない
   const mentions = findKeywordMentions(normalized, facts);
-  if (mentions.length === 0) return [];
 
   const bad: { word: string; claim: string; reason: string }[] = [];
   const re = /圏外/g;
@@ -340,6 +341,34 @@ export function validateOutOfRangeClaims(
     const sentStart = Math.max(normalized.lastIndexOf("。", pos), normalized.lastIndexOf("\n", pos)) + 1;
     let sentEnd = normalized.indexOf("。", pos);
     if (sentEnd < 0) sentEnd = normalized.length;
+
+    // 「圏外転落のキーワードはなく」のような不在の主張。
+    // 2026-08-02 patty rôti再分析で発生: 「名東区 パスタ」が4月1位→当月圏外なのに
+    // 「今月は圏外転落のキーワードはなく、全キーワードが順位圏内を維持」と書かれた。
+    // （当月のグリッド未計測KWはAIの当月ブロックに載らず、推移系列だけで渡るため見落とされる）
+    // 直近計測が「順位→圏外」のKWがいれば、不在の主張は確実に矛盾する
+    const tail = normalized.slice(pos, Math.min(sentEnd, pos + 30));
+    if (/[へに]?転落[^。]{0,12}(なく|なかった|ない|無く|無い|見られず|見られない|おらず|ゼロ|発生していない|起きていない)/.test(tail)) {
+      // 同じ文の直前にKWがあればそのKW限定の主張、無ければ全KWへの主張とみなす
+      let subj: KeywordRankFacts | null = null;
+      for (const mention of mentions) {
+        if (mention.index >= sentStart && mention.index < pos) subj = mention.fact;
+        if (mention.index >= pos) break;
+      }
+      const fellNow = (f: KeywordRankFacts) => {
+        const ms = (f.series || []).filter((r): r is number => r !== null);
+        return ms.length >= 2 && ms[ms.length - 1] === 0 && ms[ms.length - 2] > 0;
+      };
+      const fallen = subj ? [subj].filter(fellNow) : facts.filter(fellNow);
+      if (fallen.length > 0) {
+        bad.push({
+          word: fallen.map((f) => f.word).join("・"),
+          claim: normalized.slice(sentStart, Math.min(sentEnd, pos + 20)).trim(),
+          reason: `実際には${fallen.map((f) => `「${f.word}」`).join("")}が直近の計測で順位から圏外へ転落している（推移データの最終計測を確認すること）`,
+        });
+      }
+      continue;
+    }
 
     // 予防・仮定・否定の文脈は「圏外である」という主張ではない
     const around = normalized.slice(Math.max(sentStart, pos - 12), Math.min(sentEnd, pos + 16));
