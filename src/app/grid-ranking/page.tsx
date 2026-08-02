@@ -37,13 +37,16 @@ interface GridLog {
 // 3×3グリッドの中心+四隅スロットとして保存（奇数グリッド=centerCellが中心を返せる）
 const GRID_SIZE_5POINT = 3;
 const POINTS_PER_KW = 5;
+// 2026-08-02 田中さん要望: 5kmは不要、500m刻みで細かく選べるように
+// （既存店舗の設定は全店500m/未設定だったため、5km廃止による影響店舗はゼロ）
 const INTERVALS = [
   { label: "500m", value: 500 },
   { label: "1km", value: 1000 },
+  { label: "1.5km", value: 1500 },
   { label: "2km", value: 2000 },
+  { label: "2.5km", value: 2500 },
   { label: "3km", value: 3000 },
   { label: "4km", value: 4000 },
-  { label: "5km", value: 5000 },
 ];
 /** 計測地点の既定距離(m)。店舗ごとの設定(shops.grid_interval_m)が無い場合に使う */
 const DEFAULT_INTERVAL = 500;
@@ -1827,7 +1830,8 @@ export default function GridRankingPage() {
             </div>
             <p className="mt-1 text-xs text-gray-400">
               距離・向きは店舗ごとに保存され、一括計測でも使用されます。
-              ※15度単位の差が計測に反映されるのは距離3km以上が目安です（2km以下では斜め⇔十字の45度単位が有効）
+              ※計測点は約500mの格子に丸められます。15度単位の向きの差が反映されるのは距離2km以上が目安です
+              （それ未満は斜め⇔十字の45度単位が有効）。斜め配置では2.5kmと3kmが同一地点になる場合があります
             </p>
           </div>
         </div>

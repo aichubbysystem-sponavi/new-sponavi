@@ -140,8 +140,14 @@ export const POST = withAudit("多地点順位実測", "PAID_OP", async (request
   // 計測地点を格子にスナップ（キャッシュキー＝実際の検索中心。一貫性を保つ）
   // 格子幅は距離間隔に比例させる: 500m間隔の計測で隣接地点が同一格子に潰れるのを防ぐ
   // （リクエスト数は間隔スケール前の従来仕様と同じ＝コスト増なし）
+  //
+  // 上限を1.0→0.5に変更（2026-08-02 距離500m刻み対応）:
+  // 格子1kmのままだと、斜め配置の外周点は距離1km/1.5km/2kmで同一格子に丸まり、
+  // 新設した500m刻みの選択肢が計測に反映されない（斜めの軸方向オフセット差=約354m/500m刻み）。
+  // 格子500mなら隣接する刻みはほぼ区別される（例外: 斜めの2.5km⇔3kmは同一になる場合あり。UI注記済み）。
+  // 変更時点で1km以上を設定した店舗はゼロのため、既存キャッシュキーへの影響なし
   const intervalM = Number(interval) || 1000;
-  const gridFactor = Math.min(1, Math.max(0.25, intervalM / 1000));
+  const gridFactor = Math.min(0.5, Math.max(0.25, intervalM / 1000));
   const latKey = snapCoord(lat, LAT_STEP * gridFactor);
   const lngKey = snapCoord(lng, LNG_STEP * gridFactor);
   const month = jstMonth();

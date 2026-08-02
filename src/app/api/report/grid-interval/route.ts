@@ -13,7 +13,8 @@ import { withAudit, requireCtxShopAccess } from "@/lib/audit";
 export const dynamic = "force-dynamic";
 
 // 許可値。UIのボタンと一致させる（route.tsはハンドラ以外exportできないため非export）
-const ALLOWED_INTERVALS = [500, 1000, 2000, 3000, 4000, 5000];
+// 2026-08-02 田中さん要望で5km廃止・500m刻みを追加（廃止時点で5km設定の店舗はゼロ）
+const ALLOWED_INTERVALS = [500, 1000, 1500, 2000, 2500, 3000, 4000];
 const ALLOWED_ANGLES = [0, 15, 30, 45, 60, 75]; // 4点は90度間隔のため90度で一周
 /** 計測地点の既定距離(m)。店舗ごとの設定(shops.grid_interval_m)が無い場合に使う */
 const DEFAULT_INTERVAL = 500;
