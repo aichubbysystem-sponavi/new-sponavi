@@ -868,24 +868,37 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
           if (reviewDelta && reviewDelta.length > 0 && reviewLabels && reviewLabels.length > 0) {
             // レポート対象月（curMonth="2026/4"）以降のデータを除外
             const curMonthNum = (() => { const p = curMonth.split("/"); return (parseInt(p[0]) || 0) * 100 + (parseInt(p[1]) || 0); })();
-            // reviewLabelsは "1月","2月"等の形式。monthlyLabelsの年を参考に変換
+            // reviewLabelsは "2026/7" 形式と "7月" 形式の両方がある。
+            // 以前は "N月" 形式しか処理せず、"2026/7" 形式が素通しになっていた。
+            // その結果、6月レポートに7月(+0)が混入して「月平均+7.8件」
+            // 「2026年7月は新規投稿ゼロ」という表示期間外の総評が生成された（2026-08-02）
             const baseYear = parseInt((labels[0] || "2026").split("/")[0]) || 2026;
             let trimIdx = reviewLabels.length;
             let runningYear = baseYear;
             for (let ri = 0; ri < reviewLabels.length; ri++) {
-              const mMatch = (reviewLabels[ri] || "").match(/(\d{1,2})月/);
-              if (mMatch) {
-                const monthNum = parseInt(mMatch[1]);
-                // 年を推定（12月→1月で年が繰り上がり、以降維持）
-                if (ri > 0) {
-                  const prevMatch = (reviewLabels[ri - 1] || "").match(/(\d{1,2})月/);
-                  if (prevMatch && parseInt(prevMatch[1]) > monthNum) runningYear++;
+              const label = reviewLabels[ri] || "";
+              let rNum = 0;
+              if (label.includes("/")) {
+                // "2026/7" 形式: そのまま数値化
+                const p = label.split("/");
+                rNum = (parseInt(p[0]) || 0) * 100 + (parseInt(p[1]) || 0);
+              } else {
+                const mMatch = label.match(/(\d{1,2})月/);
+                if (mMatch) {
+                  const monthNum = parseInt(mMatch[1]);
+                  // 年を推定（12月→1月で年が繰り上がり、以降維持）
+                  if (ri > 0) {
+                    const prevMatch = (reviewLabels[ri - 1] || "").match(/(\d{1,2})月/);
+                    if (prevMatch && parseInt(prevMatch[1]) > monthNum) runningYear++;
+                  }
+                  rNum = runningYear * 100 + monthNum;
                 }
-                const rNum = runningYear * 100 + monthNum;
-                if (rNum > curMonthNum) { trimIdx = ri; break; }
               }
+              if (rNum > curMonthNum) { trimIdx = ri; break; }
             }
             const trimmedDeltas = reviewDelta.slice(0, trimIdx);
+            // 数値照合（validateMonthlyAverage）もAIに渡したのと同じ窓で行う
+            verifyReviewDeltas = trimmedDeltas.filter((d: number | null) => typeof d === "number") as number[];
             const trimmedLabels = reviewLabels.slice(0, trimIdx);
             const recentDeltas = trimmedDeltas.slice(-6).filter((d: number | null) => d !== null) as number[];
             if (recentDeltas.length > 0) {
@@ -1033,8 +1046,14 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
             // 数値照合用: AIに渡すのと同じ順位データから許容値を組み立てる。
             // ここで作らないと「AIには渡したが照合には無い順位」が偽陽性になる
             verifyKeywordFacts = buildKeywordFacts(kwData, report.rankingHistory);
-            verifyReviewDeltas = (report.reviewDelta || [])
-              .filter((d: number | null) => typeof d === "number") as number[];
+            // verifyReviewDeltas は口コミ増加ペースのブロックで対象月までに
+            // トリムした値を設定済み。ここで全期間版に上書きすると、
+            // AIが見ていない月（対象月より後）まで照合の許容範囲に入ってしまう。
+            // 口コミブロックが実行されなかった場合のみフォールバックで設定する
+            if (verifyReviewDeltas.length === 0) {
+              verifyReviewDeltas = (report.reviewDelta || [])
+                .filter((d: number | null) => typeof d === "number") as number[];
+            }
 
             if (kwData.length > 0) {
               // 対象月が未計測で過去月のデータを使っている場合は、その月を見出しに出し
