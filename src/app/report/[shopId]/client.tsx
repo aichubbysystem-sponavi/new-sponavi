@@ -1808,16 +1808,25 @@ export default function ReportClient({
                       })() : <span style={{ fontSize: 16, color: "#bbb" }}>{yoyNote}</span>}
                     </>) : (<>
                       {mom && <span style={badgeStyle(mom.isUp, mom.isFlat)}>{arrow(mom)} {mom.text}（{kpi.momValue!.toLocaleString()}→{kpi.value.toLocaleString()}）前月比</span>}
-                      {yoyC ? <span style={badgeStyle(yoyC.isUp, yoyC.isFlat)}>{arrow(yoyC)} {yoyC.text}（{kpi.yoyValue!.toLocaleString()}→{kpi.value.toLocaleString()}）前年比</span>
+                      {/* 異常値の注記は「※」だけをバッジに付け、説明文はグリッドの空きマスに出す。
+                          カード内に文章を入れると高さが増えて3段目がスライドからはみ出す */}
+                      {yoyC ? <span style={badgeStyle(yoyC.isUp, yoyC.isFlat)}>{arrow(yoyC)} {yoyC.text}（{kpi.yoyValue!.toLocaleString()}→{kpi.value.toLocaleString()}）前年比{yoyAnomalyLabels.has(kpi.label) ? "※" : ""}</span>
                         : <span style={{ fontSize: 16, color: "#bbb" }}>{yoyNote}</span>}
-                      {yoyC && yoyAnomalyLabels.has(kpi.label) && (
-                        <span style={{ fontSize: 12, color: "#b8860b" }}>※前年同月は前後の月と比べ突出した値のため参考値（集計仕様変更等の可能性）</span>
-                      )}
                     </>)}
                   </div>
                 </div>
               );
             })}
+            {/* 前年比「※」の説明。グリッドの空きマス（3列×3行の9マス目）に置くことで
+                カードの高さを一切変えない（注記をカード内に入れると3段目がはみ出す）。
+                空きマスが無いレイアウトのときは最下行の下に出さず省略する（はみ出し優先で回避） */}
+            {yoyAnomalyLabels.size > 0 && kpis.length % 3 !== 0 && (
+              <div style={{ display: "flex", alignItems: "flex-end", padding: "0 4px 2px" }}>
+                <span style={{ fontSize: 12, color: "#b8860b", lineHeight: 1.6 }}>
+                  ※ {Array.from(yoyAnomalyLabels).join("・")}の前年同月は前後の月と比べ突出した値のため参考値（Googleの集計仕様変更等の可能性）
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </div>
