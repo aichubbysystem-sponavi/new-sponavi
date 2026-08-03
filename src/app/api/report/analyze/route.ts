@@ -349,28 +349,17 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
     }
   }
 
-  // 3. 全グループのキャッシュを一括取得
-  const groupIds = new Set<string>();
+  // 3. 比較対象（同業種）のキャッシュを一括取得
+  //
+  // 【グループ平均は2026-08-03に廃止】business_group_id は実運用では
+  // 全店が自社（株式会社Chubby）に属しており、「グループ平均」＝焼肉店も脱毛サロンも
+  // ごみ回収業も混ざった607店の平均だった。業種をまたいだマップ表示回数の比較は
+  // 意味を持たないうえ、レポート上は「グループ平均」＝系列店の平均と誤読されるため、
+  // 同業種（GBPメインカテゴリ）の比較だけを残した。
   const categories = new Set<string>();
   shopInfoByName.forEach(s => {
-    if (s.business_group_id) groupIds.add(s.business_group_id);
     if (s.gbp_main_category) categories.add(s.gbp_main_category);
   });
-
-  // グループ内店舗の名前とキャッシュ
-  const groupShopNamesMap = new Map<string, string[]>();
-  if (groupIds.size > 0) {
-    const { data: groupShops } = await supabase
-      .from("shops")
-      .select("name, business_group_id")
-      .in("business_group_id", Array.from(groupIds))
-      .limit(500);
-    for (const gs of (groupShops || [])) {
-      const list = groupShopNamesMap.get(gs.business_group_id) || [];
-      list.push(gs.name);
-      groupShopNamesMap.set(gs.business_group_id, list);
-    }
-  }
 
   // カテゴリ内店舗の名前とキャッシュ
   const catShopNamesMap = new Map<string, string[]>();
@@ -387,9 +376,8 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
     }
   }
 
-  // グループ・カテゴリ全店舗のキャッシュも一括取得
+  // 同業種店舗のキャッシュも一括取得
   const allRelatedNames = new Set<string>();
-  Array.from(groupShopNamesMap.values()).forEach(names => names.forEach(n => allRelatedNames.add(n)));
   Array.from(catShopNamesMap.values()).forEach(names => names.forEach(n => allRelatedNames.add(n)));
   const relatedNamesArr = Array.from(allRelatedNames).filter(n => !cacheMap.has(n));
   let relatedCacheMap = new Map<string, any>();
@@ -1029,55 +1017,41 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
           console.warn(`[analyze] ${shop.name}: report_data_cacheにデータなし`);
         }
 
-        // 同グループ店舗の平均を取得（バッチ済み）
-        const shopInfoForGroup = shopInfoByName.get(shop.name) || shopInfoById.get(shop.id);
-        if (shopInfoForGroup?.business_group_id) {
-          const groupNames = (groupShopNamesMap.get(shopInfoForGroup.business_group_id) || []).filter((n: string) => n !== shop.name);
-          if (groupNames.length > 0) {
-            const groupCaches = groupNames.slice(0, 50).map((n: string) => ({ report_json: cacheMap.get(n) })).filter((c: any) => c.report_json);
-            if (groupCaches.length > 0) {
-              let totalSearch = 0, totalMap = 0, totalAction = 0, gReviews = 0, gRating = 0, count = 0;
-              for (const gc of groupCaches) {
-                const gk = gc.report_json?.kpis || [];
-                const search = gk.find((k: any) => k.label?.includes("検索"))?.value || 0;
-                const map = gk.find((k: any) => k.label?.includes("マップ"))?.value || 0;
-                const action = gk.filter((k: any) => k.label?.includes("ルート") || k.label?.includes("通話") || k.label?.includes("ウェブ") || k.label?.includes("メニュー") || k.label?.includes("予約")).reduce((s: number, k: any) => s + (k.value || 0), 0);
-                const shopData = gc.report_json?.shop;
-                totalSearch += search; totalMap += map; totalAction += action;
-                if (shopData?.totalReviews) gReviews += shopData.totalReviews;
-                if (shopData?.rating) gRating += shopData.rating;
-                count++;
-              }
-              if (count > 0) {
-                kpiText += `\n\n【同グループ平均（${count}店舗）※店舗名は記載しないこと】\nGoogle検索平均: ${Math.round(totalSearch / count).toLocaleString()}回\nGoogleマップ平均: ${Math.round(totalMap / count).toLocaleString()}回\nアクション合計平均: ${Math.round(totalAction / count).toLocaleString()}回`;
-              }
-            }
-          }
-        }
+        // ── 比較平均（同業種）──
+        // 【2026-08-03 修正】以前は次の3つの問題があった:
+        //  (1) 母数が1店でも「同業種平均」としてAIに渡していた（patty rôtiは実質1店との比較だった）
+        //  (2) 母数をAIに伝えていなかったため、レポートに根拠のない「平均」だけが出ていた
+        //  (3) 「グループ平均」は business_group_id = 自社(株式会社Chubby) の全店＝
+        //      焼肉店も脱毛サロンも混ざった平均で、業種をまたぐ比較に意味がなかった
+        // 対応: 母数がMIN_PEERS未満なら渡さない／母数を明記する／業種横断のグループ平均は廃止する
+        const MIN_PEERS = 3; // これ未満は「平均」と呼べないため比較に使わない
 
-        // 同業種（カテゴリ）店舗の平均を取得（バッチ済み）
         const catInfoRow = shopInfoByName.get(shop.name) || shopInfoById.get(shop.id);
         if (catInfoRow?.gbp_main_category) {
           const category = catInfoRow.gbp_main_category;
           const catNames = (catShopNamesMap.get(category) || []).filter((n: string) => n !== shop.name);
           if (catNames.length > 0) {
             const catCaches = catNames.slice(0, 50).map((n: string) => ({ report_json: cacheMap.get(n) })).filter((c: any) => c.report_json);
-            if (catCaches.length > 0) {
-              let tSearch = 0, tMap = 0, tAction = 0, tReviews = 0, tRating = 0, cnt = 0;
+            if (catCaches.length >= MIN_PEERS) {
+              let tSearch = 0, tMap = 0, tAction = 0, cnt = 0;
               for (const cc of catCaches) {
                 const ck = cc.report_json?.kpis || [];
                 const s = ck.find((k: any) => k.label?.includes("検索"))?.value || 0;
                 const m = ck.find((k: any) => k.label?.includes("マップ"))?.value || 0;
                 const a = ck.filter((k: any) => k.label?.includes("ルート") || k.label?.includes("通話") || k.label?.includes("ウェブ") || k.label?.includes("メニュー") || k.label?.includes("予約")).reduce((s: number, k: any) => s + (k.value || 0), 0);
-                const shopData = cc.report_json?.shop;
                 tSearch += s; tMap += m; tAction += a;
-                if (shopData?.totalReviews) tReviews += shopData.totalReviews;
-                if (shopData?.rating) tRating += shopData.rating;
                 cnt++;
               }
-              if (cnt > 0) {
-                kpiText += `\n\n【同業種平均（${category} ${cnt}店舗）※店舗名は記載しないこと】\nGoogle検索平均: ${Math.round(tSearch / cnt).toLocaleString()}回\nGoogleマップ平均: ${Math.round(tMap / cnt).toLocaleString()}回\nアクション合計平均: ${Math.round(tAction / cnt).toLocaleString()}回`;
-              }
+              kpiText += `\n\n【同業種の平均（弊社が運用支援している「${category}」${cnt}店舗の平均。全国統計ではない）】`;
+              kpiText += `\nGoogle検索平均: ${Math.round(tSearch / cnt).toLocaleString()}回`;
+              kpiText += `\nGoogleマップ平均: ${Math.round(tMap / cnt).toLocaleString()}回`;
+              kpiText += `\nアクション合計平均: ${Math.round(tAction / cnt).toLocaleString()}回`;
+              kpiText += `\n※言及するときは必ず「同業種${cnt}店舗の平均」のように母数を書くこと。店舗名は出さない`;
+              kpiText += `\n※業界全体の統計ではないので「業界平均」「全国平均」とは書かないこと`;
+            } else {
+              // 母数不足。ここで渡さないだけでなく、AIが勝手に平均へ言及しないよう明示する
+              console.log(`[analyze] ${shop.name}: 同業種の比較対象が${catCaches.length}店（${MIN_PEERS}店未満）のため平均を渡しません`);
+              kpiText += `\n\n【比較平均について】\n同業種の比較対象が${MIN_PEERS}店舗に満たないため、平均値は提供しない。「同業種平均」「グループ平均」「他店と比べて」等の比較表現は一切書かないこと`;
             }
           }
         }
