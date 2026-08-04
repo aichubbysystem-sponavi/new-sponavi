@@ -272,11 +272,12 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
       prevCtr: adsPrev.ctr,
       cpcYen: adsCurrent.averageCpc / 1_000_000,
       prevCpcYen: adsPrev.averageCpc / 1_000_000,
-      mapActionsTotal: gbpActionTotal(gbpCurrent),
+      // GBP行が無い月は「未計測」としてnullを渡す（0件との混同禁止・重要ナレッジ2026-07-31）
+      mapActionsTotal: gbpCurrent ? gbpActionTotal(gbpCurrent) : null,
       mapsSearchSharePct: channelTotalImp > 0 ? (mapsSearchImp / channelTotalImp) * 100 : null,
       langCpcs,
-      saveShare: gbpCurrent?.saveShare ?? 0,
-      prevSaveShare: gbpPrev?.saveShare ?? 0,
+      saveShare: gbpCurrent ? gbpCurrent.saveShare : null,
+      prevSaveShare: gbpPrev ? gbpPrev.saveShare : null,
     });
   })();
   const hasAdvice = adviceParagraphs.length > 0;

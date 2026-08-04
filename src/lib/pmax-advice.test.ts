@@ -97,6 +97,28 @@ describe("buildPmaxAdvice", () => {
     expect(buildPmaxAdvice({ ...base, mapActionsTotal: 0, impressions: 0, clicks: 0, prevImpressions: 0 })).toEqual([]);
   });
 
+  it("GBP未計測(null)は0件と区別し、口コミ提案を出さない", () => {
+    expect(buildPmaxAdvice({ ...base, mapActionsTotal: null })).toEqual([]);
+  });
+
+  it("前月の保存・共有が未計測(null)なら前月比較を書かない", () => {
+    expect(buildPmaxAdvice({ ...base, saveShare: 2000, prevSaveShare: null })).toEqual([]);
+    expect(buildPmaxAdvice({ ...base, saveShare: null, prevSaveShare: null })).toEqual([]);
+  });
+
+  it("クリック率が丸め後同値（0.50%→0.50%）なら表示減+率上昇の文を出さない", () => {
+    const out = buildPmaxAdvice({ ...base, impressions: 90_000, ctr: 0.005004, prevCtr: 0.005 });
+    expect(out).toEqual([]);
+  });
+
+  it("少数サンプル（表示1,000回未満やクリック10件未満）ではクリック率の評価を出さない", () => {
+    expect(buildPmaxAdvice({ ...base, impressions: 250, prevImpressions: 250, clicks: 2, ctr: 0.008 })).toEqual([]);
+    expect(buildPmaxAdvice({ ...base, impressions: 5000, prevImpressions: 5000, clicks: 9, ctr: 0.008 })).toEqual([]);
+    const out = buildPmaxAdvice({ ...base, impressions: 5000, prevImpressions: 5000, clicks: 40, ctr: 0.008 });
+    expect(out).toHaveLength(1);
+    expect(out[0]).toContain("0.80%");
+  });
+
   it("最大5段落に制限される", () => {
     const out = buildPmaxAdvice({
       ...base,
