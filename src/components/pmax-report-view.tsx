@@ -15,6 +15,7 @@ import {
   Legend,
 } from "chart.js";
 import { Chart, Pie } from "react-chartjs-2";
+import { buildPmaxAdvice } from "@/lib/pmax-advice";
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, LineController, BarElement, BarController, ArcElement, Title, Tooltip, Legend);
 
@@ -249,7 +250,40 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
   const channelOffset = hasChannels ? 1 : 0;
   const channelPct = (imp: number) => (channelAgg.total > 0 ? ((imp / channelAgg.total) * 100).toFixed(1) : "0.0");
 
-  const totalPages = 1 + convOffset + languages.length + channelOffset + (hasSummary ? 1 : 0);
+  // 店舗様へのアドバイス（営業商談の原文引用ベース・当月数値に合致した項目のみ）
+  const adviceParagraphs = (() => {
+    const gbpActionTotal = (r?: GbpRow) =>
+      r ? r.totalVisits + r.phone + r.directions + r.website + r.menuClicks + r.saveShare + r.reservation : 0;
+    // マップ+検索の配信割合（チャネル生データから。集計が無い月はnull）
+    const channelTotalImp = channels.reduce((s, r) => s + r.impressions, 0);
+    const mapsSearchImp = channels.filter((r) => r.network === "MAPS" || r.network === "SEARCH").reduce((s, r) => s + r.impressions, 0);
+    // 当月の言語別平均クリック単価（クリックが発生した言語のみ）
+    const langCpcs = languages.flatMap((lang) => {
+      const row = (monthlyByLang[lang] || []).find((r) => (r.month || "").startsWith(currentMonthKey));
+      if (!row || row.clicks <= 0) return [];
+      return [{ language: lang, cpcYen: row.averageCpc / 1_000_000 }];
+    });
+    return buildPmaxAdvice({
+      impressions: adsCurrent.impressions,
+      prevImpressions: adsPrev.impressions,
+      clicks: adsCurrent.clicks,
+      prevClicks: adsPrev.clicks,
+      ctr: adsCurrent.ctr,
+      prevCtr: adsPrev.ctr,
+      cpcYen: adsCurrent.averageCpc / 1_000_000,
+      prevCpcYen: adsPrev.averageCpc / 1_000_000,
+      // GBP行が無い月は「未計測」としてnullを渡す（0件との混同禁止・重要ナレッジ2026-07-31）
+      mapActionsTotal: gbpCurrent ? gbpActionTotal(gbpCurrent) : null,
+      mapsSearchSharePct: channelTotalImp > 0 ? (mapsSearchImp / channelTotalImp) * 100 : null,
+      langCpcs,
+      saveShare: gbpCurrent ? gbpCurrent.saveShare : null,
+      prevSaveShare: gbpPrev ? gbpPrev.saveShare : null,
+    });
+  })();
+  const hasAdvice = adviceParagraphs.length > 0;
+  const adviceOffset = hasAdvice ? 1 : 0;
+
+  const totalPages = 1 + convOffset + languages.length + channelOffset + adviceOffset + (hasSummary ? 1 : 0);
 
   const kpiCards = [
     { label: "総表示回数", value: adsCurrent.impressions, format: formatNum, prev: adsPrev.impressions, lastYear: hasYearData ? adsLastYear.impressions : null },
@@ -518,6 +552,25 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
             </div>
             <div style={{ fontSize: 11, color: "#888", marginTop: 12, lineHeight: 1.6 }}>
               ※ 対象月のGoogle広告の表示回数を配信先ネットワーク別に集計した割合です。P-MAX広告は成果が最大になるよう配信先を自動で最適化します。
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 店舗様へのアドバイスページ（最終ページの1つ前） */}
+      {hasAdvice && (
+        <div style={slideStyle}>
+          <div style={slideBarStyle}>
+            <span>{shopName} — アドバイス</span>
+            <span>{2 + convOffset + languages.length + channelOffset} / {totalPages}</span>
+          </div>
+          {/* 溢れた場合に下だけ切れるよう flex-start（タイトル消失防止） */}
+          <div style={{ ...slideBodyStyle, justifyContent: "flex-start", paddingTop: 36 }}>
+            <div style={stitleStyle}>店舗様へのアドバイス</div>
+            <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", fontSize: 15, lineHeight: 1.8, color: "#333" }}>
+              {adviceParagraphs.map((p, i) => (
+                <p key={i} style={{ margin: i === 0 ? 0 : "14px 0 0" }}>{p}</p>
+              ))}
             </div>
           </div>
         </div>
