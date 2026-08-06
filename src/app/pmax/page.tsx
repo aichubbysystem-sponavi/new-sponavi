@@ -6,6 +6,7 @@ import api from "@/lib/api";
 import BackToTopLink from "@/components/back-to-top-link";
 import { useRole } from "@/components/role-provider";
 import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
+import { searchMatch } from "@/lib/search-normalize";
 
 type StoreSummary = {
   shopName: string;
@@ -57,6 +58,7 @@ export default function PmaxTopPage() {
 
   // 店舗選択
   const [knownShops, setKnownShops] = useState<string[]>([]);
+  const [missingShops, setMissingShops] = useState<string[]>([]); // 選択月にデータが無い店舗（未反映）
   const [selectedShops, setSelectedShops] = useState<Set<string>>(new Set());
   const [showSelector, setShowSelector] = useState(false);
   const [shopSearch, setShopSearch] = useState("");
@@ -193,16 +195,15 @@ export default function PmaxTopPage() {
     });
   };
 
-  // 店舗選択パネルを開く
+  // 店舗選択パネルを開く（月ごとの未反映店舗を出すため、開くたびに再取得する）
   const openSelector = async () => {
-    if (knownShops.length === 0) {
-      try {
-        const res = await api.get("/api/pmax/known-shops");
-        setKnownShops(res.data.shops || []);
-      } catch {
-        setSyncProgress("店舗一覧の取得に失敗しました");
-        return;
-      }
+    try {
+      const res = await api.get(`/api/pmax/known-shops?month=${monthKey}`);
+      setKnownShops(res.data.shops || []);
+      setMissingShops(res.data.missing || []);
+    } catch {
+      setSyncProgress("店舗一覧の取得に失敗しました");
+      return;
     }
     setShowSelector(true);
   };
@@ -236,13 +237,15 @@ export default function PmaxTopPage() {
     }
   };
 
-  const filteredKnownShops = knownShops.filter(
-    (s) => s.toLowerCase().includes(shopSearch.toLowerCase())
-  );
+  // 検索はNFKC+異体字吸収（「靱」で「靭公園」がヒットしない実害の再発防止）
+  const missingSet = useMemo(() => new Set(missingShops), [missingShops]);
+  const filteredKnownShops = useMemo(() => {
+    const list = knownShops.filter((s) => searchMatch(s, shopSearch));
+    // 未反映の店舗を先頭に（同期漏れの選択を最短にする）
+    return list.sort((a, b) => Number(missingSet.has(b)) - Number(missingSet.has(a)) || a.localeCompare(b, "ja"));
+  }, [knownShops, shopSearch, missingSet]);
 
-  const filtered = stores.filter(
-    (s) => s.shopName.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = stores.filter((s) => searchMatch(s.shopName, search));
 
   // 店舗名の正規化（グループ定義シートとの照合用: NFKC + 空白除去 + 小文字化）
   const normName = (s: string) => (s || "").normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
@@ -409,6 +412,24 @@ export default function PmaxTopPage() {
               <h3 className="text-sm font-bold text-slate-700">更新する店舗を選択（{selectedShops.size}件選択中）</h3>
               <button onClick={() => setShowSelector(false)} className="text-slate-400 hover:text-slate-600 text-lg leading-none">&times;</button>
             </div>
+            {missingShops.length > 0 && (
+              <div className="flex items-center justify-between gap-2 mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded">
+                <span className="text-xs text-amber-800">
+                  <strong>{selectedYear}年{selectedMonth}月に未反映の店舗が {missingShops.length} 件</strong>あります（同期漏れ等。配信を終了した店舗も含まれます）
+                </span>
+                <button
+                  onClick={() => setSelectedShops(new Set([...Array.from(selectedShops), ...missingShops]))}
+                  className="px-3 py-1.5 text-xs font-bold text-amber-800 border border-amber-400 rounded hover:bg-amber-100 whitespace-nowrap"
+                >
+                  未反映分をまとめて選択
+                </button>
+              </div>
+            )}
+            {missingShops.length === 0 && knownShops.length > 0 && (
+              <div className="mb-3 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded text-xs text-emerald-700">
+                {selectedYear}年{selectedMonth}月は全店舗にデータが反映されています
+              </div>
+            )}
             <div className="flex items-center gap-2 mb-3">
               <input
                 type="text"
@@ -462,6 +483,11 @@ export default function PmaxTopPage() {
                     className="rounded border-slate-300 text-[#003D6B] focus:ring-[#003D6B]/30"
                   />
                   <span className="truncate">{name}</span>
+                  {missingSet.has(name) && (
+                    <span className="ml-auto flex-shrink-0 text-[10px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded" title={`${selectedYear}年${selectedMonth}月のデータがありません`}>
+                      未反映
+                    </span>
+                  )}
                 </label>
               ))}
               {filteredKnownShops.length === 0 && (
