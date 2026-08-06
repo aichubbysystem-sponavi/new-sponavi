@@ -11,6 +11,8 @@
  * N: 来店（ビュースルー）, O: 合計来店数
  */
 
+import { GBP_NAME_ALIASES } from "./pmax-gbp-alias";
+
 const SHEET_ID = "1wludlpnMw7xithCJc3-9iIkjnhx2RFSWR9A8ihOsJ4A";
 const GID = "372148068";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
@@ -113,10 +115,25 @@ function parseCSVLine(line: string): string[] {
  * @param shopName 店舗名（部分一致）
  * @param targetMonth "YYYY/MM" 形式（省略時は全月）
  */
-/** 店舗名の照合用正規化（NFKCで全半角統一 + 空白除去 + 小文字化） */
+/**
+ * 店舗名の照合用正規化。
+ * NFKC（全半角統一）+ ハイフン異体字の統一 + 中黒・句読点の除去 + 空白除去 + 小文字化。
+ * ハイフン統一は patty rôti ‑パティロティ‑（U+2011）がシート側の半角ハイフンと
+ * 一致しなかった実害、中黒除去は「シン·ニクズシマン」(U+00B7)の実害への対応（2026-08-06）。
+ */
 export function normShopName(s: string): string {
-  return s.normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
+  return s
+    .normalize("NFKC")
+    .replace(/[‐-―−]/g, "-") // ハイフン異体字（‐‑‒–—―−）→ 半角ハイフン
+    .replace(/[・･·•。、，]/g, "") // 中黒（・･·•）と句読点（。、，）を除去
+    .replace(/[\s　]+/g, "")
+    .toLowerCase();
 }
+
+// Ads側⇔シート側の表記ズレ対応表（正規化キーで引く）。詳細は pmax-gbp-alias.ts
+const GBP_ALIAS_MAP: Map<string, string> = new Map(
+  GBP_NAME_ALIASES.map(([ads, sheet]) => [normShopName(ads), normShopName(sheet)])
+);
 
 /**
  * Ads側店舗名を、GBPシート側の正規化済み店舗名候補に安全に照合する。
@@ -135,6 +152,9 @@ export function pickGbpMatch(
 ): { key: string | null; ambiguous: boolean } {
   const key = normShopName(adsName);
   if (!key) return { key: null, ambiguous: false };
+  // 0. 対応表（人間が確認済みの表記ズレペア）: シート側キーが実在する場合のみ採用
+  const aliasKey = GBP_ALIAS_MAP.get(key);
+  if (aliasKey && candidateNormKeys.includes(aliasKey)) return { key: aliasKey, ambiguous: false };
   // 1. 完全一致
   if (candidateNormKeys.includes(key)) return { key, ambiguous: false };
   // 2/3. 相互部分一致

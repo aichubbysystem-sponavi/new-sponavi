@@ -58,3 +58,40 @@ describe("pickGbpMatch", () => {
     expect(pickGbpMatch("abc", ["", "zzz"])).toEqual({ key: null, ambiguous: false });
   });
 });
+
+describe("normShopName 異体字・記号の吸収（2026-08-06追加）", () => {
+  it("ハイフン異体字を統一（patty rôtiのU+2011で照合失敗した実害）", () => {
+    expect(normShopName("patty rôti ‑パティロティ‑")).toBe(normShopName("patty rôti -パティロティ-"));
+  });
+
+  it("中黒の有無・変種を吸収（シン·ニクズシマンのU+00B7）", () => {
+    expect(normShopName("シン·ニクズシマン")).toBe("シンニクズシマン");
+    expect(normShopName("シン・ニクズシマン")).toBe("シンニクズシマン");
+  });
+
+  it("句点の有無を吸収（福キタル。金山店 vs 福キタル金山店）", () => {
+    expect(normShopName("福キタル。 金山店")).toBe(normShopName("福キタル金山店"));
+  });
+});
+
+describe("pickGbpMatch 対応表（GBP_NAME_ALIASES）", () => {
+  it("表記が全く違うペアを対応表で照合（SIK eatery 靭公園 ⇔ うつぼ公園店）", () => {
+    const keys = [normShopName("SIK eatery うつぼ公園店"), "無関係の店"];
+    expect(pickGbpMatch("SIK eatery 靭公園", keys)).toEqual({
+      key: normShopName("SIK eatery うつぼ公園店"),
+      ambiguous: false,
+    });
+  });
+
+  it("対応表のシート側キーがその月に無ければ通常照合にフォールバック", () => {
+    expect(pickGbpMatch("SIK eatery 靭公園", ["無関係の店"])).toEqual({ key: null, ambiguous: false });
+  });
+
+  it("エミナルクリニック メンズ ⇔ メンズエミナル の各院", () => {
+    const keys = [normShopName("メンズエミナル 梅田院"), normShopName("メンズエミナル 札幌院")];
+    expect(pickGbpMatch("エミナルクリニック メンズ 梅田院", keys)).toEqual({
+      key: normShopName("メンズエミナル 梅田院"),
+      ambiguous: false,
+    });
+  });
+});

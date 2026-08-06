@@ -144,6 +144,19 @@ export async function getAccountSummary(
 
 const KNOWN_LANGUAGES = ["Japanese", "Chinese", "English", "Korean", "Thai", "Vietnamese", "French", "Spanish", "Portuguese", "German", "Italian", "Russian", "Arabic", "Hindi"];
 
+// 日本語表記の言語サフィックス（例: 「なか田 本店 繁体字」）。
+// これを言語と認識しないと店舗名に言語が残り、同一店舗が別カードに分裂し
+// GBPシート照合にも失敗する（2026-08-06調査で なか田/れたす/HELIO HOSTEL の実害）
+const LANG_SUFFIX_JA: Record<string, string> = {
+  日本語: "Japanese",
+  中国語: "Chinese",
+  繁体字: "Traditional Chinese",
+  簡体字: "Simplified Chinese",
+  韓国語: "Korean",
+  英語: "English",
+  タイ語: "Thai",
+};
+
 /**
  * キャンペーン名から店舗名と言語を抽出
  *
@@ -169,12 +182,16 @@ export function parseCampaignName(campaignName: string): { shopName: string; lan
     return { shopName: shopName || name.trim(), language: "Japanese" };
   }
 
-  // 末尾の単語が言語かチェック
-  const lastSpace = name.lastIndexOf(" ");
-  if (lastSpace > 0) {
-    const lastWord = name.slice(lastSpace + 1);
-    if (KNOWN_LANGUAGES.includes(lastWord)) {
-      return { shopName: name.slice(0, lastSpace).trim(), language: lastWord };
+  // 末尾の単語が言語かチェック（全角スペース区切り・小文字表記 "korean" 等も許容）
+  const m = name.trim().match(/^(.*?)[\s　]+([^\s　]+)$/);
+  if (m) {
+    const lastWord = m[2];
+    const capitalized = lastWord.charAt(0).toUpperCase() + lastWord.slice(1).toLowerCase();
+    if (KNOWN_LANGUAGES.includes(capitalized)) {
+      return { shopName: m[1].trim(), language: capitalized };
+    }
+    if (LANG_SUFFIX_JA[lastWord]) {
+      return { shopName: m[1].trim(), language: LANG_SUFFIX_JA[lastWord] };
     }
   }
 
