@@ -41,6 +41,8 @@ const MAX_PARAGRAPHS = 5;
 const LANG_LABELS: Record<string, string> = {
   Japanese: "日本語",
   Chinese: "中国語",
+  "Traditional Chinese": "繁体字",
+  "Simplified Chinese": "簡体字",
   English: "英語",
   Korean: "韓国語",
   Thai: "タイ語",

@@ -90,4 +90,31 @@ describe("parseCampaignName", () => {
       language: "Unknown",
     });
   });
+
+  // 2026-08-06追加: 日本語サフィックス・小文字・全角スペース
+  it("日本語の言語サフィックス（繁体字）を認識し店舗名から除く", () => {
+    expect(parseCampaignName("P-MAX なか田 本店 繁体字")).toEqual({
+      shopName: "なか田 本店",
+      language: "Traditional Chinese",
+    });
+  });
+
+  it("全角スペース区切りでも言語サフィックスを認識", () => {
+    expect(parseCampaignName("P-MAX れたす　中目黒 繁体字")).toEqual({
+      shopName: "れたす　中目黒",
+      language: "Traditional Chinese",
+    });
+  });
+
+  it("小文字の英語言語名（korean）も認識", () => {
+    expect(parseCampaignName("P-MAX HELIO HOSTEL korean")).toEqual({
+      shopName: "HELIO HOSTEL",
+      language: "Korean",
+    });
+  });
+
+  it("韓国語・簡体字サフィックス", () => {
+    expect(parseCampaignName("P-MAX テスト店 韓国語")).toEqual({ shopName: "テスト店", language: "Korean" });
+    expect(parseCampaignName("P-MAX テスト店 簡体字")).toEqual({ shopName: "テスト店", language: "Simplified Chinese" });
+  });
 });
