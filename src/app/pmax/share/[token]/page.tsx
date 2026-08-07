@@ -3,12 +3,14 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import PmaxReportView, { type PmaxReportData } from "@/components/pmax-report-view";
+import { EMPTY_PMAX_SETTINGS, type PmaxReportSettings } from "@/lib/pmax-overrides";
 
 export default function SharedPmaxReport() {
   const params = useParams();
   const token = params.token as string;
 
   const [data, setData] = useState<PmaxReportData | null>(null);
+  const [settings, setSettings] = useState<PmaxReportSettings>(EMPTY_PMAX_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -32,6 +34,8 @@ export default function SharedPmaxReport() {
           month: d.month,
           summaryText: d.summaryText || "",
         });
+        // 管理画面で手動編集した数値・表示設定を共有側でも反映
+        setSettings({ overrides: d.overrides || {}, sectionVisibility: d.sectionVisibility || {} });
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : "エラーが発生しました");
       } finally {
@@ -63,5 +67,5 @@ export default function SharedPmaxReport() {
     );
   }
 
-  return <PmaxReportView data={data} />;
+  return <PmaxReportView data={data} settings={settings} />;
 }

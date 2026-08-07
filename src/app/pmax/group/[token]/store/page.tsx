@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import PmaxReportView, { type PmaxReportData } from "@/components/pmax-report-view";
+import { EMPTY_PMAX_SETTINGS, type PmaxReportSettings } from "@/lib/pmax-overrides";
 
 function LoadingScreen() {
   return (
@@ -33,6 +34,7 @@ function GroupStoreReportInner() {
   const month = searchParams.get("month") || "";
 
   const [data, setData] = useState<PmaxReportData | null>(null);
+  const [settings, setSettings] = useState<PmaxReportSettings>(EMPTY_PMAX_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -65,6 +67,8 @@ function GroupStoreReportInner() {
           month: d.month,
           summaryText: d.summaryText || "",
         });
+        // 管理画面で手動編集した数値・表示設定を共有側でも反映
+        setSettings({ overrides: d.overrides || {}, sectionVisibility: d.sectionVisibility || {} });
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : "エラーが発生しました");
       } finally {
@@ -97,5 +101,5 @@ function GroupStoreReportInner() {
     );
   }
 
-  return <PmaxReportView data={data} backHref={`/pmax/group/${encodeURIComponent(token)}`} />;
+  return <PmaxReportView data={data} settings={settings} backHref={`/pmax/group/${encodeURIComponent(token)}`} />;
 }

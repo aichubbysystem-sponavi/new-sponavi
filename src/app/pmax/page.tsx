@@ -247,21 +247,31 @@ export default function PmaxTopPage() {
     return list.sort((a, b) => Number(missingSet.has(b)) - Number(missingSet.has(a)) || a.localeCompare(b, "ja"));
   }, [knownShops, shopSearch, missingSet]);
 
-  const filtered = stores.filter((s) => searchMatch(s.shopName, search));
-
   // 店舗名の正規化（グループ定義シートとの照合用: NFKC + 空白除去 + 小文字化）
   const normName = (s: string) => (s || "").normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
 
-  // シート定義に沿って店舗をグループ分け（該当店舗がある月のみ表示）
-  const groupSections = useMemo(() => {
-    const nameToGroup = new Map<string, string>();
+  // 店舗名→所属グループ名（検索・グループ分けの両方で使う）
+  const nameToGroup = useMemo(() => {
+    const map = new Map<string, string>();
     for (const g of groups) {
       for (const sName of g.stores) {
         const k = normName(sName);
-        if (!nameToGroup.has(k)) nameToGroup.set(k, g.name);
+        if (!map.has(k)) map.set(k, g.name);
       }
     }
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groups]);
 
+  // 店舗名ヒットに加え、所属グループ名（会社名）ヒットでも配下の全店舗を表示する
+  const filtered = stores.filter((s) => {
+    if (searchMatch(s.shopName, search)) return true;
+    const g = nameToGroup.get(normName(s.shopName));
+    return g ? searchMatch(g, search) : false;
+  });
+
+  // シート定義に沿って店舗をグループ分け（該当店舗がある月のみ表示）
+  const groupSections = useMemo(() => {
     const byGroup = new Map<string, StoreSummary[]>();
     const ungrouped: StoreSummary[] = [];
     for (const s of filtered) {
@@ -282,7 +292,7 @@ export default function PmaxTopPage() {
     if (ungrouped.length) sections.push({ name: "未分類", stores: ungrouped, isUngrouped: true });
     return sections;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtered, groups]);
+  }, [filtered, groups, nameToGroup]);
 
   const totalStores = stores.length;
   const totalImpressions = stores.reduce((s, v) => s + v.impressions, 0);

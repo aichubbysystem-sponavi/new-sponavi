@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { getGroupStores, normalizeShopName } from "@/lib/pmax-groups";
 import { isShareActive } from "@/lib/share-token";
+import { applyAdsOverrides, parseReportSettings } from "@/lib/pmax-overrides";
 
 export const dynamic = "force-dynamic";
 
@@ -62,41 +63,65 @@ export async function GET(
       return NextResponse.json({ error: "データ取得に失敗しました" }, { status: 500 });
     }
 
+    // 言語別に集計してから店舗合計を出す（レポートの手動編集を一覧の数値にも反映するため）
     const storeMap = new Map<string, {
       shopName: string;
-      languages: Set<string>;
-      impressions: number;
-      clicks: number;
-      costMicros: number;
+      langAgg: Map<string, { impressions: number; clicks: number; ctr: number; averageCpc: number; costMicros: number }>;
     }>();
 
     for (const row of rows || []) {
       if (!memberSet.has(normalizeShopName(row.shop_name))) continue; // グループ外は除外
-      const existing = storeMap.get(row.shop_name);
-      if (existing) {
-        existing.languages.add(row.language);
-        existing.impressions += Number(row.impressions || 0);
-        existing.clicks += Number(row.clicks || 0);
-        existing.costMicros += Number(row.cost_micros || 0);
-      } else {
-        storeMap.set(row.shop_name, {
-          shopName: row.shop_name,
-          languages: new Set([row.language]),
-          impressions: Number(row.impressions || 0),
-          clicks: Number(row.clicks || 0),
-          costMicros: Number(row.cost_micros || 0),
-        });
+      let store = storeMap.get(row.shop_name);
+      if (!store) {
+        store = { shopName: row.shop_name, langAgg: new Map() };
+        storeMap.set(row.shop_name, store);
+      }
+      const lang = row.language || "";
+      const agg = store.langAgg.get(lang) || { impressions: 0, clicks: 0, ctr: 0, averageCpc: 0, costMicros: 0 };
+      agg.impressions += Number(row.impressions || 0);
+      agg.clicks += Number(row.clicks || 0);
+      agg.costMicros += Number(row.cost_micros || 0);
+      store.langAgg.set(lang, agg);
+    }
+
+    // 手動編集（数値上書き）を取得し、詳細レポートと同じロジックで一覧の合計に適用
+    const shopNames = Array.from(storeMap.keys());
+    const overridesByShop = new Map<string, Record<string, number>>();
+    if (shopNames.length > 0) {
+      const { data: settingsRows } = await sb
+        .from("pmax_report_settings")
+        .select("shop_name, overrides")
+        .in("shop_name", shopNames);
+      for (const s of settingsRows || []) {
+        overridesByShop.set(s.shop_name, parseReportSettings(s).overrides);
       }
     }
 
     const stores = Array.from(storeMap.values())
-      .map((v) => ({
-        shopName: v.shopName,
-        languages: Array.from(v.languages).filter(Boolean).sort(),
-        impressions: v.impressions,
-        clicks: v.clicks,
-        costMicros: v.costMicros,
-      }))
+      .map((v) => {
+        const ov = overridesByShop.get(v.shopName) || {};
+        let impressions = 0, clicks = 0, costMicros = 0;
+        for (const [lang, agg] of Array.from(v.langAgg.entries())) {
+          applyAdsOverrides(agg, `m|${lang}|${month}`, ov);
+          impressions += agg.impressions;
+          clicks += agg.clicks;
+          costMicros += agg.costMicros;
+        }
+        // KPIサマリー合計の直接上書き（k|）は言語合算より優先
+        const oImp = ov[`k|${month}|impressions`];
+        if (oImp !== undefined) impressions = oImp;
+        const oClk = ov[`k|${month}|clicks`];
+        if (oClk !== undefined) clicks = oClk;
+        const oCost = ov[`k|${month}|costYen`];
+        if (oCost !== undefined) costMicros = Math.round(oCost * 1_000_000);
+        return {
+          shopName: v.shopName,
+          languages: Array.from(v.langAgg.keys()).filter(Boolean).sort(),
+          impressions,
+          clicks,
+          costMicros,
+        };
+      })
       .sort((a, b) => b.impressions - a.impressions);
 
     return NextResponse.json({

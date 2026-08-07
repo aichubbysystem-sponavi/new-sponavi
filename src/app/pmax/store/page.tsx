@@ -1,11 +1,12 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useRole } from "@/components/role-provider";
 import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
 import PmaxReportView, { type CampaignRow, type GbpRow, type ChannelRow } from "@/components/pmax-report-view";
+import { applyAdsOverrides, applyGbpOverrides, EMPTY_PMAX_SETTINGS, type PmaxReportSettings } from "@/lib/pmax-overrides";
 
 // ── メインコンポーネント ──
 export default function PmaxStoreDetailPage() {
@@ -42,6 +43,12 @@ function StoreDetailContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // 表示設定＋数値上書き（DB保存・共有URLにも反映される）
+  const [settings, setSettings] = useState<PmaxReportSettings>(EMPTY_PMAX_SETTINGS);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [saveState, setSaveState] = useState<"" | "saving" | "saved" | "error">("");
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // URLパラメータの年月を優先、なければ現在月
   const [now] = useState(() => new Date());
   const targetYear = paramYear ? Number(paramYear) : now.getFullYear();
@@ -72,9 +79,51 @@ function StoreDetailContent() {
     })();
   }, [shopName, targetYear, targetMonthNum]);
 
-  // KPIデータが揃ったらAI文章を1回だけ生成（C2修正: summaryRequestedで制御）
+  // 表示設定＋数値上書きの読み込み（店舗単位）
   useEffect(() => {
-    if (monthly.length === 0 || summaryRequested) return;
+    if (!shopName) return;
+    (async () => {
+      try {
+        const token = (await supabase.auth.getSession()).data.session?.access_token;
+        const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+        const res = await fetch(`/api/pmax/report-settings?shopName=${encodeURIComponent(shopName)}`, { headers });
+        if (res.ok) {
+          const d = await res.json();
+          setSettings({ overrides: d.overrides || {}, sectionVisibility: d.sectionVisibility || {} });
+        }
+      } catch {
+        // 読み込み失敗時はデフォルト（全表示・上書きなし）のまま
+      } finally {
+        setSettingsLoaded(true);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shopName]);
+
+  // 変更をデバウンスしてDB保存（上書きされない限り永続保存）
+  const handleSettingsChange = (next: PmaxReportSettings) => {
+    setSettings(next);
+    setSaveState("saving");
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(async () => {
+      try {
+        const token = (await supabase.auth.getSession()).data.session?.access_token;
+        const res = await fetch("/api/pmax/report-settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          body: JSON.stringify({ shopName, overrides: next.overrides, sectionVisibility: next.sectionVisibility }),
+        });
+        setSaveState(res.ok ? "saved" : "error");
+      } catch {
+        setSaveState("error");
+      }
+    }, 600);
+  };
+
+  // KPIデータが揃ったらAI文章を1回だけ生成（C2修正: summaryRequestedで制御）
+  // 手動編集（数値上書き）の読み込み完了を待ち、編集後の数値で文章を作る（本文との矛盾防止）
+  useEffect(() => {
+    if (monthly.length === 0 || summaryRequested || !settingsLoaded) return;
     setSummaryRequested(true);
     (async () => {
       try {
@@ -86,11 +135,24 @@ function StoreDetailContent() {
         const prevD = new Date(targetYear, targetMonthNum - 2, 1);
         const prevKey = `${prevD.getFullYear()}-${String(prevD.getMonth() + 1).padStart(2, "0")}`;
 
+        const ov = settings.overrides;
         const sumMonth = (key: string) => {
-          const rows = monthly.filter(r => (r.month || "").startsWith(key));
-          const imp = rows.reduce((s, r) => s + r.impressions, 0);
-          const clk = rows.reduce((s, r) => s + r.clicks, 0);
-          const cost = rows.reduce((s, r) => s + r.costMicros, 0);
+          // 言語別に集計→上書き適用→合算（レポート本文と同じ手順）
+          const byLang = new Map<string, { impressions: number; clicks: number; ctr: number; averageCpc: number; costMicros: number }>();
+          for (const r of monthly) {
+            if (!(r.month || "").startsWith(key)) continue;
+            const agg = byLang.get(r.language) || { impressions: 0, clicks: 0, ctr: 0, averageCpc: 0, costMicros: 0 };
+            agg.impressions += r.impressions; agg.clicks += r.clicks; agg.costMicros += r.costMicros;
+            byLang.set(r.language, agg);
+          }
+          let imp = 0, clk = 0, cost = 0;
+          for (const [lang, agg] of Array.from(byLang.entries())) {
+            applyAdsOverrides(agg, `m|${lang}|${key}`, ov);
+            imp += agg.impressions; clk += agg.clicks; cost += agg.costMicros;
+          }
+          if (ov[`k|${key}|impressions`] !== undefined) imp = ov[`k|${key}|impressions`];
+          if (ov[`k|${key}|clicks`] !== undefined) clk = ov[`k|${key}|clicks`];
+          if (ov[`k|${key}|costYen`] !== undefined) cost = Math.round(ov[`k|${key}|costYen`] * 1_000_000);
           return { imp, clk, cost, ctr: imp > 0 ? clk / imp : 0, cpc: clk > 0 ? cost / clk : 0 };
         };
         const cur = sumMonth(curKey);
@@ -98,8 +160,15 @@ function StoreDetailContent() {
 
         const gbpCurKey = `${targetYear}/${String(targetMonthNum).padStart(2, "0")}`;
         const gbpPrevKey = `${prevD.getFullYear()}/${String(prevD.getMonth() + 1).padStart(2, "0")}`;
-        const gbpCur = gbpRows.find(r => r.month === gbpCurKey);
-        const gbpPrv = gbpRows.find(r => r.month === gbpPrevKey);
+        const findGbp = (mKey: string) => {
+          const row = gbpRows.find(r => r.month === mKey);
+          if (!row) return undefined;
+          const copy = { ...row };
+          applyGbpOverrides(copy, ov);
+          return copy;
+        };
+        const gbpCur = findGbp(gbpCurKey);
+        const gbpPrv = findGbp(gbpPrevKey);
 
         const body = {
           shopName, // キャッシュキー: 同じ店×月×データなら再生成せず同じ文面を返す
@@ -126,7 +195,8 @@ function StoreDetailContent() {
         // 文章生成失敗は無視（レポート表示には影響しない）
       }
     })();
-  }, [monthly, gbpRows, summaryRequested, targetYear, targetMonthNum]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [monthly, gbpRows, summaryRequested, settingsLoaded, targetYear, targetMonthNum]);
 
   if (loading) {
     return (
@@ -207,6 +277,10 @@ function StoreDetailContent() {
       {/* レポート本体（共有ページと共通コンポーネント） */}
       <PmaxReportView
         data={{ monthly, daily, gbp: gbpRows, channels, shopName, year: targetYear, month: targetMonthNum, summaryText }}
+        settings={settings}
+        editable={canData}
+        onSettingsChange={canData ? handleSettingsChange : undefined}
+        saveState={saveState}
       />
     </div>
   );

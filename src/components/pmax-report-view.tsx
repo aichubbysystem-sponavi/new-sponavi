@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -16,8 +17,19 @@ import {
 } from "chart.js";
 import { Chart, Pie } from "react-chartjs-2";
 import { buildPmaxAdvice } from "@/lib/pmax-advice";
+import {
+  applyAdsOverrides,
+  applyGbpOverrides,
+  GBP_OVERRIDE_FIELDS,
+  EMPTY_PMAX_SETTINGS,
+  type PmaxReportSettings,
+} from "@/lib/pmax-overrides";
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, LineController, BarElement, BarController, ArcElement, Title, Tooltip, Legend);
+
+// 店舗様へのアドバイスページの全体スイッチ。
+// 2026-08-07 ユーザー依頼で全店舗非表示（コード・ロジックは温存。再開時は true に戻すだけ）
+const SHOW_ADVICE_PAGE = false;
 
 export type CampaignRow = {
   language: string;
@@ -127,12 +139,12 @@ function ComparisonBadge({ current, previous, label, format }: { current: number
   return <div style={{ fontSize: 11, color, lineHeight: 1.5 }}>{arrow} {isFlat ? "0.0" : (isUp ? "+" : "") + pct.toFixed(1)}%（{fmt(previous)}→{fmt(current)}）{label}</div>;
 }
 
-function KpiCard({ kpi, colorIdx }: { kpi: { label: string; value: number; format: (v: number) => string; prev: number; lastYear: number | null }; colorIdx: number }) {
+function KpiCard({ kpi, colorIdx, valueNode }: { kpi: { label: string; value: number; format: (v: number) => string; prev: number; lastYear: number | null }; colorIdx: number; valueNode?: React.ReactNode }) {
   return (
     <div style={{ background: "#fff", borderRadius: 12, padding: "14px 16px", position: "relative", overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.04)" }}>
       <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: 3, background: kpiTopColors[colorIdx % kpiTopColors.length] }} />
       <div style={{ fontSize: 12, color: "#888", fontWeight: 500 }}>{kpi.label}</div>
-      <div style={{ fontSize: 24, fontWeight: 900, lineHeight: 1.1, margin: "4px 0 6px" }}>{kpi.format(kpi.value)}</div>
+      <div style={{ fontSize: 24, fontWeight: 900, lineHeight: 1.1, margin: "4px 0 6px" }}>{valueNode ?? kpi.format(kpi.value)}</div>
       <ComparisonBadge current={kpi.value} previous={kpi.prev} label="前月比" format={kpi.format} />
       {kpi.lastYear !== null && <ComparisonBadge current={kpi.value} previous={kpi.lastYear} label="前年比" format={kpi.format} />}
     </div>
@@ -140,18 +152,47 @@ function KpiCard({ kpi, colorIdx }: { kpi: { label: string; value: number; forma
 }
 
 /**
- * P-MAX 店舗レポートの表示専用コンポーネント。
+ * P-MAX 店舗レポートの表示コンポーネント。
  * データ取得は各ページ側で行い、結果をpropsで渡す。
  * @param backHref 指定すると左上に「戻る」リンクを表示（グループページから遷移した場合など）
+ * @param settings 表示設定＋数値上書き（共有ページでも渡されるとレポートに反映される）
+ * @param editable trueで「表示設定」「数値を編集」ボタンを表示（管理画面のみ）。
+ *                 編集内容は onSettingsChange 経由で親がDB保存する。
  */
-export default function PmaxReportView({ data, backHref }: { data: PmaxReportData; backHref?: string }) {
-  const { monthly, daily, gbp: gbpRows, channels = [], shopName, year: targetYear, month: targetMonthNum, summaryText = "" } = data;
+export default function PmaxReportView({ data, backHref, settings, editable = false, onSettingsChange, saveState = "" }: {
+  data: PmaxReportData;
+  backHref?: string;
+  settings?: PmaxReportSettings;
+  editable?: boolean;
+  onSettingsChange?: (next: PmaxReportSettings) => void;
+  saveState?: "" | "saving" | "saved" | "error";
+}) {
+  const { monthly, daily, gbp: gbpRaw, channels: channelsRaw = [], shopName, year: targetYear, month: targetMonthNum, summaryText = "" } = data;
+  const { overrides, sectionVisibility } = settings || EMPTY_PMAX_SETTINGS;
+  // 表示設定: 未設定キーは表示（falseだけ非表示）
+  const vis = (key: string) => sectionVisibility[key] !== false;
+  const canEdit = editable && !!onSettingsChange;
+
+  // 編集モード（数値クリック→インライン入力）
+  const [editMode, setEditMode] = useState(false);
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [showSettings, setShowSettings] = useState(false);
 
   // ── データ集計 ──
   const currentMonthKey = `${targetYear}-${String(targetMonthNum).padStart(2, "0")}`;
   const prevMonthDate = new Date(targetYear, targetMonthNum - 2, 1);
   const prevMonthKey = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, "0")}`;
   const lastYearMonthKey = `${targetYear - 1}-${String(targetMonthNum).padStart(2, "0")}`;
+
+  // GBP行・チャネル行はコピーしてから数値上書きを適用（元データは変更しない）
+  const gbpRows: GbpRow[] = gbpRaw.map((r) => ({ ...r }));
+  for (const r of gbpRows) applyGbpOverrides(r, overrides);
+  const channels: ChannelRow[] = channelsRaw.map((r) => ({ ...r }));
+  for (const r of channels) {
+    const v = overrides[`c|${currentMonthKey}|${r.network}|impressions`];
+    if (v !== undefined) r.impressions = v;
+  }
 
   const currentMonth = `${targetYear}/${targetMonthNum}`;
   const periodStart = `${targetYear}/${String(targetMonthNum).padStart(2, "0")}/01`;
@@ -172,7 +213,10 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
         existing.averageCpc = existing.clicks > 0 ? existing.costMicros / existing.clicks : 0;
       } else { monthMap.set(key, { ...r }); }
     }
-    monthlyByLang[lang] = Array.from(monthMap.values()).sort((a, b) => (a.month || "").localeCompare(b.month || ""));
+    const monthAgg = Array.from(monthMap.values());
+    // 手動編集（数値上書き）を集計後の行に適用
+    for (const row of monthAgg) applyAdsOverrides(row, `m|${lang}|${row.month || ""}`, overrides);
+    monthlyByLang[lang] = monthAgg.sort((a, b) => (a.month || "").localeCompare(b.month || ""));
 
     const langDailyRows = daily.filter(r => r.language === lang);
     const dayMap = new Map<string, CampaignRow>();
@@ -185,31 +229,57 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
         existing.averageCpc = existing.clicks > 0 ? existing.costMicros / existing.clicks : 0;
       } else { dayMap.set(key, { ...r }); }
     }
-    dailyByLang[lang] = Array.from(dayMap.values()).sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    const dayAgg = Array.from(dayMap.values());
+    for (const row of dayAgg) applyAdsOverrides(row, `d|${lang}|${row.date || ""}`, overrides);
+    dailyByLang[lang] = dayAgg.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
   }
 
+  // 集計は上書き適用済みの言語別月次行から行う（言語別テーブルとKPIサマリーの整合を保つ）。
+  // さらに k|<月>|<field> の直接上書きがあれば合計値そのものを差し替える。
   function getAdsMonthTotal(monthKey: string) {
-    const rows = monthly.filter(r => (r.month || "").startsWith(monthKey));
-    return { impressions: rows.reduce((s, r) => s + r.impressions, 0), clicks: rows.reduce((s, r) => s + r.clicks, 0), costMicros: rows.reduce((s, r) => s + r.costMicros, 0), ctr: 0, averageCpc: 0 };
+    const t = { impressions: 0, clicks: 0, costMicros: 0, ctr: 0, averageCpc: 0 };
+    for (const lang of languages) {
+      for (const r of monthlyByLang[lang] || []) {
+        if ((r.month || "").startsWith(monthKey)) {
+          t.impressions += r.impressions; t.clicks += r.clicks; t.costMicros += r.costMicros;
+        }
+      }
+    }
+    const oImp = overrides[`k|${monthKey}|impressions`];
+    if (oImp !== undefined) t.impressions = oImp;
+    const oClk = overrides[`k|${monthKey}|clicks`];
+    if (oClk !== undefined) t.clicks = oClk;
+    const oCost = overrides[`k|${monthKey}|costYen`];
+    if (oCost !== undefined) t.costMicros = Math.round(oCost * 1_000_000);
+    t.ctr = t.impressions > 0 ? t.clicks / t.impressions : 0;
+    t.averageCpc = t.clicks > 0 ? t.costMicros / t.clicks : 0;
+    return t;
   }
   const adsCurrent = getAdsMonthTotal(currentMonthKey);
-  adsCurrent.ctr = adsCurrent.impressions > 0 ? adsCurrent.clicks / adsCurrent.impressions : 0;
-  adsCurrent.averageCpc = adsCurrent.clicks > 0 ? adsCurrent.costMicros / adsCurrent.clicks : 0;
   const adsPrev = getAdsMonthTotal(prevMonthKey);
-  adsPrev.ctr = adsPrev.impressions > 0 ? adsPrev.clicks / adsPrev.impressions : 0;
-  adsPrev.averageCpc = adsPrev.clicks > 0 ? adsPrev.costMicros / adsPrev.clicks : 0;
   const adsLastYear = getAdsMonthTotal(lastYearMonthKey);
   const hasYearData = adsLastYear.impressions > 0 || adsLastYear.clicks > 0 || adsLastYear.costMicros > 0;
 
   const gbpCurrentKey = `${targetYear}/${String(targetMonthNum).padStart(2, "0")}`;
   const gbpPrevKeyVal = `${prevMonthDate.getFullYear()}/${String(prevMonthDate.getMonth() + 1).padStart(2, "0")}`;
   const gbpLastYearKey = `${targetYear - 1}/${String(targetMonthNum).padStart(2, "0")}`;
-  const gbpCurrent = gbpRows.find(r => r.month === gbpCurrentKey);
-  const gbpPrev = gbpRows.find(r => r.month === gbpPrevKeyVal);
-  const gbpLastYear = gbpRows.find(r => r.month === gbpLastYearKey);
+  // GBP行が無い月でも手動上書きがあれば0埋め行を合成して表示する（KPIカード編集用）
+  const findGbp = (mKey: string): GbpRow | undefined => {
+    const row = gbpRows.find(r => r.month === mKey);
+    if (row) return row;
+    if (GBP_OVERRIDE_FIELDS.some((f) => overrides[`g|${mKey}|${f}`] !== undefined)) {
+      const synth: GbpRow = { month: mKey, shopName, totalImpressions: 0, totalVisits: 0, phone: 0, directions: 0, website: 0, menuClicks: 0, saveShare: 0, reservation: 0 };
+      applyGbpOverrides(synth, overrides);
+      return synth;
+    }
+    return undefined;
+  };
+  const gbpCurrent = findGbp(gbpCurrentKey);
+  const gbpPrev = findGbp(gbpPrevKeyVal);
+  const gbpLastYear = findGbp(gbpLastYearKey);
   const hasGbpYearData = !!gbpLastYear;
 
-  const hasSummary = summaryText.length > 0;
+  const hasSummary = summaryText.length > 0 && vis("summary");
 
   // コンバージョン（GBP由来アクション）の月次系列
   const convRows = [...gbpRows].sort((a, b) => (a.month || "").localeCompare(b.month || ""));
@@ -226,7 +296,7 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
     { key: "website", label: "WEBサイト" },
     { key: "saveShare", label: "保存・共有・写真" },
   ];
-  const hasConversion = convRows.length > 0;
+  const hasConversion = convRows.length > 0 && vis("conversion");
   const convOffset = hasConversion ? 1 : 0;
 
   // 媒体別配信比率（対象月の表示回数ベース）: 6チャネル＋その他に集計し、多い順に並べる
@@ -238,15 +308,15 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
       if (knownKeys.has(r.network)) byKey.set(r.network, (byKey.get(r.network) || 0) + r.impressions);
       else otherImp += r.impressions;
     }
-    const items: { label: string; color: string; impressions: number }[] = CHANNEL_DEFS.map((d) => ({
-      label: d.label, color: d.color, impressions: byKey.get(d.key) || 0,
+    const items: { label: string; color: string; impressions: number; network: string }[] = CHANNEL_DEFS.map((d) => ({
+      label: d.label, color: d.color, impressions: byKey.get(d.key) || 0, network: d.key,
     }));
-    if (otherImp > 0) items.push({ label: CHANNEL_OTHER.label, color: CHANNEL_OTHER.color, impressions: otherImp });
+    if (otherImp > 0) items.push({ label: CHANNEL_OTHER.label, color: CHANNEL_OTHER.color, impressions: otherImp, network: "" });
     items.sort((a, b) => b.impressions - a.impressions);
     const total = items.reduce((s, i) => s + i.impressions, 0);
     return { items, total };
   })();
-  const hasChannels = channelAgg.total > 0;
+  const hasChannels = channelAgg.total > 0 && vis("channels");
   const channelOffset = hasChannels ? 1 : 0;
   const channelPct = (imp: number) => (channelAgg.total > 0 ? ((imp / channelAgg.total) * 100).toFixed(1) : "0.0");
 
@@ -280,22 +350,78 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
       prevSaveShare: gbpPrev ? gbpPrev.saveShare : null,
     });
   })();
-  const hasAdvice = adviceParagraphs.length > 0;
+  const hasAdvice = SHOW_ADVICE_PAGE && vis("advice") && adviceParagraphs.length > 0;
   const adviceOffset = hasAdvice ? 1 : 0;
 
-  const totalPages = 1 + convOffset + languages.length + channelOffset + adviceOffset + (hasSummary ? 1 : 0);
+  // 表示設定でOFFにした言語ページは描画・ページ番号の両方から除外
+  const visibleLanguages = languages.filter((lang) => vis(`lang|${lang}`));
+  const showDaily = vis("daily");
+
+  const totalPages = 1 + convOffset + visibleLanguages.length + channelOffset + adviceOffset + (hasSummary ? 1 : 0);
+
+  // ── 編集モード: 数値クリック→インライン入力。空で確定すると元の値に戻す ──
+  const commitEdit = () => {
+    if (!activeKey || !onSettingsChange) { setActiveKey(null); return; }
+    const key = activeKey;
+    setActiveKey(null);
+    const t = draft.trim().replace(/[,，¥￥%％\s]/g, "");
+    const next = { ...overrides };
+    if (t === "") {
+      if (next[key] === undefined) return;
+      delete next[key];
+    } else {
+      const n = Number(t);
+      if (!Number.isFinite(n) || n < 0) return;
+      if (next[key] === n) return;
+      next[key] = n;
+    }
+    onSettingsChange({ overrides: next, sectionVisibility });
+  };
+
+  /** 編集対応の数値表示。編集モード中はクリックで入力欄に切り替わる */
+  const ed = (key: string, display: string, rawForInput: number | string) => {
+    if (!canEdit || !editMode) return <>{display}</>;
+    if (activeKey === key) {
+      return (
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commitEdit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commitEdit();
+            else if (e.key === "Escape") setActiveKey(null);
+          }}
+          style={{ width: 80, maxWidth: "100%", fontSize: "inherit", fontWeight: "inherit", textAlign: "center", border: "1.5px solid #e94560", borderRadius: 4, padding: "1px 4px", color: "#1a1a2e", background: "#fff", boxSizing: "border-box" }}
+        />
+      );
+    }
+    const isOverridden = overrides[key] !== undefined;
+    return (
+      <span
+        onClick={() => { setActiveKey(key); setDraft(String(rawForInput)); }}
+        title={isOverridden ? "手動編集済み。クリックで再編集（空にして確定すると元の値に戻ります）" : "クリックして編集"}
+        style={{ cursor: "pointer", borderBottom: "1.5px dashed #e94560", background: isOverridden ? "rgba(233,69,96,.14)" : undefined, borderRadius: 2 }}
+      >{display}</span>
+    );
+  };
+
+  const toggleSection = (key: string) => {
+    if (!onSettingsChange) return;
+    onSettingsChange({ overrides, sectionVisibility: { ...sectionVisibility, [key]: !vis(key) } });
+  };
 
   const kpiCards = [
-    { label: "総表示回数", value: adsCurrent.impressions, format: formatNum, prev: adsPrev.impressions, lastYear: hasYearData ? adsLastYear.impressions : null },
-    { label: "総クリック", value: adsCurrent.clicks, format: formatNum, prev: adsPrev.clicks, lastYear: hasYearData ? adsLastYear.clicks : null },
-    { label: "総広告費", value: adsCurrent.costMicros, format: formatCost, prev: adsPrev.costMicros, lastYear: hasYearData ? adsLastYear.costMicros : null },
-    { label: "合計来店数", value: gbpCurrent?.totalVisits ?? 0, format: formatNum, prev: gbpPrev?.totalVisits ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.totalVisits ?? 0) : null },
-    { label: "電話", value: gbpCurrent?.phone ?? 0, format: formatNum, prev: gbpPrev?.phone ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.phone ?? 0) : null },
-    { label: "経路案内", value: gbpCurrent?.directions ?? 0, format: formatNum, prev: gbpPrev?.directions ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.directions ?? 0) : null },
-    { label: "メニュークリック", value: gbpCurrent?.menuClicks ?? 0, format: formatNum, prev: gbpPrev?.menuClicks ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.menuClicks ?? 0) : null },
-    { label: "予約", value: gbpCurrent?.reservation ?? 0, format: formatNum, prev: gbpPrev?.reservation ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.reservation ?? 0) : null },
-    { label: "WEBサイト", value: gbpCurrent?.website ?? 0, format: formatNum, prev: gbpPrev?.website ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.website ?? 0) : null },
-    { label: "保存・共有・写真", value: gbpCurrent?.saveShare ?? 0, format: formatNum, prev: gbpPrev?.saveShare ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.saveShare ?? 0) : null },
+    { label: "総表示回数", value: adsCurrent.impressions, format: formatNum, prev: adsPrev.impressions, lastYear: hasYearData ? adsLastYear.impressions : null, editKey: `k|${currentMonthKey}|impressions`, editRaw: adsCurrent.impressions },
+    { label: "総クリック", value: adsCurrent.clicks, format: formatNum, prev: adsPrev.clicks, lastYear: hasYearData ? adsLastYear.clicks : null, editKey: `k|${currentMonthKey}|clicks`, editRaw: adsCurrent.clicks },
+    { label: "総広告費", value: adsCurrent.costMicros, format: formatCost, prev: adsPrev.costMicros, lastYear: hasYearData ? adsLastYear.costMicros : null, editKey: `k|${currentMonthKey}|costYen`, editRaw: Math.round(adsCurrent.costMicros / 1_000_000) },
+    { label: "合計来店数", value: gbpCurrent?.totalVisits ?? 0, format: formatNum, prev: gbpPrev?.totalVisits ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.totalVisits ?? 0) : null, editKey: `g|${gbpCurrentKey}|totalVisits`, editRaw: gbpCurrent?.totalVisits ?? 0 },
+    { label: "電話", value: gbpCurrent?.phone ?? 0, format: formatNum, prev: gbpPrev?.phone ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.phone ?? 0) : null, editKey: `g|${gbpCurrentKey}|phone`, editRaw: gbpCurrent?.phone ?? 0 },
+    { label: "経路案内", value: gbpCurrent?.directions ?? 0, format: formatNum, prev: gbpPrev?.directions ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.directions ?? 0) : null, editKey: `g|${gbpCurrentKey}|directions`, editRaw: gbpCurrent?.directions ?? 0 },
+    { label: "メニュークリック", value: gbpCurrent?.menuClicks ?? 0, format: formatNum, prev: gbpPrev?.menuClicks ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.menuClicks ?? 0) : null, editKey: `g|${gbpCurrentKey}|menuClicks`, editRaw: gbpCurrent?.menuClicks ?? 0 },
+    { label: "予約", value: gbpCurrent?.reservation ?? 0, format: formatNum, prev: gbpPrev?.reservation ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.reservation ?? 0) : null, editKey: `g|${gbpCurrentKey}|reservation`, editRaw: gbpCurrent?.reservation ?? 0 },
+    { label: "WEBサイト", value: gbpCurrent?.website ?? 0, format: formatNum, prev: gbpPrev?.website ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.website ?? 0) : null, editKey: `g|${gbpCurrentKey}|website`, editRaw: gbpCurrent?.website ?? 0 },
+    { label: "保存・共有・写真", value: gbpCurrent?.saveShare ?? 0, format: formatNum, prev: gbpPrev?.saveShare ?? 0, lastYear: hasGbpYearData ? (gbpLastYear?.saveShare ?? 0) : null, editKey: `g|${gbpCurrentKey}|saveShare`, editRaw: gbpCurrent?.saveShare ?? 0 },
   ];
 
   return (
@@ -325,13 +451,13 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
         <div style={{ flex: 1, padding: "20px 36px", overflow: "hidden" }}>
           <div style={stitleStyle}>主要指標サマリー（{currentMonth}）</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14, marginBottom: 14 }}>
-            {kpiCards.slice(0, 3).map((kpi, i) => <KpiCard key={kpi.label} kpi={kpi} colorIdx={i} />)}
+            {kpiCards.slice(0, 3).map((kpi, i) => <KpiCard key={kpi.label} kpi={kpi} colorIdx={i} valueNode={canEdit ? ed(kpi.editKey, kpi.format(kpi.value), kpi.editRaw) : undefined} />)}
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14, marginBottom: 14 }}>
-            {kpiCards.slice(3, 6).map((kpi, i) => <KpiCard key={kpi.label} kpi={kpi} colorIdx={i + 3} />)}
+            {kpiCards.slice(3, 6).map((kpi, i) => <KpiCard key={kpi.label} kpi={kpi} colorIdx={i + 3} valueNode={canEdit ? ed(kpi.editKey, kpi.format(kpi.value), kpi.editRaw) : undefined} />)}
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 14 }}>
-            {kpiCards.slice(6, 10).map((kpi, i) => <KpiCard key={kpi.label} kpi={kpi} colorIdx={i + 6} />)}
+            {kpiCards.slice(6, 10).map((kpi, i) => <KpiCard key={kpi.label} kpi={kpi} colorIdx={i + 6} valueNode={canEdit ? ed(kpi.editKey, kpi.format(kpi.value), kpi.editRaw) : undefined} />)}
           </div>
         </div>
       </div>
@@ -362,7 +488,9 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
                       <tr key={m.key} style={{ background: ri % 2 === 0 ? "#f8f9fa" : "#fff" }}>
                         <td style={{ padding: "9px 14px", fontWeight: 700, color: "#0f3460", whiteSpace: "nowrap" }}>{m.label}</td>
                         {values.map((v, i) => (
-                          <td key={i} style={{ textAlign: "center", padding: "9px 8px", background: i === values.length - 1 ? "#fff8f0" : undefined }}>{v.toLocaleString()}</td>
+                          <td key={i} style={{ textAlign: "center", padding: "9px 8px", background: i === values.length - 1 ? "#fff8f0" : undefined }}>
+                            {ed(`g|${convRows[i].month}|${m.key}`, v.toLocaleString(), v)}
+                          </td>
                         ))}
                         <td style={{ textAlign: "center", padding: "9px 14px", fontWeight: 700, background: "#eef1f6" }}>{total.toLocaleString()}</td>
                       </tr>
@@ -375,8 +503,8 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
         </div>
       )}
 
-      {/* 言語別ページ */}
-      {languages.map((lang, langIdx) => {
+      {/* 言語別ページ（表示設定でOFFの言語は出さない） */}
+      {visibleLanguages.map((lang, langIdx) => {
         const mRows = monthlyByLang[lang];
         const dRows = dailyByLang[lang];
         return (
@@ -438,16 +566,25 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
                   {(["impressions", "clicks", "ctr", "averageCpc", "costMicros"] as const).map((field, ri) => (
                     <tr key={field} style={{ background: ri % 2 === 0 ? "#f8f9fa" : "#f8f9fb" }}>
                       <td style={{ padding: "6px 10px", fontWeight: 600, color: "#666" }}>{{ impressions: "表示回数", clicks: "クリック数", ctr: "クリック率", averageCpc: "平均クリック単価", costMicros: "広告費" }[field]}</td>
-                      {mRows.map((r, i) => (
-                        <td key={i} style={{ textAlign: "center", padding: "6px", fontWeight: field === "costMicros" ? 700 : undefined, background: i === mRows.length - 1 ? "#fff8f0" : undefined }}>
-                          {field === "impressions" ? r.impressions.toLocaleString() : field === "clicks" ? r.clicks.toLocaleString() : field === "ctr" ? formatCtr(r.ctr) : field === "averageCpc" ? formatCpc(r.averageCpc) : formatCost(r.costMicros)}
-                        </td>
-                      ))}
+                      {mRows.map((r, i) => {
+                        const prefix = `m|${lang}|${r.month || ""}`;
+                        const cell =
+                          field === "impressions" ? ed(`${prefix}|impressions`, r.impressions.toLocaleString(), r.impressions)
+                          : field === "clicks" ? ed(`${prefix}|clicks`, r.clicks.toLocaleString(), r.clicks)
+                          : field === "ctr" ? ed(`${prefix}|ctrPct`, formatCtr(r.ctr), +(r.ctr * 100).toFixed(2))
+                          : field === "averageCpc" ? ed(`${prefix}|cpcYen`, formatCpc(r.averageCpc), +(r.averageCpc / 1_000_000).toFixed(1))
+                          : ed(`${prefix}|costYen`, formatCost(r.costMicros), Math.round(r.costMicros / 1_000_000));
+                        return (
+                          <td key={i} style={{ textAlign: "center", padding: "6px", fontWeight: field === "costMicros" ? 700 : undefined, background: i === mRows.length - 1 ? "#fff8f0" : undefined }}>
+                            {cell}
+                          </td>
+                        );
+                      })}
                     </tr>
                   ))}
                 </tbody>
               </table>
-              {dRows.length > 0 && (
+              {showDaily && dRows.length > 0 && (
                 <>
                   <div style={{ ...stitleStyle, marginTop: 24, marginBottom: 10 }}>日次データ{dRows[0]?.date ? `（${new Date(dRows[0].date).getMonth() + 1}月）` : ""}</div>
                   <div style={{ overflowY: "auto", maxHeight: 280, border: "1px solid #e0e0e0", borderRadius: 8 }}>
@@ -458,16 +595,19 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
                         ))}
                       </tr></thead>
                       <tbody>
-                        {dRows.map((r, i) => (
+                        {dRows.map((r, i) => {
+                          const prefix = `d|${lang}|${r.date || ""}`;
+                          return (
                           <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#f8f9fb" }}>
                             <td style={{ padding: "6px 12px", fontWeight: 600, color: "#666", whiteSpace: "nowrap" }}>{formatDate(r.date || "")}</td>
-                            <td style={{ textAlign: "center", padding: "6px 12px" }}>{r.impressions.toLocaleString()}</td>
-                            <td style={{ textAlign: "center", padding: "6px 12px" }}>{r.clicks.toLocaleString()}</td>
-                            <td style={{ textAlign: "center", padding: "6px 12px" }}>{formatCtr(r.ctr)}</td>
-                            <td style={{ textAlign: "center", padding: "6px 12px" }}>{formatCpc(r.averageCpc)}</td>
-                            <td style={{ textAlign: "center", padding: "6px 12px", fontWeight: 700 }}>{formatCost(r.costMicros)}</td>
+                            <td style={{ textAlign: "center", padding: "6px 12px" }}>{ed(`${prefix}|impressions`, r.impressions.toLocaleString(), r.impressions)}</td>
+                            <td style={{ textAlign: "center", padding: "6px 12px" }}>{ed(`${prefix}|clicks`, r.clicks.toLocaleString(), r.clicks)}</td>
+                            <td style={{ textAlign: "center", padding: "6px 12px" }}>{ed(`${prefix}|ctrPct`, formatCtr(r.ctr), +(r.ctr * 100).toFixed(2))}</td>
+                            <td style={{ textAlign: "center", padding: "6px 12px" }}>{ed(`${prefix}|cpcYen`, formatCpc(r.averageCpc), +(r.averageCpc / 1_000_000).toFixed(1))}</td>
+                            <td style={{ textAlign: "center", padding: "6px 12px", fontWeight: 700 }}>{ed(`${prefix}|costYen`, formatCost(r.costMicros), Math.round(r.costMicros / 1_000_000))}</td>
                           </tr>
-                        ))}
+                          );
+                        })}
                         <tr style={{ background: "#e8eaf0", fontWeight: 700 }}>
                           <td style={{ padding: "8px 12px" }}>合計</td>
                           <td style={{ textAlign: "center", padding: "8px 12px" }}>{dRows.reduce((s, r) => s + r.impressions, 0).toLocaleString()}</td>
@@ -491,7 +631,7 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
         <div style={slideStyle}>
           <div style={slideBarStyle}>
             <span>{shopName} — 媒体別配信比率</span>
-            <span>{2 + convOffset + languages.length} / {totalPages}</span>
+            <span>{2 + convOffset + visibleLanguages.length} / {totalPages}</span>
           </div>
           <div style={slideBodyStyle}>
             <div style={stitleStyle}>媒体別配信比率（{currentMonth}）</div>
@@ -537,7 +677,9 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
                     <span style={{ width: 20, fontSize: 13, fontWeight: 700, color: "#9aa3b2" }}>{i + 1}</span>
                     <span style={{ width: 14, height: 14, borderRadius: 4, background: it.color, border: "1px solid rgba(11,11,11,.12)", flexShrink: 0 }} />
                     <span style={{ fontSize: 15, fontWeight: 600, color: "#333", flex: 1 }}>{it.label}</span>
-                    <span style={{ width: 110, textAlign: "right", fontSize: 13, color: "#888", fontVariantNumeric: "tabular-nums" }}>{it.impressions.toLocaleString()}回</span>
+                    <span style={{ width: 110, textAlign: "right", fontSize: 13, color: "#888", fontVariantNumeric: "tabular-nums" }}>
+                      {it.network ? ed(`c|${currentMonthKey}|${it.network}|impressions`, it.impressions.toLocaleString(), it.impressions) : it.impressions.toLocaleString()}回
+                    </span>
                     <span style={{ width: 80, textAlign: "right", fontSize: 18, fontWeight: 800, color: "#0f3460", fontVariantNumeric: "tabular-nums" }}>{channelPct(it.impressions)}%</span>
                   </div>
                 ))}
@@ -562,7 +704,7 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
         <div style={slideStyle}>
           <div style={slideBarStyle}>
             <span>{shopName} — アドバイス</span>
-            <span>{2 + convOffset + languages.length + channelOffset} / {totalPages}</span>
+            <span>{2 + convOffset + visibleLanguages.length + channelOffset} / {totalPages}</span>
           </div>
           {/* 溢れた場合に下だけ切れるよう flex-start（タイトル消失防止） */}
           <div style={{ ...slideBodyStyle, justifyContent: "flex-start", paddingTop: 36 }}>
@@ -587,6 +729,92 @@ export default function PmaxReportView({ data, backHref }: { data: PmaxReportDat
             <div style={stitleStyle}>まとめ</div>
             <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", fontSize: 15, lineHeight: 1.8, color: "#333", whiteSpace: "pre-wrap" }}>
               {summaryText}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 編集ツールバー（管理画面のみ・印刷/共有ページには出ない） */}
+      {canEdit && (
+        <div className="no-print" style={{ position: "fixed", right: 20, bottom: 20, zIndex: 120, display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
+          {editMode && (
+            <div style={{ background: "rgba(233,69,96,.95)", color: "#fff", padding: "10px 14px", borderRadius: 10, fontSize: 12, maxWidth: 280, lineHeight: 1.7, boxShadow: "0 4px 16px rgba(0,0,0,.3)" }}>
+              編集モード中：赤い点線の数値をクリックすると変更できます。空にして確定すると元の値に戻ります。変更は自動保存され、共有URLにもそのまま反映されます。
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {saveState && (
+              <span style={{ fontSize: 12, fontWeight: 600, padding: "4px 10px", borderRadius: 20, background: saveState === "error" ? "rgba(244,67,54,.9)" : "rgba(255,255,255,.15)", color: "#fff" }}>
+                {saveState === "saving" ? "保存中..." : saveState === "saved" ? "保存済み" : "保存失敗（再編集で再試行）"}
+              </span>
+            )}
+            <button
+              onClick={() => setShowSettings(true)}
+              style={{ padding: "10px 18px", borderRadius: 10, border: "1px solid rgba(255,255,255,.3)", background: "#16213e", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 16px rgba(0,0,0,.3)" }}
+            >
+              表示設定
+            </button>
+            <button
+              onClick={() => { setEditMode(!editMode); setActiveKey(null); }}
+              style={{ padding: "10px 18px", borderRadius: 10, border: "none", background: editMode ? "#e94560" : "#0f3460", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 16px rgba(0,0,0,.3)" }}
+            >
+              {editMode ? "編集を終了" : "数値を編集"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 表示設定モーダル */}
+      {canEdit && showSettings && (
+        <div
+          className="no-print"
+          style={{ position: "fixed", inset: 0, zIndex: 130, background: "rgba(0,0,0,.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+          onClick={() => setShowSettings(false)}
+        >
+          <div style={{ background: "#fff", borderRadius: 14, maxWidth: 440, width: "100%", maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ background: "linear-gradient(135deg,#1a1a2e,#0f3460)", padding: "14px 20px", borderRadius: "14px 14px 0 0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#fff" }}>表示設定</h3>
+              <button onClick={() => setShowSettings(false)} style={{ background: "none", border: "none", color: "#fff", fontSize: 20, cursor: "pointer", lineHeight: 1 }}>&times;</button>
+            </div>
+            <div style={{ padding: "16px 20px" }}>
+              <p style={{ margin: "0 0 12px", fontSize: 12, color: "#888", lineHeight: 1.6 }}>
+                OFFにしたページは管理画面・共有URLの両方で非表示になります（設定は店舗ごとに保存）。
+              </p>
+              {([
+                { key: "conversion", label: "コンバージョン推移", enabled: convRows.length > 0 },
+                ...languages.map((lang) => ({ key: `lang|${lang}`, label: `言語別ページ: ${lang}`, enabled: true })),
+                { key: "daily", label: "日次データ表（言語別ページ内）", enabled: true },
+                { key: "channels", label: "媒体別配信比率", enabled: channelAgg.total > 0 },
+                ...(SHOW_ADVICE_PAGE ? [{ key: "advice", label: "店舗様へのアドバイス", enabled: true }] : []),
+                { key: "summary", label: "まとめ", enabled: summaryText.length > 0 },
+              ]).map((item) => (
+                <label key={item.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 4px", borderBottom: "1px solid #f0f0f5", cursor: "pointer", opacity: item.enabled ? 1 : 0.5 }}>
+                  <span style={{ fontSize: 14, color: "#333" }}>
+                    {item.label}
+                    {!item.enabled && <span style={{ fontSize: 11, color: "#aaa", marginLeft: 6 }}>（この月はデータなし）</span>}
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={vis(item.key)}
+                    onChange={() => toggleSection(item.key)}
+                    style={{ width: 18, height: 18, accentColor: "#0f3460", cursor: "pointer" }}
+                  />
+                </label>
+              ))}
+              {Object.keys(overrides).length > 0 && (
+                <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid #eee", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                  <span style={{ fontSize: 12, color: "#888" }}>手動編集した数値: {Object.keys(overrides).length}件</span>
+                  <button
+                    onClick={() => {
+                      if (!confirm("この店舗の手動編集した数値をすべて元に戻します。よろしいですか？")) return;
+                      onSettingsChange?.({ overrides: {}, sectionVisibility });
+                    }}
+                    style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid #f0c0c8", background: "#fef1f3", color: "#c0392b", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                  >
+                    すべて元の値に戻す
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>

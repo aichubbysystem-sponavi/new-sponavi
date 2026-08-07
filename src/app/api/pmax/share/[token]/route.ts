@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { isShareActive } from "@/lib/share-token";
+import { parseReportSettings } from "@/lib/pmax-overrides";
 
 export const dynamic = "force-dynamic";
 
@@ -118,6 +119,14 @@ export async function GET(
       reservation: Number(r.reservation ?? 0),
     }));
 
+    // 手動編集（数値上書き・表示設定）を共有側にも反映
+    const { data: settingsRow } = await sb
+      .from("pmax_report_settings")
+      .select("overrides, section_visibility")
+      .eq("shop_name", shopName)
+      .maybeSingle();
+    const settings = parseReportSettings(settingsRow);
+
     return NextResponse.json({
       monthly,
       daily,
@@ -127,6 +136,8 @@ export async function GET(
       year,
       month,
       summaryText: summaryText || "",
+      overrides: settings.overrides,
+      sectionVisibility: settings.sectionVisibility,
     });
   } catch (err) {
     console.error("[pmax/share/token] Error:", err);
