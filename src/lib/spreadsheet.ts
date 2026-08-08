@@ -988,6 +988,16 @@ export async function getReportFromSpreadsheet(
       .maybeSingle();
     shop = exact;
     if (!shop) {
+      // GBP上の店名で完全一致するか（GBP改名後にシート側が新名になっているケース）
+      const { data: byGbp } = await supabase
+        .from("shops")
+        .select("id, gbp_location_name")
+        .eq("gbp_shop_name", shopName)
+        .limit(1)
+        .maybeSingle();
+      shop = byGbp;
+    }
+    if (!shop) {
       // 【】→スペースに変換して部分一致
       const simpleName = shopName.replace(/[【】\[\]（）()]/g, " ").replace(/\s+/g, " ").trim();
       const { data: fuzzy } = await supabase

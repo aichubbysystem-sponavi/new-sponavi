@@ -1,170 +1,91 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, verifyCron } from "@/lib/supabase";
 import { getOAuthToken } from "@/lib/gbp-token";
+import { syncShopsFromGbp } from "@/lib/gbp-shop-sync";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const GO_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
-async function getDefaultOwnerId(): Promise<string> {
-  const supabase = getSupabase();
-  // 1. ownersテーブルから最初のオーナーを取得
-  try {
-    const { data } = await supabase.from("owners").select("id").limit(1).maybeSingle();
-    if (data?.id) return data.id;
-  } catch (e: any) { console.error("[cron/sync-shops] owners table fetch:", e?.message); }
-  // 2. 既存shopsからowner_idを推定
-  try {
-    const { data } = await supabase.from("shops").select("owner_id").not("owner_id", "is", null).limit(1).maybeSingle();
-    if (data?.owner_id) return data.owner_id;
-  } catch (e: any) { console.error("[cron/sync-shops] shops owner_id lookup:", e?.message); }
-  return "";
-}
-
 /**
  * GET /api/cron/sync-shops
- * 毎日新店舗を自動検出: 全GBPアカウントのロケーションをスキャン→未登録店舗を自動追加
+ * 毎日実行:
+ *   Step 1) 全GBPアカウントをスキャンし、新店舗を追加 + 既存店舗のGBP店名(gbp_shop_name)を同期
+ *   Step 2) Go API → Supabase の店舗情報同期
+ *
+ * Step 1 の実体は lib/gbp-shop-sync.ts（手動実行の /api/report/gbp-sync と同じロジック）。
+ * shops.name は結合キーなので絶対に更新しない。GBP側の改名は gbp_shop_name に入る。
  */
 export async function GET(request: NextRequest) {
   const cronErr = verifyCron(request); if (cronErr) return cronErr;
 
   const supabase = getSupabase();
-  const accessToken = await getOAuthToken();
-  if (!accessToken) {
-    return NextResponse.json({ error: "OAuthトークンなし" }, { status: 500 });
-  }
-
-  // owner_id を事前取得
-  const ownerId = await getDefaultOwnerId();
-  if (!ownerId) {
-    console.log("[cron/sync-shops] owner_id not found, skipping");
-    return NextResponse.json({ error: "owner_idが見つかりません", added: 0, skipped: 0 }, { status: 200 });
-  }
-
-  // 既存店舗のGBPロケーション名を取得
-  const { data: existingShops } = await supabase
-    .from("shops").select("gbp_location_name").not("gbp_location_name", "is", null);
-  const existingNames = new Set((existingShops || []).map(s => s.gbp_location_name));
-
-  // GBPアカウント一覧を取得（Go API経由）
-  let accounts: string[] = [];
-  try {
-    const accRes = await fetch(`${GO_API_URL}/api/gbp/account`, {
-      cache: "no-store" as const,
-      headers: { Authorization: `Bearer ${accessToken}` },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (accRes.ok) {
-      const accData = await accRes.json();
-      accounts = (accData || []).map((a: { name?: string; account_name?: string }) => a.name || a.account_name || "").filter(Boolean);
-    }
-  } catch (e: unknown) { console.error("[cron/sync-shops] GBP account list fetch:", e instanceof Error ? e.message : e); }
-
-  if (accounts.length === 0) {
-    // フォールバック: business_groupsから取得
-    const { data: groups } = await supabase.from("business_groups").select("gbp_account_name").not("gbp_account_name", "is", null);
-    accounts = (groups || []).map(g => g.gbp_account_name).filter(Boolean);
-  }
-
-  // 重複排除
-  accounts = Array.from(new Set(accounts));
 
   let added = 0;
   let skipped = 0;
+  let renamed = 0;
+  let linked = 0;
+  let linkable: string[] = [];
+  let scannedAccounts = 0;
   const errors: string[] = [];
+  let ownerId = "";
 
-  for (const accName of accounts.slice(0, 5)) {
-    try {
-      // Account Management API でロケーション一覧（ページネーション対応）
-      let nextPageToken = "";
-      do {
-        const url = new URL(`https://mybusinessbusinessinformation.googleapis.com/v1/${accName}/locations`);
-        url.searchParams.set("readMask", "name,title,storefrontAddress,phoneNumbers,latlng,categories");
-        url.searchParams.set("pageSize", "100");
-        if (nextPageToken) url.searchParams.set("pageToken", nextPageToken);
-
-        const listRes = await fetch(url.toString(), {
-          headers: { Authorization: `Bearer ${accessToken}` },
-          signal: AbortSignal.timeout(15000),
-        });
-
-        if (!listRes.ok) {
-          errors.push(`${accName}: HTTP ${listRes.status}`);
-          break;
-        }
-
-        const listData = await listRes.json();
-        const locations = listData.locations || [];
-        nextPageToken = listData.nextPageToken || "";
-
-        for (const loc of locations) {
-          const locName = loc.name || "";
-          if (!locName) { skipped++; continue; }
-
-          // 既存店舗: カテゴリ + GBPフルパスを永続保存
-          if (existingNames.has(locName)) {
-            try {
-              const updateData: Record<string, any> = {
-                gbp_full_path: `${accName}/${locName}`,
-              };
-              if (loc.categories?.primaryCategory?.displayName) {
-                updateData.gbp_main_category = loc.categories.primaryCategory.displayName;
-                updateData.gbp_main_category_id = loc.categories.primaryCategory.name || null;
-              }
-              await supabase.from("shops")
-                .update(updateData)
-                .eq("gbp_location_name", locName);
-            } catch (e: any) { console.error("[cron/sync-shops] update:", e?.message); }
-            skipped++;
-            continue;
-          }
-          if (existingNames.has(locName)) { skipped++; continue; }
-
-          try {
-            await fetch(`${GO_API_URL}/api/shop`, {
-              cache: "no-store" as const,
-              method: "POST",
-              headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-              body: JSON.stringify({
-                name: loc.title || locName,
-                gbp_location_name: locName,
-                gbp_shop_name: loc.title || "",
-                owner_id: ownerId,
-                state: loc.storefrontAddress?.administrativeArea || "",
-                city: loc.storefrontAddress?.locality || "",
-                address: (loc.storefrontAddress?.addressLines || []).join(" "),
-                phone: loc.phoneNumbers?.primaryPhone || "",
-              }),
-            });
-            added++;
-            existingNames.add(locName);
-          } catch (e: any) {
-            errors.push(`${loc.title || locName}: ${e?.message || "POST失敗"}`);
-          }
-        }
-      } while (nextPageToken);
-    } catch (e: any) {
-      errors.push(`${accName}: ${e?.message || "取得失敗"}`);
+  try {
+    // autoLink は付けない: 無人実行で既存店舗のGBP連携を勝手に張り直さない
+    // （担当者が「ロケーション解除」した店舗を毎晩復活させてしまうため）
+    const result = await syncShopsFromGbp();
+    scannedAccounts = result.accounts;
+    added = result.added.length;
+    linked = result.linked.length;
+    renamed = result.renamed.length;
+    // 「スキャンしたが新規ではなかった」＝既存扱い
+    skipped = Math.max(0, result.scanned - result.added.length - result.linked.length);
+    errors.push(...result.errors);
+    for (const c of result.conflicts) errors.push(`${c.title}: ${c.reason}`);
+    linkable = result.linkable;
+    if (linkable.length > 0) {
+      console.log(`[cron/sync-shops] 紐付け候補（画面から実行すれば連携されます）: ${linkable.join(" / ")}`);
     }
+    if (result.renamed.length > 0) {
+      console.log(`[cron/sync-shops] 店名変更を検出: ${result.renamed.map(r => `${r.oldGbpName} → ${r.newGbpName}`).join(" / ")}`);
+    }
+  } catch (e: unknown) {
+    errors.push(`GBP同期失敗: ${e instanceof Error ? e.message : String(e)}`);
   }
+
+  // Step 2 用の owner_id（Go API側に無い店舗をSupabaseへ入れる際のフォールバック）
+  try {
+    const { data } = await supabase.from("owners").select("id").limit(1).maybeSingle();
+    ownerId = data?.id || "";
+  } catch (e: unknown) { console.error("[cron/sync-shops] owners fetch:", e instanceof Error ? e.message : e); }
 
   // ── Step 2: Go API → Supabase shops 同期 ──
   // Go APIの全店舗をSupabaseにもupsertして、ID/住所/カテゴリ等を統一
   let synced = 0;
   let syncErrors = 0;
   try {
+    const goToken = await getOAuthToken();
     const goRes = await fetch(`${GO_API_URL}/api/shop`, {
       cache: "no-store" as const,
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: goToken ? { Authorization: `Bearer ${goToken}` } : {},
       signal: AbortSignal.timeout(15000),
     });
     if (goRes.ok) {
       const goData = await goRes.json();
       const goShops: import("@/lib/api-types").GoApiShop[] = Array.isArray(goData) ? goData : [];
       // Supabaseの既存店舗を名前で取得（重複チェック用）
-      const { data: sbShops } = await supabase.from("shops").select("id, name, gbp_location_name");
-      const sbByName = new Map((sbShops || []).map((s: { name: string; id: string; gbp_location_name: string | null }) => [s.name, s]));
+      // PostgRESTは1件のselectで最大1000行しか返さないため必ずページングする
+      type SbShop = { name: string; id: string; gbp_location_name: string | null };
+      const sbShops: SbShop[] = [];
+      for (let from = 0; ; from += 1000) {
+        const { data: page } = await supabase
+          .from("shops").select("id, name, gbp_location_name").order("id").range(from, from + 999);
+        const rows = (page || []) as SbShop[];
+        sbShops.push(...rows);
+        if (rows.length < 1000) break;
+      }
+      const sbByName = new Map(sbShops.map((s) => [s.name, s]));
 
       for (const gs of goShops) {
         const name = gs.name || gs.Name;
@@ -223,6 +144,12 @@ export async function GET(request: NextRequest) {
     console.error("[cron/sync-shops] Go→Supabase sync error:", e?.message);
   }
 
-  console.log(`[cron/sync-shops] added: ${added}, skipped: ${skipped}, synced: ${synced}, syncErrors: ${syncErrors}, accounts: ${accounts.length}`);
-  return NextResponse.json({ success: true, added, skipped, synced, syncErrors, accounts: accounts.length, errors: errors.slice(0, 5) });
+  console.log(`[cron/sync-shops] added: ${added}, linked: ${linked}, renamed: ${renamed}, skipped: ${skipped}, synced: ${synced}, syncErrors: ${syncErrors}, accounts: ${scannedAccounts}`);
+  return NextResponse.json({
+    success: true,
+    added, linked, renamed, skipped, synced, syncErrors,
+    accounts: scannedAccounts,
+    linkable: linkable.slice(0, 20),
+    errors: errors.slice(0, 10),
+  });
 }

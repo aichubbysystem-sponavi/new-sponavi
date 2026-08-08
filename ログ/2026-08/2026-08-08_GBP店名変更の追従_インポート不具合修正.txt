@@ -1,0 +1,183 @@
+==========================================================
+2026-08-08 GBP店名変更への追従 / 店舗インポートの不具合修正
+==========================================================
+
+■ 発端
+「ジェルネイル専門 WHITE NAIL 高崎店」を顧客マスタで検索しても0件になる。
+GBPの権限は chubby.co.ltd.1204 / chubby1204.meo / meo@japanselect の3つで持っている。
+
+■ 調査結果（実データで確認）
+権限の問題ではなかった。この店舗は既に登録されている。
+
+  locations/2042073457397401125
+  shop_id 5c39acb6-3e8b-45aa-96ac-0f9fa6a1e35c
+  DB name : アイブロウサロンWHITE EYE まつ毛と眉毛の専門店 高崎店 ホワイトアイ
+  GBP title: ジェルネイル専門 WHITE NAIL 高崎店   （GBP APIで直接確認。カテゴリ=ネイルサロン、027-386-2655）
+
+アイブロウ店→ネイル店に業態変更してGBP名だけ変わり、SPOTLIGHT側が追従していなかった。
+
+0件になる理由は2段階:
+ 1) インポートは gbp_location_name（ロケーションID）で既存判定してスキップし、名前を更新しない
+    （gbp-accounts/page.tsx の事前判定、cron/sync-shops も gbp_full_path とカテゴリのみ書き戻し）
+ 2) 顧客マスタの検索 fuzzyMatch は入力の全単語がDB名に含まれることを要求する
+    → 「ジェルネイル専門」がDB名に無いので0件
+
+■ 同時に判明した問題
+ (a) 名前ズレが28件（DB名 ≠ GBP現在名）
+ (b) 2026-08-08に追加された3件（うら山本店 / shisha cafe&bar 煙工房 / 鍼灸整体院 ENISHI）は
+     gbp_location_name が NULL。Go APIの POST /api/shop が gbp_location_name を保存していない
+ (c) cron/sync-shops は accounts.slice(0,5) で先頭5アカウントしか見ていない。
+     実際は9アカウント見えている（4アカウントが恒常的にスキャン対象外）
+ (d) 同一GBPロケーションに店舗が2行ある重複が5件
+     ニュークラブ NOBLE / Four Seasons / SEASIDE CLUB / Red Shoes / 熱塩温泉 山形屋
+ (e) lib/gbp-location.ts の GBP APIフォールバック4箇所が Authorization: `Bearer ` （トークン変数が抜けていた）
+     → フォールバック経路は常に401だった
+ (f) system_oauth_tokens は LIMIT 1 のVIEWなので実質1トークン。
+     /api/google/token が返すのは chubby.yamada@gmail.com のトークンのみ
+     （他4アカウントのトークンは 2026-06-23 以降リフレッシュされていない）
+
+■ 設計判断: shops.name は絶対に自動更新しない
+shops.name は「システム全体の結合キー」であり、以下が全て文字列一致で紐付いている。
+  reviews.shop_name / report_analysis.shop_name / pmax_*.shop_name /
+  grid_ranking_logs.shop_name / report_display_settings.shop_id /
+  user_shop_access.shop_name / 投稿用スプレッドシートのB列 / Dropbox写真フォルダ名
+name を GBP名で上書きすると過去データが行方不明になり、自動投稿は
+auto-post の「店舗未登録（スキップ）」で静かに止まる。
+
+→ GBP上の現在名は gbp_shop_name に同期し、name はそのまま。
+   auto-post は既に name / gbp_shop_name の両方で照合しているため、
+   旧名のままのシートも、新名に直したシートも、どちらも通る（別名として機能する）。
+
+■ 変更内容
+[新規] src/lib/gbp-locations.ts
+  全OAuthトークン × 全GBPアカウント × 全ロケーションを列挙。ページネーション完走、
+  401/403はエラー扱いせず別トークンで再試行、同一アカウントの二重スキャンはしない。
+
+[新規] src/lib/gbp-shop-sync.ts
+  スキャン結果を shops へ反映。name は新規INSERT時にしか書かない。
+  - 既存: gbp_shop_name / gbp_full_path / カテゴリ を差分があるときだけUPDATE
+  - 店名変更を検出したら shop_name_changes に記録
+  - 同名でGBP未連携の行があれば紐付けて修復（(b)の3件が対象）
+  - 未登録のGBPアカウント配下の新規ロケーションはINSERTせず要確認として報告
+    （新しいGoogleアカウント接続時に個人GBPを大量取り込みしないための安全策）
+  - 同一ロケーションに複数店舗行がある場合は自動統合せず報告のみ
+  - id順で索引を作るため、重複行のうちどれを採用するかは実行ごとにブレない
+
+[新規] src/app/api/report/gbp-sync/route.ts
+  GET=差分プレビュー(書き込みなし) / POST=実行。POSTは withAudit("GBP店舗同期","DATA_OP")。
+  DATA_OP は president/executive のみ。社員(manager)にも実行させるなら要変更。
+
+[新規] src/app/api/report/shop-gbp-info/route.ts
+  Go APIの /api/shop は gbp_shop_name / state / city / phone を返さないため、
+  Supabaseから補完して顧客マスタへ渡す。1000行上限を避けてページング。
+
+[新規] sql/2026-08-08_shop_name_changes.sql
+  店名変更履歴テーブル。RLS有効 + authenticated SELECTのみ。
+  ※本番SQL Editorで実行が必要。未作成でも同期処理は落ちない（ログにエラーを出すだけ）
+
+[修正] src/app/api/cron/sync-shops/route.ts
+  Step1を syncShopsFromGbp() に置換（5アカウント制限の撤廃）。
+  Step2のshops取得を1000行ページング化。
+
+[修正] src/app/gbp-accounts/page.tsx
+  「新店舗を検出・インポート」をサーバールート1発に変更。
+  クライアントからGo APIにPOSTする方式をやめたので (b) の不具合が起きない。
+  結果画面に 新規追加 / 紐付け修復 / 情報更新 / 店名変更検出 / 要確認 を表示。
+
+[修正] src/app/customer-master/page.tsx
+  検索対象に gbp_shop_name を追加（GBP新名で引ける）。
+  「店名変更あり」サマリーカード + フィルタ、行に「GBP改名」バッジとGBP現在名を併記。
+  state/city/phone を shop-gbp-info からフォールバック補完（従来は常に空だった）。
+
+[修正] src/lib/gbp-location.ts   … Bearerトークン欠落の4箇所を修正
+[修正] src/app/api/cron/execute-posts/route.ts … 店舗解決に gbp_shop_name フォールバック追加
+[修正] src/lib/report-api.ts     … getShopDbIds に gbp_shop_name 完全一致を追加（危険な部分一致より前）
+[修正] src/lib/spreadsheet.ts    … 同上
+
+■ 本番データでのドライラン結果（書き込みなし・実行前確認）
+  アカウント 9 / ロケーション 517
+  INSERT   : 0
+  LINK     : 3（うら山本店 / shisha cafe&bar 煙工房 / 鍼灸整体院 ENISHI）
+  RENAME   : 28
+  UPDATE   : 280（ユニークID 280 = 同一行への二重更新なし）
+              内訳 gbp_shop_name 278 / gbp_full_path 5 / gbp_main_category 3
+              うち約250件は gbp_shop_name が NULL だった行への初回補完
+  CONFLICT : 5（すべて上記(d)の重複登録）
+  ERROR    : 0
+  ※2回目以降の実行は差分だけなのでUPDATEはほぼ0になる
+
+■ 検証
+  npx tsc --noEmit … エラーなし
+  npx next lint（変更ファイル）… 警告なし
+  npx next build … Compiled successfully / 227ページ生成
+
+■ 残タスク
+  - sql/2026-08-08_shop_name_changes.sql を本番SQL Editorで実行
+  - 重複登録5件の統合方針を決める（口コミ・レポートがどちらの店舗名に付いているか要確認）
+  - 他4アカウントのGBPトークン再取得（現状 chubby.yamada の1本に依存）
+  - DBにあってGBPに無い42件の棚卸し（解約/GBP削除の反映漏れ）
+
+==========================================================
+追記: セルフレビューで見つかった問題と修正（同日）
+==========================================================
+
+■ 高1: 「ロケーション解除」が毎晩自動で取り消される問題
+  gbp-shop-sync の link分岐が「gbp_location_name が空 + 名前がGBPタイトルと一致」で
+  自動再紐付けするため、担当者が意図的に外した連携をcronが復活させてしまう。
+  （現時点の該当は0件。NULL 50件のうち名前一致は復活させたい3件だけ。構造的な欠陥）
+  修正:
+   - syncShopsFromGbp に autoLink オプション追加。
+     手動実行(/api/report/gbp-sync POST)のみ true。cronは false で候補報告(linkable)のみ。
+   - 新規 POST /api/report/shop-unlink … 解除したロケーションIDを
+     previous_gbp_location_name に残す（このカラムは未使用だった。0行）。
+     同期側は previous_gbp_location_name があれば自動紐付けせず conflict 報告に回す。
+   - customer-master の handleUnlinkGbp を Go API PUT から新ルートへ変更。
+
+■ 高2: スキャンが部分的に失敗しても「エラー0・完了」に見える問題
+  listLocations の 401/403 は skipped=true を返すだけで errors に積んでいなかった。
+  「別トークンで再試行される」前提だが実運用の有効トークンは1本なので再試行されない。
+  アクセストークンは1時間で切れるため、スキャン中の期限切れで実際に起こりうる。
+  （検証中も同条件で 517件取れた回と 453件しか取れなかった回があった）
+  さらに scanAllGbpLocations 末尾に「スキャンできなかったアカウントを明示する」という
+  コメントだけがあり、実装が無かった。
+  修正: 全トークン試行後、seenAccounts にあって scannedAccounts に無いアカウントを
+        必ず errors に積む（「この配下は今回同期されていません」）。
+
+■ 中1: 店名変更の検出数とUIバッジ数が食い違う
+  同期側=NFC完全一致で28件、UI側=NFKC+空白除去+小文字化。3件が同一扱いになりバッジが出ない。
+   生ラムジンギスカン 新なるぼんず→新なるぼんず（空白）
+   IHOKUBASE|伊北ベース→｜（全角半角）
+   鮨 赫 sushi AKA Tokyo→Sushi（大文字小文字）
+  修正: lib/normalize.ts に normShopName / isSameShopName を追加して両者で共有。
+        検出は25件に揃った（gbp_shop_name に入れる値はGBP原文のまま）。
+
+■ 中2: shop_name_changes 未作成のまま同期すると履歴が永久に取れない
+  recordRenames はログを出すだけで続行していたが、gbp_shop_name を先に更新するため
+  次回以降は差分が消えて二度と検出できない。
+  修正: 履歴の記録を「gbp_shop_name の更新より前」に移動。
+        記録に失敗したら該当行の gbp_shop_name 更新だけ取り下げて次回に持ち越す。
+        エラー文にSQLファイル名を明示。
+
+■ 中3: 複数アカウントに見えるロケーションで gbp_full_path がブレる + 安全ガードが無効化される
+  locations/11708453413660533120（株式会社Chubby）と
+  locations/15877184882855301460（SIK eatery うつぼ公園店）は
+  「株式会社Chubby山田」(PERSONAL) と「Spotlight Navigator」の両方に出る。
+  first-winsなのでGoogleのaccounts.list順に依存し、個人アカウントのパスが入ると
+  knownAccounts に個人アカウントが登録されて新規取り込みの安全ガードが無効化される。
+  修正: sortAccounts() で PERSONAL を後回し + name順に固定。
+        結果 gbp_full_path の書き換えは5件→3件（いずれも 株式会社Chubby 03/05 の正当なパス）。
+        個人アカウントは knownAccounts に入らないままになった。
+
+■ 低: ページネーション上限 MAX_PAGES=100 を追加（同じpageTokenが返り続けた場合の無限ループ防止）
+■ 低: クライアントtimeout 290秒 < サーバmaxDuration 300秒 だったので 320秒へ。
+      ECONNABORTED時は「失敗」と断定せず再読込を促す文言に変更。
+
+■ 修正後のドライラン（本番データ・書き込みなし）
+  ロケーション 517 / RENAME 25（UIバッジ数と一致）/ UPDATE 278
+  手動実行時のLINK 3 / cron実行時は linkable として報告のみ
+  INSERT 0 / gbp_full_path 変更 3
+
+■ 未対応（把握済み）
+  - 同時実行ロックなし（UNIQUE(name)で破壊はしないが競合時はconflictに出る）
+  - usableTokens はGBPアカウント0件の有効トークンを数えない（表示のみ）
+  - cron Step 2 が毎日607行を updated_at だけ更新（既存の無駄。今回の変更ではない）

@@ -64,7 +64,15 @@ async function getLocationName(post: any, supabase: any): Promise<string | null>
     const { data: byName } = await supabase.from("shops")
       .select("gbp_location_name").eq("name", post.shop_name)
       .not("gbp_location_name", "is", null).limit(1).maybeSingle();
-    if (byName?.gbp_location_name) shopLocName = byName.gbp_location_name;
+    if (byName?.gbp_location_name) {
+      shopLocName = byName.gbp_location_name;
+    } else {
+      // GBP上の店名で登録されているケース（GBP改名後にシート側を新名に直した場合）
+      const { data: byGbpName } = await supabase.from("shops")
+        .select("gbp_location_name").eq("gbp_shop_name", post.shop_name)
+        .not("gbp_location_name", "is", null).limit(1).maybeSingle();
+      if (byGbpName?.gbp_location_name) shopLocName = byGbpName.gbp_location_name;
+    }
   }
   if (!shopLocName) return null;
   return resolveLocationName(shopLocName);

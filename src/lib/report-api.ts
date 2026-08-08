@@ -67,6 +67,14 @@ async function getShopDbIds(shopName: string): Promise<string[]> {
       .eq("name", shopName)
       .limit(1);
     if (data && data.length > 0) return [data[0].id];
+    // GBP上の店名で一致するか（GBP改名後にシート側が新名になっているケース）
+    // 危険な部分一致より先に、完全一致であるこちらを試す
+    const { data: byGbp } = await sb
+      .from("shops")
+      .select("id")
+      .eq("gbp_shop_name", shopName)
+      .limit(1);
+    if (byGbp && byGbp.length > 0) return [byGbp[0].id];
     // 部分一致フォールバック
     const simpleName = shopName.replace(/[【】\[\]（）()]/g, " ").replace(/\s+/g, " ").trim();
     const { data: fuzzy } = await sb

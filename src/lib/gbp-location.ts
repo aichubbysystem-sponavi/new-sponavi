@@ -102,7 +102,7 @@ export async function getLocationMap(): Promise<Map<string, LocMapping>> {
       if (token) {
         const accRes = await fetch(
           "https://mybusinessaccountmanagement.googleapis.com/v1/accounts",
-          { cache: "no-store", headers: { Authorization: `Bearer ` }, signal: AbortSignal.timeout(15000) }
+          { cache: "no-store", headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000) }
         );
         if (accRes.ok) {
           const accData = await accRes.json();
@@ -110,7 +110,7 @@ export async function getLocationMap(): Promise<Map<string, LocMapping>> {
             try {
               const locRes = await fetch(
                 `https://mybusinessbusinessinformation.googleapis.com/v1/${acc.name}/locations?readMask=name,title,latlng&pageSize=100`,
-                { cache: "no-store", headers: { Authorization: `Bearer ` }, signal: AbortSignal.timeout(15000) }
+                { cache: "no-store", headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000) }
               );
               if (!locRes.ok) continue;
               const locData = await locRes.json();
@@ -157,7 +157,7 @@ async function resolveViaGbpApi(locationId: string): Promise<string | null> {
   try {
     const accRes = await fetch(
       "https://mybusinessaccountmanagement.googleapis.com/v1/accounts",
-      { cache: "no-store", headers: { Authorization: `Bearer ` }, signal: AbortSignal.timeout(15000) }
+      { cache: "no-store", headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000) }
     );
     if (!accRes.ok) return null;
     const accData = await accRes.json();
@@ -166,7 +166,7 @@ async function resolveViaGbpApi(locationId: string): Promise<string | null> {
       try {
         const locRes = await fetch(
           `https://mybusinessbusinessinformation.googleapis.com/v1/${acc.name}/locations?readMask=name&pageSize=100`,
-          { cache: "no-store", headers: { Authorization: `Bearer ` }, signal: AbortSignal.timeout(10000) }
+          { cache: "no-store", headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10000) }
         );
         if (!locRes.ok) continue;
         const locData = await locRes.json();

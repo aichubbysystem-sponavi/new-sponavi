@@ -220,3 +220,22 @@ SPOTLIGHT NAVIGATOR 超重要ナレッジ
   中身が詰まったページは flex-start にして「下だけ切れる」安全な失敗にする
 ■ 競合比較の自店口コミ数: comp.self?.reviewCount ?? 0 は禁止（圏外店で「全店に劣る」と真逆になる）。
   フォールバックは表示側と同じ officialCount / displayTotalReviews
+
+━━━ 2026-08-08 追加（詳細: ログ/2026-08/2026-08-08_GBP店名変更の追従_インポート不具合修正.txt）━━━
+■ shops.name は「システム全体の結合キー」。GBP改名に追従して書き換えてはいけない
+  reviews.shop_name / report_analysis.shop_name / pmax_*.shop_name / grid_ranking_logs.shop_name /
+  report_display_settings.shop_id / user_shop_access.shop_name / 投稿用シートB列 / Dropbox写真フォルダ名
+  が全て name の文字列一致で紐付いている。書き換えると過去データが行方不明になり、
+  auto-post は「店舗未登録（スキップ）」で静かに止まる（エラーにならないので気づけない）。
+  → GBP上の現在名は shops.gbp_shop_name に同期する。auto-post は name / gbp_shop_name の
+     両方で照合するので、旧名のシートも新名のシートも通る（別名として機能する）
+■ GBPスキャンは lib/gbp-locations.ts + lib/gbp-shop-sync.ts に一本化（cronと手動UIで共有）
+  旧 cron/sync-shops は accounts.slice(0,5) で先頭5アカウントしか見ておらず、
+  実際に見えている9アカウントのうち4つが恒常的にスキャン対象外だった
+■ Go APIの POST /api/shop は gbp_location_name を保存しない
+  クライアントから店舗を作るとGBP未連携の行ができる。店舗追加はサーバー側でSupabaseに直接INSERTする
+■ Go APIの GET /api/shop は gbp_shop_name / state / city / phone を返さない
+  （shops テーブル自体はSupabaseと同一。IDも一致する。返却フィールドが少ないだけ）
+  顧客マスタ等でこれらが要る場合は /api/report/shop-gbp-info でSupabaseから補完する
+■ shops の制約: UNIQUE(name) あり。gbp_location_name にはUNIQUEが無い
+  → 同一ロケーションに複数店舗行がぶら下がる重複が実際に5件ある（2026-08-08時点）

@@ -47,6 +47,23 @@ export function normalize(str: string): string {
 }
 
 /**
+ * 店舗名の同一判定用の正規化（NFKC + 空白除去 + 小文字化）
+ * 全角半角・空白の有無・大文字小文字だけの違いは「同じ名前」とみなす。
+ *
+ * GBP店名の変更検出（lib/gbp-shop-sync.ts）と顧客マスタの「店名変更あり」バッジ
+ * （app/customer-master）は必ずこれを共有すること。基準がズレると
+ * 「28件検出」と言われて画面には25件しか出ない、という不一致が起きる。
+ */
+export function normShopName(s: string | null | undefined): string {
+  return (s || "").normalize("NFKC").replace(/[\s　]+/g, "").toLowerCase();
+}
+
+/** 店舗名が実質同一か（表記ゆれを無視して比較） */
+export function isSameShopName(a: string | null | undefined, b: string | null | undefined): boolean {
+  return normShopName(a) === normShopName(b);
+}
+
+/**
  * 検索マッチ判定
  * クエリの全単語がターゲット文字列のいずれかに含まれていればtrue
  */
