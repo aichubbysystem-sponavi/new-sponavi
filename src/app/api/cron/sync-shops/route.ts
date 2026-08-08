@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
   let renamed = 0;
   let linked = 0;
   let linkable: string[] = [];
-  let pendingInserts: string[] = [];
+  let pendingInserts: { title: string; accountLabel: string }[] = [];
   let scannedAccounts = 0;
   const errors: string[] = [];
   let ownerId = "";
@@ -52,7 +52,11 @@ export async function GET(request: NextRequest) {
       console.log(`[cron/sync-shops] 紐付け候補（画面から実行すれば連携されます）: ${linkable.join(" / ")}`);
     }
     if (pendingInserts.length > 0) {
-      console.log(`[cron/sync-shops] 未登録の新店舗 ${pendingInserts.length}件を検出（登録は画面から）: ${pendingInserts.slice(0, 30).join(" / ")}`);
+      // アカウント別の件数を出す。特定アカウントに偏っていれば状況の変化に気づける
+      const byAccount = new Map<string, number>();
+      for (const p of pendingInserts) byAccount.set(p.accountLabel, (byAccount.get(p.accountLabel) || 0) + 1);
+      const breakdown = Array.from(byAccount.entries()).map(([a, n]) => `${a}:${n}件`).join(" / ");
+      console.log(`[cron/sync-shops] 未登録の新店舗 ${pendingInserts.length}件を検出（登録は画面から）— ${breakdown}`);
     }
     if (result.renamed.length > 0) {
       console.log(`[cron/sync-shops] 店名変更を検出: ${result.renamed.map(r => `${r.oldGbpName} → ${r.newGbpName}`).join(" / ")}`);

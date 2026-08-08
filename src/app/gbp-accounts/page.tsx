@@ -24,10 +24,23 @@ interface SyncResult {
   updated: number;
   renamed: { shopId: string; shopName: string; locationId: string; oldGbpName: string; newGbpName: string }[];
   conflicts: { locationId: string; title: string; reason: string }[];
-  pendingInserts: string[];
+  pendingInserts: { title: string; locationId: string; accountId: string; accountLabel: string }[];
   insertBlockedReason: "cron" | "threshold" | null;
   insertThreshold: number;
   errors: string[];
+}
+
+/** 保留中の店舗をGBPアカウント別にまとめる（件数の多い順） */
+function groupByAccount(
+  items: SyncResult["pendingInserts"],
+): [string, SyncResult["pendingInserts"]][] {
+  const map = new Map<string, SyncResult["pendingInserts"]>();
+  for (const p of items) {
+    const key = p.accountLabel || p.accountId || "（不明なアカウント）";
+    const list = map.get(key);
+    if (list) list.push(p); else map.set(key, [p]);
+  }
+  return Array.from(map.entries()).sort((a, b) => b[1].length - a[1].length);
 }
 
 export default function GbpAccountsPage() {
@@ -256,15 +269,31 @@ export default function GbpAccountsPage() {
                     + `下の一覧が全て自社で管理する店舗であることを確認してから登録してください。`
                   : `無人実行では店舗を登録しません。内容を確認して登録してください。`}
               </p>
-              <div className="max-h-56 overflow-y-auto border border-slate-100 rounded p-2 mb-2">
-                {result.pendingInserts.map((n, i) => (
-                  <p key={i} className="text-[10px] text-slate-600">{n}</p>
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {groupByAccount(result.pendingInserts).map(([account, items]) => (
+                  <span key={account} className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium">
+                    {account} {items.length}件
+                  </span>
+                ))}
+              </div>
+              <div className="max-h-72 overflow-y-auto border border-slate-100 rounded p-2 mb-2">
+                {groupByAccount(result.pendingInserts).map(([account, items]) => (
+                  <div key={account} className="mb-2 last:mb-0">
+                    <p className="text-[11px] font-bold text-slate-700 bg-slate-100 px-2 py-1 rounded sticky top-0">
+                      GBPアカウント: {account}（{items.length}件）
+                    </p>
+                    {items.map((p) => (
+                      <p key={p.locationId} className="text-[10px] text-slate-600 pl-2">{p.title}</p>
+                    ))}
+                  </div>
                 ))}
               </div>
               <button
                 onClick={() => {
+                  const breakdown = groupByAccount(result.pendingInserts)
+                    .map(([a, items]) => `・${a}: ${items.length}件`).join("\n");
                   if (!confirm(
-                    `${result.pendingInserts.length}件を顧客マスタに登録します。\n\n`
+                    `${result.pendingInserts.length}件を顧客マスタに登録します。\n\n${breakdown}\n\n`
                     + `※ 自社で管理していない店舗が含まれていないか、上の一覧を確認してください。\n`
                     + `※ 登録後に取り消すには1件ずつ削除する必要があります。`,
                   )) return;

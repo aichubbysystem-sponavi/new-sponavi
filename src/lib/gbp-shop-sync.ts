@@ -18,7 +18,7 @@
  */
 
 import { getSupabase } from "@/lib/supabase";
-import { scanAllGbpLocations, toLocationId } from "@/lib/gbp-locations";
+import { scanAllGbpLocations, toLocationId, type GbpLocation } from "@/lib/gbp-locations";
 import { isSameShopName } from "@/lib/normalize";
 
 export interface RenameRecord {
@@ -33,6 +33,14 @@ export interface ConflictRecord {
   locationId: string;
   title: string;
   reason: string;
+}
+
+/** 登録を保留した新規店舗。どのGBPアカウント配下かが分かるようにしておく */
+export interface PendingInsert {
+  title: string;
+  locationId: string;
+  accountId: string;
+  accountLabel: string;
 }
 
 export interface SyncSummary {
@@ -54,7 +62,7 @@ export interface SyncSummary {
   /** 自動処理を見送った件（人の判断が必要） */
   conflicts: ConflictRecord[];
   /** 登録せずに保留した新規店舗（無人実行 or 一括登録ガード） */
-  pendingInserts: string[];
+  pendingInserts: PendingInsert[];
   /** 保留した理由。"cron"=無人実行のため / "threshold"=一度に登録する件数が多すぎるため */
   insertBlockedReason: "cron" | "threshold" | null;
   /** 一括登録ガードの閾値 */
@@ -229,7 +237,8 @@ export async function syncShopsFromGbp(
 
   const renames: RenameRecord[] = [];
   const updates: { id: string; row: Record<string, unknown> }[] = [];
-  const inserts: Record<string, unknown>[] = [];
+  // どのGBPアカウントの店舗かを画面で判断できるよう、元のロケーションも保持する
+  const inserts: { row: Record<string, unknown>; loc: GbpLocation }[] = [];
 
   // 新規INSERT用の共通値（既存データから推定）
   let defaultOwnerId = "";
@@ -358,21 +367,24 @@ export async function syncShopsFromGbp(
     }
 
     inserts.push({
-      name: title,
-      owner_id: defaultOwnerId,
-      business_group_id: defaultGroupId,
-      gbp_location_name: loc.locationId,
-      gbp_shop_name: title,
-      gbp_full_path: loc.fullPath,
-      gbp_main_category: loc.categoryName || null,
-      gbp_main_category_id: loc.categoryId || null,
-      state: loc.state,
-      city: loc.city,
-      address: loc.address,
-      postal_code: (loc.postalCode || "").replace(/[^0-9]/g, "").slice(0, 7),
-      phone: loc.phone,
-      gbp_latitude: loc.latitude,
-      gbp_longitude: loc.longitude,
+      loc,
+      row: {
+        name: title,
+        owner_id: defaultOwnerId,
+        business_group_id: defaultGroupId,
+        gbp_location_name: loc.locationId,
+        gbp_shop_name: title,
+        gbp_full_path: loc.fullPath,
+        gbp_main_category: loc.categoryName || null,
+        gbp_main_category_id: loc.categoryId || null,
+        state: loc.state,
+        city: loc.city,
+        address: loc.address,
+        postal_code: (loc.postalCode || "").replace(/[^0-9]/g, "").slice(0, 7),
+        phone: loc.phone,
+        gbp_latitude: loc.latitude,
+        gbp_longitude: loc.longitude,
+      },
     });
     // 同一実行内で同じ名前を2回INSERTしないように予約しておく（UNIQUE(name)違反の防止）
     byName.set(title, { id: "", name: title, gbp_shop_name: title, gbp_location_name: loc.locationId,
@@ -384,21 +396,25 @@ export async function syncShopsFromGbp(
 
   // ── 新規登録をこの実行で行ってよいか判定 ──
   // 「登録するつもりが無い実行」と「一度に大量すぎる実行」は、書き込まずに一覧で返す。
-  const insertNames = inserts.map(r => String(r.name));
   let blockedReason: "cron" | "threshold" | null = null;
-  if (insertNames.length > 0) {
+  if (inserts.length > 0) {
     if (!allowInsert) blockedReason = "cron";
-    else if (!confirmBulkImport && insertNames.length > BULK_INSERT_THRESHOLD) blockedReason = "threshold";
+    else if (!confirmBulkImport && inserts.length > BULK_INSERT_THRESHOLD) blockedReason = "threshold";
   }
   if (blockedReason) {
-    summary.pendingInserts = insertNames;
+    summary.pendingInserts = inserts.map(({ loc }) => ({
+      title: nfc(loc.title),
+      locationId: loc.locationId,
+      accountId: loc.accountId,
+      accountLabel: loc.accountLabel,
+    }));
     summary.insertBlockedReason = blockedReason;
     inserts.length = 0;
   }
 
   if (dryRun) {
     summary.updated = updates.length;
-    summary.added = insertNames.length > 0 && !blockedReason ? insertNames : [];
+    summary.added = inserts.map(i => String(i.row.name));
     return summary;
   }
 
@@ -438,11 +454,11 @@ export async function syncShopsFromGbp(
     }
   }
 
-  for (const row of inserts) {
+  for (const { row, loc } of inserts) {
     const { data, error } = await sb.from("shops").insert(row).select("id, name").maybeSingle();
     if (error) {
       summary.conflicts.push({
-        locationId: String(row.gbp_location_name), title: String(row.name),
+        locationId: loc.locationId, title: String(row.name),
         reason: `追加失敗: ${error.message}`,
       });
       continue;
