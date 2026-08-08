@@ -250,3 +250,10 @@ SPOTLIGHT NAVIGATOR 超重要ナレッジ
   ローカルは Go APIの /api/google/token（chubby.yamada 1本）しか使えないが、
   本番は getAllOAuthTokens() が全アカウントのrefresh tokenを更新するため見える範囲が広い。
   2026-08-08実測: ローカル9アカウント/517ロケーション → 本番15アカウント/835ロケーション
+■ shops に owner_id カラムは無い。オーナーは business_group_id → business_groups.owner_id
+  Go APIの GET /api/shop は owner_id / full_address / owner / group を返すが、これらは
+  結合結果であって shops の列ではない。INSERT/UPDATEに渡すと
+  「column "owner_id" of relation "shops" does not exist」で失敗する。
+  2026-08-08、これで新規登録169件が全滅した（画面には「追加失敗」が先頭20件外に隠れて見えなかった）。
+  shops に書き込むコードを足したら、列名を information_schema.columns と必ず突き合わせること。
+  本番での検証は BEGIN → INSERT → ROLLBACK が安全で確実。

@@ -234,3 +234,39 @@ auto-post の「店舗未登録（スキップ）」で静かに止まる。
   - 重複登録5件の統合方針（口コミ・レポートがどちらに付いているか要確認）
   - GBP未連携21件 / gbp_full_path 未設定36件
   - DBにあってGBPに無い店舗の棚卸し
+
+==========================================================
+追記3: 新規登録が全滅していたバグ（owner_id）
+==========================================================
+
+■ 症状
+  一括登録ガードの一覧(169件)で「169件をすべて登録する」を押しても
+  新規追加0件・要確認274件になり、DBは611件のまま増えなかった。
+  274 = 前回の要確認105 + 追加失敗169。
+
+■ 原因
+  shops テーブルに owner_id カラムが存在しない。
+  lib/gbp-shop-sync.ts の INSERT が owner_id を渡していたため、
+  169件すべてが column "owner_id" of relation "shops" does not exist で失敗し、
+  conflicts に「追加失敗: ...」として積まれていた。
+  （UIは先頭20件しか出さないので、画面には前回と同じMEO用Chubbyの行だけが見えていた）
+
+  オーナーは shops.business_group_id → business_groups.owner_id で解決される。
+  Go APIの GET /api/shop が owner_id を返すのは結合結果であって、列ではない。
+  最初にカラム一覧を取得していたのに突き合わせず、Go APIのレスポンスだけを見て
+  列が存在すると思い込んだのが原因。CLAUDE.md「実データを必ず確認」の違反。
+
+■ 検証方法（今後もこれをやる）
+  本番DBに BEGIN → INSERT → ROLLBACK でテスト行を入れて再現・確認した。
+  さらにコードのINSERT/UPDATE列名を information_schema.columns と突き合わせて
+  存在しない列がゼロであることを確認した。
+
+■ 修正
+  - lib/gbp-shop-sync.ts: INSERTから owner_id を削除。business_group_id のみ渡す。
+    事前チェックも「オーナー未登録」から「business_groups未登録」に変更
+  - cron/sync-shops Step2 の insertRow からも owner_id を削除（同じ地雷が残っていた）
+
+■ 教訓（重要ナレッジにも記載）
+  Go APIのレスポンス項目 ≠ shops のカラム。書き込む前に必ず
+  information_schema.columns と突き合わせること。
+  owner_id / full_address / owner / group はGo API側の結合結果。

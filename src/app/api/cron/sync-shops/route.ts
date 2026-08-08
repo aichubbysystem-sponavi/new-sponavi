@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
   let pendingInserts: { title: string; accountLabel: string }[] = [];
   let scannedAccounts = 0;
   const errors: string[] = [];
-  let ownerId = "";
+  let defaultGroupId: string | null = null;
 
   try {
     // autoLink / allowInsert は付けない: 無人実行ではDBに店舗を増やさない・連携を張り直さない。
@@ -65,11 +65,12 @@ export async function GET(request: NextRequest) {
     errors.push(`GBP同期失敗: ${e instanceof Error ? e.message : String(e)}`);
   }
 
-  // Step 2 用の owner_id（Go API側に無い店舗をSupabaseへ入れる際のフォールバック）
+  // Step 2 用の business_group_id（Go API側に無い店舗をSupabaseへ入れる際に必要）
   try {
-    const { data } = await supabase.from("owners").select("id").limit(1).maybeSingle();
-    ownerId = data?.id || "";
-  } catch (e: unknown) { console.error("[cron/sync-shops] owners fetch:", e instanceof Error ? e.message : e); }
+    const { data } = await supabase
+      .from("shops").select("business_group_id").not("business_group_id", "is", null).limit(1).maybeSingle();
+    defaultGroupId = data?.business_group_id || null;
+  } catch (e: unknown) { console.error("[cron/sync-shops] business_group_id fetch:", e instanceof Error ? e.message : e); }
 
   // ── Step 2: Go API → Supabase shops 同期 ──
   // Go APIの全店舗をSupabaseにもupsertして、ID/住所/カテゴリ等を統一
@@ -128,10 +129,12 @@ export async function GET(request: NextRequest) {
             await supabase.from("shops").update(updateRow).eq("id", existing.id);
           } else {
             // 新規 → 挿入
+            // shops に owner_id カラムは無い（オーナーは business_group_id 経由で解決）。
+            // 渡すとINSERTが "column owner_id does not exist" で失敗する
             const insertRow: Record<string, any> = {
               id: gs.id || gs.ID || crypto.randomUUID(),
               name,
-              owner_id: gs.owner_id || gs.OwnerID || ownerId,
+              business_group_id: defaultGroupId,
               gbp_location_name: gs.gbp_location_name || gs.GbpLocationName || null,
               gbp_shop_name: gs.gbp_shop_name || gs.GbpShopName || null,
               state: gs.state || gs.State || "",

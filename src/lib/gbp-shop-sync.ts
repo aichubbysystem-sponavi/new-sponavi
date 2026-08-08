@@ -241,11 +241,9 @@ export async function syncShopsFromGbp(
   const inserts: { row: Record<string, unknown>; loc: GbpLocation }[] = [];
 
   // 新規INSERT用の共通値（既存データから推定）
-  let defaultOwnerId = "";
+  // shops は business_group_id しか持たず、オーナーは business_groups 経由で解決される
   let defaultGroupId: string | null = null;
   if (importNew) {
-    const { data: ownerRow } = await sb.from("owners").select("id").limit(1).maybeSingle();
-    defaultOwnerId = ownerRow?.id || "";
     const { data: grpRow } = await sb
       .from("shops").select("business_group_id").not("business_group_id", "is", null).limit(1).maybeSingle();
     defaultGroupId = grpRow?.business_group_id || null;
@@ -353,8 +351,11 @@ export async function syncShopsFromGbp(
       summary.conflicts.push({ locationId: loc.locationId, title: "(名称なし)", reason: "GBPのtitleが空のため追加できません" });
       continue;
     }
-    if (!defaultOwnerId) {
-      summary.conflicts.push({ locationId: loc.locationId, title, reason: "オーナーが未登録のため追加できません" });
+    if (!defaultGroupId) {
+      summary.conflicts.push({
+        locationId: loc.locationId, title,
+        reason: "ビジネスグループ(business_groups)が未登録のため追加できません",
+      });
       continue;
     }
     if (!knownAccounts.has(loc.accountId)) {
@@ -370,7 +371,9 @@ export async function syncShopsFromGbp(
       loc,
       row: {
         name: title,
-        owner_id: defaultOwnerId,
+        // shops に owner_id カラムは無い。オーナーは business_group_id →
+        // business_groups.owner_id 経由で解決される（Go APIのレスポンスに owner_id が
+        // あるのは結合結果であって列ではない。2026-08-08にこれで169件の追加が全滅した）
         business_group_id: defaultGroupId,
         gbp_location_name: loc.locationId,
         gbp_shop_name: title,
