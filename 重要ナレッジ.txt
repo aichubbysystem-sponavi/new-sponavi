@@ -239,3 +239,14 @@ SPOTLIGHT NAVIGATOR 超重要ナレッジ
   顧客マスタ等でこれらが要る場合は /api/report/shop-gbp-info でSupabaseから補完する
 ■ shops の制約: UNIQUE(name) あり。gbp_location_name にはUNIQUEが無い
   → 同一ロケーションに複数店舗行がぶら下がる重複が実際に5件ある（2026-08-08時点）
+■ GBP同期: 無人実行(cron)はDBに書き足さない。登録・再紐付けは画面から人が実行する
+  cron は検出のみ（pendingInserts / linkable を返してログに出す）。理由:
+   - 「ロケーション解除」した連携を毎晩復活させてしまう
+   - 新しいGoogleアカウントを接続すると数百件が無言で登録される
+     （2026-08-08、新アカウントが見えて254件が対象になった）
+  手動実行でも新規登録が BULK_INSERT_THRESHOLD(20)件を超えたら一旦保留し、
+  一覧を見せてから「すべて登録する」で確定させる（lib/gbp-shop-sync.ts）
+■ ローカルのGBPドライラン結果は「下限」。本番より少なく出る
+  ローカルは Go APIの /api/google/token（chubby.yamada 1本）しか使えないが、
+  本番は getAllOAuthTokens() が全アカウントのrefresh tokenを更新するため見える範囲が広い。
+  2026-08-08実測: ローカル9アカウント/517ロケーション → 本番15アカウント/835ロケーション

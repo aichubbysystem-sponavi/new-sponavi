@@ -24,6 +24,9 @@ interface SyncResult {
   updated: number;
   renamed: { shopId: string; shopName: string; locationId: string; oldGbpName: string; newGbpName: string }[];
   conflicts: { locationId: string; title: string; reason: string }[];
+  pendingInserts: string[];
+  insertBlockedReason: "cron" | "threshold" | null;
+  insertThreshold: number;
   errors: string[];
 }
 
@@ -105,7 +108,7 @@ export default function GbpAccountsPage() {
    *  - クライアントからGoogle APIを直接叩けないため、アカウントの取りこぼしが起きていた
    *    （旧実装は先頭5アカウントのみスキャン。実際は9アカウント存在する）
    */
-  const handleImport = async () => {
+  const handleImport = async (confirmBulkImport = false) => {
     if (importing) return;
     setImporting(true);
     setResult(null);
@@ -114,7 +117,7 @@ export default function GbpAccountsPage() {
     try {
       // サーバー側の maxDuration(300秒) より長くする。
       // 短くすると「クライアントは失敗表示・サーバーは正常完了」という食い違いが起きる
-      const res = await api.post('/api/report/gbp-sync', {}, { timeout: 320000 });
+      const res = await api.post('/api/report/gbp-sync', { confirmBulkImport }, { timeout: 320000 });
       const data = res.data as SyncResult;
       setResult(data);
 
@@ -124,7 +127,8 @@ export default function GbpAccountsPage() {
         `情報更新 ${data.updated}件`,
         `店名変更検出 ${data.renamed.length}件`,
       ];
-      const hasProblem = data.errors.length > 0 || data.conflicts.length > 0;
+      if (data.pendingInserts.length > 0) parts.push(`登録保留 ${data.pendingInserts.length}件`);
+      const hasProblem = data.errors.length > 0 || data.conflicts.length > 0 || data.pendingInserts.length > 0;
       showMsg(
         `同期完了（${data.accounts}アカウント / ${data.scanned}ロケーション）: ${parts.join(" / ")}`,
         hasProblem ? "error" : "success",
@@ -160,7 +164,7 @@ export default function GbpAccountsPage() {
           <p className="text-sm text-slate-500 mt-1">Googleアカウントの接続・店舗インポート・新店舗自動検出</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={handleImport} disabled={loading || importing}
+          <button onClick={() => handleImport(false)} disabled={loading || importing}
             className="px-4 py-2 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">
             {importing ? "同期中..." : "新店舗を検出・インポート"}
           </button>
@@ -213,10 +217,14 @@ export default function GbpAccountsPage() {
           <h3 className="text-sm font-bold mb-3 text-slate-700">
             同期結果（{result.accounts}アカウント / {result.scanned}ロケーション）
           </h3>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-center">
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3 text-center">
             <div>
               <p className="text-xl font-bold text-emerald-600">{result.added.length}</p>
               <p className="text-[10px] text-slate-500">新規追加</p>
+            </div>
+            <div>
+              <p className="text-xl font-bold text-amber-600">{result.pendingInserts.length}</p>
+              <p className="text-[10px] text-slate-500">登録保留</p>
             </div>
             <div>
               <p className="text-xl font-bold text-blue-600">{result.linked.length}</p>
@@ -235,6 +243,40 @@ export default function GbpAccountsPage() {
               <p className="text-[10px] text-slate-500">要確認</p>
             </div>
           </div>
+
+          {result.pendingInserts.length > 0 && (
+            <div className="mt-3 bg-white rounded-lg p-3 border-2 border-amber-300">
+              <p className="text-xs font-bold text-amber-700 mb-1">
+                未登録の店舗を{result.pendingInserts.length}件検出しました（まだ登録していません）
+              </p>
+              <p className="text-[10px] text-slate-500 mb-2">
+                {result.insertBlockedReason === "threshold"
+                  ? `1回の登録が${result.insertThreshold}件を超えるため、確認のため保留しました。`
+                    + `新しいGBPアカウントが見えるようになった等、状況が変わった可能性があります。`
+                    + `下の一覧が全て自社で管理する店舗であることを確認してから登録してください。`
+                  : `無人実行では店舗を登録しません。内容を確認して登録してください。`}
+              </p>
+              <div className="max-h-56 overflow-y-auto border border-slate-100 rounded p-2 mb-2">
+                {result.pendingInserts.map((n, i) => (
+                  <p key={i} className="text-[10px] text-slate-600">{n}</p>
+                ))}
+              </div>
+              <button
+                onClick={() => {
+                  if (!confirm(
+                    `${result.pendingInserts.length}件を顧客マスタに登録します。\n\n`
+                    + `※ 自社で管理していない店舗が含まれていないか、上の一覧を確認してください。\n`
+                    + `※ 登録後に取り消すには1件ずつ削除する必要があります。`,
+                  )) return;
+                  handleImport(true);
+                }}
+                disabled={importing}
+                className="px-4 py-2 rounded-lg text-xs font-semibold bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                {result.pendingInserts.length}件をすべて登録する
+              </button>
+            </div>
+          )}
 
           {result.renamed.length > 0 && (
             <div className="mt-3 bg-white rounded-lg p-3 border border-orange-100">

@@ -27,13 +27,16 @@ export async function GET(request: NextRequest) {
   let renamed = 0;
   let linked = 0;
   let linkable: string[] = [];
+  let pendingInserts: string[] = [];
   let scannedAccounts = 0;
   const errors: string[] = [];
   let ownerId = "";
 
   try {
-    // autoLink は付けない: 無人実行で既存店舗のGBP連携を勝手に張り直さない
-    // （担当者が「ロケーション解除」した店舗を毎晩復活させてしまうため）
+    // autoLink / allowInsert は付けない: 無人実行ではDBに店舗を増やさない・連携を張り直さない。
+    // 検出結果は linkable / pendingInserts として返し、登録は人が画面から実行する。
+    // （担当者が解除した連携を毎晩復活させたり、新アカウント接続時に数百件が
+    //   無言で登録されるのを防ぐ。2026-08-08に254件で顕在化）
     const result = await syncShopsFromGbp();
     scannedAccounts = result.accounts;
     added = result.added.length;
@@ -44,8 +47,12 @@ export async function GET(request: NextRequest) {
     errors.push(...result.errors);
     for (const c of result.conflicts) errors.push(`${c.title}: ${c.reason}`);
     linkable = result.linkable;
+    pendingInserts = result.pendingInserts;
     if (linkable.length > 0) {
       console.log(`[cron/sync-shops] 紐付け候補（画面から実行すれば連携されます）: ${linkable.join(" / ")}`);
+    }
+    if (pendingInserts.length > 0) {
+      console.log(`[cron/sync-shops] 未登録の新店舗 ${pendingInserts.length}件を検出（登録は画面から）: ${pendingInserts.slice(0, 30).join(" / ")}`);
     }
     if (result.renamed.length > 0) {
       console.log(`[cron/sync-shops] 店名変更を検出: ${result.renamed.map(r => `${r.oldGbpName} → ${r.newGbpName}`).join(" / ")}`);
@@ -150,6 +157,8 @@ export async function GET(request: NextRequest) {
     added, linked, renamed, skipped, synced, syncErrors,
     accounts: scannedAccounts,
     linkable: linkable.slice(0, 20),
+    pendingInsertCount: pendingInserts.length,
+    pendingInserts: pendingInserts.slice(0, 20),
     errors: errors.slice(0, 10),
   });
 }

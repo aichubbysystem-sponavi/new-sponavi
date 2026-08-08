@@ -53,9 +53,24 @@ export interface SyncSummary {
   renamed: RenameRecord[];
   /** 自動処理を見送った件（人の判断が必要） */
   conflicts: ConflictRecord[];
+  /** 登録せずに保留した新規店舗（無人実行 or 一括登録ガード） */
+  pendingInserts: string[];
+  /** 保留した理由。"cron"=無人実行のため / "threshold"=一度に登録する件数が多すぎるため */
+  insertBlockedReason: "cron" | "threshold" | null;
+  /** 一括登録ガードの閾値 */
+  insertThreshold: number;
   /** 取得エラー。空でなければ「GBPを全件見えていない」状態 */
   errors: string[];
 }
+
+/**
+ * 1回の実行でこの件数を超える新規登録が発生する場合、確認なしでは登録しない。
+ *
+ * 通常の新規出店は多くて数店舗。数十件が一度に出るのは
+ * 「新しいGoogleアカウントを接続した」等、状況が変わった合図であり、
+ * そのまま流し込むと顧客マスタが意図しない店舗で膨らむ（2026-08-08に254件で発生）。
+ */
+export const BULK_INSERT_THRESHOLD = 20;
 
 interface ShopRow {
   id: string;
@@ -130,13 +145,22 @@ async function recordRenames(renames: RenameRecord[]): Promise<{ ok: boolean; me
  * @param opts.importNew falseなら新規店舗の追加を行わない（名前同期のみ）
  */
 export async function syncShopsFromGbp(
-  opts: { dryRun?: boolean; importNew?: boolean; autoLink?: boolean } = {},
+  opts: {
+    dryRun?: boolean;
+    importNew?: boolean;
+    autoLink?: boolean;
+    allowInsert?: boolean;
+    confirmBulkImport?: boolean;
+  } = {},
 ): Promise<SyncSummary> {
   const dryRun = opts.dryRun === true;
   const importNew = opts.importNew !== false;
   // 既存店舗へのGBP再紐付けは「人が実行したとき」だけ行う。
   // 無人のcronで自動的に紐付けると、担当者が意図的に外した連携を毎晩復活させてしまう
   const autoLink = opts.autoLink === true;
+  // 新規店舗の登録も「人が実行したとき」だけ。cronは検出して報告するに留める
+  const allowInsert = opts.allowInsert === true;
+  const confirmBulkImport = opts.confirmBulkImport === true;
   const sb = getSupabase();
 
   const scan = await scanAllGbpLocations();
@@ -150,6 +174,9 @@ export async function syncShopsFromGbp(
     updated: 0,
     renamed: [],
     conflicts: [],
+    pendingInserts: [],
+    insertBlockedReason: null,
+    insertThreshold: BULK_INSERT_THRESHOLD,
     errors: [...scan.errors],
   };
 
@@ -355,9 +382,23 @@ export async function syncShopsFromGbp(
 
   summary.renamed = renames;
 
+  // ── 新規登録をこの実行で行ってよいか判定 ──
+  // 「登録するつもりが無い実行」と「一度に大量すぎる実行」は、書き込まずに一覧で返す。
+  const insertNames = inserts.map(r => String(r.name));
+  let blockedReason: "cron" | "threshold" | null = null;
+  if (insertNames.length > 0) {
+    if (!allowInsert) blockedReason = "cron";
+    else if (!confirmBulkImport && insertNames.length > BULK_INSERT_THRESHOLD) blockedReason = "threshold";
+  }
+  if (blockedReason) {
+    summary.pendingInserts = insertNames;
+    summary.insertBlockedReason = blockedReason;
+    inserts.length = 0;
+  }
+
   if (dryRun) {
     summary.updated = updates.length;
-    summary.added = inserts.map(r => String(r.name));
+    summary.added = insertNames.length > 0 && !blockedReason ? insertNames : [];
     return summary;
   }
 
