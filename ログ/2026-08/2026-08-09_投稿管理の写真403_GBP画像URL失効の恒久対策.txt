@@ -1,0 +1,217 @@
+===========================================================
+2026-08-09 投稿管理・分析の写真サムネイルが403になる問題
+GBP画像URLの失効に対する恒久対策
+===========================================================
+
+## 症状
+
+new-spotlight-navigator.com/posts（投稿管理・分析）で、写真投稿のサムネイルが
+壊れアイコンになる。DevToolsコンソールに lh3.googleusercontent.com への
+GET が 403 (Forbidden) で14件出ていた。
+同じ日（2026/8/7）の投稿でも、1行の中で表示できる写真とできない写真が混在していた。
+
+
+## 調査（すべて実測。推測で判断していない）
+
+### 1. 保存済みURLを直接叩く
+ユーザーからDevToolsのURLを14本もらい、curlで検証:
+
+  suffix なし   -> 403（818バイトのGoogleエラーPNGが返る）
+  =s400        -> 403
+  =w400-h400   -> 403
+  =s0          -> 403
+  Referer なし  -> 403
+  Referer あり  -> 403（https://new-spotlight-navigator.com/ を付与）
+
+→ サイズサフィックス欠落でもReferer制限でもない。URL自体が無効。
+
+### 2. GBP APIから取り直したURLを叩く
+Go API(/api/google/token)でトークンを取得し、GBP v4のメディアを直接確認:
+
+  リソース名の形式: accounts/{id}/locations/{id}/media/{id}
+    例) accounts/105824873810081958139/locations/11708453413660533120/media/AF1Qip...
+
+  単体GET /v4/{name}          -> 200（395ms。十分速い）
+    返却: googleUrl / thumbnailUrl 両方あり
+    googleUrl の匿名GET       -> 200  ★
+    thumbnailUrl の匿名GET    -> 200  ★
+    取り直したURLに =s400 を付与 -> 400 ★サイズ指定は付けてはいけない
+
+### 3. 画面で壊れていた実物で確認
+画面に出ていた「WHITE EYE 栄店」「WHITE EYE いわき」等の 2026-08-07 の写真を
+GBPのメディア一覧から特定し、取り直したgoogleUrlを匿名GET:
+
+  WHITE EYE 栄店      2026-08-07 の3枚 -> すべて 200
+  WHITE EYE いわき     2026-08-07 の3枚 -> すべて 200
+  WHITE EYE 福岡博多店 2026-08-07 の3枚 -> すべて 200
+
+→ 画像そのものは生きていて、URL文字列だけが失効していた。
+
+
+## 原因
+
+GBP Media API が返す googleUrl は永続URLではない。
+公式ドキュメントにも "This URL is not static since it may change over time" とある。
+
+その googleUrl を post_logs.media_url にそのまま保存して、後から <img src> に
+使っていたのが原因。数日で失効して403になる。
+
+  src/app/api/report/auto-post/route.ts:1046
+    media_url: mediaBody.googleUrl || stableUrl
+
+さらに悪いことに、Dropbox写真をSupabase Storageに上げて作った安定URL（stableUrl）は
+投稿成功後に cleanupImage() で削除している（auto-post/route.ts:1051、lib/image-proxy.ts:88）。
+つまりgoogleUrlが死ぬとローカルには復元元が何も残らない状態だった。
+
+### 一部だけ壊れていた理由
+- create-post（手動投稿）は media_url に「元のURL」を保存している → 生きていた
+- auto-post（自動写真投稿）だけ googleUrl を保存している    → 403になっていた
+表示できる写真と壊れた写真が混在していたのはこの違い。
+
+### git履歴の確認
+src/app/posts/page.tsx は7月以降変更なし。
+デプロイ起因の新規バグではなく、時間経過でURLが腐る設計上の問題だった。
+
+
+## 対応
+
+post_logs.gbp_post_name に GBPのメディアリソース名が保存されていたため、
+そこから「今この瞬間に有効なURL」を取り直す方式にした。過去分も含めて復旧する。
+
+### 新規: src/app/api/report/media-urls/route.ts
+POST でリソース名の配列を受け取り、GBP v4の単体GETで現在有効な
+googleUrl / thumbnailUrl を返す。
+
+  - 認証: verifyAuth（Bearer）。既存API（gbp-urls等）と同じ形
+  - 形式チェック: accounts/{id}/locations/{id}/media/{id} 以外は弾く
+    （localPostsのリソース名や任意文字列でGBPのURLを組み立てさせない）
+  - インスタンス内キャッシュ TTL 30分。失効するURLなので長く持たない
+  - 同時実行8、1リクエスト最大200件。上限超過は黙って切らずに truncated 件数を返す
+  - 失敗は握りつぶさず failed[] とサーバーログに出す
+
+### ★最初の実装は間違っていた（onErrorでは検知できない）
+最初 <img onError> を起点に取り直す実装にしたが、これは一切動かない。
+
+  403のレスポンス本文は Content-Type: image/png の有効なPNGだった
+    HTTP/1.1 403 Forbidden
+    Content-Type: image/png
+    Content-Length: 818
+    Access-Control-Allow-Origin: *
+  中身はGoogleの「画像なし」PNG（200x200）。他の失効URLも全て同じ818バイト/200x200。
+
+  headless Chromium（ms-playwright の chrome-headless-shell）で実測:
+    new Image() の結果 -> {"status":"load","w":200,"h":200}
+  つまり load が発火し、onError は発火しない。
+  画面に見えていた「丸に斜線」のアイコンはブラウザの壊れアイコンではなく、
+  Googleが返しているこのPNGが正常に描画されていたもの。
+
+  → 目視でも onError でも検知できない。HTTPステータスで見るしかない。
+
+### 検知方法（ブラウザで実測して確定）
+lh3 は Access-Control-Allow-Origin: * を返すので、ブラウザから
+fetch(url, {method:"HEAD"}) でクロスオリジンにステータスを読める。
+
+  headless Chromium 実測:
+    HEAD 失効URL      -> ok=false status=403 type=cors
+    HEAD 取り直したURL -> ok=true  status=200
+    Dropbox等          -> そもそも対象外（ホストで除外）
+
+### 変更: src/app/posts/page.tsx
+  - LocalPost.media に mediaName（GBPメディアリソース名）を持たせた
+  - groupPhotoLogs が各ログの gbp_post_name を mediaName に詰める。
+    ただし gbp_post_name には通常投稿の localPosts/{id} も入るので、
+    メディアリソース名の形式に一致するものだけを採用する（toMediaName）
+  - 投稿一覧を読み込んだら、Googleホストの保存済みURLをHEADで確認し、
+    死んでいるものだけ /api/report/media-urls に問い合わせて差し替える
+    ★HEADはGoogle側なのでGBP APIのクォータを消費しない。
+      生きているURLではGBP APIを1回も叩かない
+  - <img onError> は Dropbox等の非Google URL向けの保険として残した
+  - 取り直しても駄目だった写真は「写真を表示できません」のプレースホルダー表示
+  - 取り直したURLでも失敗した場合に再取得ループにならないよう requested で管理
+  - 店舗切り替え時に失敗状態をリセット
+  - 拡大ポップアップも失効時にメッセージ表示（photoPopupError state）
+
+### セルフレビューで見つけて直したバグ
+  1. 壊れ判定のキー不一致
+     handleMediaError は不正な形式のリソース名のときURLをキーに記録するのに、
+     isMediaBroken は `mediaName || url` で引いていた。通常投稿でプレースホルダーが
+     出ないままになる。mediaKey() に統一して解消
+  2. デバウンスが永久に延びる
+     onErrorのたびにタイマーをリセットしていたため、スクロール中は取り直しが
+     走らない可能性があった。最初のエラーから固定300msの窓に変更
+  3. reactStrictMode の二重実行で開発時に一度も確認が走らない
+     1回目が「確認済み」フラグを立ててcleanupでキャンセル → 2回目が全部スキップ。
+     中断時はフラグを戻すようにした
+  4. サーバーが maxDuration を超えて全件失敗になる経路
+     45秒の締め切りを設け、超えた分は skipped として返し、クライアントが1回だけ
+     積み直す。無言で切り捨てない
+
+### 意図的にやらなかったこと
+- cleanupImage() の廃止（Supabase Storageに写真を残す）
+  → ストレージ課金が増える。無料枠1GB、写真1枚300KBなら約3,300枚で枯渇する。
+     取り直しで解決できるので採用しなかった
+- 保存する media_url を stableUrl に変える
+  → cleanupImage で消えるので、googleUrlより短命になり逆効果
+- post_logs の一括埋め直し
+  → 埋め直したURLも数日で腐るため根治にならない
+
+
+## 残タスク・注意
+
+- [ ] src/app/media/page.tsx（メディア一覧）も media テーブルの
+      thumbnail_url / google_url をそのまま表示していて同じ失効問題を抱えている。
+      同じ /api/report/media-urls で直せる（未対応）
+- [ ] /api/report/media-urls は verifyAuth のみで店舗単位の認可はしていない。
+      post_logs 自体が authenticated に USING(true) で全店舗読める現状の姿勢に
+      合わせたもの。行レベルRLSを入れる段階でここも合わせること
+- 手動投稿（create-post）が保存する元URL（Dropbox等）も一時URLなので、
+  いずれ同じように失効しうる。こちらはリソース名から取り直せない場合がある
+
+## 第三者視点レビューで追加で見つけた不具合（すべて修正済み）
+
+### R1. サーバーの締め切りがトークン取得後から測られていた（実害大）
+  deadline = Date.now() + 45秒 を getOAuthToken() の「あと」に計算していた。
+  トークン取得は Go API 20秒 + DBリフレッシュ15秒のタイムアウトを持つので、
+  最悪 35秒 + 45秒 + 個別10秒 = 90秒 となり maxDuration(60秒) を超えて
+  関数ごと落ちる＝全件失敗。締め切りをリクエスト開始時刻から測るよう修正。
+
+### R2. 店舗を切り替えるたびに同じ写真を再確認・再取得していた（クォータ浪費）
+  店舗切替時に probedRef / resolveRequestedRef / brokenMedia をリセットしていた。
+  しかしHEAD確認に使うのは post_logs の「保存済みURL」なので、店舗を戻すと
+  また403 → またGBP APIで取り直し、になる。既に resolvedMedia に持っているのに。
+  これらのキーはメディアリソース名（またはURL）で店舗をまたいで一意なので、
+  リセット自体が不要かつ有害だった。店舗切替のリセットを削除。
+  → 「生きているURLではGBP APIを叩かない」という前提が実際に守られるようになった
+
+### R3. 一時的なAPI失敗で写真が恒久的に「表示できません」になっていた
+  fetchが !res.ok のとき、そのチャンク全件を即座に壊れ扱いにしていた。
+  500が1回返っただけでリロードするまで復帰しない。
+  時間切れ(skipped)と同じく「1回だけ積み直し、2回目も駄目なら諦める」に統一。
+
+### R4. 取り直せない写真が「正常な画像」の顔をして出続けていた（誤解を招く）
+  単一店舗モードではGBP API由来の投稿も混ざるが、これらにはメディアリソース名が
+  無いので取り直せない。従来はHEAD確認の対象外にしていたため、失効していると
+  Googleの「画像なし」PNGがそのまま表示され、壊れていることに気づけない
+  （今回の調査の発端そのものの状態）。
+  取り直せなくても確認だけは行い、死んでいれば「写真を表示できません」を出すようにした。
+
+### R5. サーバーの truncated をクライアントが読んでいなかった
+  分割送信しているので本来出ないが、定数がずれたときに無言で件数が減る。
+  出たらコンソールにエラーを出すようにした。
+
+## 検証済み
+- next build 成功（新規の警告なし）
+- 判定ロジックを headless Chromium で実測確認
+  失効URL2本 -> 403 -> 取り直す / 取り直したURL -> 200 -> そのまま / Dropbox -> 対象外
+- 画面に出ていた実店舗の8/7写真が取り直しで200になることを確認（前述）
+
+## 未検証（本番未デプロイ）
+- 実画面での動作は未確認。デプロイ後の確認手順:
+  /posts を開く
+  → Networkタブに lh3 への HEAD が並び、403のものだけ
+     /api/report/media-urls への POST が1本出ること
+  → コンソールに「失効した写真URL N/M件を取り直します」が出ること
+  → サムネイルが実際の写真に差し替わること
+  → 取り直せないものが「写真を表示できません」になること
+  ※「画像が見えている＝正常」ではない。Googleの200x200プレースホルダが
+    表示されているだけの可能性があるので、必ずNetworkタブのステータスで見ること

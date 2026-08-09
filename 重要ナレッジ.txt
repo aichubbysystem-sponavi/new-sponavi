@@ -257,3 +257,31 @@ SPOTLIGHT NAVIGATOR 超重要ナレッジ
   2026-08-08、これで新規登録169件が全滅した（画面には「追加失敗」が先頭20件外に隠れて見えなかった）。
   shops に書き込むコードを足したら、列名を information_schema.columns と必ず突き合わせること。
   本番での検証は BEGIN → INSERT → ROLLBACK が安全で確実。
+
+━━━ 2026-08-09 追加（詳細: ログ/2026-08/2026-08-09_投稿管理の写真403_GBP画像URL失効の恒久対策.txt）━━━
+■ GBPの googleUrl / thumbnailUrl は永続URLではない。DBに保存して後から表示に使ってはいけない
+  公式に "This URL is not static since it may change over time"。数日で失効し
+  lh3.googleusercontent.com が403を返す（2026-08-09、投稿管理の写真が全滅して発覚）。
+  実測: 保存済みURLはサイズサフィックス(=s400/=s0)もReferer有無も全パターン403。
+        取り直せば匿名GETで200。画像自体は生きていてURL文字列だけが腐る。
+  → 保存するのは「GBPのメディアリソース名」(accounts/{id}/locations/{id}/media/{id})。
+     表示時に GET /v4/{name} で取り直す（395ms・十分速い）。/api/report/media-urls がそれ
+  ★取り直したURLに =s400 等のサイズサフィックスを付けると 400 になる。そのまま使うこと
+■ 一時URLをGBPに渡した後、元画像を消すと復元不能になる
+  auto-post は Dropbox写真をSupabase Storageに上げて安定URL化 → GBP投稿 →
+  cleanupImage() でStorageのコピーを削除、という流れ。保存したgoogleUrlが腐ると
+  ローカルに復元元が何も残らない。消す前に「後で表示に使う経路が無いか」を確認すること
+■★Googleの失効画像URLでは <img> の onError は発火しない（最重要の落とし穴）
+  403 だが本文は Content-Type: image/png の有効なPNG（Googleの「画像なし」画像・
+  200x200・818バイト）。ブラウザはこれを正常な画像として描画し load を発火する。
+  画面に見える丸に斜線のアイコンはブラウザの壊れアイコンではなくGoogleのその画像。
+  → onError による検知は絶対に動かない。判定は HEAD のHTTPステータスで行うこと。
+     lh3 は Access-Control-Allow-Origin: * を返すのでブラウザからstatusを読める
+     （headless Chromiumで実測: 失効URL=403 / 取り直したURL=200 / imgはload発火）
+  同じ理由で「画像が表示されているから正常」という目視確認も当てにならない
+■ 画像の再取得は「HEADで死んでいると確認できたものだけ」に絞る
+  HEADはGoogle側なのでGBP APIのクォータを消費しない。生きているURLではAPIを叩かない。
+  再取得後もう一度失敗したら必ず打ち止めにする（無限ループ防止）
+■ reactStrictMode:true なので useEffect は開発時に二重実行される
+  1回目で「処理済み」フラグを立てて即キャンセルされると、2回目が全部スキップして
+  開発時だけ一切動かなくなる。中断時はフラグを戻すこと

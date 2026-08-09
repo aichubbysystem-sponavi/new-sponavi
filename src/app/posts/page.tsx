@@ -16,7 +16,7 @@ interface LocalPost {
   callToAction?: { actionType?: string; url?: string };
   createTime?: string;
   topicType?: string;
-  media?: { googleUrl?: string; sourceUrl?: string; mediaFormat?: string }[];
+  media?: { googleUrl?: string; sourceUrl?: string; mediaFormat?: string; mediaName?: string }[];
   searchUrl?: string;
   state?: string;
   // ログ由来
@@ -33,6 +33,17 @@ const TOPIC_STYLES: Record<string, { bg: string; text: string; label: string }> 
   PHOTO: { bg: "bg-emerald-50", text: "text-emerald-600", label: "写真投稿" },
 };
 
+// GBPのメディアリソース名。これに一致するものだけがURL取り直しの対象。
+// post_logs.gbp_post_name には通常投稿の localPosts/{id} も入るので必ず判別すること
+const MEDIA_NAME_RE = /^accounts\/[A-Za-z0-9_-]+\/locations\/[A-Za-z0-9_-]+\/media\/[A-Za-z0-9_-]+$/;
+function toMediaName(name: unknown): string | undefined {
+  return typeof name === "string" && MEDIA_NAME_RE.test(name) ? name : undefined;
+}
+/** 取り直し・壊れ判定で使うキー。リソース名が使えないものはURLで代用する */
+function mediaKey(mediaName: string | undefined, url: string): string {
+  return mediaName || url;
+}
+
 /** PHOTO投稿を同日・同店舗でグループ化（複数写真を1エントリにまとめる） */
 function groupPhotoLogs(logs: any[], shopId?: string): LocalPost[] {
   const result: LocalPost[] = [];
@@ -48,7 +59,7 @@ function groupPhotoLogs(logs: any[], shopId?: string): LocalPost[] {
       result.push({
         summary: log.summary, topicType: log.topic_type, createTime: log.created_at,
         callToAction: log.action_type ? { actionType: log.action_type, url: log.action_url } : undefined,
-        media: log.media_url ? [{ sourceUrl: log.media_url, mediaFormat: "PHOTO" }] : undefined,
+        media: log.media_url ? [{ sourceUrl: log.media_url, mediaFormat: "PHOTO", mediaName: toMediaName(log.gbp_post_name) }] : undefined,
         searchUrl: log.search_url || undefined,
         name: log.gbp_post_name || undefined,
         _fromLog: true, _shopName: log.shop_name,
@@ -63,7 +74,7 @@ function groupPhotoLogs(logs: any[], shopId?: string): LocalPost[] {
       summary: `写真 ${groupLogs.length}枚投稿`,
       topicType: "PHOTO",
       createTime: first.created_at,
-      media: groupLogs.map((l) => ({ sourceUrl: l.media_url, mediaFormat: "PHOTO" as const })),
+      media: groupLogs.map((l) => ({ sourceUrl: l.media_url, mediaFormat: "PHOTO" as const, mediaName: toMediaName(l.gbp_post_name) })),
       name: first.gbp_post_name || undefined,
       _fromLog: true,
       _shopName: first.shop_name,
@@ -129,6 +140,7 @@ export default function PostsPage() {
   const [autoPostAttempt, setAutoPostAttempt] = useState(1); // 実行回数
   const [autoPostFailedShops, setAutoPostFailedShops] = useState<string[]>([]); // 失敗店舗名一覧（再実行用）
   const [photoPopup, setPhotoPopup] = useState<string | null>(null); // 写真ポップアップURL
+  const [photoPopupError, setPhotoPopupError] = useState(false); // 拡大表示のURLも失効していた場合
   const [gbpUrlMap, setGbpUrlMap] = useState<Record<string, string>>({}); // 店舗名→GBP URL
   const [scheduleDate, setScheduleDate] = useState(""); // 予約日付
   const [scheduleHour, setScheduleHour] = useState("9"); // 予約時（0-23）
@@ -166,6 +178,220 @@ export default function PostsPage() {
   const [fixedMessages, setFixedMessages] = useState<{ id: string; title: string; message: string }[]>([]);
   const [showInsertMenu, setShowInsertMenu] = useState(false);
   const insertMenuRef = useRef<HTMLDivElement>(null);
+
+  // === 写真URLの取り直し ===
+  // GBPが返す googleUrl は永続URLではなく、数日で失効して lh3.googleusercontent.com が403を返す。
+  // post_logs に保存済みのURLをそのまま表示するとサムネイルが壊れるため、
+  // GBPのメディアリソース名から現在有効なURLを取り直す。
+  //
+  // ★重要: 失効時のレスポンスは 403 だが、本文はGoogleの「画像なし」PNG(200x200・818バイト)で
+  //   Content-Type も image/png。ブラウザはこれを正常な画像として描画するため
+  //   <img> の onError は発火しない（headless Chromiumで load 発火を実測確認）。
+  //   したがって判定は onError ではなく HEAD のHTTPステータスで行う。
+  //   lh3 は Access-Control-Allow-Origin: * を返すので、ブラウザからステータスを読める。
+  const [resolvedMedia, setResolvedMedia] = useState<Record<string, { url: string | null; thumb: string | null }>>({});
+  const [brokenMedia, setBrokenMedia] = useState<Record<string, true>>({});
+  const resolveQueueRef = useRef<Set<string>>(new Set());
+  const resolveRequestedRef = useRef<Set<string>>(new Set());
+  const resolveRetriedRef = useRef<Set<string>>(new Set());
+  const probedRef = useRef<Set<string>>(new Set());
+  const resolveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 取り直しをまとめて走らせるためのタイマー。既に予約済みなら延長しない
+  // （延長すると、次々エラーが来るあいだ永久に実行されない）
+  const scheduleFlush = useCallback((delayMs: number, run: () => void) => {
+    if (resolveTimerRef.current !== null) return;
+    resolveTimerRef.current = setTimeout(() => {
+      resolveTimerRef.current = null;
+      run();
+    }, delayMs);
+  }, []);
+
+  const markBroken = useCallback((names: string[]) => {
+    if (names.length === 0) return;
+    setBrokenMedia((prev) => {
+      const next = { ...prev };
+      names.forEach((n) => { next[n] = true; });
+      return next;
+    });
+  }, []);
+
+  // 自分自身を再スケジュールするので型注釈が必要（無いと循環推論でTSエラーになる）
+  const flushMediaResolve: () => Promise<void> = useCallback(async () => {
+    const names = Array.from(resolveQueueRef.current);
+    resolveQueueRef.current.clear();
+    if (names.length === 0) return;
+
+    // 一時的な失敗（サーバーエラー・時間切れ）は1回だけ積み直す。
+    // 2回目も駄目なら諦めて壊れ表示にする
+    const requeueOnce = (candidates: string[]): { retried: string[]; giveUp: string[] } => {
+      const retried: string[] = [];
+      const giveUp: string[] = [];
+      for (const n of candidates) {
+        if (resolveRetriedRef.current.has(n)) giveUp.push(n);
+        else { resolveRetriedRef.current.add(n); resolveQueueRef.current.add(n); retried.push(n); }
+      }
+      if (retried.length > 0) scheduleFlush(1000, () => { flushMediaResolve(); });
+      return { retried, giveUp };
+    };
+
+    try {
+      const token = (await supabase.auth.getSession()).data.session?.access_token;
+      // サーバー側の上限が200件なので、それに合わせて分割して送る
+      for (let i = 0; i < names.length; i += 200) {
+        const chunk = names.slice(i, i + 200);
+        let data: any;
+        try {
+          const res = await fetch("/api/report/media-urls", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ names: chunk }),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          data = await res.json();
+        } catch (e: any) {
+          // 一時的な障害でこの画面の写真が永久に「表示できません」になるのを避ける
+          console.error(`[posts] 写真URLの取り直し失敗: ${e?.message}`);
+          const { giveUp } = requeueOnce(chunk);
+          markBroken(giveUp);
+          continue;
+        }
+
+        if (data.urls && Object.keys(data.urls).length > 0) {
+          setResolvedMedia((prev) => ({ ...prev, ...data.urls }));
+        }
+        if (data.truncated > 0) {
+          // 分割して送っているので本来出ないはず。出たら分割サイズがサーバー上限とずれている
+          console.error(`[posts] サーバー側で${data.truncated}件が上限超過で切られた（分割サイズを見直すこと）`);
+        }
+
+        // サーバーが時間切れで処理しなかった分は「失敗」ではないので積み直す
+        const skipped: string[] = Array.isArray(data.skipped) ? data.skipped : [];
+        const { retried } = requeueOnce(skipped);
+
+        // 取り直しても駄目だったものは壊れ表示にする（無言で壊れアイコンのままにしない）
+        const resolvedKeys = new Set(Object.keys(data.urls || {}));
+        const retrySet = new Set(retried);
+        const stillBroken = chunk.filter((n) => !resolvedKeys.has(n) && !retrySet.has(n));
+        if (stillBroken.length > 0) {
+          console.error(`[posts] 取り直せなかった写真 ${stillBroken.length}件`, (data.failed || []).slice(0, 5));
+          markBroken(stillBroken);
+        }
+      }
+    } catch (e) {
+      console.error("[posts] 写真URLの取り直しでエラー:", e);
+    }
+  }, [scheduleFlush, markBroken]);
+
+  // 画像の読み込みが本当に失敗したときの保険（Dropbox等の非Google URL向け）。
+  // Googleの失効URLはonErrorが発火しないので、そちらは上のHEAD確認が担当する
+  const handleMediaError = useCallback((mediaName: string | undefined, url: string) => {
+    const key = mediaKey(mediaName, url);
+    // リソース名が無い写真（手動投稿の元URL等）は取り直せないので、そのまま壊れ表示にする。
+    // 取り直したURLでも失敗した場合も同じく打ち止めにする（再取得ループ防止）
+    if (!mediaName || resolveRequestedRef.current.has(mediaName)) {
+      setBrokenMedia((prev) => (prev[key] ? prev : { ...prev, [key]: true }));
+      return;
+    }
+    resolveRequestedRef.current.add(mediaName);
+    resolveQueueRef.current.add(mediaName);
+    scheduleFlush(300, () => { flushMediaResolve(); });
+  }, [flushMediaResolve, scheduleFlush]);
+
+  // 表示に使うURLを決める（取り直せていればそれを優先）
+  const mediaSrc = useCallback((storedUrl: string, mediaName?: string, full = false) => {
+    const r = mediaName ? resolvedMedia[mediaName] : undefined;
+    if (r) return (full ? r.url || r.thumb : r.thumb || r.url) || storedUrl;
+    return storedUrl;
+  }, [resolvedMedia]);
+
+  const isMediaBroken = useCallback(
+    (mediaName: string | undefined, url: string) => !!brokenMedia[mediaKey(mediaName, url)],
+    [brokenMedia],
+  );
+
+  // 保存済みのGoogle画像URLが本当に生きているかHEADで確かめ、死んでいるものだけ取り直す。
+  // 生きているURLではGBP APIを1回も叩かない（HEADはGoogle側なのでAPIクォータを消費しない）
+  useEffect(() => {
+    const probed = probedRef.current; // cleanupから参照するのでここで掴んでおく
+    const candidates: { name?: string; url: string; key: string }[] = [];
+    for (const p of localPosts) {
+      for (const m of p.media || []) {
+        const url = m.googleUrl || m.sourceUrl || "";
+        if (!url) continue;
+        // 失効するのはGoogleホストのURLだけ。Dropbox等は対象外（そちらはonErrorで拾う）
+        if (!/^https:\/\/[^/]*\.googleusercontent\.com\//.test(url)) continue;
+        // リソース名が無いもの（GBP API由来の投稿）は取り直せないが、
+        // 放置するとGoogleの「画像なし」PNGが正常な写真の顔をして出続けるので、
+        // 確認だけはして失敗を見えるようにする
+        const key = mediaKey(m.mediaName, url);
+        if (probed.has(key)) continue;
+        probed.add(key);
+        candidates.push({ name: m.mediaName, url, key });
+      }
+    }
+    if (candidates.length === 0) return;
+
+    let cancelled = false;
+    let finished = false;
+    (async () => {
+      const dead: typeof candidates = [];
+      let cursor = 0;
+      await Promise.all(
+        Array.from({ length: Math.min(8, candidates.length) }, async () => {
+          while (cursor < candidates.length && !cancelled) {
+            const c = candidates[cursor++];
+            try {
+              const r = await fetch(c.url, { method: "HEAD", cache: "no-store" });
+              if (!r.ok) dead.push(c);
+            } catch {
+              // ネットワーク不通やCORS遮断も「確認できない」として取り直し側に倒す
+              dead.push(c);
+            }
+          }
+        }),
+      );
+      finished = true;
+      if (cancelled || dead.length === 0) return;
+
+      const resolvable = dead.filter((c) => c.name);
+      const unresolvable = dead.filter((c) => !c.name);
+      console.log(
+        `[posts] 失効した写真URL ${dead.length}/${candidates.length}件` +
+        `（取り直す ${resolvable.length}件 / リソース名が無く取り直せない ${unresolvable.length}件）`,
+      );
+      // 取り直せないものは、誤解を招く画像を出し続けずに「表示できません」にする
+      markBroken(unresolvable.map((c) => c.key));
+      if (resolvable.length === 0) return;
+      resolvable.forEach((c) => {
+        resolveRequestedRef.current.add(c.name!);
+        resolveQueueRef.current.add(c.name!);
+      });
+      flushMediaResolve();
+    })();
+
+    return () => {
+      cancelled = true;
+      // 完了前に中断された場合は確認済みの印を戻す。
+      // 戻さないと StrictMode の二重実行で1回目がキャンセルされたまま
+      // 2回目が「全部確認済み」と誤判定し、開発時に一度も確認が走らなくなる
+      if (!finished) candidates.forEach((c) => probed.delete(c.key));
+    };
+  }, [localPosts, flushMediaResolve, markBroken]);
+
+  // ポップアップを開き直すたびにエラー表示をリセットする（setPhotoPopupの呼び出し箇所が複数あるためここで一元化）
+  useEffect(() => { setPhotoPopupError(false); }, [photoPopup]);
+
+  // 店舗切り替えでは何もリセットしない。
+  // probedRef / resolveRequestedRef / brokenMedia / resolvedMedia のキーは
+  // GBPのメディアリソース名（またはURL）で、店舗をまたいで一意。
+  // ここでリセットすると、店舗を戻すたびに同じ写真を再確認→再取得することになり、
+  // 「生きているURLではGBP APIを叩かない」という前提が崩れてクォータを無駄に消費する。
+
+  // アンマウント時にタイマーを止める
+  useEffect(() => () => {
+    if (resolveTimerRef.current !== null) clearTimeout(resolveTimerRef.current);
+  }, []);
 
   // 差し込みメニュー外クリックで閉じる
   useEffect(() => {
@@ -1756,13 +1982,45 @@ export default function PostsPage() {
                               mUrl = mUrl.replace("dl=0", "raw=1");
                               if (!mUrl.includes("raw=1") && !mUrl.includes("dl=1")) mUrl += (mUrl.includes("?") ? "&" : "?") + "raw=1";
                             }
-                            return mUrl ? <img key={mi} src={mUrl} alt={`写真${mi + 1}`} className="w-24 h-24 object-cover cursor-pointer hover:opacity-80 transition" loading="lazy" onClick={() => setPhotoPopup(mUrl)} /> : null;
+                            if (!mUrl) return null;
+                            if (isMediaBroken(m.mediaName, mUrl)) {
+                              return (
+                                <div key={mi} className="w-24 h-24 flex flex-col items-center justify-center bg-slate-100 text-slate-400 text-[9px] leading-tight text-center px-1">
+                                  <span className="text-base leading-none mb-1">🖼</span>
+                                  写真を表示<br />できません
+                                </div>
+                              );
+                            }
+                            return (
+                              <img
+                                key={mi}
+                                src={mediaSrc(mUrl, m.mediaName)}
+                                alt={`写真${mi + 1}`}
+                                className="w-24 h-24 object-cover cursor-pointer hover:opacity-80 transition"
+                                loading="lazy"
+                                onError={() => handleMediaError(m.mediaName, mUrl)}
+                                onClick={() => setPhotoPopup(mediaSrc(mUrl, m.mediaName, true))}
+                              />
+                            );
                           })}
                         </div>
                       ) : photoUrl ? (
-                        <div className="w-32 flex-shrink-0 bg-slate-100 cursor-pointer" onClick={() => setPhotoPopup(photoUrl)}>
-                          <img src={photoUrl} alt="" className="w-full h-full object-cover hover:opacity-80 transition" loading="lazy" />
-                        </div>
+                        isMediaBroken(post.media?.[0]?.mediaName, photoUrl) ? (
+                          <div className="w-32 flex-shrink-0 flex flex-col items-center justify-center bg-slate-100 text-slate-400 text-[10px] leading-tight text-center px-2 py-6">
+                            <span className="text-lg leading-none mb-1">🖼</span>
+                            写真を表示できません
+                          </div>
+                        ) : (
+                          <div className="w-32 flex-shrink-0 bg-slate-100 cursor-pointer" onClick={() => setPhotoPopup(mediaSrc(photoUrl, post.media?.[0]?.mediaName, true))}>
+                            <img
+                              src={mediaSrc(photoUrl, post.media?.[0]?.mediaName)}
+                              alt=""
+                              className="w-full h-full object-cover hover:opacity-80 transition"
+                              loading="lazy"
+                              onError={() => handleMediaError(post.media?.[0]?.mediaName, photoUrl)}
+                            />
+                          </div>
+                        )
                       ) : null}
                       <div className="flex-1 p-4">
                         <div className="flex items-center justify-between mb-2">
@@ -1831,7 +2089,20 @@ export default function PostsPage() {
     {photoPopup && (
       <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setPhotoPopup(null)}>
         <div className="relative max-w-4xl max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
-          <img src={photoPopup} alt="" className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl" />
+          {photoPopupError ? (
+            /* 拡大表示のURLも失効していた場合は、壊れアイコンではなく理由を出す */
+            <div className="bg-white rounded-lg shadow-2xl px-8 py-10 text-center text-sm text-slate-500">
+              写真を表示できませんでした
+              <div className="text-xs text-slate-400 mt-1">GBP側の画像URLが失効しています</div>
+            </div>
+          ) : (
+            <img
+              src={photoPopup}
+              alt=""
+              className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl"
+              onError={() => setPhotoPopupError(true)}
+            />
+          )}
           <button onClick={() => setPhotoPopup(null)} className="absolute -top-3 -right-3 w-8 h-8 bg-white rounded-full shadow-lg flex items-center justify-center text-slate-600 hover:bg-slate-100 text-lg font-bold">&times;</button>
         </div>
       </div>
