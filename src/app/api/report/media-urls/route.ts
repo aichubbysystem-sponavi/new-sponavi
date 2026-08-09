@@ -18,6 +18,12 @@ const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
  * 画像そのものは生きているので、リソース名から都度取り直せば表示できる。
  *
  * 注意: 取り直したURLに =s400 等のサイズサフィックスを付けると 400 になる。そのまま使うこと。
+ *
+ * さらに: メディアの「リソース名」も永続とは限らない。
+ * 2026-08-09 実測: 75件中14件が投稿2日後に 404 になったが、該当ロケーションの
+ * メディア一覧には同じ投稿日時の写真が別IDで存在した（Googleが処理過程でIDを付け替える）。
+ * そのため 404 のときは、クライアントから貰った投稿日時(hints)を頼りに
+ * ロケーションのメディア一覧から同時期の写真を探して代替する。
  */
 
 // 失効するURLなので長くは持てない。同じ画面の再描画でGBPを叩き直さない程度の短いTTL
@@ -25,6 +31,10 @@ const TTL_MS = 30 * 60 * 1000;
 const MAX_NAMES = 200;
 const CONCURRENCY = 8;
 const CACHE_LIMIT = 5000;
+// 404時の代替探索: 投稿日時とメディアのcreateTimeがこの範囲内なら同じ投稿の写真とみなす。
+// post_logs.created_at は投稿直後に書かれるので実際の差は数分だが、時差や再投稿を考慮して広めに取る
+const FALLBACK_WINDOW_MS = 36 * 60 * 60 * 1000;
+const FALLBACK_LIST_PAGES = 3;
 
 type Entry = { url: string | null; thumb: string | null; at: number };
 // Vercelのインスタンス内キャッシュ。インスタンスをまたぐと消えるが、
@@ -99,6 +109,8 @@ export async function POST(request: NextRequest) {
   if (!Array.isArray(raw)) {
     return NextResponse.json({ error: "names（配列）が必要です" }, { status: 400 });
   }
+  // hints: { リソース名: 投稿日時(ISO) }。404時に同時期のメディアを探すために使う（任意）
+  const rawHints = body?.hints && typeof body.hints === "object" ? body.hints : {};
 
   // 重複除去 + 形式チェック
   const seen = new Set<string>();
@@ -145,12 +157,81 @@ export async function POST(request: NextRequest) {
     }),
   );
 
-  if (failed.length > 0) {
-    console.error(`[media-urls] ${failed.length}/${targets.length}件の解決に失敗:`, failed.slice(0, 5));
+  // === 404フォールバック ===
+  // リソース名の付け替え（前述）で単体GETが404になった写真を、
+  // ロケーションのメディア一覧から「投稿日時が近いもの」で代替する。
+  // 対象は 404 かつ投稿日時ヒントがあるものだけ。一覧取得は404が出たロケーション限定。
+  const substituted = new Set<string>();
+  const fallbackTargets = failed.filter((f) => {
+    if (f.status !== 404) return false;
+    const h = rawHints[f.name];
+    return typeof h === "string" && Number.isFinite(Date.parse(h));
+  });
+  if (fallbackTargets.length > 0) {
+    // 同じ画面の他の写真として既に使われているIDを代替に流用しない
+    const requestedNames = new Set(targets);
+    const byLocation = new Map<string, { name: string; at: number }[]>();
+    for (const f of fallbackTargets) {
+      const loc = f.name.split("/media/")[0];
+      if (!byLocation.has(loc)) byLocation.set(loc, []);
+      byLocation.get(loc)!.push({ name: f.name, at: Date.parse(rawHints[f.name]) });
+    }
+
+    for (const [loc, wants] of Array.from(byLocation.entries())) {
+      if (Date.now() > deadline) break;
+      // 一覧は新しい順で返るため、直近の投稿なら先頭ページで見つかる
+      const items: { name: string; createTime?: string; googleUrl?: string; thumbnailUrl?: string }[] = [];
+      let pageToken = "";
+      for (let i = 0; i < FALLBACK_LIST_PAGES; i++) {
+        if (Date.now() > deadline) break;
+        try {
+          const res = await fetch(
+            `${GBP_API_BASE}/${loc}/media?pageSize=100${pageToken ? `&pageToken=${pageToken}` : ""}`,
+            { cache: "no-store", headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10000) },
+          );
+          if (!res.ok) break;
+          const data = await res.json().catch(() => ({} as any));
+          items.push(...(data.mediaItems || []));
+          pageToken = data.nextPageToken || "";
+          if (!pageToken) break;
+        } catch { break; }
+      }
+
+      const used = new Set<string>();
+      // 各404写真に、投稿日時に最も近い未使用メディアを割り当てる
+      for (const w of wants.sort((a, b) => a.at - b.at)) {
+        let best: (typeof items)[number] | null = null;
+        let bestDiff = FALLBACK_WINDOW_MS;
+        for (const item of items) {
+          if (!item.name || used.has(item.name) || requestedNames.has(item.name)) continue;
+          if (!item.googleUrl && !item.thumbnailUrl) continue;
+          const t = Date.parse(item.createTime || "");
+          if (!Number.isFinite(t)) continue;
+          const diff = Math.abs(t - w.at);
+          if (diff <= bestDiff) { bestDiff = diff; best = item; }
+        }
+        if (!best) continue;
+        used.add(best.name);
+        const entry: Entry = { url: best.googleUrl || null, thumb: best.thumbnailUrl || null, at: Date.now() };
+        // 元のリソース名のキーでキャッシュする（次回リクエストは一覧を叩かずに済む）
+        cache.set(w.name, entry);
+        urls[w.name] = { url: entry.url, thumb: entry.thumb };
+        substituted.add(w.name);
+      }
+    }
+    pruneCache();
+    if (substituted.size > 0) {
+      console.log(`[media-urls] 404の${substituted.size}/${fallbackTargets.length}件を同時期のメディアで代替した`);
+    }
+  }
+
+  const stillFailed = failed.filter((f) => !substituted.has(f.name));
+  if (stillFailed.length > 0) {
+    console.error(`[media-urls] ${stillFailed.length}/${targets.length}件の解決に失敗:`, stillFailed.slice(0, 5));
   }
   if (skipped.length > 0) {
     console.error(`[media-urls] 時間切れで${skipped.length}件を未処理のまま返した`);
   }
 
-  return NextResponse.json({ urls, failed, invalid, truncated, skipped });
+  return NextResponse.json({ urls, failed: stillFailed, invalid, truncated, skipped });
 }

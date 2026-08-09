@@ -192,6 +192,9 @@ export default function PostsPage() {
   const [resolvedMedia, setResolvedMedia] = useState<Record<string, { url: string | null; thumb: string | null }>>({});
   const [brokenMedia, setBrokenMedia] = useState<Record<string, true>>({});
   const resolveQueueRef = useRef<Set<string>>(new Set());
+  // リソース名 → 投稿日時。GBPはメディアIDを後から付け替えることがあり（2026-08-09実測 75件中14件）、
+  // 単体GETが404のときサーバーが「同時期のメディア」を探すためのヒントとして併送する
+  const mediaHintsRef = useRef<Map<string, string>>(new Map());
   const resolveRequestedRef = useRef<Set<string>>(new Set());
   const resolveRetriedRef = useRef<Set<string>>(new Set());
   const probedRef = useRef<Set<string>>(new Set());
@@ -240,12 +243,18 @@ export default function PostsPage() {
       // サーバー側の上限が200件なので、それに合わせて分割して送る
       for (let i = 0; i < names.length; i += 200) {
         const chunk = names.slice(i, i + 200);
+        // 404時の代替探索に使う投稿日時ヒント（あるものだけ）
+        const hints: Record<string, string> = {};
+        for (const n of chunk) {
+          const h = mediaHintsRef.current.get(n);
+          if (h) hints[n] = h;
+        }
         let data: any;
         try {
           const res = await fetch("/api/report/media-urls", {
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-            body: JSON.stringify({ names: chunk }),
+            body: JSON.stringify({ names: chunk, hints }),
           });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           data = await res.json();
@@ -319,6 +328,8 @@ export default function PostsPage() {
       for (const m of p.media || []) {
         const url = m.googleUrl || m.sourceUrl || "";
         if (!url) continue;
+        // 取り直し時の404フォールバック用に投稿日時を控えておく（確認済みでも毎回上書きで問題ない）
+        if (m.mediaName && p.createTime) mediaHintsRef.current.set(m.mediaName, p.createTime);
         // 失効するのはGoogleホストのURLだけ。Dropbox等は対象外（そちらはonErrorで拾う）
         if (!/^https:\/\/[^/]*\.googleusercontent\.com\//.test(url)) continue;
         // リソース名が無いもの（GBP API由来の投稿）は取り直せないが、
