@@ -280,3 +280,55 @@ fetch(url, {method:"HEAD"}) でクロスオリジンにステータスを読め�
 - 対応: クライアントの送信を25件ずつに分割（posts/page.tsx の CHUNK=25）。
   解決できたチャンクから順次差し替わるので、上の行から数秒で写真が現れる
 - サーバー上限200件はそのまま。分割数が変わっただけで挙動は同一
+
+===========================================================
+## 【2026-08-09 セッション2】本番検証→404フォールバック→分割送信→Batch調査
+===========================================================
+
+### 決定事項
+- 404になったメディアは「ロケーションのメディア一覧から投稿日時が近い写真」で代替表示する
+- post_logs.gbp_post_name のDB自動修復（新IDへの書き換え）は誤マッチ恒久化のリスクがあるため実装しない
+- 写真URLの取り直しは25件ずつの分割送信にして順次表示（体感改善）
+- 口コミ分析Batchの「結果を取り込む」は、Anthropic側の実状態（Ended/Canceled）を確認するまで押さない
+
+### 変更内容（具体的に）
+- src/app/api/report/media-urls/route.ts:
+  - body に hints（リソース名→投稿日時）を追加受け取り
+  - 単体GETが404かつヒントありのとき、そのロケーションの /media 一覧（最大3ページ）から
+    「リクエスト中の他の保存済みIDに該当しない」「±36h以内」のメディアを時刻が近い順に割り当て
+  - 代替結果は元のリソース名のキーで30分キャッシュ。失敗ログはフォールバック後の残件のみ出す
+- src/app/posts/page.tsx:
+  - mediaHintsRef（リソース名→post_logs.created_at）を投稿一覧走査時に構築し hints として併送
+  - 取り直しPOSTを CHUNK=25 の分割送信に変更（解決したチャンクから順次サムネイル差し替え）
+- 重要ナレッジ.txt: 「GBPメディアのリソース名も永続ではない」を追記
+- コミット/デプロイ: 529d4f1（フォールバック）→ 0750589（ナレッジ）→ f333cd0（分割送信）。
+  いずれも origin main（Vercel本番）と omni の両方へpush、本番バンドル反映確認済み
+
+### 数値・設定値
+- FALLBACK_WINDOW_MS = 36時間（投稿日時とメディアcreateTimeの許容差。実測の差は3〜7時間）
+- FALLBACK_LIST_PAGES = 3（メディア一覧 100件×最大3ページ）
+- クライアント送信チャンク CHUNK = 25（サーバー上限 MAX_NAMES=200 は不変）
+- 参考（analyze-batch-lib、変更なし）: MAX_CORRECTIONS=2 / MAX_POLL_ATTEMPTS=20 / 1poll=5バッチまで
+
+### 未解決・次回やること
+- ★口コミ分析Batch: analysis_batches に submitted のまま 37バッチ/187店舗 が残っている
+  （8/7 18:21〜18:26 JST投入 round0。画面の「処理中」表示は先頭8件だけで実態はこの規模）
+  1. まずAnthropic側の実状態を確認（Console の Batches か、ANTHROPIC_API_KEY を貰って一括確認。
+     例: msgbatch_01PuaRTRYjZSGi4XQK6J5tqP）
+  2. Ended なら「結果を取り込む」を8回（5バッチ/回）で回収。追加課金は修正ラウンド分のみ
+  3. Canceled が混ざる場合、取り込むと自動再投入＝再課金される。再分析するか破棄するか先に決める
+  4. 結果ファイルは作成から29日（〜9/5頃）で失効。放置すると回収不能
+- 「再投入なしで破棄」機能は未実装（キャンセル済みを課金なしで消す手段が無い）
+- 「前回の分析失敗店舗76件（6/24認証エラー）」の「失敗店舗だけ再実行」は76店舗分の新規課金。不用意に押さない
+- media/page.tsx（メディア一覧）の同じURL失効問題が未対応のまま
+- Chrome拡張（claude.ai/chrome）が未接続。接続すれば本番画面のConsole/Network確認をClaudeが直接できる
+
+### 注意点・ハマったこと
+- GBPはアップロード後の処理でメディアIDを付け替えることがある（75件中14件が投稿2日で404。
+  写真自体は同ロケーション一覧に別IDで現存。googleUrlだけでなくリソース名も永続ではない）
+- 失効URLの403はGoogleが「正常なPNG（グレー丸に斜線）」を返すため、onErrorも発火せず目視でも気づけない
+- Vercel CLIのリンク先は spotlight-navigators-projects/new-sponavi（全ビルド失敗の死んだ重複）で、
+  本番のログ・環境変数は見えない。本番は aichubbysystem-6689s-projects/new-sponavi（ダッシュボードのみ）
+- 本番デプロイは origin（aichubbysystem-sponavi/new-sponavi）への push。omni への push だけでは反映されない
+- 本番DBは pooler直結で読める（aws-1-ap-northeast-1.pooler.supabase.com / パスワードは .secrets\chubby-meo\メモ.txt）。
+  今回の原因特定は post_logs / analysis_batches の実データ照合で確定できた
