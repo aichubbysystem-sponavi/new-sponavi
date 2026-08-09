@@ -267,6 +267,10 @@ SPOTLIGHT NAVIGATOR 超重要ナレッジ
   → 保存するのは「GBPのメディアリソース名」(accounts/{id}/locations/{id}/media/{id})。
      表示時に GET /v4/{name} で取り直す（395ms・十分速い）。/api/report/media-urls がそれ
   ★取り直したURLに =s400 等のサイズサフィックスを付けると 400 になる。そのまま使うこと
+■ さらに: GBPメディアの「リソース名」も永続ではない（2026-08-09実測: 75件中14件が投稿2日で
+  別IDに付け替わり単体GETが404。写真自体は同ロケーションの一覧に別IDで現存）
+  → /api/report/media-urls は404時、クライアント併送の投稿日時(hints)を使い
+     ロケーションのメディア一覧から±36h以内の写真を割り当てて代替する
 ■ 一時URLをGBPに渡した後、元画像を消すと復元不能になる
   auto-post は Dropbox写真をSupabase Storageに上げて安定URL化 → GBP投稿 →
   cleanupImage() でStorageのコピーを削除、という流れ。保存したgoogleUrlが腐ると
