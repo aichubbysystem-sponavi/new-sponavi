@@ -240,9 +240,13 @@ export default function PostsPage() {
 
     try {
       const token = (await supabase.auth.getSession()).data.session?.access_token;
-      // サーバー側の上限が200件なので、それに合わせて分割して送る
-      for (let i = 0; i < names.length; i += 200) {
-        const chunk = names.slice(i, i + 200);
+      // 小さめに分割して送り、解決できたチャンクから順次写真を差し替える。
+      // 一括(75件)で送ると全件解決までサムネイルが1枚も変わらず、体感十数秒待たされる。
+      // 25件ならサーバー側(同時8並列)で数秒で返り、上の行から順に写真が現れる。
+      // ※サーバーの上限は200件なので、この値は200以下であれば動作は同じ
+      const CHUNK = 25;
+      for (let i = 0; i < names.length; i += CHUNK) {
+        const chunk = names.slice(i, i + CHUNK);
         // 404時の代替探索に使う投稿日時ヒント（あるものだけ）
         const hints: Record<string, string> = {};
         for (const n of chunk) {
