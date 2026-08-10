@@ -37,16 +37,14 @@ interface GridLog {
 // 3×3グリッドの中心+四隅スロットとして保存（奇数グリッド=centerCellが中心を返せる）
 const GRID_SIZE_5POINT = 3;
 const POINTS_PER_KW = 5;
-// 2026-08-02 田中さん要望: 5kmは不要、500m刻みで細かく選べるように
-// （既存店舗の設定は全店500m/未設定だったため、5km廃止による影響店舗はゼロ）
+// 2026-08-10 ユーザー要望: 近距離を細かく（100m/300m/700m追加、1.5km以上は廃止）
+// （廃止時点の設定は全店500m/未設定だったため、1.5km以上の廃止による影響店舗はゼロ）
 const INTERVALS = [
+  { label: "100m", value: 100 },
+  { label: "300m", value: 300 },
   { label: "500m", value: 500 },
+  { label: "700m", value: 700 },
   { label: "1km", value: 1000 },
-  { label: "1.5km", value: 1500 },
-  { label: "2km", value: 2000 },
-  { label: "2.5km", value: 2500 },
-  { label: "3km", value: 3000 },
-  { label: "4km", value: 4000 },
 ];
 /** 計測地点の既定距離(m)。店舗ごとの設定(shops.grid_interval_m)が無い場合に使う */
 const DEFAULT_INTERVAL = 500;
@@ -1868,9 +1866,9 @@ export default function GridRankingPage() {
             </div>
             <p className="mt-1 text-xs text-gray-400">
               距離・向きは店舗ごとに保存され、一括計測でも使用されます。
-              ※計測点は約500mの格子に丸められるため、隣り合う刻み（例: 1.5km↔2km）では
+              ※計測点は距離と同じ幅（上限500m）の格子に丸められるため、隣り合う刻み（例: 700m↔1km）では
               店舗の位置によってごく稀に同じ地点になり、結果が変わらないことがあります（実測1〜3%程度）。
-              15度単位の向きの差が反映されるのは距離2km以上が目安です（それ未満は斜め⇔十字の45度単位が有効）
+              距離1km以下では15度単位の向きの差は格子に丸められやすいため、実質有効なのは斜め⇔十字（45度単位）です
             </p>
           </div>
         </div>

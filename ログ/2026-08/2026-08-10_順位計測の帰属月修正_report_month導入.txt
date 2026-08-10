@@ -82,3 +82,11 @@ grid_ranking_overrides にも「暦月ラベル」で二重書き込みしてい
 RPAのoverrides二重書き込みは8/1計測では発生していないが、停止したか未確認。
 9/1計測で再発すると「2026/9」ラベルの複製が9月分に居座る同症状が出る。
 → RPA担当に「grid_ranking_overridesへの書き込みをやめたか」を確認すること。
+
+━━━ 追記2（同日・距離オプション変更） ━━━
+- 距離選択肢を 100m/300m/500m/700m/1km に変更（1.5km以上は廃止。全店500m/未設定のため影響ゼロ）
+- 変更: grid-ranking/page.tsx INTERVALS / grid-interval/route.ts ALLOWED_INTERVALS
+- 重要: grid-ranking/route.ts の gridFactor 下限を 0.25→0.1 に変更。
+  250m格子のままだと100m計測の外周点(オフセット≈71m)が中心セルに丸まり
+  「5地点全部同じキャッシュ順位」になるため。500m既存店舗のキャッシュキーは不変。
+- 隣接刻みのセル衝突注記は 700m↔1km の例に更新
