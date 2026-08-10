@@ -1,0 +1,58 @@
+■ 2026-08-10 順位計測の帰属月修正（report_month導入）
+
+【背景・問題】
+- 順位計測（grid_ranking_logs）は毎月1日に「前月末時点」を計測する運用だが、
+  コードは measured_at の月をそのままレポート月にしていたため、7/1計測が「7月分」に載っていた。
+- 一方 grid_ranking_overrides（手動データ）は運用者が既に前月として入力しており、
+  「2026/7」に1,632件（8/1計測相当）。コード解釈だけが人間の運用とズレていた。
+- GBPパフォーマンス系（検索数/マップ/検索語句）は getExpectedMonthJST()=実行時点の前月で
+  既に正しく前月帰属。ズレていたのは順位のみ（口コミはSheet2の列＝運用側の問題、コード対象外）。
+
+【決定した仕様（ユーザー承認済み）】
+- 帰属ルール: JSTで計測日1〜3日→前月 / 4日以降→当月（月中の臨時計測を前月に入れない）
+- 適用範囲: 過去分も全部付け替え（提出済みレポートの月表示が変わる点は了承済み）
+
+【実施内容】
+1. バックアップ: grid_ranking_logs(5,064件)/grid_ranking_overrides(2,028件) を
+   C:\Users\pasok\Downloads\grid_ranking_backup_20260810\ にJSON保存
+2. DB: grid_ranking_logs に report_month(text) 追加＋全件backfill
+   （sql/2026-08-10_grid_ranking_report_month.sql、pooler直結でトランザクション実行済み）
+   - backfill 5,064件 / 前月へ移動 4,705件（事前見積もりと完全一致）/ 不一致0 / NULL0
+   - measured_at は一切変更していない（事実の記録として保持）
+3. コード: 帰属月の導出を report_month ?? reportMonthFromMeasuredAt() に統一
+   - src/lib/month-utils.ts: reportMonthFromMeasuredAt() 追加（SQL backfillと同一ルール）
+   - 書込: api/report/grid-ranking/route.ts insert時に report_month スタンプ
+   - 読取: lib/report-api.ts(fetchGridRankingLive) / lib/spreadsheet.ts(fetchGridRankingData)
+   - CSV: api/export/route.ts(grid-ranking) と api/report/grid-export/route.ts を
+     measured_at範囲フィルタ → report_month一致 に変更
+   - api/report/grid-ranking-generate/route.ts: 実測保護の既存判定も帰属月基準に
+   - grid-ranking/page.tsx: CSV月セレクタのデフォルトを前月に（帰属月基準では前月が最新計測月）
+   - テスト: month-utils.test.ts に境界テスト追加（JST境界/年またぎ/4日以降）
+
+【触っていないもの（意図的）】
+- grid_search_cache の jstMonth() キー: Places API課金抑止のキャッシュキーであり
+  帰属月とは別物。変更するとキャッシュミス→再課金が発生するため不変。
+- grid-stats / grid-shop-status / isMeasuredThisMonth（grid-ranking/page.tsx）/ presets:
+  「今月の計測バッチを実施済みか」という運用判定なので暦月のままが正しい。
+- grid_ranking_overrides: 人間が月を明示入力しており既に正しい。
+- overrides優先仕様（同KW×同月は手動が実測を隠す）: 既存仕様のまま。
+
+【検証結果】
+- vitest 398件全パス / next build 成功
+- TSヘルパー vs DB backfill: 5,064件全件一致
+- 新基準: 2026/6 ← 7/1-2計測3,627件、2026/7 ← 8/1計測948件（期待通り）
+- 帰属月が動く店舗: 336/343
+
+【運用への影響（周知事項）】
+- 7月分レポートの順位 = 8/1計測。8月分は9/1計測後に表示される（8月中は「8月分の順位」は無い）
+- 過去分も付け替えたため、提出済みレポートの順位掲載月が1ヶ月ずれて見える
+  （例: 旧「7月分」に出ていた7/1計測は「6月分」に移動）
+- 計測が月初4日以降にずれ込むと当月扱いになる → 計測バッチは毎月1〜3日に必ず実行すること
+
+【残タスク】
+- 口コミ件数・評価: Sheet2の列をどの月に書くかは運用（RPA/担当）依存。
+  7/1取得分をどの列に書いているか担当に確認（コード修正は不要の見込み）
+- デプロイ: mainプッシュ＝即本番。ユーザー承認後にコミット＆プッシュ
+
+【DB接続メモ】
+- aws-1-ap-northeast-1.pooler.supabase.com:5432 / postgres.kxxwspavskhhjtiixcep（PWはメモ.txt）

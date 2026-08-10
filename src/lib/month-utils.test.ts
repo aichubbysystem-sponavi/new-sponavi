@@ -5,6 +5,7 @@ import {
   normalizeMonthLabel,
   isCompetitorFetchAllowed,
   COMPETITOR_FETCH_MONTHS_BACK,
+  reportMonthFromMeasuredAt,
 } from "./month-utils";
 
 /**
@@ -131,5 +132,42 @@ describe("競合比較の取得可否（月が変わってもページが消え�
 
   it("遡り月数の定数が意図した値", () => {
     expect(COMPETITOR_FETCH_MONTHS_BACK).toBe(3);
+  });
+});
+
+/**
+ * このテストが守っているもの:
+ * 順位は毎月1日に「前月末時点」を計測する運用のため、7/1計測は6月分レポートの値。
+ * measured_at の月をそのまま使うと7月分に載る（2026-08-10修正の旧バグ）。
+ * 境界はJST。UTCで判定すると 7/1 08:59 JST（6/30 23:59 UTC）が6月扱いになる等ずれる。
+ */
+describe("reportMonthFromMeasuredAt（帰属月: 1〜3日は前月）", () => {
+  it("月初1〜3日(JST)の計測は前月に帰属する", () => {
+    expect(reportMonthFromMeasuredAt("2026-07-01T09:00:00+09:00")).toBe("2026/6");
+    expect(reportMonthFromMeasuredAt("2026-07-03T23:59:59+09:00")).toBe("2026/6");
+    expect(reportMonthFromMeasuredAt("2026-08-01T07:28:52+09:00")).toBe("2026/7");
+  });
+
+  it("4日以降(JST)の計測は当月のまま（月中の臨時計測を前月に入れない）", () => {
+    expect(reportMonthFromMeasuredAt("2026-07-04T00:00:00+09:00")).toBe("2026/7");
+    expect(reportMonthFromMeasuredAt("2026-06-06T10:00:00+09:00")).toBe("2026/6");
+    expect(reportMonthFromMeasuredAt("2026-07-15T12:00:00+09:00")).toBe("2026/7");
+  });
+
+  it("1月1〜3日は前年12月に帰属する（年またぎ）", () => {
+    expect(reportMonthFromMeasuredAt("2027-01-01T09:00:00+09:00")).toBe("2026/12");
+    expect(reportMonthFromMeasuredAt("2027-01-04T09:00:00+09:00")).toBe("2027/1");
+  });
+
+  it("判定はJST基準（UTC入力でも正しい日に丸める）", () => {
+    // 6/30 16:00 UTC = 7/1 01:00 JST → 1日計測なので6月分
+    expect(reportMonthFromMeasuredAt("2026-06-30T16:00:00Z")).toBe("2026/6");
+    // 7/3 15:30 UTC = 7/4 00:30 JST → 4日なので7月分
+    expect(reportMonthFromMeasuredAt("2026-07-03T15:30:00Z")).toBe("2026/7");
+  });
+
+  it("SQL backfillと同一ルール（月フォーマットはゼロパディングなし）", () => {
+    expect(reportMonthFromMeasuredAt("2026-05-01T09:00:00+09:00")).toBe("2026/4");
+    expect(reportMonthFromMeasuredAt("2026-10-05T09:00:00+09:00")).toBe("2026/10");
   });
 });

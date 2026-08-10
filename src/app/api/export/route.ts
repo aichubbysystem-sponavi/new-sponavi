@@ -225,11 +225,12 @@ export async function GET(request: NextRequest) {
 
       // ── 多地点順位 ────────────────────────────────────────────
       case "grid-ranking": {
+        // 帰属月(report_month)で絞る: 月初1〜3日計測は前月分（レポート表示と同じ基準）。
+        // measured_atの時刻範囲で絞ると7/1計測が「7月分」に入り、画面のレポートとズレる
         const logs = await fetchAll<any>((f, t) =>
           sb.from("grid_ranking_logs")
-            .select("shop_id, keyword, grid_size, interval_m, results, measured_at")
-            .gte("measured_at", mk.startIso)
-            .lt("measured_at", mk.endIso)
+            .select("shop_id, keyword, grid_size, interval_m, results, measured_at, report_month")
+            .eq("report_month", mk.slashNoPad)
             .order("measured_at", { ascending: false })
             .order("id", { ascending: true }) // ページング安定用
             .range(f, t)

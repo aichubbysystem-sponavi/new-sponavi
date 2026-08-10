@@ -8,6 +8,7 @@ import { readShopListFromCache, readReportDataFromCache, writeReportDataToCache 
 import { normalizeKw } from "./keyword-normalize";
 import { getShopsFromSpreadsheet, getReportFromSpreadsheet } from "./spreadsheet";
 import { getSupabase } from "@/lib/supabase";
+import { reportMonthFromMeasuredAt } from "@/lib/month-utils";
 
 /** "2025/10" → 202510 のように数値化して月ソート */
 function monthToNum(m: string): number {
@@ -140,13 +141,13 @@ export async function fetchGridRankingLive(shopIds: string[], shopName?: string)
     // 2. 実測データ（同じKW×月に手動データがある場合のみスキップ）
     const { data: logs } = await sb
       .from("grid_ranking_logs")
-      .select("keyword, grid_size, interval_m, results, measured_at")
+      .select("keyword, grid_size, interval_m, results, measured_at, report_month")
       .in("shop_id", shopIds)
       .order("measured_at", { ascending: true });
     if (logs && logs.length > 0) {
       for (const log of logs) {
-        const d = new Date(log.measured_at);
-        const monthKey = `${d.getFullYear()}/${d.getMonth() + 1}`;
+        // 帰属月: report_month列を優先（月初計測=前月分。無い行のみ同一ルールで導出）
+        const monthKey = log.report_month || reportMonthFromMeasuredAt(log.measured_at);
         const kw = normalizeKw(log.keyword);
         // 同一KW×同一月に手動/生成データがあれば実測はスキップ（手動を優先）
         if (overrideKeys.has(`${monthKey}::${kw}`)) continue;

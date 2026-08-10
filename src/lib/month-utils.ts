@@ -61,3 +61,26 @@ export function normalizeMonthLabel(m: string | null | undefined): string {
   if (!n) return "";
   return `${Math.floor(n / 100)}/${n % 100}`;
 }
+
+/**
+ * 順位計測時刻（ISO）→ レポート帰属月 "YYYY/M"。
+ *
+ * 順位は毎月1日（前月末時点のスナップショット）に計測する運用のため、
+ * JSTで1〜3日の計測は「前月分レポート」の値として扱う。4日以降は当月扱い
+ * （月中の臨時計測を前月へ誤帰属させないための境界。2026-08-10決定）。
+ *
+ * grid_ranking_logs.report_month のbackfill SQL
+ * （sql/2026-08-10_grid_ranking_report_month.sql）と同一ルール。
+ * 読み取り側は report_month 列を優先し、無い行のみこの関数で導出する。
+ * measured_at の月をそのまま使うのは禁止（7/1計測が7月分に載る旧バグの再発）。
+ */
+export function reportMonthFromMeasuredAt(iso: string): string {
+  const jst = new Date(new Date(iso).getTime() + 9 * 60 * 60 * 1000);
+  let y = jst.getUTCFullYear();
+  let m = jst.getUTCMonth() + 1;
+  if (jst.getUTCDate() <= 3) {
+    m -= 1;
+    if (m === 0) { m = 12; y -= 1; }
+  }
+  return `${y}/${m}`;
+}

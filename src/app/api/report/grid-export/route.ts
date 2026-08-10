@@ -8,7 +8,8 @@ export const maxDuration = 60;
 /**
  * GET /api/report/grid-export
  * 全計測データをCSV形式でエクスポート
- * ?month=YYYY-MM でフィルタ可能（省略時は今月）
+ * ?month=YYYY-MM でフィルタ可能（省略時は今月）。
+ * 月は帰属月(report_month)基準: 月初1〜3日計測は前月分（レポート表示と同じ）
  */
 export async function GET(request: NextRequest) {
   const r = await requireRole(request, ["president", "executive", "manager"]);
@@ -17,21 +18,17 @@ export async function GET(request: NextRequest) {
   const sb = getSupabase();
   const monthParam = request.nextUrl.searchParams.get("month");
 
-  // 対象期間
+  // 対象帰属月（"YYYY/M" 形式。grid_ranking_logs.report_month と同じ）
   const now = new Date();
-  let startDate: string;
-  let endDate: string;
+  let reportMonth: string;
   let monthLabel: string;
 
   if (monthParam && /^\d{4}-\d{2}$/.test(monthParam)) {
     const [y, m] = monthParam.split("-").map(Number);
-    startDate = `${monthParam}-01T00:00:00`;
-    const lastDay = new Date(y, m, 0).getDate();
-    endDate = `${monthParam}-${String(lastDay).padStart(2, "0")}T23:59:59`;
+    reportMonth = `${y}/${m}`;
     monthLabel = `${y}年${m}月`;
   } else {
-    startDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01T00:00:00`;
-    endDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-31T23:59:59`;
+    reportMonth = `${now.getFullYear()}/${now.getMonth() + 1}`;
     monthLabel = `${now.getFullYear()}年${now.getMonth() + 1}月`;
   }
 
@@ -39,8 +36,7 @@ export async function GET(request: NextRequest) {
   const { data: logs, error } = await sb
     .from("grid_ranking_logs")
     .select("shop_id, keyword, grid_size, interval_m, results, measured_at")
-    .gte("measured_at", startDate)
-    .lte("measured_at", endDate)
+    .eq("report_month", reportMonth)
     .order("measured_at", { ascending: false })
     .limit(50000);
 

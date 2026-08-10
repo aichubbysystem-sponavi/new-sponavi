@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, verifyAuth, verifyShopAccess } from "@/lib/supabase";
 import { withAudit, requireCtxShopAccess } from "@/lib/audit";
 import { normalizeKw } from "@/lib/keyword-normalize";
+import { reportMonthFromMeasuredAt } from "@/lib/month-utils";
 
 export const dynamic = "force-dynamic";
 
@@ -149,11 +150,12 @@ export const POST = withAudit("グリッド推定生成", "DATA_OP", async (requ
     // 実測ログがあるKW×月にも推定を作らない（実測を正とし、推定で隠さない）
     if (shopId) {
       const { data: logRows } = await supabase.from("grid_ranking_logs")
-        .select("keyword, measured_at")
+        .select("keyword, measured_at, report_month")
         .eq("shop_id", shopId);
-      for (const l of (logRows || []) as { keyword: string; measured_at: string }[]) {
-        const d = new Date(l.measured_at);
-        existingKeys.add(`${normalizeKw(l.keyword)}::${d.getFullYear()}/${d.getMonth() + 1}`);
+      for (const l of (logRows || []) as { keyword: string; measured_at: string; report_month: string | null }[]) {
+        // 帰属月: report_month列を優先（月初計測=前月分。レポート表示と同じ基準で実測を保護）
+        const month = l.report_month || reportMonthFromMeasuredAt(l.measured_at);
+        existingKeys.add(`${normalizeKw(l.keyword)}::${month}`);
       }
     }
 

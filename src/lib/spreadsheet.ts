@@ -15,7 +15,7 @@ import type {
   ReviewAnalysis,
 } from "./report-data";
 import { getSupabase } from "@/lib/supabase";
-import { compareMonths } from "@/lib/month-utils";
+import { compareMonths, reportMonthFromMeasuredAt } from "@/lib/month-utils";
 
 // ── スプレッドシート設定 ──
 
@@ -391,7 +391,7 @@ async function fetchGridRankingData(
     console.log(`[grid-ranking] fetching for shopId=${shopId}`);
     const { data: logs, error } = await sb
       .from("grid_ranking_logs")
-      .select("keyword, grid_size, interval_m, results, measured_at")
+      .select("keyword, grid_size, interval_m, results, measured_at, report_month")
       .eq("shop_id", shopId)
       .order("measured_at", { ascending: true });
     console.log(`[grid-ranking] logs=${logs?.length ?? 0}, error=${error?.message ?? "none"}`);
@@ -402,8 +402,8 @@ async function fetchGridRankingData(
 
     for (const log of logs) {
       keywordSet.add(log.keyword);
-      const d = new Date(log.measured_at);
-      const monthKey = `${d.getFullYear()}/${d.getMonth() + 1}`;
+      // 帰属月: report_month列を優先（月初計測=前月分。無い行のみ同一ルールで導出）
+      const monthKey = log.report_month || reportMonthFromMeasuredAt(log.measured_at);
       const results: import("./report-data").GridPoint[] = log.results || [];
       const ranked = results.filter(r => r.rank > 0);
       const avg = ranked.length > 0 ? ranked.reduce((s, r) => s + r.rank, 0) / ranked.length : 0;

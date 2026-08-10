@@ -1403,7 +1403,8 @@ export default function GridRankingPage() {
                   <div className="flex items-center gap-2">
                     <select
                       id="csv-month"
-                      defaultValue={`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`}
+                      // デフォルトは前月: 帰属月基準(月初計測=前月分)では前月が「計測済みの最新月」
+                      defaultValue={(() => { const d = new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; })()}
                       className="text-xs border border-slate-200 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-[#003D6B]/30"
                     >
                       {Array.from({ length: 12 }, (_, i) => {

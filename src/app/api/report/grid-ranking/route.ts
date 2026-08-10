@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, verifyAuth, requireShopAccessById } from "@/lib/supabase";
 import { withAudit, requireCtxShopAccessById } from "@/lib/audit";
+import { reportMonthFromMeasuredAt } from "@/lib/month-utils";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -405,6 +406,7 @@ export const PUT = withAudit("順位実測値保存", "DATA_OP", async (request,
   ctx.detail = `${shopResPut.shopName}: 「${keyword}」${gridSize}×${gridSize}グリッド ${cleanResults.length}地点を保存`;
 
   const supabase = getSupabase();
+  const measuredAt = new Date().toISOString();
   const { error: insertErr } = await supabase.from("grid_ranking_logs").insert({
     id: crypto.randomUUID(),
     shop_id: shopId,
@@ -412,7 +414,9 @@ export const PUT = withAudit("順位実測値保存", "DATA_OP", async (request,
     grid_size: gridSize,
     interval_m: interval,
     results: cleanResults,
-    measured_at: new Date().toISOString(),
+    measured_at: measuredAt,
+    // 帰属月: 月初1〜3日の計測は前月分レポートの値（詳細は month-utils.ts）
+    report_month: reportMonthFromMeasuredAt(measuredAt),
   });
 
   if (insertErr) {
