@@ -110,3 +110,70 @@ autoFocus要素にフォーカスを移す際その要素までスクロール�
 - KpiDataに comparisonLabel（前年同月比/先月比）を追加。各pairのprevは選択した基準月の値
 - 表記ルール: 最初の表示回数のみ「（前年同月比－64.3％）」とラベル付き、以降は「（＋80.1％）」
 - 初月テンプレート（v2で導入）は変更なし
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## 【2026-08-11】セッション総括
+
+### 決定事項
+- KPIサマリーとコンバージョン表の連動は「同じ上書きキー(g|月|field)を共有」の既存設計を維持。
+  バグはUI表示位置の識別だけ分離して解決（保存キー体系は変えない）
+- 「まとめ」手動編集は pmax_report_settings.summary_override に永続保存。
+  空文字=上書きなし（AI生成文に戻る）。共有URL発行時も手動文優先
+- まとめAI文章は3テンプレート運用に決定:
+  ①初月（当月より前の広告実績なし）=初月用文章・比較なし
+  ②2ヶ月目以降+前年同月あり=3セクション構成・前年同月比
+  ③2ヶ月目以降+前年同月なし=3セクション構成・先月比に自動フォールバック
+- GBP当月行があるのに前年同月GBP行が無い店舗は全項目NEW表記を避けるため先月比に倒す
+- マイグレーション未適用でも既存機能が壊れないよう防御コードを入れる方針
+  （select("*")化＋summary_override除外リトライ）
+
+### 変更内容（具体的に）
+- src/components/pmax-report-view.tsx:
+  ed()に第4引数uiId追加（activeKey=保存キー/activeUiId=表示位置を分離）。
+  KPIカード3箇所に uiId=`kpi:${editKey}` を付与しページ跳躍を解消。
+  まとめページに編集モード時のtextarea UI（保存/キャンセル/AI生成文に戻す）。
+  summaryText表示は (summaryOverride || summaryTextRaw).replace(/\*\*/g,"")
+- src/lib/pmax-overrides.ts(+test): PmaxReportSettingsにsummaryOverride追加。
+  parseReportSettingsでsummary_override列（文字列のみ）をパース
+- src/app/api/pmax/report-settings/route.ts:
+  GETをselect("*")化。PUTにsummary_override保存+列未作成時の除外リトライ
+- src/app/api/pmax/share/[token]/route.ts・group-share/[token]/store/route.ts:
+  settings読込をselect("*")化、summaryOverrideをレスポンスに追加
+- src/app/pmax/share/[token]/page.tsx・group/[token]/store/page.tsx・store/page.tsx:
+  settingsにsummaryOverrideを読み書き。共有URL発行時のsummaryTextは手動文優先
+- src/app/api/pmax/summary-text/route.ts:
+  SYSTEM_PROMPTを2本化（FIRST_MONTH/ONGOING）。ONGOINGは3セクション構成。
+  KpiDataにisFirstMonth/comparisonLabel/reservation追加。生成直後に**除去
+- src/app/pmax/store/page.tsx: 初月判定・前年同月集計・useYoy判定を追加してbodyに送信
+- sql/2026-08-11_pmax_summary_override.sql: summary_override TEXT列追加（本番適用済み）
+
+### 数値・設定値
+- PROMPT_VERSION: v1 → v3（v2=初月/継続の2本化、v3=継続を3セクション化）
+- pmax_report_settings.summary_override: TEXT、NULL/空=上書きなし
+- 初月判定: monthlyの当月より前の行で imp/clicks/cost いずれか>0 が1件も無ければ初月
+- 前年同月比採用条件: 前年同月の広告実績あり AND (GBP当月行なし OR 前年同月GBP行あり)
+- まとめ再生成コスト: 1回約1〜2円（claude-sonnet-4-6）。v3化で全キャッシュ無効、
+  開いた店舗×月のみ再生成（全321店舗でも上限500円前後）
+- CTR評価文の条件: 0.3％以上なら業界平均0.3〜0.6％と比較、未満なら省略（従来踏襲）
+- コミット: 87800a9（バグ修正+まとめ編集）→ fbf32df（v2）→ e4f3808（v3）
+
+### 未解決・次回やること
+- 本番での実生成文面の確認（初月店舗/前年比店舗/先月比店舗を各1店舗）が未実施
+- KPIカードのページ跳躍解消・まとめ手動編集の実ブラウザ動作確認も未実施
+- 継続テンプレの文言微調整はユーザーの出力確認後に発生しうる
+- 既発行の共有URLに残る旧文面（**入り等）は表示時replaceで対処済みだが、
+  文面自体を差し替えるには「共有URLを発行」の押し直しが必要（URLは変わらない）
+
+### 注意点・ハマったこと
+- ユーザーが「2パターンの文章」として同一テキストを2回貼付→AskUserQuestionの回答も同一
+  →3度目でようやく別文面（3セクション構成）が判明。同一性の指摘は具体的に
+  「1文字も違わない」と伝え、正しい方の再貼付を促すのが早い
+- ed()の入力欄判定に保存キーを流用すると、同一キーが複数ページに描画される構成で
+  input autoFocusが複数同時生成→ブラウザが最後の要素へ自動スクロール
+  =「クリックしたら別ページに飛ぶ」に見える。保存キーとUI位置IDは必ず分離
+- 新カラム追加時のデプロイ順序罠（再発2回目・owner_id 169件全滅と同型）:
+  クライアントが常に新フィールドを送る設計だと、列未作成のDBでは既存機能の保存まで全滅。
+  さらにselect("列名")のエラー握りつぶしで共有URLの手動編集が全部消えて見える。
+  → 読みはselect("*")、書きは新列除外リトライで「列が無くても壊れない」を担保してから
+    マイグレーションを依頼する順序が安全
+- 「完璧？」と聞かれたら安心報告せず再検証（今回も上記デプロイ順序バグが実在した）
