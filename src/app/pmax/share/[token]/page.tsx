@@ -34,8 +34,8 @@ export default function SharedPmaxReport() {
           month: d.month,
           summaryText: d.summaryText || "",
         });
-        // 管理画面で手動編集した数値・表示設定を共有側でも反映
-        setSettings({ overrides: d.overrides || {}, sectionVisibility: d.sectionVisibility || {} });
+        // 管理画面で手動編集した数値・表示設定・まとめ文章を共有側でも反映
+        setSettings({ overrides: d.overrides || {}, sectionVisibility: d.sectionVisibility || {}, summaryOverride: d.summaryOverride || "" });
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : "エラーが発生しました");
       } finally {

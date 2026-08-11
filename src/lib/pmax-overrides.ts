@@ -27,9 +27,11 @@ export type PmaxSectionVisibility = Record<string, boolean>;
 export type PmaxReportSettings = {
   overrides: PmaxOverrides;
   sectionVisibility: PmaxSectionVisibility;
+  // 「まとめ」AI文章の手動上書き。空文字＝上書きなし（AI生成文をそのまま使う）
+  summaryOverride: string;
 };
 
-export const EMPTY_PMAX_SETTINGS: PmaxReportSettings = { overrides: {}, sectionVisibility: {} };
+export const EMPTY_PMAX_SETTINGS: PmaxReportSettings = { overrides: {}, sectionVisibility: {}, summaryOverride: "" };
 
 type AdsLikeRow = {
   impressions: number;
@@ -89,6 +91,7 @@ export function applyGbpOverrides(
 export function parseReportSettings(row: {
   overrides?: unknown;
   section_visibility?: unknown;
+  summary_override?: unknown;
 } | null): PmaxReportSettings {
   const overrides: PmaxOverrides = {};
   if (row?.overrides && typeof row.overrides === "object") {
@@ -105,5 +108,6 @@ export function parseReportSettings(row: {
       if (typeof v === "boolean") sectionVisibility[k] = v;
     }
   }
-  return { overrides, sectionVisibility };
+  const summaryOverride = typeof row?.summary_override === "string" ? row.summary_override : "";
+  return { overrides, sectionVisibility, summaryOverride };
 }

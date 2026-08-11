@@ -1,0 +1,70 @@
+【2026-08-11】P-MAXレポート「炭焼 うな富士 福岡大名別邸」7月分の編集不具合3件対応
+
+■ 症状（ユーザー報告）
+1. KPIサマリーの「合計来店数・電話・経路案内・メニュークリック・予約・WEBサイト・保存共有写真」を
+   編集モードでクリックすると数値入力にならず、ページが2/6（コンバージョン推移）に飛ぶ
+   （総表示回数・総クリック・総広告費は正常に編集できていた）
+2. 上記KPIカードを編集したら2/6のコンバージョン推移表にも反映してほしい
+3. 6/6「まとめ」ページ（AI生成の総評文）を手動編集して保存できるようにしてほしい
+
+■ 原因（1・2は同一根本原因）
+src/components/pmax-report-view.tsx の ed() 関数は、上書きキー（例: g|2026/07|totalVisits）を
+「今どのセルが入力欄になっているか」を判定する activeKey にもそのまま使っていた。
+ところがこのキーは
+  - P1 KPIサマリーカード（合計来店数など、editKey: g|<月>|<field>）
+  - P2 コンバージョン推移表の当月列（同じ g|<月>|<field>）
+の2箇所で完全に同一の文字列になる。クリックしてactiveKeyをセットすると、
+同じレンダーで両方のed()呼び出しが「自分がactiveKeyと一致した」と判定し、
+2箇所同時に<input autoFocus>が生成される。ブラウザは最後にマウントされた
+autoFocus要素にフォーカスを移す際その要素までスクロールするため、
+見た目上「ページ2に飛んだ」ように見えていた（実際は同じ値が2箇所編集可能になっていただけ）。
+総表示回数等（k|<月>|<field>キー）はP1にしか登場しないため症状が出なかった。
+
+■ 修正
+- activeKey（保存キー・入力の確定に使う）とは別に activeUiId（どのレンダー位置の入力欄かを
+  区別するID）を新設。ed(key, display, rawForInput, uiId=key) の第4引数で明示的に指定。
+- P1のKPIサマリーカード（kpiCards.slice内の3箇所）だけ uiId=`kpi:${kpi.editKey}` を付与し、
+  コンバージョン推移表側の同名キーと衝突しないようにした。
+- 保存先キー（g|<月>|<field>）自体はP1・P2で共通のまま。したがって編集は自動的に両方に反映される
+  （項目2は1の修正だけで解決。データ側の仕組みは元々共通overridesを参照していたため追加対応不要）。
+
+■ まとめページの手動編集（項目3）
+- pmax_report_settings テーブルに summary_override カラムを追加
+  （sql/2026-08-11_pmax_summary_override.sql、本番Supabaseダッシュボードで要実行）
+- src/lib/pmax-overrides.ts: PmaxReportSettings に summaryOverride: string を追加。
+  parseReportSettings で summary_override 列をパース。空文字="上書きなし"（AI生成文をそのまま使う）。
+- PmaxReportViewの表示テキストは summaryOverride || data.summaryText（override優先）。
+  editable=trueの管理画面のみ、6/6ページをクリックすると<textarea>に切り替わり、
+  保存/キャンセル/AI生成文に戻す の3ボタンで操作。保存は既存のonSettingsChange経由で
+  数値上書き・表示設定と同じPUT /api/pmax/report-settings に相乗り。
+- 「共有URLを発行」時に送るsummaryTextも settings.summaryOverride || summaryText に変更し、
+  手動編集した文章がそのまま共有URLのスナップショットにも入るようにした。
+- share/[token]・group-share/[token]/store の両APIとフロント（share/[token]/page.tsx、
+  group/[token]/store/page.tsx）にも summaryOverride の読み書きを追加し、共有ページでも
+  手動編集後の文章が表示されるようにした。
+
+■ 確認
+- npx vitest run: 18 files / 399 tests 全通過（pmax-overrides.test.tsに summary_override 用ケース追加）
+- npx next build: エラーなし成功
+- ブラウザでの実クリック確認は未実施（次回ユーザー側で本番/localで要確認）
+
+■ 再検証（「完璧？」確認）で見つけたデプロイ順序の罠と防御コード
+ユーザーの再確認要求で洗い直したところ、SQLマイグレーション未実行のままデプロイすると
+既存機能まで巻き添えで壊れる問題を発見・修正した:
+1. PUT /api/pmax/report-settings はクライアントが常にsummaryOverrideを送るため、
+   summary_override列が無いと「column does not exist」で数値編集・表示設定の保存が
+   全て失敗する（2026-08-08のowner_id列169件全滅と同型）。
+   → 保存エラーがsummary_overrideに言及していたら同フィールドを除外して1回だけ再保存する
+     フォールバックを追加（既存機能は列が無くても動く）
+2. さらに深刻: share/[token]・group-share/[token]/store は
+   select("... summary_override") のエラーを握りつぶして data=null になるため、
+   共有URL上で既存の手動編集数値が「全部消えた」ように見える（サイレント）。
+   → 3箇所の読み込みを select("*") に変更。存在する列だけがparseReportSettingsに
+     渡るので、列の有無に関わらず安全（重要ナレッジ「APIエラーを握りつぶさない」の実例）
+- group-share/[token]（グループ一覧）は select("shop_name, overrides") のみで無関係と確認
+- 修正後に再実行: vitest 399件全通過 / next build エラーなし
+
+■ 残作業
+- sql/2026-08-11_pmax_summary_override.sql を本番Supabaseダッシュボードで実行する必要あり
+  （上記フォールバックにより列が無くても既存機能・デプロイは壊れないが、
+  「まとめ」手動編集の保存だけは列を作るまで永続化されない）

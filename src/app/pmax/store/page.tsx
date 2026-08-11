@@ -89,7 +89,7 @@ function StoreDetailContent() {
         const res = await fetch(`/api/pmax/report-settings?shopName=${encodeURIComponent(shopName)}`, { headers });
         if (res.ok) {
           const d = await res.json();
-          setSettings({ overrides: d.overrides || {}, sectionVisibility: d.sectionVisibility || {} });
+          setSettings({ overrides: d.overrides || {}, sectionVisibility: d.sectionVisibility || {}, summaryOverride: d.summaryOverride || "" });
         }
       } catch {
         // 読み込み失敗時はデフォルト（全表示・上書きなし）のまま
@@ -111,7 +111,7 @@ function StoreDetailContent() {
         const res = await fetch("/api/pmax/report-settings", {
           method: "PUT",
           headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-          body: JSON.stringify({ shopName, overrides: next.overrides, sectionVisibility: next.sectionVisibility }),
+          body: JSON.stringify({ shopName, overrides: next.overrides, sectionVisibility: next.sectionVisibility, summaryOverride: next.summaryOverride }),
         });
         setSaveState(res.ok ? "saved" : "error");
       } catch {
@@ -235,7 +235,7 @@ function StoreDetailContent() {
                 const res = await fetch("/api/pmax/share", {
                   method: "POST",
                   headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-                  body: JSON.stringify({ shopName, year: targetYear, month: targetMonthNum, summaryText }),
+                  body: JSON.stringify({ shopName, year: targetYear, month: targetMonthNum, summaryText: settings.summaryOverride || summaryText }),
                 });
                 if (!res.ok) throw new Error("発行失敗");
                 const { token: shareToken } = await res.json();

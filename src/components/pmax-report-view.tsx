@@ -167,8 +167,10 @@ export default function PmaxReportView({ data, backHref, settings, editable = fa
   onSettingsChange?: (next: PmaxReportSettings) => void;
   saveState?: "" | "saving" | "saved" | "error";
 }) {
-  const { monthly, daily, gbp: gbpRaw, channels: channelsRaw = [], shopName, year: targetYear, month: targetMonthNum, summaryText = "" } = data;
-  const { overrides, sectionVisibility } = settings || EMPTY_PMAX_SETTINGS;
+  const { monthly, daily, gbp: gbpRaw, channels: channelsRaw = [], shopName, year: targetYear, month: targetMonthNum, summaryText: summaryTextRaw = "" } = data;
+  const { overrides, sectionVisibility, summaryOverride } = settings || EMPTY_PMAX_SETTINGS;
+  // 手動編集した「まとめ」文章があればそちらを優先表示（AI生成文は上書きしない）
+  const summaryText = summaryOverride || summaryTextRaw;
   // 表示設定: 未設定キーは表示（falseだけ非表示）
   const vis = (key: string) => sectionVisibility[key] !== false;
   const canEdit = editable && !!onSettingsChange;
@@ -176,8 +178,14 @@ export default function PmaxReportView({ data, backHref, settings, editable = fa
   // 編集モード（数値クリック→インライン入力）
   const [editMode, setEditMode] = useState(false);
   const [activeKey, setActiveKey] = useState<string | null>(null);
+  // 同じ上書きキー（g|<月>|<field>）がKPIサマリーとコンバージョン表など複数箇所に
+  // 同時に描画されるため、「今どのインスタンスが入力欄になっているか」は別IDで区別する
+  // （区別しないと両方に同時にinput autoFocusが生成され、後者へブラウザが自動スクロールしてしまう）
+  const [activeUiId, setActiveUiId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [showSettings, setShowSettings] = useState(false);
+  const [summaryEditing, setSummaryEditing] = useState(false);
+  const [summaryDraft, setSummaryDraft] = useState("");
 
   // ── データ集計 ──
   const currentMonthKey = `${targetYear}-${String(targetMonthNum).padStart(2, "0")}`;
@@ -361,9 +369,10 @@ export default function PmaxReportView({ data, backHref, settings, editable = fa
 
   // ── 編集モード: 数値クリック→インライン入力。空で確定すると元の値に戻す ──
   const commitEdit = () => {
-    if (!activeKey || !onSettingsChange) { setActiveKey(null); return; }
+    if (!activeKey || !onSettingsChange) { setActiveKey(null); setActiveUiId(null); return; }
     const key = activeKey;
     setActiveKey(null);
+    setActiveUiId(null);
     const t = draft.trim().replace(/[,，¥￥%％\s]/g, "");
     const next = { ...overrides };
     if (t === "") {
@@ -375,13 +384,19 @@ export default function PmaxReportView({ data, backHref, settings, editable = fa
       if (next[key] === n) return;
       next[key] = n;
     }
-    onSettingsChange({ overrides: next, sectionVisibility });
+    onSettingsChange({ overrides: next, sectionVisibility, summaryOverride });
   };
 
-  /** 編集対応の数値表示。編集モード中はクリックで入力欄に切り替わる */
-  const ed = (key: string, display: string, rawForInput: number | string) => {
+  /**
+   * 編集対応の数値表示。編集モード中はクリックで入力欄に切り替わる。
+   * @param uiId 入力欄インスタンスの識別子（省略時はkey）。同じ上書きキーを別々の場所
+   *             （KPIサマリーとコンバージョン表など）に描画する場合は必ず別々のuiIdを渡すこと。
+   *             同一uiIdが複数箇所にあると、複数のinput autoFocusが同時に生成され
+   *             ブラウザが最後の要素へ自動スクロールしてしまう。
+   */
+  const ed = (key: string, display: string, rawForInput: number | string, uiId: string = key) => {
     if (!canEdit || !editMode) return <>{display}</>;
-    if (activeKey === key) {
+    if (activeUiId === uiId) {
       return (
         <input
           autoFocus
@@ -390,7 +405,7 @@ export default function PmaxReportView({ data, backHref, settings, editable = fa
           onBlur={commitEdit}
           onKeyDown={(e) => {
             if (e.key === "Enter") commitEdit();
-            else if (e.key === "Escape") setActiveKey(null);
+            else if (e.key === "Escape") { setActiveKey(null); setActiveUiId(null); }
           }}
           style={{ width: 80, maxWidth: "100%", fontSize: "inherit", fontWeight: "inherit", textAlign: "center", border: "1.5px solid #e94560", borderRadius: 4, padding: "1px 4px", color: "#1a1a2e", background: "#fff", boxSizing: "border-box" }}
         />
@@ -399,7 +414,7 @@ export default function PmaxReportView({ data, backHref, settings, editable = fa
     const isOverridden = overrides[key] !== undefined;
     return (
       <span
-        onClick={() => { setActiveKey(key); setDraft(String(rawForInput)); }}
+        onClick={() => { setActiveKey(key); setActiveUiId(uiId); setDraft(String(rawForInput)); }}
         title={isOverridden ? "手動編集済み。クリックで再編集（空にして確定すると元の値に戻ります）" : "クリックして編集"}
         style={{ cursor: "pointer", borderBottom: "1.5px dashed #e94560", background: isOverridden ? "rgba(233,69,96,.14)" : undefined, borderRadius: 2 }}
       >{display}</span>
@@ -408,7 +423,7 @@ export default function PmaxReportView({ data, backHref, settings, editable = fa
 
   const toggleSection = (key: string) => {
     if (!onSettingsChange) return;
-    onSettingsChange({ overrides, sectionVisibility: { ...sectionVisibility, [key]: !vis(key) } });
+    onSettingsChange({ overrides, sectionVisibility: { ...sectionVisibility, [key]: !vis(key) }, summaryOverride });
   };
 
   const kpiCards = [
@@ -451,13 +466,13 @@ export default function PmaxReportView({ data, backHref, settings, editable = fa
         <div style={{ flex: 1, padding: "20px 36px", overflow: "hidden" }}>
           <div style={stitleStyle}>主要指標サマリー（{currentMonth}）</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14, marginBottom: 14 }}>
-            {kpiCards.slice(0, 3).map((kpi, i) => <KpiCard key={kpi.label} kpi={kpi} colorIdx={i} valueNode={canEdit ? ed(kpi.editKey, kpi.format(kpi.value), kpi.editRaw) : undefined} />)}
+            {kpiCards.slice(0, 3).map((kpi, i) => <KpiCard key={kpi.label} kpi={kpi} colorIdx={i} valueNode={canEdit ? ed(kpi.editKey, kpi.format(kpi.value), kpi.editRaw, `kpi:${kpi.editKey}`) : undefined} />)}
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14, marginBottom: 14 }}>
-            {kpiCards.slice(3, 6).map((kpi, i) => <KpiCard key={kpi.label} kpi={kpi} colorIdx={i + 3} valueNode={canEdit ? ed(kpi.editKey, kpi.format(kpi.value), kpi.editRaw) : undefined} />)}
+            {kpiCards.slice(3, 6).map((kpi, i) => <KpiCard key={kpi.label} kpi={kpi} colorIdx={i + 3} valueNode={canEdit ? ed(kpi.editKey, kpi.format(kpi.value), kpi.editRaw, `kpi:${kpi.editKey}`) : undefined} />)}
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 14 }}>
-            {kpiCards.slice(6, 10).map((kpi, i) => <KpiCard key={kpi.label} kpi={kpi} colorIdx={i + 6} valueNode={canEdit ? ed(kpi.editKey, kpi.format(kpi.value), kpi.editRaw) : undefined} />)}
+            {kpiCards.slice(6, 10).map((kpi, i) => <KpiCard key={kpi.label} kpi={kpi} colorIdx={i + 6} valueNode={canEdit ? ed(kpi.editKey, kpi.format(kpi.value), kpi.editRaw, `kpi:${kpi.editKey}`) : undefined} />)}
           </div>
         </div>
       </div>
@@ -727,9 +742,66 @@ export default function PmaxReportView({ data, backHref, settings, editable = fa
           </div>
           <div style={{ ...slideBodyStyle, justifyContent: "flex-start", paddingTop: 36 }}>
             <div style={stitleStyle}>まとめ</div>
-            <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", fontSize: 15, lineHeight: 1.8, color: "#333", whiteSpace: "pre-wrap" }}>
-              {summaryText}
-            </div>
+            {canEdit && editMode ? (
+              summaryEditing ? (
+                <div>
+                  <textarea
+                    autoFocus
+                    value={summaryDraft}
+                    onChange={(e) => setSummaryDraft(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Escape") setSummaryEditing(false); }}
+                    style={{ width: "100%", minHeight: 260, fontSize: 15, lineHeight: 1.8, color: "#333", padding: "24px 28px", borderRadius: 12, border: "1.5px solid #e94560", boxSizing: "border-box", fontFamily: "inherit", resize: "vertical" }}
+                  />
+                  <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                    <button
+                      onClick={() => {
+                        setSummaryEditing(false);
+                        if (!onSettingsChange) return;
+                        const next = summaryDraft.trim() === "" ? "" : summaryDraft;
+                        if (next === summaryOverride) return;
+                        onSettingsChange({ overrides, sectionVisibility, summaryOverride: next });
+                      }}
+                      style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: "#e94560", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+                    >
+                      保存
+                    </button>
+                    <button
+                      onClick={() => setSummaryEditing(false)}
+                      style={{ padding: "8px 20px", borderRadius: 8, border: "1px solid #ccc", background: "#fff", color: "#666", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+                    >
+                      キャンセル
+                    </button>
+                    {summaryOverride && (
+                      <button
+                        onClick={() => {
+                          if (!confirm("手動編集を取り消してAI生成文に戻します。よろしいですか？")) return;
+                          setSummaryEditing(false);
+                          onSettingsChange?.({ overrides, sectionVisibility, summaryOverride: "" });
+                        }}
+                        style={{ padding: "8px 20px", borderRadius: 8, border: "1px solid #f0c0c8", background: "#fef1f3", color: "#c0392b", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+                      >
+                        AI生成文に戻す
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div
+                  onClick={() => { setSummaryEditing(true); setSummaryDraft(summaryText); }}
+                  title="クリックして編集"
+                  style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", fontSize: 15, lineHeight: 1.8, color: "#333", whiteSpace: "pre-wrap", cursor: "pointer", border: summaryOverride ? "1.5px dashed #e94560" : "1.5px dashed transparent" }}
+                >
+                  {summaryText}
+                  <div style={{ fontSize: 11, color: "#e94560", marginTop: 12, fontWeight: 600 }}>
+                    クリックして編集{summaryOverride ? "（手動編集済み）" : ""}
+                  </div>
+                </div>
+              )
+            ) : (
+              <div style={{ background: "#fff", borderRadius: 12, padding: "24px 28px", fontSize: 15, lineHeight: 1.8, color: "#333", whiteSpace: "pre-wrap" }}>
+                {summaryText}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -755,7 +827,7 @@ export default function PmaxReportView({ data, backHref, settings, editable = fa
               表示設定
             </button>
             <button
-              onClick={() => { setEditMode(!editMode); setActiveKey(null); }}
+              onClick={() => { setEditMode(!editMode); setActiveKey(null); setActiveUiId(null); setSummaryEditing(false); }}
               style={{ padding: "10px 18px", borderRadius: 10, border: "none", background: editMode ? "#e94560" : "#0f3460", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 16px rgba(0,0,0,.3)" }}
             >
               {editMode ? "編集を終了" : "数値を編集"}
@@ -807,7 +879,7 @@ export default function PmaxReportView({ data, backHref, settings, editable = fa
                   <button
                     onClick={() => {
                       if (!confirm("この店舗の手動編集した数値をすべて元に戻します。よろしいですか？")) return;
-                      onSettingsChange?.({ overrides: {}, sectionVisibility });
+                      onSettingsChange?.({ overrides: {}, sectionVisibility, summaryOverride });
                     }}
                     style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid #f0c0c8", background: "#fef1f3", color: "#c0392b", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
                   >

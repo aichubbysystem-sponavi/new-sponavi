@@ -16,10 +16,13 @@ export async function GET(request: NextRequest) {
   const shopName = request.nextUrl.searchParams.get("shopName");
   if (!shopName) return NextResponse.json({ error: "shopName は必須です" }, { status: 400 });
 
+  // select("*")で列名を明示しない: summary_override列のマイグレーション未適用でも
+  // エラーにならず、存在する列だけがparseReportSettingsに渡る（列名指定だと全体がエラー→
+  // 既存の数値上書きまで消えたように見える）
   const sb = getSupabase();
   const { data, error } = await sb
     .from("pmax_report_settings")
-    .select("overrides, section_visibility")
+    .select("*")
     .eq("shop_name", shopName)
     .maybeSingle();
 
@@ -43,15 +46,17 @@ export const PUT = withAudit("P-MAXレポート表示設定保存", "DATA_OP", a
   }
   ctx.targetShop = shopName;
 
-  // 送られてきた値を数値/真偽だけに絞って保存（不正型の混入防止）
+  // 送られてきた値を数値/真偽/文字列だけに絞って保存（不正型の混入防止）
   const clean = parseReportSettings({
     overrides: body?.overrides,
     section_visibility: body?.sectionVisibility,
+    summary_override: body?.summaryOverride,
   });
 
   const row: Record<string, unknown> = { shop_name: shopName, updated_at: new Date().toISOString() };
   if (body?.overrides !== undefined) row.overrides = clean.overrides;
   if (body?.sectionVisibility !== undefined) row.section_visibility = clean.sectionVisibility;
+  if (body?.summaryOverride !== undefined) row.summary_override = clean.summaryOverride || null;
 
   const sb = getSupabase();
 
@@ -62,9 +67,20 @@ export const PUT = withAudit("P-MAXレポート表示設定保存", "DATA_OP", a
     .eq("shop_name", shopName)
     .maybeSingle();
 
-  const { error } = existing
-    ? await sb.from("pmax_report_settings").update(row).eq("shop_name", shopName)
-    : await sb.from("pmax_report_settings").insert(row);
+  const save = (r: Record<string, unknown>) =>
+    existing
+      ? sb.from("pmax_report_settings").update(r).eq("shop_name", shopName)
+      : sb.from("pmax_report_settings").insert(r);
+
+  let { error } = await save(row);
+
+  // summary_override列のマイグレーション未適用でも数値上書き・表示設定の保存は通す
+  // （列が無いと行全体の保存が失敗し、既存機能まで巻き添えで壊れるため）
+  if (error && row.summary_override !== undefined && error.message.includes("summary_override")) {
+    console.error("[pmax/report-settings] summary_override列が未作成のため除外して再保存:", error.message);
+    const { summary_override: _dropped, ...rest } = row;
+    ({ error } = await save(rest));
+  }
 
   if (error) {
     console.error("[pmax/report-settings] save error:", error.message);
@@ -74,6 +90,7 @@ export const PUT = withAudit("P-MAXレポート表示設定保存", "DATA_OP", a
   const parts = [
     body?.overrides !== undefined ? `数値上書き${Object.keys(clean.overrides).length}件` : null,
     body?.sectionVisibility !== undefined ? "表示設定" : null,
+    body?.summaryOverride !== undefined ? "まとめ文章" : null,
   ].filter(Boolean).join("・");
   ctx.detail = `${shopName}: ${parts || "変更なし"}を保存`;
   return NextResponse.json({ success: true });

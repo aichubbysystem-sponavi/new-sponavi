@@ -77,8 +77,8 @@ describe("applyGbpOverrides", () => {
 
 describe("parseReportSettings", () => {
   it("nullやundefinedでも空設定を返す", () => {
-    expect(parseReportSettings(null)).toEqual({ overrides: {}, sectionVisibility: {} });
-    expect(parseReportSettings({})).toEqual({ overrides: {}, sectionVisibility: {} });
+    expect(parseReportSettings(null)).toEqual({ overrides: {}, sectionVisibility: {}, summaryOverride: "" });
+    expect(parseReportSettings({})).toEqual({ overrides: {}, sectionVisibility: {}, summaryOverride: "" });
   });
 
   it("数値以外のoverrides・真偽以外のvisibilityは捨てる", () => {
@@ -88,5 +88,11 @@ describe("parseReportSettings", () => {
     });
     expect(r.overrides).toEqual({ a: 1, b: 2 });
     expect(r.sectionVisibility).toEqual({ x: false, z: true });
+  });
+
+  it("summary_overrideは文字列のみ通す", () => {
+    expect(parseReportSettings({ summary_override: "手動編集した文章" }).summaryOverride).toBe("手動編集した文章");
+    expect(parseReportSettings({ summary_override: 123 }).summaryOverride).toBe("");
+    expect(parseReportSettings({ summary_override: null }).summaryOverride).toBe("");
   });
 });

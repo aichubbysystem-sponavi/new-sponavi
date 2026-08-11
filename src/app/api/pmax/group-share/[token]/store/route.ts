@@ -179,9 +179,11 @@ export async function GET(
     }
 
     // 手動編集（数値上書き・表示設定）を共有側にも反映
+    // select("*"): summary_override列のマイグレーション未適用でもエラーにせず、
+    // 存在する列だけを反映する（列名指定だとエラー握りつぶし→手動編集が全部消えて見える）
     const { data: settingsRow } = await sb
       .from("pmax_report_settings")
-      .select("overrides, section_visibility")
+      .select("*")
       .eq("shop_name", dbShopName)
       .maybeSingle();
     const settings = parseReportSettings(settingsRow);
@@ -197,6 +199,7 @@ export async function GET(
       summaryText,
       overrides: settings.overrides,
       sectionVisibility: settings.sectionVisibility,
+      summaryOverride: settings.summaryOverride,
     });
   } catch (err) {
     console.error("[pmax/group-share/token/store] Error:", err);
