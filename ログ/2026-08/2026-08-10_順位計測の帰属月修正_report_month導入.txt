@@ -99,3 +99,66 @@ RPAのoverrides二重書き込みは8/1計測では発生していないが、�
 2. KWシート側の順位月ラベルが暦月のままの可能性（未検証）
    → シート7月列とグリッド6月中心順位が頻繁に一致するなら暦月ラベル。RPA担当への確認事項
 3. grid-ranking/route.ts:15 の「格子幅≈1km」コメントが実態(100〜500m可変)と不一致（軽微・次回修正）
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+## 【2026-08-10】セッション総括
+
+### 決定事項
+- 順位の帰属月ルール: JSTで計測日1〜3日→前月 / 4日以降→当月（ユーザー承認）
+- 適用範囲: 過去分も全部付け替え（提出済みレポートの月表示が変わる点も承認）
+- RPA二重書き込みの複製overrides 1,941件は削除（実測ログが正）
+- 8月中の追加計測はしない（テスト段階のため。7月分未計測の約160店舗は推定/未計測表示のまま）
+- 多地点順位の距離は 100m/300m/500m/700m/1km の5択に変更（1.5km以上廃止）
+- 100m計測の実用性（半径2000m固定問題）は案A: まず実測で順位差が出るか確認してから判断
+
+### 変更内容（具体的に）
+- DB: grid_ranking_logs に report_month(text) 追加＋全5,064件backfill（measured_atは不変）
+  sql/2026-08-10_grid_ranking_report_month.sql に記録
+- DB: grid_ranking_overrides から複製1,941件削除（rank列完全一致×時刻±60秒のlogが存在する行）
+  削除行は Downloads\grid_ranking_backup_20260810\deleted_duplicate_overrides.json に保存
+- src/lib/month-utils.ts: reportMonthFromMeasuredAt() 追加（帰属月導出の単一実装）
+- src/lib/report-api.ts fetchGridRankingLive / src/lib/spreadsheet.ts fetchGridRankingData:
+  monthKey を report_month ?? reportMonthFromMeasuredAt() に変更
+- src/app/api/report/grid-ranking/route.ts: insert時に report_month スタンプ。
+  gridFactor の clamp下限 0.25→0.1（100m計測のキャッシュセル衝突防止）
+- src/app/api/export/route.ts (grid-ranking) / src/app/api/report/grid-export/route.ts:
+  measured_at範囲フィルタ → report_month 一致に変更
+- src/app/api/report/grid-ranking-generate/route.ts: 実測保護の既存キー判定を帰属月基準に
+- src/app/grid-ranking/page.tsx: INTERVALS を新5択に、CSV月セレクタのデフォルトを前月に、
+  格子丸め注記を更新（例: 700m↔1km）
+- src/app/api/report/grid-interval/route.ts: ALLOWED_INTERVALS = [100,300,500,700,1000]
+- src/lib/month-utils.test.ts: 帰属月の境界テスト追加（JST境界/年またぎ/4日以降）
+- コミット: ed5dba3（帰属月）/ b9249fa（距離）+ ログ追記 a521717, 30b4ca4。全てmain=本番反映済み
+
+### 数値・設定値
+- 帰属ルール境界: JST 1〜3日→前月、4日〜→当月
+- backfill: 5,064件 / 前月へ移動 4,705件（336/343店舗）/ 不一致0 / NULL0
+- 削除overrides: 1,941件（2026/7:1632 + 2026/6系:309）。残87件（2025/10〜2026/4の履歴85 + 2026/6の2）
+- 帰属月別の実測: 2026/4:4 / 2026/5:130 / 2026/6:3,972(339店) / 2026/7:958(183店・5地点)
+- 距離選択肢: [100, 300, 500, 700, 1000]m（旧: 500〜4000）。全店舗500m/未設定のため影響ゼロ
+- gridFactor clamp: min(0.5, max(0.1, intervalM/1000))（旧下限0.25）。500m店舗のキャッシュキー不変
+- Places検索の locationBias 半径: 2000m固定（未変更・案Aの検証対象）
+
+### 未解決・次回やること
+- 【ユーザー】100m計測を2〜3店舗で実測 → 5地点全部同順位なら案B
+  （案B = 100m/300mのみ locationBias半径を interval連動に。500m以上は過去比較維持のため不変）
+- 【ユーザー→RPA担当】確認3件:
+  ① overridesへの二重書き込みを止めたか（9/1計測で再発すると同症状が9月分に出る）
+  ② KWシートの順位月列は「計測した暦月」か「前月」か（暦月ならシート側も1ヶ月ズレ→追加修正要）
+  ③ 口コミシート(Sheet2)の7/1取得値をどの月の列に書いているか
+- grid-ranking/route.ts:15 の「格子幅≈1km」コメントが実態と不一致（軽微・次回修正）
+- レポート一覧の月セレクタはカード数値と非連動（ラベルだけ変わる）— 8月分シート記入後に誤読リスク、対応未着手
+
+### 注意点・ハマったこと
+- 「overridesは運用者が前月として手入力」という初回セッションの推定は誤りだった。
+  実態は外部RPAが計測時に logs と overrides へ二重書き込み（rank列完全一致・時刻差0.3秒・
+  lat/lngのみ0）。overridesに大量の同月データがあったらまずRPA二重書き込みを疑うこと
+- overrides優先仕様のため、複製が実測を隠す。複製判定は「rank列(row,col順)完全一致×時刻±60秒」
+- gridFactor下限を下げ忘れると100m計測は「5地点全部同じキャッシュ順位」になる
+  （外周オフセット71m < 格子250mで中心セルに丸まる）。格子幅は必ず最小インターバル以下に
+- ALTER TABLE後のPostgREST: Supabaseは pgrst_ddl_watch で自動リロードされるが、
+  デプロイ前に NOTIFY pgrst, 'reload schema' ＋ set role での実SELECT/INSERT検証をやると確実
+- ローカル.env.localのSupabase URLは旧プロジェクト（DNS死）。DB調査は pooler直結
+  （aws-1-ap-northeast-1.pooler.supabase.com / postgres.kxxwspavskhhjtiixcep / PWはメモ.txt）
+- 検証スクリプトでpgのdate型をtoISOString()すると9時間ズレて前日表示になる（表示だけの罠）
