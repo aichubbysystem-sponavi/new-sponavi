@@ -157,9 +157,12 @@ function StoreDetailContent() {
         };
         const cur = sumMonth(curKey);
         const prev = sumMonth(prevKey);
+        const lastYearKey = `${targetYear - 1}-${String(targetMonthNum).padStart(2, "0")}`;
+        const lastYear = sumMonth(lastYearKey);
 
         const gbpCurKey = `${targetYear}/${String(targetMonthNum).padStart(2, "0")}`;
         const gbpPrevKey = `${prevD.getFullYear()}/${String(prevD.getMonth() + 1).padStart(2, "0")}`;
+        const gbpLastYearKey = `${targetYear - 1}/${String(targetMonthNum).padStart(2, "0")}`;
         const findGbp = (mKey: string) => {
           const row = gbpRows.find(r => r.month === mKey);
           if (!row) return undefined;
@@ -169,6 +172,7 @@ function StoreDetailContent() {
         };
         const gbpCur = findGbp(gbpCurKey);
         const gbpPrv = findGbp(gbpPrevKey);
+        const gbpLy = findGbp(gbpLastYearKey);
 
         // 初月判定: 対象月より前に実績のある広告月次データが1件も無ければ初月
         // （月キーはYYYY-MM形式なので文字列比較で時系列比較できる）
@@ -178,22 +182,31 @@ function StoreDetailContent() {
             (r.impressions > 0 || r.clicks > 0 || r.costMicros > 0),
         );
 
+        // 比較基準: 前年同月の広告実績があれば前年同月比、無ければ先月比。
+        // GBP当月データがあるのに前年同月のGBP行が無い場合は、MAP行動が全項目「NEW」に
+        // なって誤解を招くため先月比に倒す
+        const hasAdsYearData = lastYear.imp > 0 || lastYear.clk > 0 || lastYear.cost > 0;
+        const useYoy = hasAdsYearData && (!gbpCur || !!gbpLy);
+        const baseAds = useYoy ? lastYear : prev;
+        const baseGbp = useYoy ? gbpLy : gbpPrv;
+
         const body = {
           shopName, // キャッシュキー: 同じ店×月×データなら再生成せず同じ文面を返す
           monthKey: curKey,
           currentMonth: `${targetYear}年${targetMonthNum}月`,
           isFirstMonth,
-          impressions: { current: cur.imp, prev: prev.imp },
-          clicks: { current: cur.clk, prev: prev.clk },
-          cost: { current: cur.cost, prev: prev.cost },
-          ctr: { current: cur.ctr, prev: prev.ctr },
-          totalVisits: { current: gbpCur?.totalVisits ?? 0, prev: gbpPrv?.totalVisits ?? 0 },
-          phone: { current: gbpCur?.phone ?? 0, prev: gbpPrv?.phone ?? 0 },
-          directions: { current: gbpCur?.directions ?? 0, prev: gbpPrv?.directions ?? 0 },
-          menuClicks: { current: gbpCur?.menuClicks ?? 0, prev: gbpPrv?.menuClicks ?? 0 },
-          website: { current: gbpCur?.website ?? 0, prev: gbpPrv?.website ?? 0 },
-          saveShare: { current: gbpCur?.saveShare ?? 0, prev: gbpPrv?.saveShare ?? 0 },
-          reservation: { current: gbpCur?.reservation ?? 0, prev: gbpPrv?.reservation ?? 0 },
+          comparisonLabel: useYoy ? "前年同月比" : "先月比",
+          impressions: { current: cur.imp, prev: baseAds.imp },
+          clicks: { current: cur.clk, prev: baseAds.clk },
+          cost: { current: cur.cost, prev: baseAds.cost },
+          ctr: { current: cur.ctr, prev: baseAds.ctr },
+          totalVisits: { current: gbpCur?.totalVisits ?? 0, prev: baseGbp?.totalVisits ?? 0 },
+          phone: { current: gbpCur?.phone ?? 0, prev: baseGbp?.phone ?? 0 },
+          directions: { current: gbpCur?.directions ?? 0, prev: baseGbp?.directions ?? 0 },
+          menuClicks: { current: gbpCur?.menuClicks ?? 0, prev: baseGbp?.menuClicks ?? 0 },
+          website: { current: gbpCur?.website ?? 0, prev: baseGbp?.website ?? 0 },
+          saveShare: { current: gbpCur?.saveShare ?? 0, prev: baseGbp?.saveShare ?? 0 },
+          reservation: { current: gbpCur?.reservation ?? 0, prev: baseGbp?.reservation ?? 0 },
         };
 
         const res = await fetch("/api/pmax/summary-text", { method: "POST", headers, body: JSON.stringify(body) });

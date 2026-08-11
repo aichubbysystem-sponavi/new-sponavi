@@ -11,7 +11,9 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 // プロンプト（テンプレート）のバージョン。SYSTEM_PROMPTを改良したらここを上げる
 // → 全店舗のキャッシュが自動的に無効化され、次回表示時に新形式で再生成される
 // v2 (2026-08-11): 初月/2ヶ月目以降の2テンプレート化・予約数追加・文体変更（ユーザー提供の型）
-const PROMPT_VERSION = "v2";
+// v3 (2026-08-11): 2ヶ月目以降を3セクション構成（数値のまとめ/良かった点/改善点）に変更。
+//                  比較は前年同月データがあれば前年同月比、無ければ先月比
+const PROMPT_VERSION = "v3";
 
 const COMMON_RULES = `【厳守ルール】
 - テンプレートの構成・段落順・箇条書き形式を絶対に変えない
@@ -60,21 +62,23 @@ ${COMMON_RULES}
 - 初月のため先月比は一切記載しない`;
 
 // 2ヶ月目以降（前月以前の広告データがある店舗）用テンプレート
+// 比較基準はデータに応じて「前年同月比」または「先月比」（ユーザープロンプト側で指定される）
 const SYSTEM_PROMPT_ONGOING = `あなたはP-MAX広告とGoogleマップ集客に特化したプロの広告運用者です。
 提供されたデータを読み取り、以下の【テンプレート】に厳密に従って文章を出力してください。
-構成・段落の順番・箇条書きの形式は絶対に変えないでください。
+構成・セクションの順番・箇条書きの形式は絶対に変えないでください。
 
 【テンプレート（この構成を必ず守ること）】
 
 ---
 お世話になっております。
+{N}月の広告データがまとまりましたのでご報告いたします。
 
-{N}月分のデータが揃いましたので、レポートを送付させていただきます。
+1. 数値のまとめ
 
-数値面では、表示{表示回数}回（先月比 {増減}％）、クリック{クリック数}件（{増減}％）／クリック率{CTR}％となっており、{クリック率の評価文}。
+今月は表示{表示回数}回（{比較ラベル}{増減}％）、クリック{クリック数}件（{増減}％）／クリック率{CTR}％となりました。
+{クリック率の変化を1文で。比較時点のクリック率から上昇していれば「広告を見たユーザーからの反応率が改善しております」等、低下していればその旨を率直に}
 
-また、Googleマップからの行動についても、以下の結果となっております。
-
+MAPからの行動は以下の通りです。
 ・経路案内：{数値}件（{増減}％）
 ・WEBサイト遷移：{数値}件（{増減}％）
 ・メニュークリック：{数値}件（{増減}％）
@@ -83,25 +87,36 @@ const SYSTEM_PROMPT_ONGOING = `あなたはP-MAX広告とGoogleマップ集客�
 ・予約数：{数値}件（{増減}％）
 ・合計来店数：{数値}件（{増減}％）
 
-{行動データを踏まえた総評を2〜3文。悪い点→良い点の順。伸びた項目・数値の大きい項目に具体的に触れ、予約または合計来店数が1件以上あれば「実際の来店や予約にもつながっている」旨に触れる。悪い部分がない場合は無理に悪い点を作らない}
+2. 良かった点
 
-P-MAX広告は運用データが蓄積されるほど機械学習が進み、反応の良いユーザー層やエリア、検索傾向に合わせて最適化されていくため、今後も当月のデータをもとに、より来店や予約につながりやすい配信へ調整を行ってまいります。
+{伸びた指標・水準の高い指標を実数と増減％つきで2〜4段落で説明する。
+「来店前の検討につながる行動」（経路案内・WEBサイト遷移・メニュークリック・保存共有）と
+「実際の問い合わせ・予約・来店につながる行動」（電話・予約・合計来店数）を分けて評価する}
 
-引き続き、クリック率やWEBサイト閲覧、経路案内、電話、予約などの指標を注視しながら、Googleマップを主軸とした集客施策の精度を高め、より多くの来店・予約につながるよう運用を行ってまいります。
+3. 改善点
+
+{減少した指標を実数と増減％つきで挙げ、改善の余地がある旨を率直に述べる。
+その後「一方で〜」と伸びている指標に触れ、今後の配信方針を1〜2段落で述べる。
+減少した指標が無い場合は無理に悪い点を作らず、さらに伸ばすための方針を述べる}
+
+来月以降も、引き続き経路案内・予約・電話など来店に直結しやすいMAP行動を重視した最適化を行い、実際の来店数の増加につながるよう調整を進めてまいります。
 
 引き続きよろしくお願いいたします。
 ---
 
 ${COMMON_RULES}
+- 「1. 数値のまとめ」「2. 良かった点」「3. 改善点」の見出しは半角数字＋ピリオドのままテキストとして出力する（マークダウンの見出し記法にしない）
+- 比較ラベル（前年同月比 または 先月比）はデータに記載されたものをそのまま使う。最初の表示回数のみ「（前年同月比－64.3％）」のようにラベル付きで書き、以降は「（＋80.1％）」のように増減％だけ書く
 - 増減の書式: ＋12.3％ / －5.6％ / ±0.0％（全角記号を使う）
-- 先月が0件→今月に値がある場合は増減の代わりに「NEW」と記載する
-- 悪い部分も記載する場合は、必ず「悪い点→良い点」の順（〜であるものの、〜は好調です）`;
+- 比較時点が0件→今月に値がある場合は増減の代わりに「NEW」と記載する`;
 
 interface KpiData {
   currentMonth: string;
   // 初月判定（当月より前の広告データが無い店舗はtrue）。クライアントが月次データから算出して送る。
   // 旧クライアントは送ってこないため false（従来相当の2ヶ月目以降テンプレート）に倒す
   isFirstMonth: boolean;
+  // 2ヶ月目以降の比較基準。各pairのprevには前年同月または先月の値が入る（クライアントが選択）
+  comparisonLabel: "前年同月比" | "先月比";
   impressions: { current: number; prev: number };
   clicks: { current: number; prev: number };
   cost: { current: number; prev: number };
@@ -144,6 +159,7 @@ function sanitizeKpiData(raw: unknown): KpiData | null {
   return {
     currentMonth: d.currentMonth as string,
     isFirstMonth: d.isFirstMonth === true,
+    comparisonLabel: d.comparisonLabel === "前年同月比" ? "前年同月比" : "先月比",
     impressions: sanitizePair(d.impressions),
     clicks: sanitizePair(d.clicks),
     cost: sanitizePair(d.cost),
@@ -162,17 +178,18 @@ function buildUserPrompt(data: KpiData): string {
   const costYen = (micros: number) => Math.round(micros / 1_000_000);
   const ctrPct = (v: number) => (v * 100).toFixed(2);
 
-  // 初月は先月比を出さない（存在しないデータからの作文防止）
+  // 初月は比較を出さない（存在しないデータからの作文防止）
+  const label = data.comparisonLabel;
   const pct = (cur: number, prev: number) =>
-    data.isFirstMonth ? "" : `（先月比 ${formatPct(cur, prev)}）`;
+    data.isFirstMonth ? "" : `（${label} ${formatPct(cur, prev)}）`;
 
   return `以下は${data.currentMonth}のP-MAX広告・GBPデータです。この数値を元に文章を作成してください。
-この店舗は${data.isFirstMonth ? "初月（今月が配信開始月）" : "2ヶ月目以降（先月以前の配信データあり）"}です。
+この店舗は${data.isFirstMonth ? "初月（今月が配信開始月）" : `2ヶ月目以降（比較基準: ${label}）`}です。
 
 【広告データ】
 ・表示回数：${fmtNum(data.impressions.current)}回${pct(data.impressions.current, data.impressions.prev)}
 ・クリック数：${fmtNum(data.clicks.current)}件${pct(data.clicks.current, data.clicks.prev)}
-・クリック率：${ctrPct(data.ctr.current)}％${data.isFirstMonth ? "" : `（先月 ${ctrPct(data.ctr.prev)}％）`}
+・クリック率：${ctrPct(data.ctr.current)}％${data.isFirstMonth ? "" : `（${label.replace("比", "")} ${ctrPct(data.ctr.prev)}％）`}
 ・広告費：¥${fmtNum(costYen(data.cost.current))}${pct(costYen(data.cost.current), costYen(data.cost.prev))}
 
 【MAP行動データ】
