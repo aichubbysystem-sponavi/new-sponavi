@@ -138,3 +138,71 @@ pmax_store_data には両店とも 2025-08〜2026-08 の13ヶ月×4言語が完�
 - gbp_stale 12店舗はGBPシート側の7月分未記入の可能性 → シート記入担当に確認推奨
 - pmax_store_daily に旧キー残骸あり（れたす　中目黒 繁体字 / れたす 渋谷 繁体字 /
   しゃぶしゃぶれたす 中目黒 / 札幌駅前　ライバルマーケ）。実害なし・削除は未実施
+
+===========================================================
+セッション総括（指定フォーマット）
+===========================================================
+
+## 【2026-08-11】
+### 決定事項
+- 「月次がひと月分」の正体は広告月次ではなくGBPコンバージョン表（pmax_gbp_data）の欠落と特定
+- 対策は3層構成で採用: ①検知の自動化（週次cron） ②syncのGBP全月upsert化（運用依存の排除） ③日次キャッシュ鮮度チェック
+- 7月日次の復旧は「DELETEして表示時再取得」ではなく「鮮度チェック実装＋DB直結ウォームアップ」方式に変更
+  （共有リンク閲覧者に日次が空で見える時間を作らないため）
+- CRON_SECRETが取得不能（VercelのSharedタブ・Sensitive）のため、データ復旧はDB直結ルートで実施
+- キャンペーン名の変更による対処は禁止を再確認（過去データ分断）。不一致はエイリアス表で吸収
+
+### 変更内容（具体的に）
+- src/lib/pmax-gbp-backfill.ts【新規】: GBP全月一括upsertの共通関数 upsertGbpAllMonths()
+- src/app/api/pmax/sync/route.ts: GBPステップを対象月のみ→全月upsertに変更（upsertGbpAllMonths使用）。
+  選択/全店同期の削除対象に pmax_store_daily の対象月を追加。getGbpRowStrict の使用を廃止
+- src/app/api/pmax/backfill-gbp/route.ts: 照合＋upsert本体を共通関数へ移譲（挙動・レスポンス形状は同一）
+- src/app/api/pmax/store-detail/route.ts: 日次キャッシュに鮮度判定 isDailyFresh を追加。
+  古い場合は再取得して差し替え、API失敗/0件時は旧キャッシュにフォールバック
+- src/app/api/cron/pmax-health/route.ts【新規】: RPC pmax_health_stats() を呼びSlack通知する週次cron
+- src/lib/slack-notify.ts: 汎用 notifySlackText() を追加
+- src/lib/pmax-gbp-alias.ts: コメント追記（alias追加は次回syncで全月自動反映される旨）
+- vercel.json: cron追加 /api/cron/pmax-health
+- sql/2026-08-11_pmax_health_stats.sql【新規・本番適用済】: 健全性集計RPC（service_roleのみ実行可）
+- 本番DB直接操作: pmax_gbp_data に3903行upsert（バックフィル）、pmax_store_daily を211店舗分再取得・差し替え
+- コミット: e1414b7（実装一式）/ f9645bd（ログ）。ブランチ fix/pmax-data-freshness → main マージ済・本番デプロイ済
+
+### 数値・設定値
+- 日次鮮度判定: 最終日が min(月末, 昨日JST) 以上なら新鮮。または max(synced_at) が月末翌日以降なら確定扱い（再取得しない）
+- pmax-health cron: 毎週月曜 07:00 JST（cron式 0 22 * * 0）
+- 健全性検知の閾値: GBP遅れ=配信中(ads_max>=前月)かつgbp_maxがads_maxより2ヶ月以上遅れ／
+  新店舗照合漏れ=直近2ヶ月内開始でGBP0件／当月日次遅れ=max(date)が一昨日(current_date-2)未満
+- バックフィル結果: ads店舗名440 / matched 318 / unmatched 117 / ambiguous 5 / upsert 3903行
+- ウォームアップ結果: 7月=207店舗中203復旧（残8は正常4+旧キー残骸4）、8月=8店舗全復旧
+- upsertバッチサイズ: GBP 100行/バッチ、日次 200行/バッチ（店舗単位トランザクション）
+
+### 未解決・次回やること
+- SLACK_WEBHOOK_URL がVercelに設定済みか確認（未設定だとpmax-healthの通知が飛ばない。
+  Projectタブの環境変数一覧には無かった→Sharedタブを確認）
+- gbp_stale 12店舗（ガールズバーSMILE/クラブリオ系/グリルピア系等）はGBPシート側の
+  7月分記入漏れの可能性 → シート記入担当に確認
+- ambiguous 5店舗（HELIO HOSTEL/ときわ亭 紙屋町店/北海道海鮮居酒屋てっちゃん/
+  和牛と豚 近鉄奈良駅前店/焼肉Lab 難波店）は照合保留のまま → 必要ならエイリアス表に追加
+- pmax_store_daily の旧キー残骸4件（れたす　中目黒 繁体字/れたす 渋谷 繁体字/
+  しゃぶしゃぶれたす 中目黒/札幌駅前　ライバルマーケ）。実害なしだが気になるなら削除
+- 週明け月曜の初回pmax-health実行結果を確認（daily_stale_prevに「途中配信終了の正常4店舗」が
+  載るのは仕様。9月に入れば自然に消える）
+
+### 注意点・ハマったこと
+- 「月次がひと月分しか出ない」の原因調査では、広告月次(pmax_store_data)は13ヶ月完備だった。
+  レポート内の「月次」はコンバージョン表(pmax_gbp_data)を指すことがある。切り分けはDB直結が最速
+- 名前不一致は「途中で変わった」のではなく開設当初から2ソースで別表記
+  （てっぱち: 大通り⇔大通 / さぶろう: ススキノ⇔すすきの）。正規化・部分一致では吸収不能
+- 8/6にエイリアス追加→当時のsyncは対象月しか書かないため6月分だけ入り「1ヶ月だけある」
+  という紛らわしい状態になっていた（0件より発見が遅れる形）
+- 日次凍結の真犯人は2026-07-01 00:00 JSTの一括取得（synced_at=2026-06-30T15:00Z）。
+  「1行でもあれば再取得しない」キャッシュは月初アクセスで恒久凍結する
+- CRON_SECRETはVercelのProjectタブに存在しない（Sharedタブ側）。Sensitiveは値の再表示不可。
+  無理に書き換えると再デプロイまで本番cronが認証エラーになるので触らないこと
+- DB直結で本番相当の処理を再現する際は、書き込み前に「本番経路で作られた既存行」と
+  自前ロジックの出力を突き合わせて一致確認してから書くと安全（今回2026/06行で実施）
+- Googleシート由来の店舗キーは normShopName でもカタカナ/ひらがな・「大通り/大通」を吸収できない。
+  エイリアス表(pmax-gbp-alias.ts)が唯一の解。追加後は次回syncで全月自動反映される（今回の改修で）
+- SQL関数の本番検証は BEGIN→CREATE→SELECT→ROLLBACK が安全（重要ナレッジの既存パターン踏襲）
+- Vercel Previewは同じ本番DBを読む＝Preview閲覧でも本番DBに書き込みが起きる
+  （今回はそれが幸いし、Preview閲覧で日次が自動復旧して実機検証になった）
