@@ -170,10 +170,19 @@ function StoreDetailContent() {
         const gbpCur = findGbp(gbpCurKey);
         const gbpPrv = findGbp(gbpPrevKey);
 
+        // 初月判定: 対象月より前に実績のある広告月次データが1件も無ければ初月
+        // （月キーはYYYY-MM形式なので文字列比較で時系列比較できる）
+        const isFirstMonth = !monthly.some(
+          (r) =>
+            (r.month || "").slice(0, 7) < curKey &&
+            (r.impressions > 0 || r.clicks > 0 || r.costMicros > 0),
+        );
+
         const body = {
           shopName, // キャッシュキー: 同じ店×月×データなら再生成せず同じ文面を返す
           monthKey: curKey,
           currentMonth: `${targetYear}年${targetMonthNum}月`,
+          isFirstMonth,
           impressions: { current: cur.imp, prev: prev.imp },
           clicks: { current: cur.clk, prev: prev.clk },
           cost: { current: cur.cost, prev: prev.cost },
@@ -184,6 +193,7 @@ function StoreDetailContent() {
           menuClicks: { current: gbpCur?.menuClicks ?? 0, prev: gbpPrv?.menuClicks ?? 0 },
           website: { current: gbpCur?.website ?? 0, prev: gbpPrv?.website ?? 0 },
           saveShare: { current: gbpCur?.saveShare ?? 0, prev: gbpPrv?.saveShare ?? 0 },
+          reservation: { current: gbpCur?.reservation ?? 0, prev: gbpPrv?.reservation ?? 0 },
         };
 
         const res = await fetch("/api/pmax/summary-text", { method: "POST", headers, body: JSON.stringify(body) });

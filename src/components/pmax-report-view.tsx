@@ -170,7 +170,8 @@ export default function PmaxReportView({ data, backHref, settings, editable = fa
   const { monthly, daily, gbp: gbpRaw, channels: channelsRaw = [], shopName, year: targetYear, month: targetMonthNum, summaryText: summaryTextRaw = "" } = data;
   const { overrides, sectionVisibility, summaryOverride } = settings || EMPTY_PMAX_SETTINGS;
   // 手動編集した「まとめ」文章があればそちらを優先表示（AI生成文は上書きしない）
-  const summaryText = summaryOverride || summaryTextRaw;
+  // マークダウン強調(**)は過去に保存された文面に混入している可能性があるため表示時に除去
+  const summaryText = (summaryOverride || summaryTextRaw).replace(/\*\*/g, "");
   // 表示設定: 未設定キーは表示（falseだけ非表示）
   const vis = (key: string) => sectionVisibility[key] !== false;
   const canEdit = editable && !!onSettingsChange;

@@ -10,9 +10,19 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 
 // プロンプト（テンプレート）のバージョン。SYSTEM_PROMPTを改良したらここを上げる
 // → 全店舗のキャッシュが自動的に無効化され、次回表示時に新形式で再生成される
-const PROMPT_VERSION = "v1";
+// v2 (2026-08-11): 初月/2ヶ月目以降の2テンプレート化・予約数追加・文体変更（ユーザー提供の型）
+const PROMPT_VERSION = "v2";
 
-const SYSTEM_PROMPT = `あなたはP-MAX広告とGoogleマップ集客に特化したプロの広告運用者です。
+const COMMON_RULES = `【厳守ルール】
+- テンプレートの構成・段落順・箇条書き形式を絶対に変えない
+- 数値が0件でも省略せず「0件」と記載する。「まだ反映されていない」等の推測は絶対にしない
+- 提供された数値をそのまま正確に使う（桁区切りカンマ付き）
+- クリック率が0.3％以上なら「業界平均の0.3〜0.6％を大きく上回る高い水準で推移しております」のように業界平均と比較して良い点として説明する。0.3％未満ならクリック率の評価文は省略する
+- 文章のみ出力する。見出し・マークダウン記法（**による強調・箇条書き記号の変更など）・注釈は絶対に使わない
+- 丁寧語で、専門用語は使いすぎず初心者でも理解しやすい文にする`;
+
+// 初月（当月しか広告データが無い店舗）用テンプレート
+const SYSTEM_PROMPT_FIRST_MONTH = `あなたはP-MAX広告とGoogleマップ集客に特化したプロの広告運用者です。
 提供されたデータを読み取り、以下の【テンプレート】に厳密に従って文章を出力してください。
 構成・段落の順番・箇条書きの形式は絶対に変えないでください。
 
@@ -20,39 +30,78 @@ const SYSTEM_PROMPT = `あなたはP-MAX広告とGoogleマップ集客に特化�
 
 ---
 お世話になっております。
-{N}月の広告データがまとまりましたのでご報告いたします。
 
-今月は 表示{表示回数}回（先月比 {増減}％）、クリック{クリック数}件（{増減}％）／クリック率{CTR}％ と、{クリック率の評価文}。
+{N}月分のデータが揃いましたので、レポートを送付させていただきます。
 
-MAPからの行動は以下の通りです。
-・経路案内：{数値}件（{増減}％）
-・WEBサイト遷移：{数値}件（{増減}％）
-・メニュークリック：{数値}件（{増減}％）
-・保存・共有・写真：{数値}件（{増減}％）
-・電話：{数値}件（{増減}％）
-・合計来店数：{数値}件（{増減}％）
+初月の運用では、今後の配信最適化に向けたデータの蓄積が進み、ユーザーの反応やクリック傾向、WEBサイト閲覧・経路案内などの行動データを確認することができました。
 
-{データを踏まえた総評を1〜2文で。悪い点→良い点の順。}
+数値面では、表示{表示回数}回、クリック{クリック数}件／クリック率{CTR}％となっており、{クリック率の評価文}。初月の配信でありながら、多くのユーザーからクリックを獲得できており、広告への関心が高い状態であることが確認できます。
 
-{来月以降の方針を1文で。}
+また、Googleマップからの行動についても、以下の結果となっております。
+
+・経路案内：{数値}件
+・WEBサイト遷移：{数値}件
+・メニュークリック：{数値}件
+・保存・共有：{数値}件
+・電話：{数値}件
+・予約数：{数値}件
+・合計来店数：{数値}件
+
+{行動データを踏まえた総評を2〜3文。数値の大きい行動項目を2〜3個具体的に挙げて「初月として非常に良好な結果」等と評価し、予約または合計来店数が1件以上あれば「広告による認知だけでなく、実際の来店や予約にもつながっている」旨に触れる。全体的に数値が小さい場合は無理に持ち上げず「データの蓄積が進んでいる」等の前向きな表現にとどめる}
+
+P-MAX広告は、配信開始直後から徐々に機械学習が進み、反応の良いユーザー層やエリア、検索傾向に合わせて最適化されていくため、今後は今回得られたデータをもとに、より来店や予約につながりやすい配信へ調整を行ってまいります。
+
+引き続き、クリック率やWEBサイト閲覧、経路案内、電話、予約などの指標を注視しながら、Googleマップを主軸とした集客施策の精度を高め、より多くの来店・予約につながるよう運用を行ってまいります。
 
 引き続きよろしくお願いいたします。
 ---
 
-【厳守ルール】
-- テンプレートの構成・段落順・箇条書き形式を絶対に変えない
-- 数値が0件でも省略せず「0件」と記載する。「まだ反映されていない」等の推測は絶対にしない
-- 提供された数値をそのまま正確に使う
-- クリック率が0.3％以上なら「業界平均の0.3〜0.6％」と比較して良い点として説明する。0.3％未満ならクリック率の評価文は省略する
+${COMMON_RULES}
+- 初月のため先月比は一切記載しない`;
+
+// 2ヶ月目以降（前月以前の広告データがある店舗）用テンプレート
+const SYSTEM_PROMPT_ONGOING = `あなたはP-MAX広告とGoogleマップ集客に特化したプロの広告運用者です。
+提供されたデータを読み取り、以下の【テンプレート】に厳密に従って文章を出力してください。
+構成・段落の順番・箇条書きの形式は絶対に変えないでください。
+
+【テンプレート（この構成を必ず守ること）】
+
+---
+お世話になっております。
+
+{N}月分のデータが揃いましたので、レポートを送付させていただきます。
+
+数値面では、表示{表示回数}回（先月比 {増減}％）、クリック{クリック数}件（{増減}％）／クリック率{CTR}％となっており、{クリック率の評価文}。
+
+また、Googleマップからの行動についても、以下の結果となっております。
+
+・経路案内：{数値}件（{増減}％）
+・WEBサイト遷移：{数値}件（{増減}％）
+・メニュークリック：{数値}件（{増減}％）
+・保存・共有：{数値}件（{増減}％）
+・電話：{数値}件（{増減}％）
+・予約数：{数値}件（{増減}％）
+・合計来店数：{数値}件（{増減}％）
+
+{行動データを踏まえた総評を2〜3文。悪い点→良い点の順。伸びた項目・数値の大きい項目に具体的に触れ、予約または合計来店数が1件以上あれば「実際の来店や予約にもつながっている」旨に触れる。悪い部分がない場合は無理に悪い点を作らない}
+
+P-MAX広告は運用データが蓄積されるほど機械学習が進み、反応の良いユーザー層やエリア、検索傾向に合わせて最適化されていくため、今後も当月のデータをもとに、より来店や予約につながりやすい配信へ調整を行ってまいります。
+
+引き続き、クリック率やWEBサイト閲覧、経路案内、電話、予約などの指標を注視しながら、Googleマップを主軸とした集客施策の精度を高め、より多くの来店・予約につながるよう運用を行ってまいります。
+
+引き続きよろしくお願いいたします。
+---
+
+${COMMON_RULES}
 - 増減の書式: ＋12.3％ / －5.6％ / ±0.0％（全角記号を使う）
-- 先月が0件→今月に値がある場合は「NEW」と記載する
-- 悪い部分がない場合は総評で無理に悪い点を作らない
-- 悪い部分も記載する場合は、必ず「悪い点→良い点」の順（〜であるものの、〜は好調です）
-- 文章のみ出力する。見出し・マークダウン記法・注釈は使わない
-- 丁寧語で、専門用語は使いすぎず初心者でも理解しやすい文にする`;
+- 先月が0件→今月に値がある場合は増減の代わりに「NEW」と記載する
+- 悪い部分も記載する場合は、必ず「悪い点→良い点」の順（〜であるものの、〜は好調です）`;
 
 interface KpiData {
   currentMonth: string;
+  // 初月判定（当月より前の広告データが無い店舗はtrue）。クライアントが月次データから算出して送る。
+  // 旧クライアントは送ってこないため false（従来相当の2ヶ月目以降テンプレート）に倒す
+  isFirstMonth: boolean;
   impressions: { current: number; prev: number };
   clicks: { current: number; prev: number };
   cost: { current: number; prev: number };
@@ -63,6 +112,7 @@ interface KpiData {
   menuClicks: { current: number; prev: number };
   website: { current: number; prev: number };
   saveShare: { current: number; prev: number };
+  reservation: { current: number; prev: number };
 }
 
 // 明示的にja-JPロケールで数値フォーマット（C3修正: サーバーロケール依存回避）
@@ -93,6 +143,7 @@ function sanitizeKpiData(raw: unknown): KpiData | null {
   if (typeof d.currentMonth !== "string" || !d.currentMonth) return null;
   return {
     currentMonth: d.currentMonth as string,
+    isFirstMonth: d.isFirstMonth === true,
     impressions: sanitizePair(d.impressions),
     clicks: sanitizePair(d.clicks),
     cost: sanitizePair(d.cost),
@@ -103,6 +154,7 @@ function sanitizeKpiData(raw: unknown): KpiData | null {
     menuClicks: sanitizePair(d.menuClicks),
     website: sanitizePair(d.website),
     saveShare: sanitizePair(d.saveShare),
+    reservation: sanitizePair(d.reservation),
   };
 }
 
@@ -110,21 +162,27 @@ function buildUserPrompt(data: KpiData): string {
   const costYen = (micros: number) => Math.round(micros / 1_000_000);
   const ctrPct = (v: number) => (v * 100).toFixed(2);
 
+  // 初月は先月比を出さない（存在しないデータからの作文防止）
+  const pct = (cur: number, prev: number) =>
+    data.isFirstMonth ? "" : `（先月比 ${formatPct(cur, prev)}）`;
+
   return `以下は${data.currentMonth}のP-MAX広告・GBPデータです。この数値を元に文章を作成してください。
+この店舗は${data.isFirstMonth ? "初月（今月が配信開始月）" : "2ヶ月目以降（先月以前の配信データあり）"}です。
 
 【広告データ】
-・表示回数：${fmtNum(data.impressions.current)}回（先月比 ${formatPct(data.impressions.current, data.impressions.prev)}）
-・クリック数：${fmtNum(data.clicks.current)}件（先月比 ${formatPct(data.clicks.current, data.clicks.prev)}）
-・クリック率：${ctrPct(data.ctr.current)}％（先月 ${ctrPct(data.ctr.prev)}％）
-・広告費：¥${fmtNum(costYen(data.cost.current))}（先月比 ${formatPct(costYen(data.cost.current), costYen(data.cost.prev))}）
+・表示回数：${fmtNum(data.impressions.current)}回${pct(data.impressions.current, data.impressions.prev)}
+・クリック数：${fmtNum(data.clicks.current)}件${pct(data.clicks.current, data.clicks.prev)}
+・クリック率：${ctrPct(data.ctr.current)}％${data.isFirstMonth ? "" : `（先月 ${ctrPct(data.ctr.prev)}％）`}
+・広告費：¥${fmtNum(costYen(data.cost.current))}${pct(costYen(data.cost.current), costYen(data.cost.prev))}
 
 【MAP行動データ】
-・合計来店数：${fmtNum(data.totalVisits.current)}件（先月比 ${formatPct(data.totalVisits.current, data.totalVisits.prev)}）
-・電話：${fmtNum(data.phone.current)}件（先月比 ${formatPct(data.phone.current, data.phone.prev)}）
-・経路案内：${fmtNum(data.directions.current)}件（先月比 ${formatPct(data.directions.current, data.directions.prev)}）
-・WEBサイト：${fmtNum(data.website.current)}件（先月比 ${formatPct(data.website.current, data.website.prev)}）
-・メニュークリック：${fmtNum(data.menuClicks.current)}件（先月比 ${formatPct(data.menuClicks.current, data.menuClicks.prev)}）
-・保存・共有・写真：${fmtNum(data.saveShare.current)}件（先月比 ${formatPct(data.saveShare.current, data.saveShare.prev)}）`;
+・経路案内：${fmtNum(data.directions.current)}件${pct(data.directions.current, data.directions.prev)}
+・WEBサイト遷移：${fmtNum(data.website.current)}件${pct(data.website.current, data.website.prev)}
+・メニュークリック：${fmtNum(data.menuClicks.current)}件${pct(data.menuClicks.current, data.menuClicks.prev)}
+・保存・共有：${fmtNum(data.saveShare.current)}件${pct(data.saveShare.current, data.saveShare.prev)}
+・電話：${fmtNum(data.phone.current)}件${pct(data.phone.current, data.phone.prev)}
+・予約数：${fmtNum(data.reservation.current)}件${pct(data.reservation.current, data.reservation.prev)}
+・合計来店数：${fmtNum(data.totalVisits.current)}件${pct(data.totalVisits.current, data.totalVisits.prev)}`;
 }
 
 export const POST = withAudit("P-MAX AI総評生成", "PAID_OP", async (request, ctx) => {
@@ -190,7 +248,7 @@ export const POST = withAudit("P-MAX AI総評生成", "PAID_OP", async (request,
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
         max_tokens: 1024,
-        system: SYSTEM_PROMPT,
+        system: body.isFirstMonth ? SYSTEM_PROMPT_FIRST_MONTH : SYSTEM_PROMPT_ONGOING,
         messages: [{ role: "user", content: userPrompt }],
       }),
     });
@@ -203,7 +261,8 @@ export const POST = withAudit("P-MAX AI総評生成", "PAID_OP", async (request,
     }
 
     const result = await res.json();
-    const text = result.content?.[0]?.text || "";
+    // 万一AIがマークダウン強調(**)を混ぜても表示に出さない（テンプレート指示＋二重の保険）
+    const text = (result.content?.[0]?.text || "").replace(/\*\*/g, "");
 
     // ② 生成結果を保存（次回以降は同じ文面を¥0で返す）
     if (cacheable && text) {
