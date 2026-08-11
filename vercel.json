@@ -26,6 +26,10 @@
     {
       "path": "/api/cron/execute-posts",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/pmax-health",
+      "schedule": "0 22 * * 0"
     }
   ],
   "headers": [

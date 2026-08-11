@@ -5,6 +5,23 @@
 import type { AppRole } from "./permissions";
 import { ROLE_LABELS } from "./roles";
 
+/** 汎用テキスト通知。SLACK_WEBHOOK_URL 未設定なら何もしない（送信可否を返す） */
+export async function notifySlackText(text: string): Promise<boolean> {
+  const url = process.env.SLACK_WEBHOOK_URL;
+  if (!url) return false;
+  try {
+    await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    return true;
+  } catch (e) {
+    console.error("[notifySlackText] failed:", e);
+    return false;
+  }
+}
+
 export async function notifySlackPaidOp(params: {
   action: string;
   userName: string;

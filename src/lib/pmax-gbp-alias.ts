@@ -12,6 +12,9 @@
  * - シート側の表記が変わったらこの表も更新すること
  * - LP・リスティング系キャンペーン（不用品回収LP/受付センター等）はGBPが無いのが正常。
  *   ここに追加しないこと
+ * - ここに追加した対応は、次回のP-MAX同期（またはPOST /api/pmax/backfill-gbp）で
+ *   過去月も含めて全月反映される（2026-08-11からsyncが全月upsertになったため、
+ *   以前のような「backfill実行忘れで過去月が欠けたまま」は起きない）
  */
 export const GBP_NAME_ALIASES: [string, string][] = [
   ["SIK eatery 靭公園", "SIK eatery うつぼ公園店"],

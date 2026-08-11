@@ -16,7 +16,7 @@ import {
   getCampaignMonthly,
   parseCampaignName,
 } from "@/lib/google-ads";
-import { getGbpRowStrict } from "@/lib/pmax-sheet";
+import { upsertGbpAllMonths } from "@/lib/pmax-gbp-backfill";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -180,8 +180,9 @@ export const POST = withAudit("P-MAX広告データ同期", "DATA_OP", async (re
     const syncedShopNames = Array.from(new Set(allMonthly.map(r => r.shopName)));
     for (const name of syncedShopNames) {
       await sb.from("pmax_store_data").delete().eq("month", month).eq("shop_name", name);
-      // チャネル別キャッシュも消して次回レポート表示時に再取得させる（鮮度維持）
+      // チャネル別・日次キャッシュも消して次回レポート表示時に再取得させる（鮮度維持）
       await sb.from("pmax_channel_data").delete().eq("month", month).eq("shop_name", name);
+      await sb.from("pmax_store_daily").delete().eq("shop_name", name).gte("date", startDate).lte("date", endDate);
     }
     console.log(`[pmax/sync] Deleted data for ${syncedShopNames.length} shops in month=${month}`);
   } else {
@@ -189,8 +190,9 @@ export const POST = withAudit("P-MAX広告データ同期", "DATA_OP", async (re
       .from("pmax_store_data")
       .delete({ count: "exact" })
       .eq("month", month);
-    // チャネル別キャッシュも消して次回レポート表示時に再取得させる（鮮度維持）
+    // チャネル別・日次キャッシュも消して次回レポート表示時に再取得させる（鮮度維持）
     await sb.from("pmax_channel_data").delete().eq("month", month);
+    await sb.from("pmax_store_daily").delete().gte("date", startDate).lte("date", endDate);
     console.log(`[pmax/sync] Deleted ${deleteCount ?? "?"} rows for month=${month}`, deleteError ? `ERROR: ${deleteError.message}` : "OK");
   }
 
@@ -215,29 +217,23 @@ export const POST = withAudit("P-MAX広告データ同期", "DATA_OP", async (re
     }
   }
 
-  // ── Step 5: GBP同期 ──
-  // 相互includesの先頭採用による誤マッチを防ぐため、backfillと同じ安全照合(getGbpRowStrict)を使う。
-  // 複数候補にマッチする曖昧な店舗は「別店舗の数値を書き込まない」ためスキップし、一覧で返す。
-  const gbpMonthKey = `${year}/${String(mon).padStart(2, "0")}`;
+  // ── Step 5: GBP同期（全月一括upsert） ──
+  // 対象月だけでなくシートにある全月をupsertする（lib/pmax-gbp-backfill.ts）。
+  // 従来は対象月の1ヶ月分のみで、エイリアス表追加後にbackfillを実行し忘れると
+  // 過去月が欠けたままになる事故があった（2026-08-11）。全月upsertなら同期のたびに直る。
+  // 照合はbackfillと同じ安全照合(pickGbpMatch)。複数候補の曖昧な店舗はスキップし一覧で返す。
   const shopNames = Array.from(new Set(allMonthly.map(r => r.shopName)));
   let gbpSynced = 0;
-  const gbpAmbiguous: string[] = [];
-  for (const name of shopNames) {
-    try {
-      const { row, ambiguous } = await getGbpRowStrict(name, gbpMonthKey);
-      if (ambiguous) { gbpAmbiguous.push(name); continue; }
-      if (row) {
-        await sb.from("pmax_gbp_data").upsert({
-          shop_name: name, month: gbpMonthKey,
-          total_impressions: row.totalImpressions, total_visits: row.totalVisits,
-          phone: row.phone, directions: row.directions, website: row.website,
-          menu_clicks: row.menuClicks, save_share: row.saveShare,
-          reservation: row.reservation,
-          synced_at: new Date().toISOString(),
-        }, { onConflict: "shop_name,month" });
-        gbpSynced++;
-      }
-    } catch {}
+  let gbpAmbiguous: string[] = [];
+  try {
+    const gbpResult = await upsertGbpAllMonths(sb, shopNames);
+    gbpSynced = gbpResult.matchedShops;
+    gbpAmbiguous = gbpResult.ambiguous;
+    if (gbpResult.errors.length > 0) {
+      console.error("[pmax/sync] GBP upsert errors:", gbpResult.errors.slice(0, 3).join("; "));
+    }
+  } catch (e) {
+    console.error("[pmax/sync] GBP sync failed:", e instanceof Error ? e.message : e);
   }
 
   // ── Step 6: ログ ──

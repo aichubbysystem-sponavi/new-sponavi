@@ -58,10 +58,28 @@ export async function GET(request: NextRequest) {
     .lte("date", endDate)
     .order("date", { ascending: true });
 
-  if (dbDaily && dbDaily.length > 0) {
+  // 鮮度判定: 「1行でもあれば再取得しない」だと月初に取得された1日分のまま凍結する
+  // （2026-07-01に一括取得された205店舗が7月日次1日分のまま固まった実害あり）。
+  // - 月が終わった後に取得済み（synced_at > 月末）なら確定データとして再取得しない
+  //   ※月途中で配信終了した店舗を毎回再取得しないためのガード
+  // - それ以外は、最終日が「月末 or 昨日(JST)」に達していなければ古いとみなし再取得
+  const isDailyFresh = (() => {
+    if (!dbDaily || dbDaily.length === 0) return false;
+    const nowJst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    const yesterdayJst = new Date(nowJst.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const expectedLast = endDate < yesterdayJst ? endDate : yesterdayJst;
+    const maxDate = dbDaily.reduce((mx, r) => (r.date > mx ? r.date : mx), "");
+    if (maxDate >= expectedLast) return true;
+    const maxSynced = dbDaily.reduce((mx, r) => ((r.synced_at || "") > mx ? r.synced_at : mx), "");
+    // 月末翌日以降に取得したデータは確定扱い（synced_atはUTC ISO・日付比較で十分）
+    const monthEndNextDay = new Date(y, m, 1).toISOString().slice(0, 10);
+    return maxSynced.slice(0, 10) >= monthEndNextDay;
+  })();
+
+  if (dbDaily && dbDaily.length > 0 && isDailyFresh) {
     dailyRows = dbDaily;
   } else {
-    // DBにないのでAPIから取得して保存（この店舗のaccountIdだけ使う）
+    // DBにない/古いのでAPIから取得して保存（この店舗のaccountIdだけ使う）
     try {
       const accountIds = Array.from(new Set((monthlyRows || []).map((r) => r.account_id).filter(Boolean)));
       if (accountIds.length > 0) {
@@ -99,6 +117,10 @@ export async function GET(request: NextRequest) {
       }
     } catch (e) {
       console.error("[pmax/store-detail] daily API fetch:", e instanceof Error ? e.message : e);
+    }
+    // API取得に失敗/0件だった場合、古くてもDBのキャッシュがあればそちらを出す（空表示より情報がある）
+    if (dailyRows.length === 0 && dbDaily && dbDaily.length > 0) {
+      dailyRows = dbDaily;
     }
   }
 
