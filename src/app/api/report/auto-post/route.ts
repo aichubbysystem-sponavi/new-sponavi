@@ -16,6 +16,59 @@ function matchShopName(a: string, b: string): boolean {
 }
 
 /**
+ * GBP APIを叩く。401/403/404 は「そのトークンからそのロケーションが見えない」だけのことがあるため、
+ * 他のOAuthトークンで必ず順番に再試行する。
+ *
+ * 背景: GBPアカウントは本番で15個あり、1本のトークンで全ロケーションは見えない。
+ * 例) 一文字premium         accounts/111148362910776147900 → 既定トークンで通る
+ *     西口酒場ホームラン    accounts/111031567193825395772 → 既定トークンでは404
+ * cron/execute-posts は全トークンを試すので通るが、即時実行だけ1本しか使っておらず
+ * 「予約なら投稿できるのに、実行ボタンだと404」という差が出ていた。
+ *
+ * 400などトークンと無関係なエラーは再試行しても同じなので即座に打ち切る。
+ */
+let cachedFallbackTokens: string[] | null = null;
+const TOKEN_RETRY_STATUSES = [401, 403, 404];
+
+async function gbpFetchWithTokenFallback(
+  url: string,
+  init: { method?: string; body?: string; timeoutMs?: number },
+  primaryToken: string,
+): Promise<{ res: Response; text: string }> {
+  const call = async (token: string) => {
+    const res = await fetch(url, {
+      cache: "no-store" as const,
+      method: init.method || "POST",
+      headers: {
+        ...(init.body ? { "Content-Type": "application/json" } : {}),
+        Authorization: `Bearer ${token}`,
+      },
+      body: init.body,
+      signal: AbortSignal.timeout(init.timeoutMs || 30000),
+    });
+    return { res, text: await res.text().catch(() => "") };
+  };
+
+  let last = await call(primaryToken);
+  if (last.res.ok || !TOKEN_RETRY_STATUSES.includes(last.res.status)) return last;
+
+  if (!cachedFallbackTokens) {
+    const { getAllOAuthTokens } = await import("@/lib/gbp-token");
+    cachedFallbackTokens = await getAllOAuthTokens();
+  }
+  for (const token of cachedFallbackTokens) {
+    if (token === primaryToken) continue;
+    const attempt = await call(token);
+    if (attempt.res.ok) return attempt;
+    last = attempt;
+    if (!TOKEN_RETRY_STATUSES.includes(attempt.res.status)) break;
+  }
+  return last;
+}
+
+const parseJson = (text: string): any => { try { return JSON.parse(text); } catch { return {}; } };
+
+/**
  * スプレッドシートのタブをCSVで取得する。
  * タイムアウトを必ず付けること: Googleが応答しないとサーバーは maxDuration まで待ち続け、
  * クライアント側は先にタイムアウトして「エラー: timeout of 60000ms exceeded」になる。
@@ -606,6 +659,7 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
 
   // リクエストごとにDropboxサブフォルダキャッシュをリセット
   cachedRootSubfolders = null;
+  cachedFallbackTokens = null;
 
   if (!sheetId || !targetDate) {
     return NextResponse.json({ error: "sheetIdとtargetDateが必要です" }, { status: 400 });
@@ -1052,14 +1106,12 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
           }
         }
 
-        const mediaRes = await fetch(`${GBP_API_BASE}/${locationName}/media`, {
-          cache: "no-store" as const,
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-          body: JSON.stringify({ mediaFormat: "PHOTO", sourceUrl: stableUrl, locationAssociation: { category: "ADDITIONAL" } }),
-          signal: AbortSignal.timeout(30000),
-        });
-        const mediaBody = await mediaRes.json().catch(() => ({}));
+        const { res: mediaRes, text: mediaText } = await gbpFetchWithTokenFallback(
+          `${GBP_API_BASE}/${locationName}/media`,
+          { body: JSON.stringify({ mediaFormat: "PHOTO", sourceUrl: stableUrl, locationAssociation: { category: "ADDITIONAL" } }) },
+          accessToken,
+        );
+        const mediaBody = parseJson(mediaText);
         if (mediaRes.ok && mediaBody.name) {
           results.push({ shopName: match.shopName, status: "写真投稿成功", gbpMediaName: mediaBody.name, googleUrl: mediaBody.googleUrl, summary: `写真: ${match.photoDebug}`, sourceUrl: stableUrl });
           posted++;
@@ -1091,13 +1143,11 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
       try {
         const directUrl = match.photoUrl.includes("dropboxusercontent.com") || match.photoUrl.includes("dl.dropbox")
           ? match.photoUrl : convertDropboxUrl(match.photoUrl);
-        const mediaRes = await fetch(`${GBP_API_BASE}/${locationName}/media`, {
-          cache: "no-store" as const,
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-          body: JSON.stringify({ mediaFormat: "PHOTO", sourceUrl: directUrl, locationAssociation: { category: "ADDITIONAL" } }),
-          signal: AbortSignal.timeout(30000),
-        });
+        const { res: mediaRes } = await gbpFetchWithTokenFallback(
+          `${GBP_API_BASE}/${locationName}/media`,
+          { body: JSON.stringify({ mediaFormat: "PHOTO", sourceUrl: directUrl, locationAssociation: { category: "ADDITIONAL" } }) },
+          accessToken,
+        );
         if (mediaRes.ok) {
           results.push({ shopName: match.shopName, status: "写真投稿成功", summary: `写真: ${match.photoDebug}` });
           posted++;
@@ -1133,13 +1183,11 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
     }
 
     try {
-      let res = await fetch(`${GBP_API_BASE}/${locationName}/localPosts`, {
-        cache: "no-store" as const,
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify(postBody),
-        signal: AbortSignal.timeout(30000),
-      });
+      let { res, text: resText } = await gbpFetchWithTokenFallback(
+        `${GBP_API_BASE}/${locationName}/localPosts`,
+        { body: JSON.stringify(postBody) },
+        accessToken,
+      );
 
       // 写真付きで失敗したら写真なしでリトライ（topicType・OFFER情報は維持する）
       if (!res.ok && match.photoUrl) {
@@ -1148,17 +1196,15 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
           retryBody.event = { title: match.offerTitle, schedule: { startDate: match.offerStartDate, endDate: match.offerEndDate } };
         }
         if (match.ctaUrl) retryBody.callToAction = { actionType: "LEARN_MORE", url: match.ctaUrl };
-        res = await fetch(`${GBP_API_BASE}/${locationName}/localPosts`, {
-          cache: "no-store" as const,
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-          body: JSON.stringify(retryBody),
-          signal: AbortSignal.timeout(30000),
-        });
+        ({ res, text: resText } = await gbpFetchWithTokenFallback(
+          `${GBP_API_BASE}/${locationName}/localPosts`,
+          { body: JSON.stringify(retryBody) },
+          accessToken,
+        ));
       }
 
       if (res.ok) {
-        const result = await res.json();
+        const result = parseJson(resText);
         // GBPレスポンスにname（投稿ID）があるか検証
         if (result.name) {
           await supabase.from("post_logs").insert({
@@ -1170,11 +1216,12 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
           // GBPに実際に投稿が存在するか確認（GET投稿）
           let verified = false;
           try {
-            const verifyRes = await fetch(`${GBP_API_BASE}/${result.name}`, {
-              cache: "no-store" as const,
-              headers: { Authorization: `Bearer ${accessToken}` },
-              signal: AbortSignal.timeout(10000),
-            });
+            // 別トークンで投稿された場合、既定トークンのGETは404になるのでここもフォールバックする
+            const { res: verifyRes } = await gbpFetchWithTokenFallback(
+              `${GBP_API_BASE}/${result.name}`,
+              { method: "GET", timeoutMs: 10000 },
+              accessToken,
+            );
             verified = verifyRes.ok;
           } catch (e: any) {
             console.warn(`[auto-post] 投稿確認GET失敗: ${result.name}`, e?.message);
@@ -1188,9 +1235,8 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
           errors++;
         }
       } else {
-        const err = await res.text().catch(() => "");
-        console.error(`[auto-post] GBP API error: ${res.status}`, err.slice(0, 500));
-        results.push({ shopName: match.shopName, status: `GBPエラー(${res.status})`, detail: err.slice(0, 300), summary: match.summary.slice(0, 30), photoUrl: match.photoUrl, locationName });
+        console.error(`[auto-post] GBP API error: ${res.status}`, resText.slice(0, 500));
+        results.push({ shopName: match.shopName, status: `GBPエラー(${res.status})`, detail: resText.slice(0, 300), summary: match.summary.slice(0, 30), photoUrl: match.photoUrl, locationName });
         errors++;
       }
     } catch (e: any) {
