@@ -10,6 +10,12 @@ const BUCKET = "post-images";
 // GBPの動画上限（75MB）。写真はこれよりずっと小さいので共通の上限として使う
 const MAX_BYTES = 75 * 1024 * 1024;
 
+// GBPの動画要件: 75MB以下 / 30秒以内 / 720p以上。サイズ超過は必ず30秒以内に収める作業も伴う
+function sizeOverMessage(bytes: number): string {
+  return `ファイルが大きすぎます（${Math.round(bytes / 1024 / 1024)}MB > GBPの上限75MB）。`
+    + `GBPの動画は「75MB以下・30秒以内・720p以上」が条件です。30秒以内に切り出して書き出し直してください`;
+}
+
 
 /**
  * 画像URLをGBP APIがfetch可能な公開URLに変換
@@ -59,6 +65,16 @@ export async function resolveMediaUrl(
     }
 
     const contentType = res.headers.get("content-type") || "image/jpeg";
+
+    // 本体を読む前にサイズを見る。167MBの動画をVercel関数のメモリに載せてから捨てるのは
+    // 無駄なうえ、90秒のダウンロード待ちも丸ごと無駄になる（2026-08-15 実例）
+    const declared = Number(res.headers.get("content-length") || 0);
+    if (declared > MAX_BYTES) {
+      const msg = sizeOverMessage(declared);
+      console.error(`[image-proxy] ${msg}: ${sourceName || imageUrl.slice(0, 60)}`);
+      return { url: null, error: msg };
+    }
+
     const buffer = Buffer.from(await res.arrayBuffer());
 
     if (buffer.length < 1000) {
@@ -66,9 +82,9 @@ export async function resolveMediaUrl(
       console.error(`[image-proxy] ${msg}`);
       return { url: null, error: msg };
     }
-    // GBPの動画上限は75MB。超えるものはアップロードしても弾かれるのでここで落とす
+    // Content-Lengthが無いDropboxリンク用の保険（GBPの動画上限は75MB）
     if (buffer.length > MAX_BYTES) {
-      const msg = `ファイルが大きすぎる (${Math.round(buffer.length / 1024 / 1024)}MB > 75MB)。GBPの上限を超えているので圧縮が必要`;
+      const msg = sizeOverMessage(buffer.length);
       console.error(`[image-proxy] ${msg}: ${sourceName || imageUrl.slice(0, 60)}`);
       return { url: null, error: msg };
     }

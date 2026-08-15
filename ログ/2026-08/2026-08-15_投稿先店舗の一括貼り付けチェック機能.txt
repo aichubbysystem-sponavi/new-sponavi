@@ -503,3 +503,14 @@ Cheese Cheese Worker 千葉店で再実行 → 2件成功（動画1・写真1）
 ## 検証
   npx tsc --noEmit … エラーなし / npx vitest run … 427テスト パス
   npx next build   … Compiled successfully / 227ページ生成
+
+## 追記8の続き: 失敗した動画は167MBだった
+GBPの動画要件は「75MB以下 / 30秒以内 / 720p以上」。167MBは投稿不可でシステム側では救えない。
+Dropbox側で30秒以内に切り出して書き出し直す必要がある。
+
+[修正] lib/image-proxy.ts
+  Content-Length を見てから本体を読むようにした。
+  従来は167MBを全部ダウンロードしてBufferに載せてから捨てていたため、
+  90秒のダウンロード待ちとメモリを丸ごと無駄にしていた（Vercel関数のメモリ圧迫）。
+  Content-Lengthが無いリンク用に、読み込み後のサイズチェックも残す。
+  メッセージにGBPの3条件（75MB/30秒/720p）を明記して、現場が何をすべきか分かるようにした。
