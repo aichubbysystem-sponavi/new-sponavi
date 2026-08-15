@@ -569,3 +569,168 @@ fetchSheetCsv は失敗時 null を返し、呼び出し側は continue する�
 ## 検証
   npx tsc --noEmit … エラーなし / npx vitest run … 427テスト パス
   npx next build   … Compiled successfully
+
+==========================================================
+セッション終了ログ
+==========================================================
+
+## 2026-08-15
+
+### 決定事項
+- 投稿先の店舗指定は「店舗名を貼り付けて一括チェック」で行う。
+  照合は段階を分け、部分一致では絶対に自動チェックしない
+  （name完全一致 > GBP現在名完全一致 > name記号無視 > GBP現在名記号無視。
+    候補が複数なら自動チェックせず「要確認」に回す）。
+  370店舗の実データで検証: 他店舗名の部分文字列になっている店舗が3件あり、
+  部分一致で自動チェックすると別店舗を巻き込む。
+- GBPで改名された店舗は shops.name を変えない（2026-08-08の設計を踏襲）。
+  照合・シート絞り込みの両方で name と gbp_shop_name の両方を通す。
+- auto-post の店舗フィルタは「空配列＝全店舗」にしない。
+  サーバーは空配列を400で拒否し、フロントは絞り込みモードで0件なら実行前に中断する。
+  実行前に投稿先を画面と確認ダイアログに必ず出す。
+- GBPを叩く処理は必ず全トークンでリトライする（401/403/404のときのみ）。
+  本番は15アカウントあり、1本のトークンでは一部ロケーションが見えない。
+- 動画（MOV/MP4/M4V）も投稿する運用にする。AVI/WMVはGBP非対応なので対象外。
+- 動画対応で scheduled_posts にカラムは足さない。
+  image-proxy が拡張子を保って保存するので、実行時にURLから PHOTO/VIDEO を判定する。
+- 本番デプロイは main 直プッシュ（従来どおり）。
+
+### 変更内容（具体的に）
+[新規] src/lib/shop-name-match.ts / .test.ts（14テスト）
+  貼り付けた店舗名の照合。normKey(NFKC+小文字+空白除去) / looseKey(記号除去) /
+  stripBullet(行頭の・や1.を除去) / similarity(Dice係数、候補提示のみ) /
+  buildShopIndex / matchShopNames。aliases に gbp_shop_name を入れて4段階で照合する。
+[新規] src/components/shop-paste-selector.tsx
+  貼り付けUI。貼り付け即照合、Enter=実行/Shift+Enter=改行、置換/追加の切替、
+  一致・要確認・未検出・重複行・GBP改名のバッジ、候補ボタンで手動チェック。
+[新規] src/components/gbp-aliases.ts
+  useGbpAliases()（/api/report/shop-gbp-info から shopId=>gbp_shop_name を1回だけ取得・共有、
+  失敗はキャッシュしない）と expandShopNames()（name＋GBP現在名に展開）。
+[新規] src/lib/media-format.ts / .test.ts（9テスト）
+  detectMediaFormat / isSupportedMediaFile / isVideoFile / extFromContentType。
+[新規] sql/2026-08-15_add_scheduled_posts_approval_status.sql（本番実行済み）
+[修正] src/lib/gbp-validate.ts / .test.ts
+  安全チェックを isSafeGbpResourceName に共通化し、isValidGbpMediaName と
+  isValidGbpDeletableName を追加。isValidGbpPostName の挙動は変えていない。
+[修正] src/lib/image-proxy.ts
+  resolveMediaUrl() を追加し {url, error} を返す（resolveImageUrl は薄いラッパー）。
+  拡張子を extFromContentType で決定（動画の mov/mp4 を保持）。
+  Content-Length を見てから本体を読む。75MB超は拒否。ダウンロード30→90秒。
+[修正] src/app/api/report/auto-post/route.ts
+  - fetchSheetCsv() に切り出し。25秒タイムアウト + cache:"no-store" + 1回再試行
+  - 3タブのCSV取得を並列化（行の処理はタブ順のまま。写真投稿の重複排除がタブ順依存）
+  - 0件時のデバッグは取得済みCSVを使い回す（再取得を廃止）
+  - filterShopNames が空配列なら400で中断
+  - gbpFetchWithTokenFallback() を追加し、media POST / localPosts POST / 投稿確認GET に適用
+  - Dropbox検索を写真＋動画に対応。URLとファイル名を対で持つ MediaItem に変更
+  - mediaFormatOf() で PHOTO/VIDEO を決定。結果を「動画投稿成功」「動画1/3」と出し分け
+  - 動画は post_logs.media_url に thumbnailUrl を優先保存
+  - URL変換失敗の理由とファイル名を detail に出す
+  - 取得できなかったタブを failedTabs として全レスポンスに含める
+[修正] src/app/api/report/media-urls/route.ts
+  401/403/404 で他トークンにフォールバック。成功トークンをロケーション単位で30分キャッシュ。
+  予備トークンは404が出るまで取りに行かない（遅延ロード＋10分キャッシュ）。
+  全滅したロケーションは以降スキップ。404代替探索の一覧GETも通ったトークンで叩く。
+[修正] src/app/api/report/delete-post/route.ts
+  isValidGbpDeletableName を使用（写真=media形式を許可）。/media/ 形式のロケーション解決。
+  401/403/404は他トークンで再試行してから判断。失敗理由を gbpError で返す。
+[修正] src/app/api/cron/execute-posts/route.ts
+  動画は Go API media_direct を経由せず直接Media APIへ。mediaFormat をURLから判定。
+  timeout 30→60秒。resolveImageUrl に元URLを渡して拡張子を保つ。
+[修正] src/app/posts/page.tsx
+  - Step1「店舗を選んで投稿」と投稿フォーム内「系列店にも同時投稿」に貼り付けUIを設置
+  - Step1の店舗リストに検索窓・選択中のみ表示・すべて解除を追加。検索は gbp_shop_name にも当たる
+  - buildAutoPostFilter() に一本化（プレビュー/実行/予約登録）。絞り込み0件なら中断
+  - 投稿先を常時表示。絞り込みなしは琥珀色で警告。確認ダイアログにも明記
+  - プレビュー系のtimeoutを60→120秒。タイムアウト時は「投稿は行われていません」と明示
+  - 0件時に zeroDebug（絞り込み店舗名・各タブ先頭5行のB列）を折りたたみ表示
+  - failedTabs があれば「このタブの店舗は対象から外れています」と警告
+  - handleDelete が失敗理由を握りつぶさず「N件削除 / M件失敗: 理由」を表示
+[修正] 重要ナレッジ.txt
+  GBPトークンの多アカウント問題 / 空フィルタ / approval_status欠落 / 写真なしの原因を追記。
+
+コミット: e0dbecd → f243122 → f607831 → 3c8aaa7 → 2bf080d → 36bed59 → 83a5ec2 →
+          e92298f → a26df2c → 4640bd1 → dd957f5 → 6312728 → 5d8e308 → bbb4048 →
+          552e878 → 1073ef8 → d098ca1（すべて main）
+
+### 数値・設定値
+- SHEET_FETCH_TIMEOUT = 25000ms        シートCSV取得（失敗時1回だけ再試行）
+- プレビュー系クライアントtimeout = 120000ms（60000から変更。サーバーmaxDurationは300秒）
+- TOKEN_RETRY_STATUSES = [401, 403, 404]  他トークンで再試行する条件（400等は即打ち切り）
+- LOC_TOKEN_TTL_MS = 30分               ロケーション→成功トークンのキャッシュ（media-urls）
+- EXTRA_TOKENS_TTL_MS = 10分            getAllOAuthTokens のインスタンス内キャッシュ
+- MAX_BYTES = 75MB                      GBPの動画上限。Content-Lengthで事前に弾く
+- image-proxy ダウンロードtimeout = 90000ms（30000から変更）
+- execute-posts の直接Media API timeout = 60000ms（30000から変更）
+- 対応拡張子: 写真 jpg|jpeg|png|gif|webp|bmp / 動画 mp4|mov|m4v
+- 類似候補のしきい値 = Dice係数0.45以上（部分一致は+0.3加点）・上位5件まで
+- テスト: 20ファイル 427件（shop-name-match 14 / media-format 9 / gbp-validate +5）
+
+### 未解決・次回やること
+- [ ] delete-post は GBP削除に失敗しても post_logs を削除する。
+      GBPに残っているのに管理画面から消えるため、失敗時はDB行を残すよう直す（最優先）
+- [ ] 本日削除した投稿がGBP上から実際に消えているか目視確認（DBからは確認不能）
+- [ ] LINE由来の20店舗（キラキ系・WHITE系）はこのシートに行が無く、
+      貼り付け→投稿のエンドツーエンドがまだ一度も通っていない。対象シートIDの確認が必要
+- [ ] 未投稿4件:
+      メンズ眉毛サロン bloom 梅田 / 人類みな麺類 東京本店 / LUXBE PREMIUM 大阪駅前第3ビル店
+      （Dropboxのおおもとフォルダ221件に店舗名一致のフォルダが無い）
+      Cheese Cheese Worker 千葉店の167MB動画（30秒以内に切り出しが必要）
+- [ ] approval_status カラム追加後の承認・差戻し・保留解除が動くか実機確認
+- [ ] 0件理由表示（1073ef8）とタブ読み込み失敗警告（d098ca1）は発生していないため未確認
+- [ ] LUXBE Li-Ka 鹿児島中央駅前は1件のみ公開。Dropboxに1枚しかないのか要確認
+- [ ] /api/shop/[id]/local_post など単一トークンでGBPを叩く他ルートも同じ404を踏むはず
+- [ ] cleanupImage(post.id) がファイル名 sched-{shop_id}-{uuid} と一致せず、
+      Storage(post-images)にゴミが残り続ける
+- [ ] 予約投稿の一括取消UIが無い（今回はSQLで対応した）
+
+### 注意点・ハマったこと
+■ 「全店舗に誤爆した」は私の誤判断だった ← 今回最大のミス
+  ユーザーの選択は20店舗ではなく40店舗だった。公開された15店舗41件はすべて選択内で、
+  フィルタは正常に効いていた。20店舗という前提のまま結果を読んだのが原因。
+  この誤判断で案内したDELETEにより、保留6件（一文字premium / 西口酒場ホームラン、
+  CTA400で自動実行対象外）の予約レコードを消してしまった。GBPへの公開は無し。
+  → 件数の前提は必ず本人に確認してから結論を出す。
+  → 「何店舗に対して実行しているか」が画面に出ていないと、人もAIも結果を誤読する。
+     投稿先の常時表示を入れたのはこの再発防止でもある。
+
+■ 照合テストに shops.name ではないデータを使った
+  sql/2026-08-01_rpa_sheet_shop_check.sql は「口コミRPAシートのA列」であって shops.name ではない。
+  シート側は既にGBP新名に直されていたため 20/20 一致になり、
+  GBP改名店舗（高崎店）が引けない問題を検証で捕まえられなかった。
+  → 店舗名の照合を検証するときは shops.name そのものを使う。
+
+■ GBPは1トークンで全アカウントを見られない（本番15アカウント）
+  見えないロケーションは v4 API が 404 "Requested entity was not found" を返す。
+  権限エラーではなく「存在しない」と返るので原因を誤りやすい。
+  投稿・画像URL取り直し・削除の3箇所すべてで同じ症状が出た。
+  → GBPを叩く処理を足したら必ず全トークンのフォールバックを通すこと。
+
+■ 空配列は「絞り込みなし」を意味してしまう
+  auto-post は filterShopNames が未指定でも空配列でも全店舗として扱う。
+  フロントが店舗名の解決に失敗して空配列を送ると、絞ったつもりで全店舗に公開する。
+  → サーバー側で空配列は400にした。呼び出し側の実装に関係なく落ちる。
+
+■ 失敗を握りつぶすと原因が画面から消える
+  - handleDelete の catch {} → 「0件削除しました」としか出ない
+  - delete-post が GBP削除失敗でも success:true
+  - fetchSheetCsv 失敗時の continue → タブ丸ごと欠落しても無言
+  - resolveImageUrl が null を返すだけ → 75MB超なのかタイムアウトなのか不明
+  いずれも今日ハマった。理由を必ず呼び出し側に返して画面に出すこと。
+
+■ 写真投稿は localPosts ではなく media リソース
+  delete-post が /localPosts/ 必須の検証をしていたため、写真投稿は
+  「投稿はできるが削除できない」状態だった（これまでの写真投稿すべてが該当）。
+
+■ scheduled_posts.approval_status が存在しなかった
+  コードは前提にしていたがカラムが無く、承認・差戻し・保留解除・エラー再実行が全部失敗。
+  cron の「差戻しは実行しない」フィルタも常に素通りしていた。
+  → 本番DBに書き込む列は information_schema.columns と突き合わせること（2026-08-08と同じ轍）。
+
+■ 動画はDropbox一時リンクから形式を判定できない
+  get_temporary_link のURLはファイル名を含まないことがある。
+  ファイル一覧側の名前を持ち回すこと。URL任せにすると全部PHOTO扱いになる。
+
+■ GBPの動画要件は 75MB以下 / 30秒以内 / 720p以上
+  今回の失敗は167MB。サイズ超過はダウンロード前にContent-Lengthで弾く
+  （全部落としてから捨てるとVercel関数のメモリと90秒を無駄にする）。
