@@ -611,6 +611,15 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
     return NextResponse.json({ error: "sheetIdとtargetDateが必要です" }, { status: 400 });
   }
 
+  // filterShopNames が「空配列」で来たら絞り込みなし＝全店舗として動いてしまう。
+  // 呼び出し側が店舗を絞ったつもりで名前の解決に失敗したケースなので、全店舗に投稿せず必ず落とす。
+  if (Array.isArray(filterShopNames) && filterShopNames.length === 0) {
+    return NextResponse.json(
+      { error: "投稿先の店舗が空で送られました（全店舗への投稿を防ぐため中止しました）。店舗を選び直してください" },
+      { status: 400 },
+    );
+  }
+
   // 日付フォーマット変換
   const dateObj = new Date(targetDate);
   const dateCompact = `${String(dateObj.getFullYear()).slice(2)}-${dateObj.getMonth() + 1}-${dateObj.getDate()}`; // "26-4-12" — 写真投稿のDropboxファイル名用

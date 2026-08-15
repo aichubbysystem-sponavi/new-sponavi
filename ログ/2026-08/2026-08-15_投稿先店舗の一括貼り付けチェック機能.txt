@@ -198,3 +198,22 @@ auto-post は filterShopNames が「未指定 または 空配列」のとき
   npx tsc --noEmit … エラーなし
   npx vitest run   … 19ファイル 413テスト パス
   npx next build   … Compiled successfully / 227ページ生成
+
+## 追記3の続き: ユーザー確認結果とサーバー側の追加ガード
+ユーザー確認: 「店舗を選んで投稿」を選んだ状態のまま予約投稿した。
+→ postTargetMode は "selected" だったので、実行時に filterShopNames が
+  「空配列」でサーバーに届いたことになる。空配列になる経路は
+   (1) shops が一時的に空（Go API /api/shop が配列を返さないと shop-provider が
+       setShops([]) する。今回プレビューが60秒タイムアウトしており Go API が
+       不安定だった状況と符合する）
+   (2) postTargetShopIds に shops へ存在しないIDが残っている
+  いずれでも `shops.filter(...)` が0件になり、旧コードは空配列をそのまま送っていた。
+[修正] auto-post/route.ts
+  filterShopNames が配列で長さ0のときは 400 で中断する。
+  「絞り込んだつもりが全店舗」になるのは常にバグなので、サーバー側でも必ず落とす。
+
+## 実害
+2026-08-15 12:00 に 41件が pending で予約登録されている。
+cron/execute-posts は */5 で回り、status=pending かつ scheduled_at<=now を
+自動でGBPに公開する（approval_status='rejected' のみ除外）。
+→ ユーザーに即時停止（SQLで rejected 化 または 予約一覧から取消）を案内した。
