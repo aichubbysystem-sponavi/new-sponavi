@@ -719,13 +719,20 @@ export default function PostsPage() {
     if (!(await gate("GBP投稿の削除（取り消せません）"))) return;
     try {
       let deleted = 0;
+      // 失敗理由を握りつぶすと「0件削除しました」としか出ず原因が分からない
+      const failures: string[] = [];
       for (const name of names) {
         try {
-          await api.post("/api/report/delete-post", { postName: name }, { timeout: 15000 });
-          deleted++;
-        } catch {}
+          const res = await api.post("/api/report/delete-post", { postName: name }, { timeout: 20000 });
+          if (res.data?.gbpDeleted === false) failures.push(res.data?.gbpError || "GBP側の削除に失敗");
+          else deleted++;
+        } catch (e: any) {
+          failures.push(e?.response?.data?.error || e?.message || "不明なエラー");
+        }
       }
-      setMsg(`${deleted}件削除しました`);
+      setMsg(failures.length > 0
+        ? `${deleted}件削除 / ${failures.length}件失敗: ${Array.from(new Set(failures)).slice(0, 2).join(" / ")}`
+        : `${deleted}件削除しました`);
       await fetchData();
     } catch (e: any) {
       setMsg(`削除失敗: ${e?.response?.data?.error || e?.message}`);

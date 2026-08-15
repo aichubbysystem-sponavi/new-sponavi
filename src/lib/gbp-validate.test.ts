@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isValidGbpPostName } from "./gbp-validate";
+import { isValidGbpPostName, isValidGbpMediaName, isValidGbpDeletableName } from "./gbp-validate";
 
 describe("isValidGbpPostName", () => {
   it("正当な localPost 名を受理する", () => {
@@ -37,5 +37,40 @@ describe("isValidGbpPostName", () => {
     expect(isValidGbpPostName(null)).toBe(false);
     expect(isValidGbpPostName("")).toBe(false);
     expect(isValidGbpPostName(123)).toBe(false);
+  });
+});
+
+describe("isValidGbpMediaName", () => {
+  it("正当な media 名を受理する（写真投稿の削除に必要）", () => {
+    expect(isValidGbpMediaName("accounts/123/locations/456/media/789")).toBe(true);
+    expect(isValidGbpMediaName("locations/456/media/abc-DEF_012")).toBe(true);
+  });
+
+  it("media を含まない名前は拒否する", () => {
+    expect(isValidGbpMediaName("accounts/123/locations/456")).toBe(false);
+    expect(isValidGbpMediaName("accounts/123/locations/456/localPosts/1")).toBe(false);
+  });
+
+  it("localPostsと同じ安全チェックが効く", () => {
+    expect(isValidGbpMediaName("accounts/../locations/x/media/1")).toBe(false);
+    expect(isValidGbpMediaName("accounts/1/locations//media/1")).toBe(false);
+    expect(isValidGbpMediaName("accounts/1/locations/2/media/3?foo=bar")).toBe(false);
+    expect(isValidGbpMediaName("/accounts/1/locations/2/media/3")).toBe(false);
+    expect(isValidGbpMediaName("accounts/1/locations/2/media/3/")).toBe(false);
+    expect(isValidGbpMediaName("evil/1/media/2")).toBe(false);
+    expect(isValidGbpMediaName(undefined)).toBe(false);
+  });
+});
+
+describe("isValidGbpDeletableName", () => {
+  it("通常投稿と写真の両方を受理する", () => {
+    expect(isValidGbpDeletableName("accounts/1/locations/2/localPosts/3")).toBe(true);
+    expect(isValidGbpDeletableName("accounts/1/locations/2/media/3")).toBe(true);
+  });
+
+  it("どちらでもないリソースは拒否する", () => {
+    expect(isValidGbpDeletableName("accounts/1/locations/2")).toBe(false);
+    expect(isValidGbpDeletableName("accounts/1/locations/2/reviews/3")).toBe(false);
+    expect(isValidGbpDeletableName("evil/1/media/2")).toBe(false);
   });
 });

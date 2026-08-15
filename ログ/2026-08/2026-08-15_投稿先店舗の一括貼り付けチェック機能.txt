@@ -387,3 +387,40 @@ GETが404 → URLを取り直せない → 表示できない。
 ## 未対応（同じ問題を踏む可能性がある箇所）
   /api/shop/[id]/local_post など、GBPを単一トークンで叩いている他のルート。
   別アカウント配下の店舗で同様の404が出るはず。必要になったら同じ方式で直す。
+
+==========================================================
+追記7: 写真投稿が削除できない（0件削除しました）
+==========================================================
+
+## 症状
+投稿一覧の「削除」を押すと「0件削除しました」。GBPからもDBからも消えない。
+
+## 原因（2つ重なっていた）
+1. delete-post は isValidGbpPostName() で /localPosts/ を必須にしていた。
+   写真投稿は localPosts ではなく media リソース
+   （accounts/*/locations/*/media/*）として作られるため、必ず400
+   「postNameの形式が不正です」で弾かれていた。
+   → 写真投稿は「投稿はできるが削除できない」状態だった。
+2. posts/page.tsx の handleDelete が `catch {}` で理由を握りつぶし、
+   成功件数だけ数えていたため「0件削除しました」としか出なかった。
+   ルート側も GBP削除に失敗しても success:true を返していた。
+
+## 修正
+[修正] lib/gbp-validate.ts
+  安全チェック（許可文字・パストラバーサル・ルート形式）を isSafeGbpResourceName に切り出し、
+  isValidGbpMediaName（/media/ 必須）と
+  isValidGbpDeletableName（localPosts または media）を追加。
+  isValidGbpPostName の挙動は変えない（既存テストはそのまま通る）。
+[修正] delete-post/route.ts
+  - isValidGbpDeletableName を使用。ロケーション解決も /media/ 形式に対応
+  - 401/403/404 は他トークンで再試行してから判断（追記5・6と同じアカウント問題。
+    404を「既に削除済み」と即断すると、見えないだけの投稿を消したことにしてしまう）
+  - 失敗理由を gbpError として返す（success:true だけ返して画面が「削除しました」と
+    出るのに実際は残る、を防ぐ）
+[修正] posts/page.tsx handleDelete
+  失敗理由を集計して「N件削除 / M件失敗: 理由」と表示する
+
+## 検証
+  npx tsc --noEmit … エラーなし
+  npx vitest run   … 19ファイル 418テスト パス（gbp-validate に5テスト追加）
+  npx next build   … Compiled successfully / 227ページ生成
