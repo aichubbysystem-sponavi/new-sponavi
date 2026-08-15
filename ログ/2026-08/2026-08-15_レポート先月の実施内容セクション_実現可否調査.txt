@@ -1,0 +1,207 @@
+===========================================================
+2026-08-15 レポートに「先月実際にやったこと」セクションを追加したい
+　　　　　　　実現可否の事前調査（実装は未着手）
+===========================================================
+
+## 要望（ユーザー）
+new-spotlight-navigator.com/report のレポートに以下を追加したい。
+  - 投稿 ○○投稿（実際に投稿した写真も出す）
+  - 口コミ返信 ○○件
+  - 写真投稿 ○○枚（その中の写真の閲覧数も）
+  - イレギュラー対応（メニュー変更した等）を都度入れられるように
+「構築前にやれること/やれないことをまとめてから進めたい」
+
+
+## 調査方法（推測でなく実測）
+- 本番Supabase(new-spotlight-navigator)へプーラー直結して実データを集計
+  aws-1-ap-northeast-1.pooler.supabase.com:5432 / postgres.kxxwspavskhhjtiixcep
+- 既存コード（sync-media / sync-reviews / auto-post / execute-posts / report client）を確認
+- 過去ログ（ログ.txt 690-712行、ログ/2026-08/2026-08-09_投稿管理の写真403…）を確認
+
+
+## 実データ集計結果（2026-08-15時点）
+
+### shops
+  778件（うち gbp_location_name あり=759、cancelled_at なし=706）
+
+### reviews（口コミ返信）★最も状態が良い
+  総数 163,557件 / reply_time あり 137,925件
+  reply_time 月別:
+    2026-03: 7,620件 / 336店舗
+    2026-04: 6,612件 / 339店舗
+    2026-05: 7,330件 / 333店舗
+    2026-06: 7,212件 / 324店舗
+    2026-07: 4,942件 / 279店舗
+  reply_comment はあるが reply_time が無い = 4件のみ（cron/sync-reviewsが毎時Googleの
+  updateTimeで埋めるため実質ズレなし。auto-replyは reply_comment しか書かない点に注意）
+
+### post_logs（システム経由の投稿ログ）★全店をカバーしていない
+  2026-05: 24件 /  8店舗
+  2026-07: 48件 / 10店舗
+  2026-08: 150件 / 35店舗（8/15時点）
+  直近3ヶ月の topic_type は全て PHOTO
+  scheduled_posts の published も 2026-07=45件、2026-08=41件と同水準
+  → 返信は毎月280〜340店舗で発生しているのに、投稿ログは10〜35店舗しかない。
+     つまり投稿の実態はこのシステムの外（別ツール/手動）で行われている。
+     レポートの「投稿数」を post_logs で出すと大半の店舗が0件になる。
+  ※ 旧Go API側の post_resavations / post_files / batch_log は全て0件（移行済みで空）
+
+### media（写真）★ほぼ死んでいる
+  216件 / 3店舗のみ。synced_at は 2026-04-09〜04-11 で以降同期なし（cron未設定）
+  view_count は全216件が 0（最大値0）
+  → sync-media は手動実行のみ。cron化＋全店初回同期が必要。
+
+### 写真の閲覧数（過去調査で結論済み・ログ.txt 690-712行）
+  - GBP Media API v4 は insights フィールドを返さない（API仕様変更）
+  - Performance API に写真メトリクスは無い（実装中のMETRICSも表示回数/電話/ルート/
+    サイト/予約/メニュークリックのみ）
+  - 当時ダッシュボードから閲覧数表示を削除済み
+  → 「写真の閲覧数」は現行のGoogle APIでは取得不可（確定）。投稿の閲覧数も同様に廃止済み。
+
+### 既知の罠（ログ/2026-08/2026-08-09）
+  GBP の googleUrl は永続URLではなく数日で403になる（403でも200x200の
+  「画像なし」PNGが返るので onError では検知できない）。
+  復旧はメディアリソース名から取り直す /api/report/media-urls が実装済み。
+  → レポートに写真を出すなら、URLではなくリソース名を保存し、
+     PDF安定化のためSupabase Storageへ退避するのが安全。
+
+
+## 判定まとめ
+  ◎ 口コミ返信件数        : 既存DBのみで即可能。過去も遡れる
+  ○ 投稿数＋投稿した写真  : GBP v4 localPosts.list の同期を新設すれば可能
+                            （手動投稿分・過去分がどこまで返るかは要実測）
+  ○ 写真投稿枚数          : media.create_time で月別カウント可。cron化と全店初回同期が必要
+  × 写真の閲覧数          : API仕様上取得不可。代替案の提示が必要
+  △ イレギュラー対応      : 手入力テーブル＋管理UIで可能。自動検知は
+                            店名/住所/電話/カテゴリのみ（gbp-snapshot）。
+                            メニュー・営業時間・属性は未対応
+
+## GBP APIの実測（本番Go APIのトークンで直接叩いて確認）
+トークン: https://spotlight-api-114449938952.asia-northeast1.run.app/api/google/token
+　　　　　（DBの system_oauth_tokens の refresh_token は invalid_rapt で失効中。
+　　　　　　再発行の残タスクは別件で継続）
+
+対象: 不用品回収のキラキらっこ 栃木店 / locations/502443106944651601
+　　　accounts/105824873810081958139（アカウントは5つ以上あり、location単位で総当たり要）
+
+### GET /v4/{acc}/locations/{id}/localPosts  → 200
+  総件数 447件 / 5ページ / 3.0秒
+  最古 2021-01-05 まで遡れる（過去分も取得可能）
+  新しい順で返る → 1ページ目だけ取れば差分同期できる
+  2026-07 は 8投稿（post_logsには同店の8月分が6件しかない＝外部で投稿されている裏付け）
+  全件 media 付き。media.googleUrl で写真の実物が取れる
+  返却キー: name, languageCode, summary, callToAction, state, updateTime,
+            createTime, searchUrl, topicType
+
+### GET /v4/{acc}/locations/{id}/media  → 200
+  総件数 596件 / 6ページ / 4.2秒。新しい順
+  2026-07 は 12枚
+  category内訳: ADDITIONAL 594 / COVER 1 / PROFILE 1
+  ★ 投稿添付写真（name に /media/localPosts/ を含むもの）は 0件
+     → 「投稿の写真」と「写真投稿」は重複しない。別々に数えてよい
+  ★ insights を持つアイテムは 0件（= 閲覧数は返らない。2026-04の調査結論を再確認）
+  返却キー: name, sourceUrl, mediaFormat, locationAssociation, googleUrl,
+            thumbnailUrl, createTime, dimensions
+
+### 同期コスト試算
+  全ページ取得: 1店舗 約7秒 × 759店舗 ≒ 90分（Vercel cron 300秒では1回で不可）
+  差分同期(1ページ目のみ): 1店舗 約0.6秒 × 759店舗 ≒ 8分（月次なら十分）
+  → 初回は1ページ目(直近100件≒1年分)のみ取得で開始し、
+     全履歴が必要なら sync_progress 方式で分割実行する
+
+
+## ユーザー決定（2026-08-15）
+  (1) 投稿数 = GBPの実データ全部（localPosts同期を新設）
+  (2) 写真の閲覧数の欄は作らない（画像と枚数のみ）
+  (3) イレギュラー対応 = 既存の report_memos（レポートメモ欄）を活用
+
+## 実装済み（2026-08-15。デプロイは未実施）
+
+### DB（本番に適用済み）
+  sql/2026-08-15_gbp_posts.sql
+  - gbp_posts テーブル新設（post_name PK / shop_id / create_time / topic_type /
+    state / summary / search_url / media_name / media_format / media_url / synced_at）
+    ＋ (shop_id, create_time DESC) と (shop_name, create_time DESC) のインデックス
+  - RLS有効・ポリシー無し = anon/authenticated 全遮断（読み書きは service_role のみ）
+  - reviews に idx_reviews_shop_id_reply_time（shop_id, reply_time DESC / reply_time NOT NULL）
+    を CONCURRENTLY で追加（35.6秒。16万件の返信集計で timeout を出さないため）
+  ※ 適用済みなので SQL Editor での再実行は不要（IF NOT EXISTS なので実行しても無害）
+
+### コード
+  src/lib/gbp-activity.ts        新規。GBP実績の取得・保存・集計
+  src/lib/month-utils.ts         monthRangeIso / prevMonthLabel を追加（JST月境界）
+  src/lib/month-range.test.ts    新規。月境界と年またぎのテスト（7件・全体434件パス）
+  src/app/api/report/activity/route.ts   新規。レポート1ページ分の実績を返すAPI
+  src/app/api/cron/sync-activity/route.ts 新規。毎日3:00 JSTにGBP実績を同期
+  src/app/report/[shopId]/client.tsx     「先月の実施内容」ページをP1直後に追加
+  vercel.json                    cron追加（0 18 * * * = JST 3:00）
+
+### 設計上の判断（ハマりどころ）
+  - 投稿数は post_logs ではなくGBPの localPosts 一覧を正とする（実測の根拠は上記）
+  - 画像URLはDBに保存した値を使わない。googleUrlは数日で403になり、
+    リソース名すら付け替えられる（2026-08-09調査）。表示のたびにGBPから取り直す。
+    → Storageへの退避もしないので追加コストは¥0
+  - 一覧は新しい順に返るので、対象月まで遡ったらページングを打ち切る（通常1店舗1ページ）
+  - レポートAPIは maxDuration 60秒。1リクエスト12秒 × 2ページ × 2種 = 最悪48秒に収めた
+  - 対象月の投稿がDBに0件なら、同期が新しくてもその場で取り直す
+    （当月・前月しか同期していない状態で過去月のレポートを開くと0件表示になるため）
+  - ページ番号: P2〜P7の固定値を pageNum = N + activityPages に変更。
+    PDF側の pdfSummaryPageNum にも activityPages を加算
+  - メモの二重表示回避: 実施内容ページにメモを載せ、最終メモページは印刷対象から外す
+    （Web表示は編集用に残す）。ただし200字超の長文は切れるので従来どおり最終ページに出す
+  - 全項目0の月はページごと出さない。表示設定に「先月の実施内容」トグルを追加（既定ON）
+  - 「投稿17件・写真投稿0枚」が起こりうる（投稿添付の写真は写真タブに入らない）ため
+    ページ内に注記を入れた
+
+### 実データでの動作確認（本番DB＋本番GBP）
+  5店舗で同期→集計まで通した（2026年7月・JST基準）:
+    「泡」家系ラーメン 薩摩家 伊丹店      投稿8件 / 返信22件 / 写真4枚
+    キックボクシング&パーソナルジムFirst 本町店 投稿17件 / 返信4件 / 写真0枚
+    701 TARESOBA OKINAWA                投稿7件 / 返信28件 / 写真4枚
+    Antique Chic Brooch横浜店            投稿8件 / 返信74件 / 写真11枚
+    BISTRO MAUMU                        投稿14件 / 返信50件 / 写真0枚
+  1店舗あたり2.1〜3.1秒。投稿写真のgoogleUrlは匿名GETで200（約34KB）
+  reviews.shop_id は16万件すべて埋まっており shops.id と1:1（返信集計はshop_idで安全）
+  shops 694店舗中688店舗に gbp_full_path があるためロケーション解決はほぼ確実
+
+### 追加対応（同日・ユーザー指示による変更）
+  1. メモは最終ページのみに戻した（実施内容ページには載せない）
+  2. 写真一覧ページを新設。その月に公開した写真を「全部」出す
+     - 投稿に添付した写真＋写真タブの写真をまとめて1つの一覧にする
+       （投稿添付はメディア一覧に入らないので重複しない。実測で確認済み）
+     - 1ページ20枚（5列×4行）。20枚を超えたらページを足す（例: 45枚なら3ページ）
+     - 上限200枚。超過分は「※ N枚は掲載していません」と明示（黙って切らない）
+  3. 写真ごとの閲覧数を手入力できるようにした
+     - 保存先: gbp_posts.view_count / media.view_count（初期値NULL=未計測）
+     - POST /api/report/photo-views（権限MEMO=社員以上・監査ログ対象・shop_id条件付きUPDATE）
+     - 入力欄はログイン時のみ表示、no-printでPDFには出ない
+     - 保存すると即座に「閲覧数の多い順・未計測は末尾・同数は新しい順」で並べ替え
+     - クライアントには入力済みの数字だけ見える（未入力は何も出さない）
+  4. 費用対策: レポート1表示あたりのGBP呼び出しを3回→2回に削減し、
+     /api/report/activity にインスタンス内10分キャッシュを追加
+  5. 既存コードの巻き添え修正
+     - sync-media/route.ts が view_count に0を書いていたのを停止（手入力値が消えるため）
+     - media/page.tsx の view_count.toLocaleString() が null で落ちるのを修正（未計測表示）
+
+### 実測メモ（2026-08-15 追加）
+  - 画像URLのサイズサフィックス（=w400-h400 等）は投稿由来のURLでは200、
+    メディア一覧由来のURLでは400になる。付けずに使うこと（本体はCSSでサイズ指定）
+  - Antique Chic Brooch横浜店 2026/7 = 投稿8件・返信74件・写真タブ11枚 → 写真一覧19枚
+
+### 残り
+  - デプロイ（git push）は未実施
+  - 過去月の遡り取得は1リクエスト100件・最大2ページ。投稿頻度が非常に高い店舗では
+    数ヶ月以上前の月を開いても取り切れない場合がある（以降は日次cronの蓄積でカバー）
+
+## 実装方針（当初案）
+  - 新テーブル gbp_posts（post_name PK / shop_id / create_time / topic_type /
+    state / summary / search_url / media_name / synced_at）
+  - 既存 media テーブルを流用しcron化（view_count列は使わない）
+  - 差分同期API + 月次cron
+  - 集計API /api/report/activity?shopId=&month=
+  - レポートに「先月の実施内容」ページを1枚追加
+    （投稿数・返信件数・写真枚数の3カード＋投稿写真グリッド＋メモのイレギュラー欄）
+  - 写真URLは失効するため表示時に /api/report/media-urls で再解決、
+    PDF安定用にサムネイルを月次でStorage退避
+  - report_display_settings.section_visibility に新キーを追加して店舗別ON/OFF
+  - 工数 約3日 / 外部費用 ¥0（GBP API無料・LLM不使用）

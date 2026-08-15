@@ -84,3 +84,29 @@ export function reportMonthFromMeasuredAt(iso: string): string {
   }
   return `${y}/${m}`;
 }
+
+/**
+ * "2026/7" → その月のJST月初〜翌月初をUTCのISOで返す（DBのtimestamptz範囲検索用）。
+ * JSTの00:00はUTCの前日15:00。ここをUTC基準で切ると月初・月末の投稿が隣の月に混ざる。
+ * 解釈できなければ null。
+ */
+export function monthRangeIso(month: string): { startIso: string; endIso: string } | null {
+  const n = monthToNum(month);
+  if (!n) return null;
+  const y = Math.floor(n / 100);
+  const m = n % 100;
+  if (m < 1 || m > 12) return null;
+  const start = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0) - 9 * 60 * 60 * 1000);
+  const end = new Date(Date.UTC(y, m, 1, 0, 0, 0) - 9 * 60 * 60 * 1000);
+  return { startIso: start.toISOString(), endIso: end.toISOString() };
+}
+
+/** "2026/1" → "2025/12"。文字列比較で月を扱うと年またぎで必ず壊れるためここに集約する */
+export function prevMonthLabel(month: string): string {
+  const n = monthToNum(month);
+  if (!n) return "";
+  let y = Math.floor(n / 100);
+  let m = (n % 100) - 1;
+  if (m === 0) { m = 12; y -= 1; }
+  return `${y}/${m}`;
+}

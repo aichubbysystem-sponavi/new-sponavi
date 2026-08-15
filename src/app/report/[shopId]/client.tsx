@@ -44,6 +44,53 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointEleme
 
 import { buildStackedOptions, lineOptions } from "./chart-options";
 
+/** レポートに載せる写真1枚 */
+interface ActivityPhoto {
+  /** 閲覧数の保存キー（投稿写真=post_name / 写真タブ=media_name） */
+  key: string;
+  source: "post" | "media";
+  url: string;
+  createTime: string;
+  /** 手入力の閲覧数。null = 未計測（Googleは写真ごとの閲覧数を返さない） */
+  viewCount: number | null;
+}
+
+/** 「先月の実施内容」ページのデータ（/api/report/activity の戻り値） */
+interface ActivityData {
+  month: string;
+  posts: number;
+  postsPrev: number;
+  photos: number;
+  photosPrev: number;
+  replies: number;
+  repliesPrev: number;
+  /** その月に公開した写真すべて（閲覧数の多い順・未計測は末尾） */
+  photoItems: ActivityPhoto[];
+  photoTruncated: number;
+  photoError: string | null;
+}
+
+/** 1ページに並べる写真の枚数（5列×4行）。スライドの高さに収まる上限 */
+const PHOTOS_PER_PAGE = 20;
+/** 実施内容ページに抜粋で載せる枚数 */
+const PHOTOS_ON_SUMMARY = 8;
+
+/** ISO日時 → JSTの "M/D" */
+function jstMonthDay(iso: string): string {
+  const d = new Date(new Date(iso).getTime() + 9 * 60 * 60 * 1000);
+  return isNaN(d.getTime()) ? "" : `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+}
+
+/** 閲覧数の多い順・未計測は末尾・同数は新しい順（サーバー側と同じ並び） */
+function sortPhotos(items: ActivityPhoto[]): ActivityPhoto[] {
+  return [...items].sort((a, b) => {
+    const av = a.viewCount, bv = b.viewCount;
+    if (av != null && bv != null && av !== bv) return bv - av;
+    if (av != null && bv == null) return -1;
+    if (av == null && bv != null) return 1;
+    return Date.parse(b.createTime) - Date.parse(a.createTime);
+  });
+}
 
 // ── Component ──
 
@@ -413,6 +460,7 @@ export default function ReportClient({
   // セクション表示ON/OFF（店舗ごとにDB保存、localStorageはフォールバック）
   const visKey = `report-visibility-${shopId}`;
   const [sectionVisibility, setSectionVisibility] = useState<Record<string, boolean>>({
+    activity: true,
     keywords: true,
     rankingHistory: true,
     searchQueries: true,
@@ -895,11 +943,108 @@ export default function ReportClient({
     setMemoLoading(false);
   };
 
+  // ── 先月の実施内容（投稿 / 口コミ返信 / 写真）──
+  // 数字はDB（gbp_posts・reviews・media）、写真URLはGBPから取り直したもの。
+  // GBPのgoogleUrlは数日で失効するため保存済みURLは使わない（2026-08-09の403調査）。
+  const [activity, setActivity] = useState<ActivityData | null>(null);
+  const [activityError, setActivityError] = useState("");
+  const [activityLoading, setActivityLoading] = useState(false);
+  useEffect(() => {
+    if (!shop.name || !curLabel) return;
+    let cancelled = false;
+    (async () => {
+      setActivityLoading(true);
+      setActivityError("");
+      try {
+        const authH = await getAuthHeaders();
+        const res = await fetch(
+          `/api/report/activity?shopId=${encodeURIComponent(shop.name)}&month=${encodeURIComponent(curLabel)}`,
+          { headers: authH },
+        );
+        if (cancelled) return;
+        if (!res.ok) {
+          // 「0件」と「取得失敗」を取り違えないよう、失敗は必ず表に出す
+          const body = await res.json().catch(() => ({}));
+          setActivity(null);
+          setActivityError(body?.error || `取得に失敗しました (HTTP ${res.status})`);
+          return;
+        }
+        const json = (await res.json()) as ActivityData;
+        if (cancelled) return;
+        // 数字は出せるが写真だけ取れなかったケースを無音にしない
+        if (json.photoError) console.warn("[activity] 写真の取得に失敗:", json.photoError);
+        setActivity(json);
+      } catch (e: any) {
+        if (!cancelled) { setActivity(null); setActivityError(e?.message || "取得に失敗しました"); }
+      } finally {
+        if (!cancelled) setActivityLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [shop.name, curLabel]);
+
+  // 写真の閲覧数（手入力）。保存できたら画面上も即座に並べ替える
+  const [viewSaving, setViewSaving] = useState<string | null>(null);
+  const [viewError, setViewError] = useState("");
+  const saveViewCount = useCallback(async (photo: ActivityPhoto, raw: string) => {
+    const trimmed = raw.trim();
+    const next = trimmed === "" ? null : Math.floor(Number(trimmed));
+    if (next !== null && (!Number.isFinite(next) || next < 0)) {
+      setViewError("閲覧数は0以上の数字で入力してください");
+      return;
+    }
+    if (next === photo.viewCount) return; // 変更なし
+    setViewSaving(photo.key);
+    setViewError("");
+    try {
+      const authH = await getAuthHeaders();
+      const res = await fetch("/api/report/photo-views", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authH },
+        body: JSON.stringify({ shopId: shop.name, items: [{ source: photo.source, key: photo.key, viewCount: next }] }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setViewError(body?.error || `保存に失敗しました (HTTP ${res.status})`);
+        return;
+      }
+      // 保存できた分だけ画面に反映して並べ替える（多い順・未計測は末尾）
+      setActivity(prev => prev && ({
+        ...prev,
+        photoItems: sortPhotos(prev.photoItems.map(p => p.key === photo.key ? { ...p, viewCount: next } : p)),
+      }));
+    } catch (e: any) {
+      setViewError(e?.message || "保存に失敗しました");
+    } finally {
+      setViewSaving(null);
+    }
+  }, [shop.name]);
+
+  // 全部0の店舗にページを出しても「何もしていない」証明にしかならないので、
+  // 実績が1件でもある月だけページを作る（表示設定でも店舗ごとにOFFにできる）
+  const hasActivityData = !!activity && (
+    activity.posts + activity.photos + activity.replies +
+    activity.postsPrev + activity.photosPrev + activity.repliesPrev
+  ) > 0;
+  const showActivity = sectionVisibility.activity !== false && hasActivityData;
+  // 写真一覧は20枚ずつページを分ける（月20枚投稿していれば全部出る）
+  const photoPages: ActivityPhoto[][] = [];
+  if (showActivity && activity) {
+    for (let i = 0; i < activity.photoItems.length; i += PHOTOS_PER_PAGE) {
+      photoPages.push(activity.photoItems.slice(i, i + PHOTOS_PER_PAGE));
+    }
+  }
+  // 実施内容ページ＋写真一覧ページを差し込むと以降のページ番号がずれる（PDF側の計算にも効く）
+  const activityPages = showActivity ? 1 + photoPages.length : 0;
+  // メモは最終ページのみに出す（実施内容ページには載せない。2026-08-15 ユーザー判断）
+  const memoPagePrinted = !!memo;
+
   const handlePdfDownload = async () => {
     setPdfGenerating(true);
     const insertedEls: HTMLElement[] = [];
-    // メモが空の最終ページはno-printで除外されるため、印刷時の分母から差し引く
-    const hiddenTrailingPages = memo ? 0 : 1;
+    // メモが空の最終ページはno-printで除外されるため、印刷時の分母から差し引く。
+    // 実施内容ページにメモを載せている場合も最終ページは印刷しない（同じ文章が2ページに出るため）
+    const hiddenTrailingPages = memoPagePrinted ? 0 : 1;
     try {
       if (!visibleGridRanking || visibleGridRanking.keywords.length === 0) {
         // グリッドランキングなし → 分母だけ補正してprint
@@ -942,7 +1087,7 @@ export default function ReportClient({
       const pageShift = pdfMapPairCount - 1; // PDF追加ページ数
       const pdfTotalPages = totalPages + pageShift - hiddenTrailingPages;
       // サマリーページ番号（summaryPageNumと同じ値を計算）
-      const pdfSummaryPageNum = 5 + (showKeywords ? 1 : 0) + (showRankingHistory ? 1 : 0) + 1;
+      const pdfSummaryPageNum = 5 + activityPages + (showKeywords ? 1 : 0) + (showRankingHistory ? 1 : 0) + 1;
 
       // ── 1. マップペアスライドをDOMに生成（ヘッダーバー付き） ──
       const mapPairSlides: HTMLElement[] = [];
@@ -1248,7 +1393,7 @@ export default function ReportClient({
 
   // ── Page count ──
   // 無条件ページ: P1, P2(月次), P3-P5(グラフ)=5 + 口コミ分析 + 総括 + メモ = 8
-  let totalPages = 8;
+  let totalPages = 8 + activityPages;
   if (hasReviews) totalPages += 2; // 口コミ件数推移, 月間増加数
   if (showKeywords) totalPages++;
   if (showRankingHistory) totalPages++;
@@ -1494,6 +1639,7 @@ export default function ReportClient({
               <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 16, fontWeight: 600, display: "block", marginBottom: 10 }}>スライド表示ON/OFF</span>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {[
+                  { key: "activity", label: "先月の実施内容", hasData: hasActivityData },
                   { key: "keywords", label: "キーワード順位", hasData: hasKeywords },
                   { key: "rankingHistory", label: "順位推移テーブル", hasData: unifiedRankingHistory.labels.length > 0 },
                   { key: "gridRanking", label: "多地点順位", hasData: hasGridRanking },
@@ -1847,8 +1993,155 @@ export default function ReportClient({
         </div>
       </div>
 
+      {/* ════ 先月の実施内容（投稿・口コミ返信・写真）════ */}
+      {/* P1（結果のサマリー）の直後に置く。以降のデータページを「その結果」として読ませるため。
+          全項目0の月はページごと出さない（showActivity）。店舗ごとに表示設定でOFFにもできる */}
+      {showActivity && activity && (() => {
+        pageNum = 2;
+        const [ay, am] = curLabel.split("/");
+        const monthTitle = ay && am ? `${ay}年${am}月` : curLabel;
+        const cards = [
+          { label: "投稿", value: activity.posts, prev: activity.postsPrev, unit: "件" },
+          { label: "口コミ返信", value: activity.replies, prev: activity.repliesPrev, unit: "件" },
+          { label: "写真投稿", value: activity.photos, prev: activity.photosPrev, unit: "枚" },
+        ];
+        // 「投稿件数 - 表示枚数」ではなく「写真付き投稿の総数 - 表示枚数」。
+        // 文章だけの投稿を「載せきれなかった写真」として数えないため
+        const summaryPhotos = activity.photoItems.slice(0, PHOTOS_ON_SUMMARY);
+        const totalPhotos = activity.photoItems.length + activity.photoTruncated;
+        const restPhotos = Math.max(0, totalPhotos - summaryPhotos.length);
+        return (
+          <div style={slideStyle} className="slide">
+            <div style={slideBarStyle}>
+              <span>{shop.name} — {monthTitle}の実施内容</span>
+              <span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
+            </div>
+            <div style={{ ...slideBodyStyle, justifyContent: "flex-start" }}>
+              <div style={stitleStyle}>{monthTitle}に実施した内容</div>
+
+              {/* 実施件数 */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, flexShrink: 0 }}>
+                {cards.map((c, i) => {
+                  const diff = c.value - c.prev;
+                  return (
+                    <div key={c.label} style={{ background: "#fff", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.06)", overflow: "hidden" }}>
+                      <div style={{ height: 5, background: kpiTopColors[i % kpiTopColors.length] }} />
+                      <div style={{ padding: "12px 18px 14px" }}>
+                        <div style={{ fontSize: 16, color: "#666", fontWeight: 600 }}>{c.label}</div>
+                        <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 2 }}>
+                          <span style={{ fontSize: 34, fontWeight: 700, color: COLORS.primary, lineHeight: 1.1 }}>{c.value.toLocaleString()}</span>
+                          <span style={{ fontSize: 16, color: "#666" }}>{c.unit}</span>
+                          <span style={{ fontSize: 15, marginLeft: "auto", color: diff > 0 ? COLORS.positive : diff < 0 ? COLORS.negative : "#999", fontWeight: 600 }}>
+                            {diff > 0 ? `+${diff}` : diff < 0 ? `${diff}` : "±0"}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 14, color: "#999", marginTop: 2 }}>前月 {c.prev.toLocaleString()}{c.unit}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* 「投稿17件・写真投稿0枚」が起こりうる（投稿に添付した写真は写真タブに入らない）。
+                  数字の食い違いに見えるため必ず注記する */}
+              <div style={{ fontSize: 13, color: "#999", marginTop: 6, flexShrink: 0 }}>
+                ※「写真投稿」はプロフィールの写真タブに追加した枚数です。投稿に添付した写真は「投稿」に含まれます
+              </div>
+
+              {/* 公開した写真（抜粋。全部は次ページの一覧に出す） */}
+              <div style={{ marginTop: 12, flexShrink: 0 }}>
+                <div style={{ fontSize: 16, fontWeight: 700, color: COLORS.primary, marginBottom: 8 }}>
+                  公開した写真
+                  {restPhotos > 0 && <span style={{ fontSize: 14, fontWeight: 400, color: "#999", marginLeft: 8 }}>ほか{restPhotos}枚（次ページに一覧）</span>}
+                </div>
+                {summaryPhotos.length > 0 ? (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>
+                    {summaryPhotos.map((p) => (
+                      <div key={p.key} style={{ background: "#fff", borderRadius: 10, overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.06)" }}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={p.url} alt="" style={{ width: "100%", height: 124, objectFit: "cover", display: "block", background: "#eef1f6" }} />
+                        <div style={{ fontSize: 13, color: "#888", padding: "3px 8px", display: "flex", justifyContent: "space-between" }}>
+                          <span>{jstMonthDay(p.createTime)}</span>
+                          {p.viewCount != null && <span style={{ color: COLORS.primary, fontWeight: 600 }}>{p.viewCount.toLocaleString()}回</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 15, color: "#999", background: "#fff", borderRadius: 10, padding: "14px 16px" }}>
+                    {activity.photoError
+                      ? `写真を表示できませんでした（${activity.photoError}）`
+                      : activityLoading ? "読み込み中..." : "写真付きの投稿はありませんでした"}
+                  </div>
+                )}
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ════ 投稿した写真一覧（20枚/ページ・閲覧数の多い順）════ */}
+      {/* 「月20枚投稿したら全部出るか」への答え。全部出す。20枚を超えたらページを足す */}
+      {showActivity && activity && photoPages.map((pagePhotos, pi) => {
+        pageNum = 3 + pi;
+        const [ay, am] = curLabel.split("/");
+        const monthTitle = ay && am ? `${ay}年${am}月` : curLabel;
+        const totalPhotos = activity.photoItems.length + activity.photoTruncated;
+        return (
+          <div key={`photos-${pi}`} style={slideStyle} className="slide">
+            <div style={slideBarStyle}>
+              <span>{shop.name} — 公開した写真一覧{photoPages.length > 1 ? `（${pi + 1}/${photoPages.length}）` : ""}</span>
+              <span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span>
+            </div>
+            <div style={{ ...slideBodyStyle, justifyContent: "flex-start" }}>
+              <div style={stitleStyle}>
+                {monthTitle}に公開した写真（全{totalPhotos}枚）
+                <span style={{ fontSize: 13, fontWeight: 400, color: "#999", marginLeft: 10 }}>閲覧数の多い順</span>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 8 }}>
+                {pagePhotos.map((p) => (
+                  <div key={p.key} style={{ background: "#fff", borderRadius: 10, overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.06)" }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={p.url} alt="" style={{ width: "100%", height: 104, objectFit: "cover", display: "block", background: "#eef1f6" }} />
+                    <div style={{ fontSize: 12, color: "#888", padding: "3px 7px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span>{jstMonthDay(p.createTime)}</span>
+                      {p.viewCount != null
+                        ? <span style={{ color: COLORS.primary, fontWeight: 700 }}>{p.viewCount.toLocaleString()}回</span>
+                        : <span className="no-print" style={{ color: "#bbb" }}>未計測</span>}
+                    </div>
+                    {/* 閲覧数の手入力。Googleが数字を返さないのでここだけが入力口。印刷には出さない */}
+                    {isLoggedIn && (
+                      <div className="no-print" style={{ padding: "0 7px 6px" }}>
+                        <input
+                          type="number" min={0} defaultValue={p.viewCount ?? ""}
+                          placeholder="閲覧数"
+                          disabled={!canMemo || viewSaving === p.key}
+                          title={!canMemo ? PERMISSION_DENIED_HINT.MEMO : "閲覧数を入力（空欄=未計測）"}
+                          onBlur={(e) => saveViewCount(p, e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                          style={{ width: "100%", fontSize: 12, padding: "2px 6px", border: "1px solid #ccd", borderRadius: 5 }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {activity.photoTruncated > 0 && (
+                <div style={{ fontSize: 13, color: "#999", marginTop: 8 }}>
+                  ※ 枚数が多いため{activity.photoTruncated}枚は掲載していません
+                </div>
+              )}
+              {viewError && (
+                <div className="no-print" style={{ fontSize: 13, color: COLORS.danger, marginTop: 8 }}>{viewError}</div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+
       {/* ════ P2: 月次テーブル ════ */}
-      {(() => { pageNum = 2; return null; })()}
+      {(() => { pageNum = 2 + activityPages; return null; })()}
       <div style={slideStyle} className="slide">
         <div style={slideBarStyle}><span>{shop.name} — 月次推移データ</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
@@ -1892,7 +2185,7 @@ export default function ReportClient({
       </div>
 
       {/* ════ P3: Googleマップ表示数推移 ════ */}
-      {(() => { pageNum = 3; return null; })()}
+      {(() => { pageNum = 3 + activityPages; return null; })()}
       <div style={slideStyle} className="slide">
         <div style={slideBarStyle}><span>{shop.name} — Googleマップ表示数推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
@@ -1921,7 +2214,7 @@ export default function ReportClient({
       </div>
 
       {/* ════ P4: Google検索数推移 ════ */}
-      {(() => { pageNum = 4; return null; })()}
+      {(() => { pageNum = 4 + activityPages; return null; })()}
       <div style={slideStyle} className="slide">
         <div style={slideBarStyle}><span>{shop.name} — Google検索数推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
@@ -1950,7 +2243,7 @@ export default function ReportClient({
       </div>
 
       {/* ════ P5: ユーザー反応数推移 ════ */}
-      {(() => { pageNum = 5; return null; })()}
+      {(() => { pageNum = 5 + activityPages; return null; })()}
       <div style={slideStyle} className="slide">
         <div style={slideBarStyle}><span>{shop.name} — ユーザー反応数推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
@@ -1993,7 +2286,7 @@ export default function ReportClient({
       </div>
 
       {/* ════ P7: キーワード順位 (データある場合のみ) ════ */}
-      {showKeywords && (() => { pageNum = 6; return (
+      {showKeywords && (() => { pageNum = 6 + activityPages; return (
         <div style={slideStyle} className="slide">
           <div style={slideBarStyle}><span>{shop.name} — キーワード順位変動</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={slideBodyStyle}>
@@ -2946,7 +3239,7 @@ export default function ReportClient({
       {/* メモが空のときはスライドごとPDFから除外（空白ページ防止）。
           最終ページなので他ページの番号はずれず、印刷時は分母のみ handlePdfDownload で調整する */}
       {(() => { pageNum++; return (
-        <div style={slideStyle} className={memo ? "slide" : "slide no-print"}>
+        <div style={slideStyle} className={memoPagePrinted ? "slide" : "slide no-print"}>
           <div style={slideBarStyle}><span>{shop.name} — メモ</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={{ ...slideBodyStyle, display: "flex", flexDirection: "column" }}>
             <div style={stitleStyle}>メモ<span className="no-print" style={{ fontSize: 16, fontWeight: 400, color: "#999" }}>（担当者用）</span></div>

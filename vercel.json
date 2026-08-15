@@ -30,6 +30,10 @@
     {
       "path": "/api/cron/pmax-health",
       "schedule": "0 22 * * 0"
+    },
+    {
+      "path": "/api/cron/sync-activity",
+      "schedule": "0 18 * * *"
     }
   ],
   "headers": [

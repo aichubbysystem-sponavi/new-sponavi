@@ -16,7 +16,8 @@ interface MediaRow {
   google_url: string | null;
   thumbnail_url: string | null;
   category: string;
-  view_count: number;
+  /** null = 未計測（Googleは写真ごとの閲覧数を返さないため手入力のみ） */
+  view_count: number | null;
   description: string | null;
   create_time: string | null;
   synced_at: string;
@@ -296,7 +297,7 @@ export default function MediaPage() {
                   </div>
                   <div className="p-3">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs text-slate-500">閲覧: {m.view_count.toLocaleString()}回</span>
+                      <span className="text-xs text-slate-500">{m.view_count == null ? "閲覧: 未計測" : `閲覧: ${m.view_count.toLocaleString()}回`}</span>
                       <span className="text-[10px] text-slate-400">{m.create_time ? new Date(m.create_time).toLocaleDateString("ja-JP") : ""}</span>
                     </div>
                   </div>
@@ -323,7 +324,7 @@ export default function MediaPage() {
                 <div className="p-5">
                   <div className="flex items-center gap-3 mb-2">
                     <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-600">{getCategoryLabel(selectedImg.category)}</span>
-                    <span className="text-sm text-slate-500">閲覧数: {selectedImg.view_count.toLocaleString()}回</span>
+                    <span className="text-sm text-slate-500">{selectedImg.view_count == null ? "閲覧数: 未計測" : `閲覧数: ${selectedImg.view_count.toLocaleString()}回`}</span>
                   </div>
                   {selectedImg.description && <p className="text-sm text-slate-600">{selectedImg.description}</p>}
                   <p className="text-xs text-slate-400 mt-2">

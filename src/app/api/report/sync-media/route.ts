@@ -83,6 +83,8 @@ export const POST = withAudit("メディア同期", "DATA_OP", async (request, c
       const media = await fetchMedia(shop.gbp_location_name, accessToken);
       if (media.length === 0) continue;
 
+      // view_count は書かない。GBP v4 は insights を返さない（2026-04・2026-08-15に実測）ので
+      // この列は手入力の閲覧数の置き場になっている。0で上書きすると入力値が消える
       const rows = media.map((m) => ({
         shop_id: shop.id,
         shop_name: shop.name,
@@ -90,7 +92,6 @@ export const POST = withAudit("メディア同期", "DATA_OP", async (request, c
         google_url: m.googleUrl || null,
         thumbnail_url: m.thumbnailUrl || null,
         category: m.locationAssociation?.category || "ADDITIONAL",
-        view_count: Math.max(0, parseInt(m.insights?.viewCount || "0", 10) || 0),
         description: m.description || null,
         create_time: m.createTime || null,
         synced_at: new Date().toISOString(),
