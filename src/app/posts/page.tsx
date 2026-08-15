@@ -1034,7 +1034,10 @@ export default function PostsPage() {
                       if (!pv.ok) { setAutoPostResult({ error: pv.error }); setAutoPosting(false); return; }
                       try {
                         const res = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, ...pv.filter }, { timeout: 120000 });
-                        setAutoPostResult({ ...res.data, mode: "preview", targetLabel: pv.label });
+                        // 0件のときはエラー表示に寄せて、原因（店舗名の食い違い）を追えるようにする
+                        setAutoPostResult((res.data?.matches || 0) === 0
+                          ? { error: `${autoPostDate}に該当する投稿がありません`, zeroDebug: res.data?.debug }
+                          : { ...res.data, mode: "preview", targetLabel: pv.label });
                       } catch (e: any) {
                         // プレビューは読み取りだけなので、タイムアウトしても投稿は発生していない
                         const timedOut = e?.code === "ECONNABORTED" || /timeout/i.test(e?.message || "");
@@ -1059,7 +1062,7 @@ export default function PostsPage() {
                       try {
                         const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, ...execFilter }, { timeout: 120000 });
                         const total = previewRes.data.matches || 0;
-                        if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません` }); setAutoPosting(false); return; }
+                        if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません`, zeroDebug: previewRes.data.debug }); setAutoPosting(false); return; }
                         if (!confirm(`【${currentAttempt}回目実行】${autoPostDate}の投稿を実行しますか？\n\n投稿先: ${ex.label}\n${total}件を10件ずつバッチ処理します（${Math.ceil(total / 10)}回）`)) { setAutoPosting(false); return; }
                         // 追加ロック: 一括で公開投稿するためログインパスワードを再確認
                         if (!(await gate(`${total}件の一括自動投稿（GBPに公開されます）`))) { setAutoPosting(false); return; }
@@ -1129,7 +1132,7 @@ export default function PostsPage() {
                     try {
                       const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, ...schedFilter }, { timeout: 120000 });
                       const total = previewRes.data.matches || 0;
-                      if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません` }); setAutoPosting(false); return; }
+                      if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません`, zeroDebug: previewRes.data.debug }); setAutoPosting(false); return; }
                       if (!confirm(`${scheduleDate} ${scheduleHour}時 に予約投稿しますか？\n\n投稿先: ${sc.label}\n${total}件を予約登録します`)) { setAutoPosting(false); return; }
 
                       const bs = 10;
@@ -1190,7 +1193,28 @@ export default function PostsPage() {
                 {autoPostResult && (
                   <div className={`rounded-lg p-3 text-sm ${autoPostResult.error ? "bg-red-50 text-red-700 border border-red-200" : autoPostResult.mode === "preview" ? "bg-blue-50 text-blue-700 border border-blue-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}>
                     {autoPostResult.error ? (
-                      <p>エラー: {autoPostResult.error}</p>
+                      <>
+                        <p>エラー: {autoPostResult.error}</p>
+                        {/* 0件のときは「どの店舗名で絞り込んだか」「シートB列に何が入っているか」を出す。
+                            これが無いと店舗名の食い違いを画面から追えない */}
+                        {autoPostResult.zeroDebug && (
+                          <details className="mt-2 text-[11px]">
+                            <summary className="cursor-pointer">0件だった理由を確認する</summary>
+                            <div className="mt-1 space-y-1">
+                              <p className="font-semibold">絞り込みに使った店舗名（この表記でシートB列と完全一致する必要があります）</p>
+                              {(autoPostResult.zeroDebug.filterShopNames || []).length > 0 ? (
+                                <ul className="list-disc pl-4">
+                                  {autoPostResult.zeroDebug.filterShopNames.map((n: string) => <li key={n}>{n}</li>)}
+                                </ul>
+                              ) : <p>（絞り込みなし）</p>}
+                              <p className="font-semibold mt-1">シート各タブの先頭5行のB列</p>
+                              <ul className="list-disc pl-4">
+                                {(autoPostResult.zeroDebug.tabResults || []).map((t: string, i: number) => <li key={i}>{t}</li>)}
+                              </ul>
+                            </div>
+                          </details>
+                        )}
+                      </>
                     ) : autoPostResult.mode === "preview" ? (
                       <>
                         <p className="font-semibold mb-2">プレビュー: {autoPostResult.matches}件マッチ</p>
