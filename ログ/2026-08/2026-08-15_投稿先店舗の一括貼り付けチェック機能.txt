@@ -249,3 +249,21 @@ cron/execute-posts は */5 で回り、status=pending かつ scheduled_at<=now �
     and scheduled_at >= '2026-08-15T03:00:00Z';   -- 12:00 JST
   ※ status='rejected' への UPDATE は approval_status を触らなければ通るが、
     画面の「差戻し」ボタンは両方を同時に更新するため、カラム追加までは使えない。
+
+## 追記4の実行結果（本番）
+1) SELECT で残存を確認 → 6件のみ、すべて status='on_hold'
+   （一文字premium / 西口酒場ホームラン、03:00〜03:02 UTC = 12:00〜12:02 JST）
+   → status='pending' の行は既に無かった。つまり予約41件は12:00の cron で公開済み。
+2) ALTER TABLE scheduled_posts ADD COLUMN IF NOT EXISTS approval_status text; → Success
+   （承認 / 差戻し / 保留解除 / エラー再実行 が使えるようになった）
+3) DELETE（pending/on_hold かつ scheduled_at>=12:00 JST）→ Success。残り6件を削除。
+
+## 残作業
+- 12:00に公開された分のうち、意図しない店舗のGBP投稿を削除する
+  対象の洗い出しSQL:
+    select shop_name, count(*) 件数, min(published_at) 最初, max(published_at) 最後
+    from scheduled_posts
+    where status='published' and scheduled_at >= '2026-08-15T03:00:00Z'
+    group by shop_name order by shop_name;
+  公開済みの投稿は post_logs.gbp_post_name に GBP側のリソース名が入っており、
+  投稿一覧の「削除」ボタンはこれを使う。
