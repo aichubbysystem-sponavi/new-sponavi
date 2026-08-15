@@ -217,3 +217,35 @@ auto-post は filterShopNames が「未指定 または 空配列」のとき
 cron/execute-posts は */5 で回り、status=pending かつ scheduled_at<=now を
 自動でGBPに公開する（approval_status='rejected' のみ除外）。
 → ユーザーに即時停止（SQLで rejected 化 または 予約一覧から取消）を案内した。
+
+==========================================================
+追記4: scheduled_posts.approval_status カラムが本番に存在しない
+==========================================================
+
+## 症状
+予約投稿の「差戻し」を押すと
+  変更失敗: Could not find the 'approval_status' column of 'scheduled_posts' in the schema cache
+
+## 原因
+コードは approval_status 前提だが、本番DBにカラムが無い（sql/ にも作成用SQLが無い）。
+影響範囲は差戻しだけではない:
+  - 承認（approval_status='approved'）… 失敗
+  - 差戻し（approval_status='rejected'）… 失敗
+  - 保留中の投稿の解除 / エラー投稿の再実行 … 失敗
+    （scheduled-posts/route.ts:140-143 が status='pending' のとき
+      approval_status='pending' も必ず一緒に更新するため）
+  - cron/execute-posts:215 の filter(p => p.approval_status !== "rejected") は
+    カラムが無いと常に true。つまり承認フローは最初から一切機能していない。
+    予約は status='pending' かつ scheduled_at<=now なら5分おきに公開される。
+
+## 対応
+[新規] sql/2026-08-15_add_scheduled_posts_approval_status.sql
+  ALTER TABLE scheduled_posts ADD COLUMN IF NOT EXISTS approval_status text;
+  → 本番SQL Editorでの実行が必要（未実行のうちは承認・差戻し・保留解除が失敗し続ける）
+
+## 誤登録分の停止方法（approval_status に依存しない手段）
+  delete from scheduled_posts
+  where status in ('pending','on_hold')
+    and scheduled_at >= '2026-08-15T03:00:00Z';   -- 12:00 JST
+  ※ status='rejected' への UPDATE は approval_status を触らなければ通るが、
+    画面の「差戻し」ボタンは両方を同時に更新するため、カラム追加までは使えない。
