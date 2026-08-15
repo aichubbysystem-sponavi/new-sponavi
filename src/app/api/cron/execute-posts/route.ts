@@ -3,6 +3,7 @@ import { getSupabase, verifyCron } from "@/lib/supabase";
 import { getOAuthToken, getAllOAuthTokens } from "@/lib/gbp-token";
 import { resolveLocationName } from "@/lib/gbp-location";
 import { resolveImageUrl, cleanupImage } from "@/lib/image-proxy";
+import { detectMediaFormat } from "@/lib/media-format";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -158,7 +159,7 @@ async function uploadPhotoViaGoApi(
   }
 }
 
-/** 写真投稿: 直接Media APIでアップロード（フォールバック） */
+/** 写真・動画投稿: 直接Media APIでアップロード（フォールバック） */
 async function uploadPhotoDirectMediaApi(
   post: any, accessToken: string, locationName: string
 ): Promise<{ ok: boolean; name?: string; error?: string }> {
@@ -169,8 +170,9 @@ async function uploadPhotoDirectMediaApi(
       cache: "no-store" as const,
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify({ mediaFormat: "PHOTO", sourceUrl: post.photo_url, locationAssociation: { category: "ADDITIONAL" } }),
-      signal: AbortSignal.timeout(30000),
+      // 予約時に image-proxy が拡張子を保って保存しているのでURLから形式を判定できる
+      body: JSON.stringify({ mediaFormat: detectMediaFormat(post.photo_url) || "PHOTO", sourceUrl: post.photo_url, locationAssociation: { category: "ADDITIONAL" } }),
+      signal: AbortSignal.timeout(60000),
     });
     if (res.ok) {
       const result = await res.json().catch(() => ({}));
@@ -244,7 +246,8 @@ export async function GET(request: NextRequest) {
 
       // Dropbox一時URLを安定した公開URLに変換
       if (post.photo_url) {
-        const resolvedUrl = await resolveImageUrl(post.photo_url, post.id);
+        // 拡張子を保つためファイル名代わりに元URLを渡す（動画/写真の判定に使う）
+        const resolvedUrl = await resolveImageUrl(post.photo_url, post.id, post.photo_url);
         if (resolvedUrl) {
           post.photo_url = resolvedUrl;
         } else {
@@ -256,9 +259,13 @@ export async function GET(request: NextRequest) {
       let result: { ok: boolean; name?: string; error?: string };
 
       if (post.topic_type === "PHOTO") {
-        // === 写真投稿 ===
+        // === 写真・動画投稿 ===
+        // 動画は Go API media_direct が mediaFormat を写真固定で送るため使えない。直接Media APIに任せる
+        const isVideo = detectMediaFormat(post.photo_url || "") === "VIDEO";
         // 1. Go API media_direct 経由（店舗別トークンで「写真と動画」セクションに投稿）
-        result = await uploadPhotoViaGoApi(post.shop_id, post);
+        result = isVideo
+          ? { ok: false, error: "動画のためGo APIを経由せず直接Media APIを使う" }
+          : await uploadPhotoViaGoApi(post.shop_id, post);
 
         // 2. Go API失敗 → 直接Media API（全トークンを順番に試す）
         if (!result.ok) {

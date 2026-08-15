@@ -1,11 +1,26 @@
 import { NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { withAudit } from "@/lib/audit";
+import { detectMediaFormat, isSupportedMediaFile, type GbpMediaFormat } from "@/lib/media-format";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
+
+/** Dropboxから取り出したメディア。動画対応のためURLとファイル名を対で持つ */
+type MediaItem = { url: string; name: string };
+
+/**
+ * 投稿するメディアの形式。ファイル名から判定した結果を最優先し、
+ * 無ければURLの拡張子で判定、それも不明なら従来通り写真として扱う。
+ */
+function mediaFormatOf(match: { mediaFormat?: GbpMediaFormat; mediaFileName?: string }, url: string): GbpMediaFormat {
+  return match.mediaFormat
+    || detectMediaFormat(match.mediaFileName || "")
+    || detectMediaFormat(url)
+    || "PHOTO";
+}
 
 /** 店舗名の正規化比較（全角半角・スペースの揺れを吸収、部分一致は排除） */
 function normName(s: string): string {
@@ -142,9 +157,9 @@ async function getDropboxAccessToken(): Promise<string | null> {
 /**
  * Dropbox共有リンクからフォルダ内のファイルをリストし、日付マッチする全写真のDLリンクを取得
  */
-async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: string, shopName: string): Promise<{ urls: string[]; debug: string }> {
+async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: string, shopName: string): Promise<{ items: MediaItem[]; debug: string }> {
   const dbxToken = await getDropboxAccessToken();
-  if (!dbxToken) return { urls: [], debug: "Dropboxトークン取得失敗" };
+  if (!dbxToken) return { items: [], debug: "Dropboxトークン取得失敗" };
 
   try {
     // 共有リンクURL正規化
@@ -230,12 +245,12 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
       debugSteps.push(`list_folder例外: ${e?.message}`);
     }
 
-    if (files.length === 0) return { urls: [], debug: `フォルダ内にファイルが0件 [${debugSteps.join(" → ")}] URL: ${shareUrl.slice(0, 80)}` };
+    if (files.length === 0) return { items: [], debug: `フォルダ内にファイルが0件 [${debugSteps.join(" → ")}] URL: ${shareUrl.slice(0, 80)}` };
 
     // ファイル名にdateCompactを含む画像をフィルタ
     // "26-5-1"が"26-5-10"等にマッチしないよう、後続文字が数字でないことを確認
     const dateMatches = files.filter(f => {
-      if (!/\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(f.name)) return false;
+      if (!isSupportedMediaFile(f.name)) return false;
       const idx = f.name.indexOf(dateCompact);
       if (idx === -1) return false;
       // dateCompactの直後の文字が数字ならfalse（"26-5-1"が"26-5-10"にマッチしないように）
@@ -245,11 +260,12 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
     });
 
     if (dateMatches.length === 0) {
-      return { urls: [], debug: `フォルダ内${files.length}件中「${dateCompact}」マッチ0件。ファイル例: ${files.slice(0, 5).map(f => f.name).join(", ")}` };
+      return { items: [], debug: `フォルダ内${files.length}件中「${dateCompact}」マッチ0件。ファイル例: ${files.slice(0, 5).map(f => f.name).join(", ")}` };
     }
 
     // 全マッチファイルのDLリンクを取得
-    const urls: string[] = [];
+    // 動画混在に対応するためURLとファイル名を対で持つ（Dropbox一時リンクは拡張子を含まない）
+    const items: { url: string; name: string }[] = [];
     let dlDebug: string[] = [];
 
     // 共有フォルダのルート絶対パスを取得（get_temporary_link用）
@@ -283,7 +299,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
         });
         if (linkRes.ok) {
           const linkData = await linkRes.json();
-          if (linkData.link) { urls.push(linkData.link); got = true; }
+          if (linkData.link) { items.push({ url: linkData.link, name: file.name }); got = true; }
         }
       } catch (e: any) { console.error("[auto-post] temp_link method1 error:", file.name, e?.message); }
 
@@ -302,7 +318,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
           });
           if (linkRes2.ok) {
             const linkData2 = await linkRes2.json();
-            if (linkData2.link) { urls.push(linkData2.link); got = true; }
+            if (linkData2.link) { items.push({ url: linkData2.link, name: file.name }); got = true; }
           }
         } catch (e: any) { console.error("[auto-post] temp_link method2 error:", file.name, e?.message); }
       }
@@ -323,7 +339,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
           const shareBody = await shareRes.json();
           const fileShareUrl = shareBody?.url || shareBody?.error?.shared_link_already_exists?.metadata?.url;
           if (fileShareUrl) {
-            urls.push(fileShareUrl.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace(/\?dl=0/, "?dl=1"));
+            items.push({ url: fileShareUrl.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace(/\?dl=0/, "?dl=1"), name: file.name });
             got = true;
           }
         } catch (e: any) { console.error("[auto-post] share_link method3 error:", file.name, e?.message); }
@@ -333,16 +349,16 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
     }
 
     const debugExtra = dlDebug.length > 0 ? ` [${dlDebug.join("; ")}]` : "";
-    return { urls, debug: urls.length > 0 ? `${urls.length}枚取得（${dateMatches.length}件マッチ）${debugExtra}` : `${dateMatches.length}件マッチしたがDLリンク取得失敗${debugExtra}` };
+    return { items, debug: items.length > 0 ? `${items.length}件取得（${dateMatches.length}件マッチ）${debugExtra}` : `${dateMatches.length}件マッチしたがDLリンク取得失敗${debugExtra}` };
   } catch (e: any) {
-    return { urls: [], debug: `例外: ${e?.message}` };
+    return { items: [], debug: `例外: ${e?.message}` };
   }
 }
 
 // 後方互換: 1枚だけ返す旧インターフェース
 async function searchDropboxPhotoWithDebug(folderUrl: string, dateCompact: string, shopName: string): Promise<{ url: string; debug: string }> {
   const result = await searchDropboxPhotosMultiple(folderUrl, dateCompact, shopName);
-  return { url: result.urls[0] || "", debug: result.debug };
+  return { url: result.items[0]?.url || "", debug: result.debug };
 }
 
 // おおもとDropboxフォルダ（全店舗の写真フォルダが入っている親フォルダ）
@@ -412,17 +428,17 @@ async function getRootSubfolders(dbxToken: string): Promise<{ name: string; url:
 /**
  * おおもとフォルダから店舗名に一致するサブフォルダを探し、その中の写真を検索
  */
-async function searchDropboxByShopName(shopName: string, dateCompact: string): Promise<{ urls: string[]; debug: string }> {
+async function searchDropboxByShopName(shopName: string, dateCompact: string): Promise<{ items: MediaItem[]; debug: string }> {
   const dbxToken = await getDropboxAccessToken();
-  if (!dbxToken) return { urls: [], debug: "Dropboxトークン取得失敗" };
+  if (!dbxToken) return { items: [], debug: "Dropboxトークン取得失敗" };
 
   const subfolders = await getRootSubfolders(dbxToken);
-  if (subfolders.length === 0) return { urls: [], debug: "おおもとフォルダのサブフォルダ0件" };
+  if (subfolders.length === 0) return { items: [], debug: "おおもとフォルダのサブフォルダ0件" };
 
   // 店舗名でフォルダを検索（正規化完全一致のみ）
   const matched = subfolders.find(f => matchShopName(f.name, shopName));
   if (!matched) {
-    return { urls: [], debug: `おおもとフォルダ${subfolders.length}件中「${shopName}」一致なし` };
+    return { items: [], debug: `おおもとフォルダ${subfolders.length}件中「${shopName}」一致なし` };
   }
 
   // マッチしたサブフォルダを、おおもとフォルダの共有リンク経由でlist_folder
@@ -440,7 +456,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      return { urls: [], debug: `フォルダ「${matched.name}」のlist失敗: HTTP${res.status} ${body.slice(0, 80)}` };
+      return { items: [], debug: `フォルダ「${matched.name}」のlist失敗: HTTP${res.status} ${body.slice(0, 80)}` };
     }
     const data = await res.json();
     let allEntries = data.entries || [];
@@ -487,7 +503,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
 
     // 日付マッチする画像ファイルをフィルタ
     const dateMatches = files.filter(f => {
-      if (!/\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(f.name)) return false;
+      if (!isSupportedMediaFile(f.name)) return false;
       const idx = f.name.indexOf(dateCompact);
       if (idx === -1) return false;
       const nextChar = f.name[idx + dateCompact.length];
@@ -496,7 +512,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
     });
 
     if (dateMatches.length === 0) {
-      return { urls: [], debug: `フォルダ「${matched.name}」内${files.length}件中「${dateCompact}」マッチ0件。例: ${files.slice(0, 5).map(f => f.name).join(", ")}` };
+      return { items: [], debug: `フォルダ「${matched.name}」内${files.length}件中「${dateCompact}」マッチ0件。例: ${files.slice(0, 5).map(f => f.name).join(", ")}` };
     }
 
     // get_shared_link_metadata でルートパスを取得
@@ -516,7 +532,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
     } catch (e: any) { console.error("[auto-post] shop shared link metadata error:", e?.message); }
 
     // DLリンク取得（方法1-3を既存ロジックと同様に）
-    const urls: string[] = [];
+    const items: { url: string; name: string }[] = [];
     const dlDebug: string[] = [];
 
     for (const file of dateMatches.slice(0, 10)) {
@@ -533,7 +549,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
         });
         if (linkRes.ok) {
           const d = await linkRes.json();
-          if (d.link) { urls.push(d.link); got = true; }
+          if (d.link) { items.push({ url: d.link, name: file.name }); got = true; }
         }
       } catch (e: any) { console.error("[auto-post] shop temp_link method1 error:", file.name, e?.message); }
 
@@ -550,7 +566,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
           });
           if (linkRes2.ok) {
             const d2 = await linkRes2.json();
-            if (d2.link) { urls.push(d2.link); got = true; }
+            if (d2.link) { items.push({ url: d2.link, name: file.name }); got = true; }
           }
         } catch (e: any) { console.error("[auto-post] shop temp_link method2 error:", file.name, e?.message); }
       }
@@ -569,7 +585,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
           const shareBody = await shareRes.json();
           const fileShareUrl = shareBody?.url || shareBody?.error?.shared_link_already_exists?.metadata?.url;
           if (fileShareUrl) {
-            urls.push(fileShareUrl.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace(/\?dl=0/, "?dl=1"));
+            items.push({ url: fileShareUrl.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace(/\?dl=0/, "?dl=1"), name: file.name });
             got = true;
           }
         } catch (e: any) { console.error("[auto-post] shop share_link method3 error:", file.name, e?.message); }
@@ -579,9 +595,9 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
     }
 
     const debugExtra = dlDebug.length > 0 ? ` [${dlDebug.join("; ")}]` : "";
-    return { urls, debug: urls.length > 0 ? `${matched.name}→${urls.length}枚取得（${dateMatches.length}件マッチ）${debugExtra}` : `${matched.name}→${dateMatches.length}件マッチしたがDLリンク取得失敗${debugExtra}` };
+    return { items, debug: items.length > 0 ? `${matched.name}→${items.length}件取得（${dateMatches.length}件マッチ）${debugExtra}` : `${matched.name}→${dateMatches.length}件マッチしたがDLリンク取得失敗${debugExtra}` };
   } catch (e: any) {
-    return { urls: [], debug: `例外: ${e?.message}` };
+    return { items: [], debug: `例外: ${e?.message}` };
   }
 }
 
@@ -692,7 +708,7 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
 
   // 対象タブを読み込み
   const tabs = ["投稿用シート", "報告必須店舗 投稿用シート", "WHITE 系列 投稿用シート"];
-  const allMatches: { shopName: string; summary: string; photoUrl: string; ctaUrl: string; tab: string; rawPhotoCell: string; rawDateCell: string; photoDebug: string; topicType: string; offerTitle: string; offerStartDate: any; offerEndDate: any; photoIndex?: number }[] = [];
+  const allMatches: { shopName: string; summary: string; photoUrl: string; ctaUrl: string; tab: string; rawPhotoCell: string; rawDateCell: string; photoDebug: string; topicType: string; offerTitle: string; offerStartDate: any; offerEndDate: any; photoIndex?: number; mediaFileName?: string; mediaFormat?: GbpMediaFormat }[] = [];
   const pendingPhotoSearch: { index: number; photoCell: string; shopName: string }[] = [];
 
   // タブのCSV取得は並列（3タブ直列だとクライアントの待ち時間に乗ってしまう）。
@@ -779,7 +795,7 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
       await Promise.all(batch.map(async (p) => {
       const match = allMatches[p.index];
 
-      let photoUrls: string[] = [];
+      let mediaItems: MediaItem[] = [];
       let photoDebug = "";
       // 写真投稿: "26-5-1" = 月内の投稿番号、通常投稿: "260412" = 日付
       const fileNameDate = isPhotoOnly
@@ -788,39 +804,46 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
       // F列にDropbox URLがある場合: 直接そのフォルダを検索
       if (p.photoCell && p.photoCell.includes("dropbox.com")) {
         const result = await searchDropboxPhotosMultiple(p.photoCell.trim(), fileNameDate, p.shopName);
-        photoUrls = result.urls;
+        mediaItems = result.items;
         photoDebug = result.debug;
       }
       // F列にURL形式の文字列がある場合: 正規表現で抽出（SSRF防止: 許可ドメインのみ）
-      if (photoUrls.length === 0 && p.photoCell) {
+      if (mediaItems.length === 0 && p.photoCell) {
         const urls = (p.photoCell.match(/https?:\/\/[^\s,"]+/g) || []).filter(isAllowedPhotoUrl);
         const dated = urls.filter((u: string) => u.includes(fileNameDate));
-        photoUrls = dated.length > 0 ? dated.map(convertDropboxUrl) : [];
+        // このURLは拡張子を含むのでURL自体から形式を判定できる
+        mediaItems = dated.map((u: string) => ({ url: convertDropboxUrl(u), name: u }));
       }
       // フォールバック: おおもとDropboxフォルダから店舗名で検索
-      if (photoUrls.length === 0) {
+      if (mediaItems.length === 0) {
         const rootResult = await searchDropboxByShopName(p.shopName, fileNameDate);
-        photoUrls = rootResult.urls;
+        mediaItems = rootResult.items;
         photoDebug = rootResult.debug;
       }
-      if (photoUrls.length === 0 && !photoDebug) photoDebug = "URLから写真を抽出できません";
+      if (mediaItems.length === 0 && !photoDebug) photoDebug = "URLから写真・動画を抽出できません";
 
-      if (isPhotoOnly) {
-        // 写真のみ: 1枚目をこのマッチに、残りを追加
-        match.photoUrl = photoUrls[0] || "";
-        match.photoDebug = photoUrls.length > 0 ? `写真1/${photoUrls.length}` : photoDebug;
-        for (let pi = 1; pi < photoUrls.length; pi++) {
-          allMatches.push({ ...match, summary: "", photoUrl: photoUrls[pi], photoDebug: `写真${pi + 1}/${photoUrls.length}`, photoIndex: pi });
+      const total = mediaItems.length;
+      const label = (i: number) => `${detectMediaFormat(mediaItems[i].name) === "VIDEO" ? "動画" : "写真"}${i + 1}/${total}`;
+      const applyItem = (target: any, i: number) => {
+        target.photoUrl = mediaItems[i].url;
+        target.mediaFileName = mediaItems[i].name;
+        target.mediaFormat = detectMediaFormat(mediaItems[i].name) || undefined;
+        target.photoDebug = label(i);
+      };
+
+      if (total === 0) {
+        match.photoUrl = "";
+        match.photoDebug = photoDebug;
+      } else if (isPhotoOnly || total > 1) {
+        // 1件目をこのマッチに、残りは別マッチとして追加（1ファイル=1投稿）
+        applyItem(match, 0);
+        for (let pi = 1; pi < total; pi++) {
+          const extra: any = { ...match, summary: "", photoIndex: pi };
+          applyItem(extra, pi);
+          allMatches.push(extra);
         }
-      } else if (photoUrls.length <= 1) {
-        match.photoUrl = photoUrls[0] || "";
-        match.photoDebug = photoUrls.length > 0 ? `写真${photoUrls.length}枚取得` : photoDebug;
       } else {
-        match.photoUrl = photoUrls[0];
-        match.photoDebug = `写真${photoUrls.length}枚取得（1/${photoUrls.length}）`;
-        for (let pi = 1; pi < photoUrls.length; pi++) {
-          allMatches.push({ ...match, summary: "", photoUrl: photoUrls[pi], photoDebug: `写真${pi + 1}/${photoUrls.length}`, photoIndex: pi });
-        }
+        applyItem(match, 0);
       }
     }));
     }
@@ -958,7 +981,12 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
       //    ※Storage上の画像は実行完了まで必要なので、ここではcleanupImageを呼ばないこと
       if (match.photoUrl && match.photoUrl.includes("dropbox")) {
         const { resolveImageUrl } = await import("@/lib/image-proxy");
-        const stableUrl = await resolveImageUrl(match.photoUrl, `sched-${shop.id}-${crypto.randomUUID().slice(0, 8)}`);
+        // ファイル名を渡して拡張子を保つ。実行時はこのURLの拡張子で PHOTO / VIDEO を判定する
+        const stableUrl = await resolveImageUrl(
+          match.photoUrl,
+          `sched-${shop.id}-${crypto.randomUUID().slice(0, 8)}`,
+          match.mediaFileName || "",
+        );
         if (stableUrl) {
           match.photoUrl = stableUrl;
         } else if (isPhotoOnly) {
@@ -1096,7 +1124,7 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
         const postId = `auto-${shop.id}-${photoPostNumber}-${Date.now()}`;
         let stableUrl = match.photoUrl;
         if (match.photoUrl.includes("dropbox")) {
-          const resolved = await resolveImageUrl(match.photoUrl, postId);
+          const resolved = await resolveImageUrl(match.photoUrl, postId, match.mediaFileName || "");
           if (resolved) {
             stableUrl = resolved;
           } else {
@@ -1106,21 +1134,24 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
           }
         }
 
+        const fmt = mediaFormatOf(match, stableUrl);
         const { res: mediaRes, text: mediaText } = await gbpFetchWithTokenFallback(
           `${GBP_API_BASE}/${locationName}/media`,
-          { body: JSON.stringify({ mediaFormat: "PHOTO", sourceUrl: stableUrl, locationAssociation: { category: "ADDITIONAL" } }) },
+          { body: JSON.stringify({ mediaFormat: fmt, sourceUrl: stableUrl, locationAssociation: { category: "ADDITIONAL" } }) },
           accessToken,
         );
         const mediaBody = parseJson(mediaText);
         if (mediaRes.ok && mediaBody.name) {
-          results.push({ shopName: match.shopName, status: "写真投稿成功", gbpMediaName: mediaBody.name, googleUrl: mediaBody.googleUrl, summary: `写真: ${match.photoDebug}`, sourceUrl: stableUrl });
+          results.push({ shopName: match.shopName, status: fmt === "VIDEO" ? "動画投稿成功" : "写真投稿成功", gbpMediaName: mediaBody.name, googleUrl: mediaBody.googleUrl, summary: `${fmt === "VIDEO" ? "動画" : "写真"}: ${match.photoDebug}`, sourceUrl: stableUrl });
           posted++;
           // 投稿ログに保存（管理画面に表示するため）
           try {
             await supabase.from("post_logs").insert({
               id: crypto.randomUUID(), shop_id: shop.id, shop_name: shop.name,
               summary: "", topic_type: "PHOTO",
-              media_url: mediaBody.googleUrl || stableUrl, gbp_post_name: mediaBody.name,
+              // 動画は googleUrl が動画本体なので、一覧の<img>用にサムネイルを優先して保存する
+              media_url: (fmt === "VIDEO" ? (mediaBody.thumbnailUrl || mediaBody.googleUrl) : mediaBody.googleUrl) || stableUrl,
+              gbp_post_name: mediaBody.name,
             });
           } catch (e: any) {
             console.error(`[auto-post] post_logs記録失敗(写真): ${shop.name}`, e?.message);
@@ -1145,7 +1176,7 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
           ? match.photoUrl : convertDropboxUrl(match.photoUrl);
         const { res: mediaRes } = await gbpFetchWithTokenFallback(
           `${GBP_API_BASE}/${locationName}/media`,
-          { body: JSON.stringify({ mediaFormat: "PHOTO", sourceUrl: directUrl, locationAssociation: { category: "ADDITIONAL" } }) },
+          { body: JSON.stringify({ mediaFormat: mediaFormatOf(match, directUrl), sourceUrl: directUrl, locationAssociation: { category: "ADDITIONAL" } }) },
           accessToken,
         );
         if (mediaRes.ok) {
@@ -1179,7 +1210,7 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
     if (match.photoUrl) {
       const directUrl = match.photoUrl.includes("dropboxusercontent.com") || match.photoUrl.includes("dl.dropbox")
         ? match.photoUrl : convertDropboxUrl(match.photoUrl);
-      postBody.media = [{ mediaFormat: "PHOTO", sourceUrl: directUrl }];
+      postBody.media = [{ mediaFormat: mediaFormatOf(match, directUrl), sourceUrl: directUrl }];
     }
 
     try {

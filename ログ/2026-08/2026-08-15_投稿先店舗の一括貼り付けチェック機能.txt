@@ -424,3 +424,64 @@ GETが404 → URLを取り直せない → 表示できない。
   npx tsc --noEmit … エラーなし
   npx vitest run   … 19ファイル 418テスト パス（gbp-validate に5テスト追加）
   npx next build   … Compiled successfully / 227ページ生成
+
+==========================================================
+追記8: 動画（MOV/MP4）も投稿できるようにした
+==========================================================
+
+## 発端
+Cheese Cheese Worker 千葉店の写真が1枚しか投稿されなかった。
+Dropboxの「写真投稿26-8-2」は3ファイルあったが、
+  写真投稿26-8-2 (1).png  → 投稿された
+  写真投稿26-8-2 (1).MOV  → 拡張子フィルタで除外
+  写真投稿26-8-2 (2).MOV  → 同上
+auto-post の拡張子フィルタが jpg|jpeg|png|gif|webp|bmp だけだったため。
+ユーザー判断で「動画も投稿する運用にする」ことになった。
+
+## 実行パスの確認（触る前に全部たどった）
+  即時実行  : auto-post → Dropbox検索 → image-proxy(安定URL化) → GBP Media API
+  予約登録  : auto-post → Dropbox検索 → image-proxy → scheduled_posts.photo_url に保存
+  予約実行  : cron/execute-posts → Go API media_direct → 失敗時 直接Media API
+  表示      : post_logs.media_url → media-urls で取り直し → <img>
+
+## 設計判断: DBカラムは増やさず、URLの拡張子で判定する
+scheduled_posts に media_format を足す案もあったが、予約時に image-proxy が
+Supabase Storage へ拡張子付きで保存している（sched-xxx.mp4 等）ため、
+実行時にURLから判定できる。マイグレーション不要で経路が1つ減る。
+※そのため image-proxy が拡張子を落とさないことが前提条件になった（下記）。
+
+## 変更
+[新規] src/lib/media-format.ts + テスト9件
+  detectMediaFormat / isSupportedMediaFile / isVideoFile / extFromContentType。
+  写真 jpg|jpeg|png|gif|webp|bmp、動画 mp4|mov|m4v（GBP非対応のaviやwmvは入れない）。
+  URLはクエリ・フラグメントを落としパス部分で判定する。
+[修正] lib/image-proxy.ts
+  - 拡張子を contentType から決めていた（png/webp/jpg固定）のを extFromContentType に変更。
+    Dropboxが application/octet-stream を返す場合は元のファイル名から拾う
+  - resolveImageUrl に sourceName 引数を追加（呼び出し側から元ファイル名を渡す）
+  - ダウンロードのタイムアウト 30秒 → 90秒（動画は数十MB）
+  - 75MB超はアップロードせず落とす（GBPの動画上限）
+[修正] auto-post/route.ts
+  - Dropbox検索の拡張子フィルタを isSupportedMediaFile に変更（2箇所）
+  - Dropbox一時リンクはファイル名を含まないため、URLとファイル名を対で持つ
+    MediaItem 型に変更（searchDropboxPhotosMultiple / searchDropboxByShopName）
+  - match に mediaFileName / mediaFormat を持たせ、Media API と localPosts の
+    mediaFormat をファイル名から決定（mediaFormatOf）
+  - 結果表示を「動画投稿成功」「動画1/3」と出し分け。
+    写真が無いときの文言も「写真・動画なし（スキップ）」に変更
+  - 動画は googleUrl が動画本体なので post_logs.media_url には
+    thumbnailUrl を優先保存（一覧の<img>が壊れないように）
+[修正] cron/execute-posts/route.ts
+  - 動画は Go API media_direct を経由せず直接Media APIへ
+    （media_direct は mediaFormat を写真固定で送るため）
+  - 直接Media APIの mediaFormat を photo_url の拡張子で判定。timeout 30→60秒
+  - resolveImageUrl に元URLを渡して拡張子を保つ
+
+## GBP側の制約（コードでは弾けないもの）
+  30秒以内 / 75MB以下 / 720p以上。満たさない動画は GBP が 400 を返す。
+  結果一覧に「写真エラー(400)」として理由が出るので、そこで判別する。
+
+## 検証
+  npx tsc --noEmit … エラーなし
+  npx vitest run   … 20ファイル 427テスト パス（media-format に9件追加）
+  npx next build   … Compiled successfully / 227ページ生成

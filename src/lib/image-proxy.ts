@@ -3,9 +3,12 @@
  * GBP APIは sourceUrl から画像をfetchするため、安定した公開URLが必要
  */
 import { getSupabase } from "@/lib/supabase";
+import { extFromContentType } from "@/lib/media-format";
 
 
 const BUCKET = "post-images";
+// GBPの動画上限（75MB）。写真はこれよりずっと小さいので共通の上限として使う
+const MAX_BYTES = 75 * 1024 * 1024;
 
 
 /**
@@ -27,16 +30,21 @@ function isDropboxHost(rawUrl: string): boolean {
   return allowed.some((d) => host === d || host.endsWith("." + d));
 }
 
-export async function resolveImageUrl(imageUrl: string, postId: string): Promise<string | null> {
+/**
+ * @param imageUrl 変換元URL（Dropbox一時リンク等）
+ * @param postId   Storage上のファイル名に使う一意なID
+ * @param sourceName 元のファイル名。Dropboxが application/octet-stream を返したときの拡張子判定に使う
+ */
+export async function resolveImageUrl(imageUrl: string, postId: string, sourceName = ""): Promise<string | null> {
   if (!imageUrl) return null;
 
   // Dropboxの正規ホストのみサーバー側でダウンロード（SSRF防止）。それ以外はそのまま返す
   if (!isDropboxHost(imageUrl)) return imageUrl;
 
   try {
-    // 1. 画像をダウンロード
+    // 1. ダウンロード（動画は数十MBになるので写真より長めに待つ）
     const res = await fetch(imageUrl, {
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(90000),
       redirect: "follow",
     });
     if (!res.ok) {
@@ -48,12 +56,18 @@ export async function resolveImageUrl(imageUrl: string, postId: string): Promise
     const buffer = Buffer.from(await res.arrayBuffer());
 
     if (buffer.length < 1000) {
-      console.error(`[image-proxy] 画像が小さすぎる (${buffer.length} bytes) — HTMLリダイレクトの可能性`);
+      console.error(`[image-proxy] ファイルが小さすぎる (${buffer.length} bytes) — HTMLリダイレクトの可能性`);
+      return null;
+    }
+    // GBPの動画上限は75MB。超えるものはアップロードしても弾かれるのでここで落とす
+    if (buffer.length > MAX_BYTES) {
+      console.error(`[image-proxy] ファイルが大きすぎる (${Math.round(buffer.length / 1024 / 1024)}MB > 75MB): ${sourceName || imageUrl.slice(0, 60)}`);
       return null;
     }
 
     // 2. Supabase Storageにアップロード
-    const ext = contentType.includes("png") ? "png" : contentType.includes("webp") ? "webp" : "jpg";
+    // 拡張子を保つこと: 予約投稿は実行時にこのURLの拡張子で PHOTO / VIDEO を判定する
+    const ext = extFromContentType(contentType, sourceName);
     const fileName = `${postId}.${ext}`;
     const supabase = getSupabase();
 
