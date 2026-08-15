@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAuth } from "@/lib/supabase";
-import { getOAuthToken } from "@/lib/gbp-token";
+import { getOAuthToken, getAllOAuthTokens } from "@/lib/gbp-token";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -55,26 +55,109 @@ function pruneCache() {
 type Resolved = { name: string; url: string | null; thumb: string | null };
 type Failed = { name: string; status: number; detail?: string };
 
+/**
+ * GBPアカウントは本番で15個あり、1本のトークンでは一部ロケーションが見えない。
+ * 見えないロケーションのメディアをGETすると 404 が返るため、
+ * 「リソース名が付け替わった404」と区別がつかず、写真が永久に表示できなくなる。
+ * （2026-08-15: 西口酒場ホームラン accounts/111031567193825395772 で発生）
+ * → 401/403/404 のときは他のトークンでも試す。
+ *   一度成功したトークンはロケーション単位で覚えて、次回以降は総当たりしない。
+ */
+const TOKEN_RETRY_STATUSES = [401, 403, 404];
+const LOC_TOKEN_TTL_MS = 30 * 60 * 1000;
+const locTokenCache = new Map<string, { token: string; at: number }>();
+
+const locationOf = (mediaName: string) => mediaName.split("/media/")[0];
+
+function rememberLocToken(loc: string, token: string) {
+  locTokenCache.set(loc, { token, at: Date.now() });
+  if (locTokenCache.size > 500) {
+    for (const [k, v] of Array.from(locTokenCache.entries())) {
+      if (Date.now() - v.at > LOC_TOKEN_TTL_MS) locTokenCache.delete(k);
+    }
+  }
+}
+
+/** そのロケーションで成功実績のあるトークン（無ければnull） */
+function knownLocToken(loc: string): string | null {
+  const hit = locTokenCache.get(loc);
+  return hit && Date.now() - hit.at < LOC_TOKEN_TTL_MS ? hit.token : null;
+}
+
+/**
+ * 予備トークンの取得は高価（アカウントごとにリフレッシュが走る）ので、
+ * 既定トークンで404になったときだけ・1リクエストにつき1回だけ取りに行く。
+ * getAllOAuthTokens 自体もインスタンス内で短時間キャッシュする。
+ */
+const EXTRA_TOKENS_TTL_MS = 10 * 60 * 1000;
+let extraTokensCache: { tokens: string[]; at: number } | null = null;
+
+function makeExtraTokenLoader(): () => Promise<string[]> {
+  let inflight: Promise<string[]> | null = null;
+  return () => {
+    if (extraTokensCache && Date.now() - extraTokensCache.at < EXTRA_TOKENS_TTL_MS) {
+      return Promise.resolve(extraTokensCache.tokens);
+    }
+    if (!inflight) {
+      inflight = getAllOAuthTokens()
+        .then(tokens => { extraTokensCache = { tokens, at: Date.now() }; return tokens; })
+        .catch(() => []);
+    }
+    return inflight;
+  };
+}
+
 async function resolveOne(
   name: string,
-  token: string,
+  primaryToken: string,
+  loadExtraTokens: () => Promise<string[]>,
+  exhaustedLocs: Set<string>,
 ): Promise<{ ok: true; value: Resolved } | { ok: false; value: Failed }> {
   const hit = cache.get(name);
   if (hit && Date.now() - hit.at < TTL_MS) {
     return { ok: true, value: { name, url: hit.url, thumb: hit.thumb } };
   }
 
-  try {
+  const loc = locationOf(name);
+  const get = async (token: string) => {
     const res = await fetch(`${GBP_API_BASE}/${name}`, {
       // 失効URLを掴み続けないよう必ずno-store
       cache: "no-store",
       headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(10000),
     });
-    if (!res.ok) {
-      const detail = await res.text().catch(() => "");
-      return { ok: false, value: { name, status: res.status, detail: detail.slice(0, 200) } };
+    return res;
+  };
+
+  try {
+    const first = knownLocToken(loc) || primaryToken;
+    let res = await get(first);
+    if (res.ok) { rememberLocToken(loc, first); return await readMedia(name, res); }
+    let last = { status: res.status, detail: (await res.text().catch(() => "")).slice(0, 200) };
+
+    // 401/403/404 は「このトークンからは見えない」だけの可能性がある。
+    // 全トークンで駄目だったロケーションは総当たりを繰り返さない
+    if (TOKEN_RETRY_STATUSES.includes(res.status) && !exhaustedLocs.has(loc)) {
+      const extras = (await loadExtraTokens()).filter(t => t && t !== first);
+      for (const token of extras) {
+        res = await get(token);
+        if (res.ok) { rememberLocToken(loc, token); return await readMedia(name, res); }
+        last = { status: res.status, detail: (await res.text().catch(() => "")).slice(0, 200) };
+        if (!TOKEN_RETRY_STATUSES.includes(res.status)) break;
+      }
+      if (extras.length > 0) exhaustedLocs.add(loc);
     }
+    return { ok: false, value: { name, status: last.status, detail: last.detail } };
+  } catch (e: any) {
+    return { ok: false, value: { name, status: 0, detail: e?.message?.slice(0, 200) } };
+  }
+}
+
+async function readMedia(
+  name: string,
+  res: Response,
+): Promise<{ ok: true; value: Resolved } | { ok: false; value: Failed }> {
+  try {
     const body = await res.json().catch(() => ({} as any));
     const entry: Entry = {
       url: body.googleUrl || null,
@@ -135,6 +218,9 @@ export async function POST(request: NextRequest) {
   if (!token) {
     return NextResponse.json({ error: "GBPのOAuthトークンを取得できませんでした" }, { status: 500 });
   }
+  // 既定トークンで見えないロケーション用の予備。404が出るまで取りに行かない
+  const loadExtraTokens = makeExtraTokenLoader();
+  const exhaustedLocs = new Set<string>();
 
   const urls: Record<string, { url: string | null; thumb: string | null }> = {};
   const failed: Failed[] = [];
@@ -150,7 +236,7 @@ export async function POST(request: NextRequest) {
       while (cursor < targets.length) {
         const name = targets[cursor++];
         if (Date.now() > deadline) { skipped.push(name); continue; }
-        const r = await resolveOne(name, token);
+        const r = await resolveOne(name, token, loadExtraTokens, exhaustedLocs);
         if (r.ok) urls[r.value.name] = { url: r.value.url, thumb: r.value.thumb };
         else failed.push(r.value);
       }
@@ -182,12 +268,14 @@ export async function POST(request: NextRequest) {
       // 一覧は新しい順で返るため、直近の投稿なら先頭ページで見つかる
       const items: { name: string; createTime?: string; googleUrl?: string; thumbnailUrl?: string }[] = [];
       let pageToken = "";
+      // 一覧もロケーションが見えるトークンで叩く（既定トークンだと404になるアカウントがある）
+      const listToken = knownLocToken(loc) || token;
       for (let i = 0; i < FALLBACK_LIST_PAGES; i++) {
         if (Date.now() > deadline) break;
         try {
           const res = await fetch(
             `${GBP_API_BASE}/${loc}/media?pageSize=100${pageToken ? `&pageToken=${pageToken}` : ""}`,
-            { cache: "no-store", headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10000) },
+            { cache: "no-store", headers: { Authorization: `Bearer ${listToken}` }, signal: AbortSignal.timeout(10000) },
           );
           if (!res.ok) break;
           const data = await res.json().catch(() => ({} as any));
