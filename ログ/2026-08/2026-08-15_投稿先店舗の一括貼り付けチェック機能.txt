@@ -158,3 +158,43 @@ shops.name は結合キーなのでGBPの改名に追従しない（2026-08-08�
   npx tsc --noEmit … エラーなし
   npx vitest run   … 19ファイル 413テスト パス
   npx next build   … Compiled successfully / 227ページ生成
+
+==========================================================
+追記3: 投稿先が絞り込まれず全店舗に予約登録された件
+==========================================================
+
+## 症状
+20店舗を選んだつもりで「予約投稿として登録」した結果が
+41件成功 / 6件保留 / 5件スキップ となり、結果一覧には
+TRUE DESIGN CLINIC / SIK eatery うつぼ公園店 / らあめん新 / 一文字premium /
+西口酒場ホームラン など、選んだ20店舗に無い店舗が並んだ。
+
+## 構造上の問題（原因の切り分けとは別に、必ず直すべき点）
+auto-post は filterShopNames が「未指定 または 空配列」のとき
+絞り込みなし = シート内の全店舗として扱う（route.ts の
+`if (filterShopNames && filterShopNames.length > 0)`）。
+一方フロントは postTargetMode が "all" の場合だけでなく、
+以下でも黙って空フィルタを送っていた:
+  - postTargetMode === "current" で selectedShop が null（全店舗表示ヘッダー時）
+  - postTargetMode === "selected" で postTargetShopIds が shops に存在しないID
+    （shops 再取得や解約店の除外で起こりうる）
+つまり「絞り込んだつもりで全店舗に公開投稿する」事故が構造的に起こりうる。
+実行前の確認ダイアログにも投稿先が出ていなかったため気づけない。
+
+## 修正（posts/page.tsx）
+- buildAutoPostFilter() を追加し、プレビュー / 実行 / 予約登録の3箇所を必ずこれ経由にした。
+  戻り値は { ok, filter, label, error }。
+  postTargetMode === "selected" なのに店舗名が0件になったら ok:false を返して中断する
+  （このまま送ると全店舗が対象になるため）。
+- 確認ダイアログに「投稿先: 選択した20店舗のみ / シート内の全店舗（絞り込みなし）」を明記。
+- パネル上に常時「投稿先: …」を表示。絞り込みなしのときは琥珀色で警告し、
+  Step1で「店舗を選んで投稿」を選ぶよう案内する。
+
+## 未確定（ユーザー確認待ち）
+今回の実行が「全店舗」を選んでいたのか、上記の空フィルタ経路を踏んだのかは
+画面ログが残っていないため断定できない。以後は投稿先が常に表示されるので判別できる。
+
+## 検証
+  npx tsc --noEmit … エラーなし
+  npx vitest run   … 19ファイル 413テスト パス
+  npx next build   … Compiled successfully / 227ページ生成

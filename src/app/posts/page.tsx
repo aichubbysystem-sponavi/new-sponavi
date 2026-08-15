@@ -151,6 +151,35 @@ export default function PostsPage() {
   const [scheduleDate, setScheduleDate] = useState(""); // 予約日付
   const [scheduleHour, setScheduleHour] = useState("9"); // 予約時（0-23）
   const [showAutoPost, setShowAutoPost] = useState(false);
+
+  /**
+   * シート自動投稿の投稿先フィルタを組み立てる。プレビュー / 実行 / 予約登録で必ずこれを使う。
+   *
+   * 重要: filterShopNames が空配列だとサーバー側は「絞り込みなし = シート内の全店舗」として扱う。
+   * 絞り込んだつもりで全店舗に投稿する事故になるため、絞り込みモードなのに空になったら
+   * 呼び出し側で必ず中断すること（ok:false）。
+   */
+  const buildAutoPostFilter = useCallback((retryNames?: string[]): {
+    ok: boolean; filter: { filterShopNames?: string[] }; label: string; error?: string;
+  } => {
+    if (retryNames && retryNames.length > 0) {
+      return { ok: true, filter: { filterShopNames: retryNames }, label: `未完了の${retryNames.length}店舗のみ` };
+    }
+    if (postTargetMode === "selected") {
+      const targets = shops.filter(s => postTargetShopIds.includes(s.id));
+      const names = expandShopNames(targets, gbpAliases);
+      if (names.length === 0) {
+        return { ok: false, filter: {}, label: "", error: "選択した店舗を特定できませんでした。Step1で店舗を選び直してください（このまま実行すると全店舗が対象になります）" };
+      }
+      return { ok: true, filter: { filterShopNames: names }, label: `選択した${targets.length}店舗のみ` };
+    }
+    if (postTargetMode === "current" && selectedShop) {
+      return { ok: true, filter: { filterShopNames: expandShopNames([selectedShop], gbpAliases) }, label: `${selectedShop.name} のみ` };
+    }
+    // 「全店舗」を選んだ場合と、全店舗表示ヘッダー(isAllMode)で店舗未選択の場合は絞り込みなし
+    return { ok: true, filter: {}, label: "シート内の全店舗（絞り込みなし）" };
+  }, [postTargetMode, postTargetShopIds, shops, gbpAliases, selectedShop]);
+
   const [creating, setCreating] = useState(false);
   const [msg, setMsg] = useState("");
   const [executeLoading, setExecuteLoading] = useState(false);
@@ -994,17 +1023,11 @@ export default function PostsPage() {
                   <div className="flex items-end gap-2">
                     <button onClick={async () => {
                       setAutoPosting(true); setAutoPostResult(null);
+                      const pv = buildAutoPostFilter();
+                      if (!pv.ok) { setAutoPostResult({ error: pv.error }); setAutoPosting(false); return; }
                       try {
-                        // postTargetModeに応じたフィルタ
-                        const previewFilter: any = {};
-                        if (postTargetMode === "selected" && postTargetShopIds.length > 0) {
-                          previewFilter.filterShopNames = expandShopNames(shops.filter(s => postTargetShopIds.includes(s.id)), gbpAliases);
-                        } else if (postTargetMode === "current" && selectedShop) {
-                          previewFilter.filterShopNames = expandShopNames([selectedShop], gbpAliases);
-                        }
-                        // isAllMode（全店舗表示ヘッダー）の場合もフィルタなし
-                        const res = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, ...previewFilter }, { timeout: 120000 });
-                        setAutoPostResult({ ...res.data, mode: "preview" });
+                        const res = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, ...pv.filter }, { timeout: 120000 });
+                        setAutoPostResult({ ...res.data, mode: "preview", targetLabel: pv.label });
                       } catch (e: any) {
                         // プレビューは読み取りだけなので、タイムアウトしても投稿は発生していない
                         const timedOut = e?.code === "ECONNABORTED" || /timeout/i.test(e?.message || "");
@@ -1023,19 +1046,14 @@ export default function PostsPage() {
                       setAutoPosting(true); setAutoPostResult(null);
                       const currentAttempt = autoPostAttempt;
                       // プレビューボタンと完全に同じフィルタ構築
-                      const execFilter: any = {};
-                      if (currentAttempt > 1 && autoPostFailedShops.length > 0) {
-                        execFilter.filterShopNames = autoPostFailedShops;
-                      } else if (postTargetMode === "selected" && postTargetShopIds.length > 0) {
-                        execFilter.filterShopNames = expandShopNames(shops.filter(s => postTargetShopIds.includes(s.id)), gbpAliases);
-                      } else if (postTargetMode === "current" && selectedShop) {
-                        execFilter.filterShopNames = expandShopNames([selectedShop], gbpAliases);
-                      }
+                      const ex = buildAutoPostFilter(currentAttempt > 1 ? autoPostFailedShops : undefined);
+                      if (!ex.ok) { setAutoPostResult({ error: ex.error }); setAutoPosting(false); return; }
+                      const execFilter = ex.filter;
                       try {
                         const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, ...execFilter }, { timeout: 120000 });
                         const total = previewRes.data.matches || 0;
                         if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません` }); setAutoPosting(false); return; }
-                        if (!confirm(`【${currentAttempt}回目実行】${autoPostDate}の投稿を実行しますか？\n\n${total}件を10件ずつバッチ処理します（${Math.ceil(total / 10)}回）`)) { setAutoPosting(false); return; }
+                        if (!confirm(`【${currentAttempt}回目実行】${autoPostDate}の投稿を実行しますか？\n\n投稿先: ${ex.label}\n${total}件を10件ずつバッチ処理します（${Math.ceil(total / 10)}回）`)) { setAutoPosting(false); return; }
                         // 追加ロック: 一括で公開投稿するためログインパスワードを再確認
                         if (!(await gate(`${total}件の一括自動投稿（GBPに公開されます）`))) { setAutoPosting(false); return; }
 
@@ -1097,20 +1115,15 @@ export default function PostsPage() {
                   <button onClick={async () => {
                     setAutoPosting(true); setAutoPostResult(null);
                     // プレビュー・実行と同じフィルタ構築
-                    const schedFilter: any = {};
-                    if (autoPostAttempt > 1 && autoPostFailedShops.length > 0) {
-                      schedFilter.filterShopNames = autoPostFailedShops;
-                    } else if (postTargetMode === "selected" && postTargetShopIds.length > 0) {
-                      schedFilter.filterShopNames = expandShopNames(shops.filter(s => postTargetShopIds.includes(s.id)), gbpAliases);
-                    } else if (postTargetMode === "current" && selectedShop) {
-                      schedFilter.filterShopNames = expandShopNames([selectedShop], gbpAliases);
-                    }
+                    const sc = buildAutoPostFilter(autoPostAttempt > 1 ? autoPostFailedShops : undefined);
+                    if (!sc.ok) { setAutoPostResult({ error: sc.error }); setAutoPosting(false); return; }
+                    const schedFilter = sc.filter;
                     const scheduledAt = `${scheduleDate}T${scheduleHour.padStart(2, "0")}:00:00+09:00`;
                     try {
                       const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, ...schedFilter }, { timeout: 120000 });
                       const total = previewRes.data.matches || 0;
                       if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません` }); setAutoPosting(false); return; }
-                      if (!confirm(`${scheduleDate} ${scheduleHour}時 に予約投稿しますか？\n\n${total}件を予約登録します`)) { setAutoPosting(false); return; }
+                      if (!confirm(`${scheduleDate} ${scheduleHour}時 に予約投稿しますか？\n\n投稿先: ${sc.label}\n${total}件を予約登録します`)) { setAutoPosting(false); return; }
 
                       const bs = 10;
                       let totalPosted = 0, totalErrors = 0;
@@ -1154,6 +1167,17 @@ export default function PostsPage() {
                     {autoPosting ? "予約中..." : "予約投稿として登録"}
                   </button>
                 </div>
+                {/* 「絞り込んだつもりで全店舗に投稿していた」を防ぐため、実行前に投稿先を常に表示する */}
+                {(() => {
+                  const t = buildAutoPostFilter(autoPostAttempt > 1 ? autoPostFailedShops : undefined);
+                  const isAll = t.ok && !t.filter.filterShopNames;
+                  return (
+                    <p className={`text-xs font-semibold ${!t.ok ? "text-red-600" : isAll ? "text-amber-700" : "text-[#003D6B]"}`}>
+                      投稿先: {t.ok ? t.label : t.error}
+                      {isAll && <span className="font-normal">　← Step1で「店舗を選んで投稿」を選ぶと絞り込めます</span>}
+                    </p>
+                  );
+                })()}
                 <p className="text-[10px] text-slate-400">タブ「投稿用シート」「報告必須店舗 投稿用シート」「WHITE 系列 投稿用シート」のB列=店舗名、C列=投稿本文、E列=日付、F列=写真URL、J列=CTAボタンURL</p>
 
                 {autoPostResult && (
