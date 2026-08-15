@@ -35,11 +35,16 @@ function isDropboxHost(rawUrl: string): boolean {
  * @param postId   Storage上のファイル名に使う一意なID
  * @param sourceName 元のファイル名。Dropboxが application/octet-stream を返したときの拡張子判定に使う
  */
-export async function resolveImageUrl(imageUrl: string, postId: string, sourceName = ""): Promise<string | null> {
-  if (!imageUrl) return null;
+/** 失敗理由も返す版。画面に「なぜ変換できなかったか」を出すために使う */
+export async function resolveMediaUrl(
+  imageUrl: string,
+  postId: string,
+  sourceName = "",
+): Promise<{ url: string | null; error?: string }> {
+  if (!imageUrl) return { url: null, error: "URLが空" };
 
   // Dropboxの正規ホストのみサーバー側でダウンロード（SSRF防止）。それ以外はそのまま返す
-  if (!isDropboxHost(imageUrl)) return imageUrl;
+  if (!isDropboxHost(imageUrl)) return { url: imageUrl };
 
   try {
     // 1. ダウンロード（動画は数十MBになるので写真より長めに待つ）
@@ -48,21 +53,24 @@ export async function resolveImageUrl(imageUrl: string, postId: string, sourceNa
       redirect: "follow",
     });
     if (!res.ok) {
-      console.error(`[image-proxy] ダウンロード失敗: ${res.status} ${imageUrl.slice(0, 80)}`);
-      return null;
+      const msg = `Dropboxからのダウンロードに失敗 (HTTP ${res.status})`;
+      console.error(`[image-proxy] ${msg}: ${imageUrl.slice(0, 80)}`);
+      return { url: null, error: msg };
     }
 
     const contentType = res.headers.get("content-type") || "image/jpeg";
     const buffer = Buffer.from(await res.arrayBuffer());
 
     if (buffer.length < 1000) {
-      console.error(`[image-proxy] ファイルが小さすぎる (${buffer.length} bytes) — HTMLリダイレクトの可能性`);
-      return null;
+      const msg = `ファイルが小さすぎる (${buffer.length} bytes) — HTMLが返っている可能性`;
+      console.error(`[image-proxy] ${msg}`);
+      return { url: null, error: msg };
     }
     // GBPの動画上限は75MB。超えるものはアップロードしても弾かれるのでここで落とす
     if (buffer.length > MAX_BYTES) {
-      console.error(`[image-proxy] ファイルが大きすぎる (${Math.round(buffer.length / 1024 / 1024)}MB > 75MB): ${sourceName || imageUrl.slice(0, 60)}`);
-      return null;
+      const msg = `ファイルが大きすぎる (${Math.round(buffer.length / 1024 / 1024)}MB > 75MB)。GBPの上限を超えているので圧縮が必要`;
+      console.error(`[image-proxy] ${msg}: ${sourceName || imageUrl.slice(0, 60)}`);
+      return { url: null, error: msg };
     }
 
     // 2. Supabase Storageにアップロード
@@ -84,17 +92,25 @@ export async function resolveImageUrl(imageUrl: string, postId: string, sourceNa
     });
     if (error) {
       console.error(`[image-proxy] アップロード失敗:`, error.message);
-      return null;
+      return { url: null, error: `Storageへの保存に失敗: ${error.message}` };
     }
 
     // 3. 公開URLを返す
     const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(fileName);
     console.log(`[image-proxy] 変換成功: ${imageUrl.slice(0, 50)}... → ${urlData.publicUrl}`);
-    return urlData.publicUrl;
+    return { url: urlData.publicUrl };
   } catch (e: any) {
-    console.error(`[image-proxy] エラー:`, e?.message);
-    return null;
+    const msg = e?.name === "TimeoutError"
+      ? "Dropboxからのダウンロードが90秒以内に終わらなかった（ファイルが大きい可能性）"
+      : (e?.message || "不明なエラー");
+    console.error(`[image-proxy] エラー:`, msg);
+    return { url: null, error: msg };
   }
+}
+
+/** 従来インターフェース（URLだけ必要な呼び出し用） */
+export async function resolveImageUrl(imageUrl: string, postId: string, sourceName = ""): Promise<string | null> {
+  return (await resolveMediaUrl(imageUrl, postId, sourceName)).url;
 }
 
 /**

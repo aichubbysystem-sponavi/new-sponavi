@@ -980,21 +980,25 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
       //    実行は予約時刻（翌日以降もあり得る）のため、一時URLのままだと実行時に失効している
       //    ※Storage上の画像は実行完了まで必要なので、ここではcleanupImageを呼ばないこと
       if (match.photoUrl && match.photoUrl.includes("dropbox")) {
-        const { resolveImageUrl } = await import("@/lib/image-proxy");
+        const { resolveMediaUrl } = await import("@/lib/image-proxy");
         // ファイル名を渡して拡張子を保つ。実行時はこのURLの拡張子で PHOTO / VIDEO を判定する
-        const stableUrl = await resolveImageUrl(
+        const resolved = await resolveMediaUrl(
           match.photoUrl,
           `sched-${shop.id}-${crypto.randomUUID().slice(0, 8)}`,
           match.mediaFileName || "",
         );
-        if (stableUrl) {
-          match.photoUrl = stableUrl;
+        if (resolved.url) {
+          match.photoUrl = resolved.url;
         } else if (isPhotoOnly) {
-          schedResults.push({ shopName: match.shopName, status: "写真URL変換失敗（スキップ）", detail: `元URL: ${match.photoUrl.slice(0, 80)}` });
+          schedResults.push({
+            shopName: match.shopName,
+            status: "写真URL変換失敗（スキップ）",
+            detail: `${resolved.error || "原因不明"}${match.mediaFileName ? ` / ファイル: ${match.mediaFileName}` : ""}`,
+          });
           schedErrors++;
           continue;
         } else {
-          warnings.push("写真URL変換失敗（写真なしで保存されます）");
+          warnings.push(`写真URL変換失敗（写真なしで保存されます）: ${resolved.error || "原因不明"}`);
           match.photoUrl = "";
         }
       }
@@ -1120,15 +1124,21 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
       }
       try {
         // Dropbox一時URLをSupabase Storage経由の安定URLに変換
-        const { resolveImageUrl, cleanupImage } = await import("@/lib/image-proxy");
+        const { resolveMediaUrl, cleanupImage } = await import("@/lib/image-proxy");
         const postId = `auto-${shop.id}-${photoPostNumber}-${Date.now()}`;
         let stableUrl = match.photoUrl;
         if (match.photoUrl.includes("dropbox")) {
-          const resolved = await resolveImageUrl(match.photoUrl, postId, match.mediaFileName || "");
-          if (resolved) {
-            stableUrl = resolved;
+          const resolved = await resolveMediaUrl(match.photoUrl, postId, match.mediaFileName || "");
+          if (resolved.url) {
+            stableUrl = resolved.url;
           } else {
-            results.push({ shopName: match.shopName, status: "写真URL変換失敗", detail: `元URL: ${match.photoUrl.slice(0, 80)}`, summary: match.photoDebug });
+            // 理由を出さないと「なぜ失敗したか」が画面から分からない（サイズ超過が多い）
+            results.push({
+              shopName: match.shopName,
+              status: "写真URL変換失敗",
+              detail: `${resolved.error || "原因不明"}${match.mediaFileName ? ` / ファイル: ${match.mediaFileName}` : ""}`,
+              summary: match.photoDebug,
+            });
             errors++;
             continue;
           }

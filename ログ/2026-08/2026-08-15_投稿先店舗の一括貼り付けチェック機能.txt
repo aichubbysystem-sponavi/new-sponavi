@@ -485,3 +485,21 @@ Supabase Storage へ拡張子付きで保存している（sched-xxx.mp4 等）�
   npx tsc --noEmit … エラーなし
   npx vitest run   … 20ファイル 427テスト パス（media-format に9件追加）
   npx next build   … Compiled successfully / 227ページ生成
+
+## 追記8の実行結果と追加修正
+Cheese Cheese Worker 千葉店で再実行 → 2件成功（動画1・写真1）/ 1件「写真URL変換失敗」。
+動画投稿自体は通った（GBPは MOV を受け付ける）。
+残り1件の失敗理由が画面に出ておらず（元URLしか表示されない）原因が分からなかった。
+候補は 75MB超 / 90秒以内にダウンロードできない / Storage保存失敗 のいずれか。
+
+[修正] lib/image-proxy.ts
+  resolveMediaUrl() を追加し {url, error} を返す。resolveImageUrl は薄いラッパーに。
+  TimeoutError は「90秒以内に終わらなかった（ファイルが大きい可能性）」と明示する。
+[修正] auto-post/route.ts
+  即時実行・予約登録の両方で失敗理由とファイル名を detail に出す。
+  例: 「ファイルが大きすぎる (112MB > 75MB)。GBPの上限を超えているので圧縮が必要 /
+       ファイル: 写真投稿26-8-2 (2).MOV」
+
+## 検証
+  npx tsc --noEmit … エラーなし / npx vitest run … 427テスト パス
+  npx next build   … Compiled successfully / 227ページ生成
