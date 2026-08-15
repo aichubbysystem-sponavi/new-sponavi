@@ -289,3 +289,32 @@ SPOTLIGHT NAVIGATOR 超重要ナレッジ
 ■ reactStrictMode:true なので useEffect は開発時に二重実行される
   1回目で「処理済み」フラグを立てて即キャンセルされると、2回目が全部スキップして
   開発時だけ一切動かなくなる。中断時はフラグを戻すこと
+
+## GBPトークンは1本で全アカウントを見られない（2026-08-15）
+- 本番のGBPアカウントは15個。getOAuthToken() が返す1本では一部ロケーションが見えない
+- 見えないロケーションに v4 API を叩くと 404 "Requested entity was not found" が返る
+  （権限エラーではなく「存在しない」と返るので原因を誤りやすい）
+  例) 一文字premium      accounts/111148362910776147900 → 既定トークンで通る
+      西口酒場ホームラン accounts/111031567193825395772 → 既定トークンでは404
+- 対策: 401/403/404 のときは getAllOAuthTokens() の他トークンで順に再試行する
+  auto-post は gbpFetchWithTokenFallback()、cron/execute-posts は元から全トークン試行
+  → GBPを叩く処理を新しく足すときは必ずこのフォールバックを通すこと
+- 400（invalid argument）はトークン無関係。画像自体が原因なので再試行しても無駄
+
+## 店舗フィルタの空配列は「全店舗」を意味してしまう（2026-08-15）
+- auto-post の filterShopNames は「未指定 or 空配列」で絞り込みなし＝シート内の全店舗になる
+- フロントが店舗名の解決に失敗して空配列を送ると、絞ったつもりで全店舗に公開する事故になる
+- 対策: サーバー側で空配列は400。フロントは buildAutoPostFilter() で必ず組み立て、
+  絞り込みモードなのに0件なら実行前に中断する。実行前に投稿先を画面と確認ダイアログに必ず出す
+- 教訓: 「何店舗に対して実行しているか」が画面に出ていないと、人間もAIも結果を誤読する
+
+## scheduled_posts.approval_status は2026-08-15まで存在しなかった
+- コードは approval_status 前提だったがカラムが無く、PostgRESTが schema cache エラーを返して
+  承認 / 差戻し / 保留解除 / エラー再実行 がすべて失敗していた
+  （scheduled-posts/route.ts は status='pending' に変える時 approval_status も必ず一緒に更新する）
+- cron/execute-posts の「差戻しは実行しない」フィルタも常に素通りしていた
+- sql/2026-08-15_add_scheduled_posts_approval_status.sql で追加済み
+
+## 写真投稿の「写真なし（スキップ）」はDropbox側の問題
+- おおもとフォルダのサブフォルダ名と shops.name が一致しないと写真が見つからない
+- シートF列にDropbox URLを直接入れれば回避できる。システム側では解決できない
