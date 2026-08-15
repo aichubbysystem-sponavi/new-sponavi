@@ -130,3 +130,68 @@ describe("matchShopNames", () => {
     expect(r.duplicated.length).toBe(2);
   });
 });
+
+// GBPで改名された店舗（2026-08-08の設計により shops.name は改名に追従せず、
+// GBP現在名は gbp_shop_name にだけ入る）
+describe("GBP改名店舗（alias照合）", () => {
+  // 実データ: 高崎店はアイブロウ店→ネイル店に業態変更してGBP名だけ変わった
+  const TAKASAKI: MatchShop = {
+    id: "5c39acb6-3e8b-45aa-96ac-0f9fa6a1e35c",
+    name: "アイブロウサロンWHITE EYE まつ毛と眉毛の専門店 高崎店 ホワイトアイ",
+    aliases: ["ジェルネイル専門 WHITE NAIL 高崎店"],
+  };
+  const WITH_ALIAS: MatchShop[] = [...SHOPS.filter(s => s.name !== "ジェルネイル専門 WHITE NAIL 高崎店"), TAKASAKI];
+
+  it("GBP現在名で貼り付けても一致する", () => {
+    const r = matchShopNames("ジェルネイル専門 WHITE NAIL 高崎店", WITH_ALIAS);
+    expect(r.unmatched).toEqual([]);
+    expect(r.matched.length).toBe(1);
+    expect(r.matched[0].shop.id).toBe(TAKASAKI.id);
+    expect(r.matched[0].matchedBy).toBe("alias");
+    expect(r.matched[0].via).toBe("ジェルネイル専門 WHITE NAIL 高崎店");
+  });
+
+  it("旧店名（DB上のname）でも一致する", () => {
+    const r = matchShopNames("アイブロウサロンWHITE EYE まつ毛と眉毛の専門店 高崎店 ホワイトアイ", WITH_ALIAS);
+    expect(r.matched.length).toBe(1);
+    expect(r.matched[0].matchedBy).toBe("name");
+  });
+
+  it("旧名と新名の両方が貼られても同じ店舗を二重に数えない", () => {
+    const r = matchShopNames(
+      "ジェルネイル専門 WHITE NAIL 高崎店\nアイブロウサロンWHITE EYE まつ毛と眉毛の専門店 高崎店 ホワイトアイ",
+      WITH_ALIAS,
+    );
+    expect(r.matched.length).toBe(1);
+    expect(r.duplicated.length).toBe(1);
+  });
+
+  it("別名より name の完全一致を優先する（gbp_shop_nameが他店のnameと衝突した場合）", () => {
+    const conflict: MatchShop[] = [
+      { id: "real", name: "衝突テスト店" },
+      { id: "renamed", name: "別の店舗 旧名", aliases: ["衝突テスト店"] },
+    ];
+    const r = matchShopNames("衝突テスト店", conflict);
+    expect(r.matched.length).toBe(1);
+    expect(r.matched[0].shop.id).toBe("real");
+    expect(r.matched[0].matchedBy).toBe("name");
+  });
+
+  it("別名同士が衝突したら自動チェックせず要確認に回す", () => {
+    const conflict: MatchShop[] = [
+      { id: "a", name: "店舗A 旧名", aliases: ["新しい名前"] },
+      { id: "b", name: "店舗B 旧名", aliases: ["新しい名前"] },
+    ];
+    const r = matchShopNames("新しい名前", conflict);
+    expect(r.matched).toEqual([]);
+    expect(r.ambiguous.length).toBe(1);
+    expect(r.ambiguous[0].candidates.map(c => c.id)).toEqual(["a", "b"]);
+  });
+
+  it("nameと同一の別名は候補を二重化しない", () => {
+    const same: MatchShop[] = [{ id: "x", name: "同名テスト店", aliases: ["同名テスト店"] }];
+    const r = matchShopNames("同名テスト店", same);
+    expect(r.matched.length).toBe(1);
+    expect(r.ambiguous).toEqual([]);
+  });
+});

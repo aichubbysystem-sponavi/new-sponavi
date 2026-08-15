@@ -1,12 +1,18 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useGbpAliases } from "@/components/gbp-aliases";
 import { buildShopIndex, matchShopNames, type MatchShop, type ShopNameMatchResult } from "@/lib/shop-name-match";
 
 /**
  * 店舗名を複数行で貼り付け → 一致した店舗を自動チェックするUI。
  * 照合ロジックの仕様は @/lib/shop-name-match を参照（部分一致では自動チェックしない）。
  */
+
+// 候補ボタンの表示名。GBPで改名済みなら現在名も併記する
+const shopLabel = (s: MatchShop) =>
+  s.aliases?.length ? `${s.name}（GBP: ${s.aliases[0]}）` : s.name;
+
 export default function ShopPasteSelector({
   shops,
   selectedIds,
@@ -19,11 +25,22 @@ export default function ShopPasteSelector({
   const [text, setText] = useState("");
   const [appendMode, setAppendMode] = useState(false);
   const [result, setResult] = useState<ShopNameMatchResult | null>(null);
+  const { aliases, error: aliasError } = useGbpAliases();
 
-  const index = useMemo(() => buildShopIndex(shops), [shops]);
+  // GBPで改名された店舗は、現場から来る名前(GBP現在名)とDB上の name が違う。
+  // 例) name=アイブロウサロンWHITE EYE…高崎店 / GBP現在名=ジェルネイル専門 WHITE NAIL 高崎店
+  const shopsWithAliases = useMemo<MatchShop[]>(() => {
+    if (!aliases) return shops;
+    return shops.map(s => {
+      const g = aliases[s.id];
+      return g && g !== s.name ? { ...s, aliases: [g] } : s;
+    });
+  }, [shops, aliases]);
+
+  const index = useMemo(() => buildShopIndex(shopsWithAliases), [shopsWithAliases]);
 
   const run = (raw: string) => {
-    const res = matchShopNames(raw, shops, index);
+    const res = matchShopNames(raw, shopsWithAliases, index);
     const hitIds = res.matched.map(m => m.shop.id);
     onChange(appendMode ? Array.from(new Set(selectedIds.concat(hitIds))) : Array.from(new Set(hitIds)));
     setResult(res);
@@ -36,7 +53,7 @@ export default function ShopPasteSelector({
       ...prev,
       ambiguous: prev.ambiguous.filter(a => a.input !== input),
       unmatched: prev.unmatched.filter(u => u.input !== input),
-      matched: [...prev.matched, { input, shop }],
+      matched: [...prev.matched, { input, shop, matchedBy: "name" as const }],
     }));
   };
 
@@ -82,6 +99,11 @@ export default function ShopPasteSelector({
         </button>
         <span className="text-[10px] text-slate-400 ml-auto">選択中 {selectedIds.length}店舗</span>
       </div>
+      {aliasError && (
+        <p className="text-[10px] text-amber-700 mt-1">
+          GBPの現在の店名が取得できませんでした。改名された店舗は旧店名でしか照合できません（ページを再読込してください）
+        </p>
+      )}
 
       {result && (
         <div className="mt-2 space-y-2">
@@ -89,6 +111,11 @@ export default function ShopPasteSelector({
             <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold">
               一致 {result.matched.length}件
             </span>
+            {result.matched.some(m => m.matchedBy === "alias") && (
+              <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-semibold">
+                GBP改名 {result.matched.filter(m => m.matchedBy === "alias").length}件
+              </span>
+            )}
             {result.ambiguous.length > 0 && (
               <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 font-semibold">
                 要確認 {result.ambiguous.length}件
@@ -116,7 +143,7 @@ export default function ShopPasteSelector({
                     {a.candidates.map(c => (
                       <button key={c.id} type="button" onClick={() => addOne(c, a.input)}
                         className="text-[10px] px-2 py-0.5 rounded bg-white border border-amber-300 text-amber-800 hover:bg-amber-100">
-                        {c.name}
+                        {shopLabel(c)}
                       </button>
                     ))}
                   </div>
@@ -139,7 +166,7 @@ export default function ShopPasteSelector({
                       {u.suggestions.map(s => (
                         <button key={s.id} type="button" onClick={() => addOne(s, u.input)}
                           className="text-[10px] px-2 py-0.5 rounded bg-white border border-slate-300 text-slate-600 hover:bg-slate-100">
-                          {s.name}
+                          {shopLabel(s)}
                         </button>
                       ))}
                     </div>
@@ -154,7 +181,13 @@ export default function ShopPasteSelector({
               <summary className="cursor-pointer text-slate-500">チェックした{result.matched.length}店舗を表示</summary>
               <div className="mt-1 max-h-[120px] overflow-y-auto border border-slate-100 rounded p-1">
                 {result.matched.map(m => (
-                  <p key={m.shop.id} className="text-[10px] text-slate-600 truncate">✓ {m.shop.name}</p>
+                  <p key={m.shop.id} className="text-[10px] text-slate-600 truncate">
+                    ✓ {m.shop.name}
+                    {m.matchedBy === "alias" && (
+                      // GBPで改名された店舗。一覧には旧店名で並ぶので対応を明示する
+                      <span className="text-blue-600">　←「{m.input}」（GBP現在名）</span>
+                    )}
+                  </p>
                 ))}
               </div>
             </details>

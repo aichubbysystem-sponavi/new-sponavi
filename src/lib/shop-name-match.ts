@@ -1,15 +1,24 @@
 /**
  * 貼り付けた店舗名リストを shops と照合する。
  *
- * 照合ポリシー（誤チェック防止のため段階を分ける）:
- *  1. 完全一致（NFKC + 小文字化 + 空白除去）→ matched（自動チェック可）
- *  2. 記号無視の完全一致（1に加えて括弧・中黒などを除去）→ matched（自動チェック可）
- *  3. 1/2で候補が複数 → ambiguous（自動チェックせず手動で選ばせる）
- *  4. 一致なし → unmatched。類似候補は提示するが自動チェックはしない
+ * ■ 別名(aliases)について
+ * shops.name は「システム全体の結合キー」なのでGBPの改名に追従しない（2026-08-08の設計判断）。
+ * GBP上の現在名は shops.gbp_shop_name にだけ入る。
+ * 例) name       = アイブロウサロンWHITE EYE まつ毛と眉毛の専門店 高崎店 ホワイトアイ
+ *     gbp_shop_name = ジェルネイル専門 WHITE NAIL 高崎店
+ * 現場から送られてくるのはGBPの現在名なので、aliases に gbp_shop_name を入れて照合する。
+ *
+ * ■ 照合の優先順位（誤チェック防止のため段階を分ける）
+ *  1. name の完全一致（NFKC + 小文字化 + 空白除去）
+ *  2. alias の完全一致
+ *  3. name の記号無視一致（括弧・中黒などを除去）
+ *  4. alias の記号無視一致
+ *  上位の段階でヒットしたら下位は見ない。各段階で候補が複数なら ambiguous（自動チェックしない）。
+ *  どの段階でもヒットしなければ unmatched。類似候補は提示するが自動チェックはしない。
  * 部分一致で勝手にチェックを入れることは絶対にしない（別店舗を巻き込む事故を防ぐ）
  */
 
-export type MatchShop = { id: string; name: string };
+export type MatchShop = { id: string; name: string; aliases?: string[] };
 
 export const normKey = (x: string) =>
   (x || "").normalize("NFKC").toLowerCase().replace(/[\s　]/g, "");
@@ -45,24 +54,61 @@ export function similarity(a: string, b: string): number {
   return (2 * hit) / (A.length + B.length);
 }
 
+export type MatchedEntry = {
+  input: string;
+  shop: MatchShop;
+  /** name で一致したか、GBP現在名などの別名で一致したか */
+  matchedBy: "name" | "alias";
+  /** alias一致のとき、どの別名に当たったか */
+  via?: string;
+};
+
 export type ShopNameMatchResult = {
-  matched: { input: string; shop: MatchShop }[];
+  matched: MatchedEntry[];
   ambiguous: { input: string; candidates: MatchShop[] }[];
   unmatched: { input: string; suggestions: MatchShop[] }[];
-  /** 貼り付けテキスト内で重複していた行（1件として扱う） */
+  /** 同じ店舗を指す行が2回以上あった（1件として扱う） */
   duplicated: string[];
 };
 
+type Bucket = { shop: MatchShop; alias?: string };
+
+function push(map: Map<string, Bucket[]>, key: string, entry: Bucket) {
+  if (!key) return;
+  const cur = map.get(key);
+  if (cur) cur.push(entry);
+  else map.set(key, [entry]);
+}
+
 export function buildShopIndex(shops: MatchShop[]) {
-  const byNorm = new Map<string, MatchShop[]>();
-  const byLoose = new Map<string, MatchShop[]>();
+  const nameNorm = new Map<string, Bucket[]>();
+  const aliasNorm = new Map<string, Bucket[]>();
+  const nameLoose = new Map<string, Bucket[]>();
+  const aliasLoose = new Map<string, Bucket[]>();
   for (const s of shops) {
-    const n = normKey(s.name);
-    const l = looseKey(s.name);
-    if (n) byNorm.set(n, [...(byNorm.get(n) || []), s]);
-    if (l) byLoose.set(l, [...(byLoose.get(l) || []), s]);
+    push(nameNorm, normKey(s.name), { shop: s });
+    push(nameLoose, looseKey(s.name), { shop: s });
+    for (const a of s.aliases || []) {
+      if (!a) continue;
+      // name と同じ別名は登録しない（同一店舗が二重に候補化するのを防ぐ）
+      if (normKey(a) === normKey(s.name)) continue;
+      push(aliasNorm, normKey(a), { shop: s, alias: a });
+      push(aliasLoose, looseKey(a), { shop: s, alias: a });
+    }
   }
-  return { byNorm, byLoose };
+  return { nameNorm, aliasNorm, nameLoose, aliasLoose };
+}
+
+/** 同一店舗を指す候補は1件に畳む（同じ店舗がnameとaliasの両方で当たるケース） */
+function uniqueShops(buckets: Bucket[]): Bucket[] {
+  const seen = new Set<string>();
+  const out: Bucket[] = [];
+  for (const b of buckets) {
+    if (seen.has(b.shop.id)) continue;
+    seen.add(b.shop.id);
+    out.push(b);
+  }
+  return out;
 }
 
 export function matchShopNames(
@@ -70,36 +116,54 @@ export function matchShopNames(
   shops: MatchShop[],
   index?: ReturnType<typeof buildShopIndex>,
 ): ShopNameMatchResult {
-  const { byNorm, byLoose } = index || buildShopIndex(shops);
+  const idx = index || buildShopIndex(shops);
   const lines = raw
     .split(/\r?\n/)
     .map(l => stripBullet(l).trim())
     .filter(l => l.length > 0);
 
   const res: ShopNameMatchResult = { matched: [], ambiguous: [], unmatched: [], duplicated: [] };
-  const seen = new Set<string>();
+  const seenLine = new Set<string>();
+  const matchedShopIds = new Set<string>();
 
   for (const line of lines) {
     const n = normKey(line);
     if (!n) continue;
-    if (seen.has(n)) { res.duplicated.push(line); continue; }
-    seen.add(n);
-
-    const exact = byNorm.get(n) || [];
-    if (exact.length === 1) { res.matched.push({ input: line, shop: exact[0] }); continue; }
-    if (exact.length > 1) { res.ambiguous.push({ input: line, candidates: exact }); continue; }
+    if (seenLine.has(n)) { res.duplicated.push(line); continue; }
+    seenLine.add(n);
 
     const l = looseKey(line);
-    const loose = (l && byLoose.get(l)) || [];
-    if (loose.length === 1) { res.matched.push({ input: line, shop: loose[0] }); continue; }
-    if (loose.length > 1) { res.ambiguous.push({ input: line, candidates: loose }); continue; }
+    const tiers: { by: "name" | "alias"; hits: Bucket[] }[] = [
+      { by: "name", hits: uniqueShops(idx.nameNorm.get(n) || []) },
+      { by: "alias", hits: uniqueShops(idx.aliasNorm.get(n) || []) },
+      { by: "name", hits: uniqueShops((l && idx.nameLoose.get(l)) || []) },
+      { by: "alias", hits: uniqueShops((l && idx.aliasLoose.get(l)) || []) },
+    ];
+
+    const tier = tiers.find(t => t.hits.length > 0);
+    if (tier) {
+      if (tier.hits.length > 1) {
+        res.ambiguous.push({ input: line, candidates: tier.hits.map(h => h.shop) });
+        continue;
+      }
+      const hit = tier.hits[0];
+      // 旧名と新名の両方が貼られていた場合、同じ店舗を2回数えない
+      if (matchedShopIds.has(hit.shop.id)) { res.duplicated.push(line); continue; }
+      matchedShopIds.add(hit.shop.id);
+      res.matched.push({ input: line, shop: hit.shop, matchedBy: tier.by, via: hit.alias });
+      continue;
+    }
 
     // 未検出: 候補だけ出す（自動チェックはしない）
     const suggestions = shops
       .map(s => {
-        const sl = looseKey(s.name);
-        const contain = sl && l && (sl.includes(l) || l.includes(sl)) ? 0.3 : 0;
-        return { s, score: similarity(l, sl) + contain };
+        const keys = [s.name, ...(s.aliases || [])].map(looseKey).filter(Boolean);
+        let best = 0;
+        for (const sl of keys) {
+          const contain = l && (sl.includes(l) || l.includes(sl)) ? 0.3 : 0;
+          best = Math.max(best, similarity(l, sl) + contain);
+        }
+        return { s, score: best };
       })
       .filter(x => x.score >= 0.45)
       .sort((a, b) => b.score - a.score)

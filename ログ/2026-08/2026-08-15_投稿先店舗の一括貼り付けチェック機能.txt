@@ -56,3 +56,64 @@ posts/page.tsx:586 の handleCreate は
 - npx tsc --noEmit  → エラーなし
 - npx next build    → Compiled successfully / 227ページ生成
 - npx vitest run src/lib/shop-name-match.test.ts → 8 passed
+
+==========================================================
+追記: GBP改名店舗が未検出になる問題（同日・本番で発覚）
+==========================================================
+
+## 症状
+本番で20店舗を貼り付けたところ「一致19件 / 未検出1件」。
+未検出は「ジェルネイル専門 WHITE NAIL 高崎店」。
+候補には栄店・難波店・名駅店・西宮北口店・武蔵小杉店が出たが高崎店が無い。
+
+## 原因（2026-08-08の設計判断の帰結。ロジックのバグではない）
+この店舗はアイブロウ店→ネイル店に業態変更してGBP名だけ変わっている。
+  shops.name          = アイブロウサロンWHITE EYE まつ毛と眉毛の専門店 高崎店 ホワイトアイ
+  shops.gbp_shop_name = ジェルネイル専門 WHITE NAIL 高崎店
+shops.name は結合キーなのでGBPの改名に追従しない（2026-08-08で決定）。
+一方、投稿画面の shops は Go APIの /api/shop 由来で name しか持たない
+（/api/shop は gbp_shop_name / state / city / phone を返さない）。
+→ 現場が使うGBP現在名では引けなかった。該当は本番で約29件。
+
+なぜローカル検証で気づけなかったか:
+照合テストに使った sql/2026-08-01_rpa_sheet_shop_check.sql は
+「口コミRPAシートのA列」であって shops.name ではない。
+シート側は既にGBP新名に直されていたため、name と一致する前提が崩れていた。
+→ 店舗名の照合を検証するときは shops.name そのものを使うこと。
+
+## 修正
+[新規] src/components/gbp-aliases.ts
+  useGbpAliases()  … /api/report/shop-gbp-info から shopId => gbp_shop_name を取得。
+                     同一画面に複数の利用箇所があるためモジュールレベルで1リクエストに共有。
+                     失敗はキャッシュしない（次回再試行できるようにする）。
+  expandShopNames() … 店舗リストを「name + GBP現在名」に展開する。
+
+[修正] src/lib/shop-name-match.ts
+  MatchShop に aliases を追加し、照合を4段階の優先順位に変更:
+    1. name の完全一致  2. alias の完全一致
+    3. name の記号無視一致  4. alias の記号無視一致
+  上位段階でヒットしたら下位は見ない。各段階で候補が複数なら ambiguous。
+  ※ gbp_shop_name が別店舗の name と衝突するケースが本番に3件ある（2026-08-08確認）ため、
+    name の一致を必ず alias より優先する。alias同士の衝突は自動チェックせず要確認に回す。
+  旧名と新名の両方が貼られた場合は同じ店舗を二重に数えない（duplicatedへ）。
+
+[修正] src/components/shop-paste-selector.tsx
+  alias照合で一致した件数を「GBP改名 N件」バッジで表示。
+  一覧には旧店名で並ぶため、明細に「✓ 旧店名 ←「貼り付けた新名」（GBP現在名）」と対応を出す。
+  候補ボタンにも（GBP: 現在名）を併記。取得失敗時は警告文を出す。
+
+[修正] src/app/posts/page.tsx
+  ★ チェックが入るだけでは不十分だった点:
+    auto-post の filterShopNames はシートB列と完全一致（normName）で比較される。
+    改名店舗にDB名だけを渡すと、シートB列が新名の行は除外されて0件になる。
+    → プレビュー/実行/予約の3箇所すべてで expandShopNames() を使い、
+      新旧両方の名前を filterShopNames に渡すよう変更。
+      単一店舗の filterShopName も同じ理由で filterShopNames に統一。
+  店舗リストの検索を gbp_shop_name にも当て、改名店舗には（GBP現在名: …）を併記。
+
+## 検証
+  npx tsc --noEmit … エラーなし
+  npx vitest run   … 19ファイル 413テスト パス（本機能は14テスト）
+  npx next build   … Compiled successfully / 227ページ生成
+  追加テスト: GBP現在名で一致 / 旧名でも一致 / 新旧両方貼っても二重に数えない /
+             nameをaliasより優先 / alias衝突は要確認 / nameと同一のaliasは重複させない

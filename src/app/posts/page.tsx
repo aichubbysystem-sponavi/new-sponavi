@@ -10,6 +10,7 @@ import { usePasswordGate } from "@/components/password-gate";
 import { useRole } from "@/components/role-provider";
 import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
 import ShopPasteSelector from "@/components/shop-paste-selector";
+import { useGbpAliases, expandShopNames } from "@/components/gbp-aliases";
 
 interface LocalPost {
   name?: string;
@@ -128,6 +129,8 @@ export default function PostsPage() {
   const [postStep, setPostStep] = useState<0 | 1 | 2>(0); // 0=非表示, 1=店舗選択, 2=種類選択
   const [postTargetMode, setPostTargetMode] = useState<"all" | "selected" | "current">("current");
   const [postTargetShopIds, setPostTargetShopIds] = useState<string[]>([]);
+  // GBP改名店舗はシートB列が新旧どちらの表記でも通るよう、店舗フィルタに両方の名前を渡す
+  const { aliases: gbpAliases } = useGbpAliases();
   const [postTargetSearch, setPostTargetSearch] = useState("");
   const [postTargetOnlySelected, setPostTargetOnlySelected] = useState(false);
   const [postSelectedType, setPostSelectedType] = useState("");
@@ -878,8 +881,13 @@ export default function PostsPage() {
                         if (postTargetOnlySelected && !postTargetShopIds.includes(s.id)) return false;
                         const q = postTargetSearch.trim();
                         if (!q) return true;
-                        return (s.name || "").normalize("NFKC").toLowerCase().includes(q.normalize("NFKC").toLowerCase());
-                      }).map(s => (
+                        const nq = q.normalize("NFKC").toLowerCase();
+                        // GBPで改名された店舗は現在の店名でも引けるようにする
+                        const gbpName = gbpAliases?.[s.id] || "";
+                        return `${s.name || ""} ${gbpName}`.normalize("NFKC").toLowerCase().includes(nq);
+                      }).map(s => {
+                        const gbpName = gbpAliases?.[s.id];
+                        return (
                         <label key={s.id} className="flex items-center gap-2 py-1 px-2 hover:bg-slate-50 rounded cursor-pointer">
                           <input type="checkbox" checked={postTargetShopIds.includes(s.id)}
                             onChange={(e) => {
@@ -887,8 +895,12 @@ export default function PostsPage() {
                               else setPostTargetShopIds(postTargetShopIds.filter(id => id !== s.id));
                             }} className="w-3.5 h-3.5" />
                           <span className="text-xs text-slate-700">{s.name}</span>
+                          {gbpName && gbpName !== s.name && (
+                            <span className="text-[10px] text-blue-600 truncate">（GBP現在名: {gbpName}）</span>
+                          )}
                         </label>
-                      ))}
+                        );
+                      })}
                       </div>
                       <button onClick={() => setPostStep(2)} disabled={postTargetShopIds.length === 0}
                         className="mt-2 px-4 py-2 rounded-lg text-xs font-semibold bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50">
@@ -986,9 +998,9 @@ export default function PostsPage() {
                         // postTargetModeに応じたフィルタ
                         const previewFilter: any = {};
                         if (postTargetMode === "selected" && postTargetShopIds.length > 0) {
-                          previewFilter.filterShopNames = shops.filter(s => postTargetShopIds.includes(s.id)).map(s => s.name);
+                          previewFilter.filterShopNames = expandShopNames(shops.filter(s => postTargetShopIds.includes(s.id)), gbpAliases);
                         } else if (postTargetMode === "current" && selectedShop) {
-                          previewFilter.filterShopName = selectedShop.name;
+                          previewFilter.filterShopNames = expandShopNames([selectedShop], gbpAliases);
                         }
                         // isAllMode（全店舗表示ヘッダー）の場合もフィルタなし
                         const res = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, ...previewFilter }, { timeout: 60000 });
@@ -1007,9 +1019,9 @@ export default function PostsPage() {
                       if (currentAttempt > 1 && autoPostFailedShops.length > 0) {
                         execFilter.filterShopNames = autoPostFailedShops;
                       } else if (postTargetMode === "selected" && postTargetShopIds.length > 0) {
-                        execFilter.filterShopNames = shops.filter(s => postTargetShopIds.includes(s.id)).map(s => s.name);
+                        execFilter.filterShopNames = expandShopNames(shops.filter(s => postTargetShopIds.includes(s.id)), gbpAliases);
                       } else if (postTargetMode === "current" && selectedShop) {
-                        execFilter.filterShopName = selectedShop.name;
+                        execFilter.filterShopNames = expandShopNames([selectedShop], gbpAliases);
                       }
                       try {
                         const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, ...execFilter }, { timeout: 60000 });
@@ -1081,9 +1093,9 @@ export default function PostsPage() {
                     if (autoPostAttempt > 1 && autoPostFailedShops.length > 0) {
                       schedFilter.filterShopNames = autoPostFailedShops;
                     } else if (postTargetMode === "selected" && postTargetShopIds.length > 0) {
-                      schedFilter.filterShopNames = shops.filter(s => postTargetShopIds.includes(s.id)).map(s => s.name);
+                      schedFilter.filterShopNames = expandShopNames(shops.filter(s => postTargetShopIds.includes(s.id)), gbpAliases);
                     } else if (postTargetMode === "current" && selectedShop) {
-                      schedFilter.filterShopName = selectedShop.name;
+                      schedFilter.filterShopNames = expandShopNames([selectedShop], gbpAliases);
                     }
                     const scheduledAt = `${scheduleDate}T${scheduleHour.padStart(2, "0")}:00:00+09:00`;
                     try {
