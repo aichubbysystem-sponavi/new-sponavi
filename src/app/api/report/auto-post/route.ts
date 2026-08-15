@@ -14,6 +14,25 @@ function normName(s: string): string {
 function matchShopName(a: string, b: string): boolean {
   return normName(a) === normName(b);
 }
+
+/**
+ * スプレッドシートのタブをCSVで取得する。
+ * タイムアウトを必ず付けること: Googleが応答しないとサーバーは maxDuration まで待ち続け、
+ * クライアント側は先にタイムアウトして「エラー: timeout of 60000ms exceeded」になる。
+ * 取得できなかったタブは null を返し、他タブの処理は続行する。
+ */
+const SHEET_FETCH_TIMEOUT = 25000;
+async function fetchSheetCsv(sheetId: string, tab: string, accessToken: string | null): Promise<string | null> {
+  const gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
+  const headers: Record<string, string> = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" };
+  if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
+  const res = await fetch(gvizUrl, { headers, redirect: "follow", cache: "no-store", signal: AbortSignal.timeout(SHEET_FETCH_TIMEOUT) });
+  if (!res.ok) return null;
+  const csvText = await res.text();
+  // 未認証だとログインページのHTMLが返る
+  if (csvText.includes("<!DOCTYPE") || csvText.includes("<html")) return null;
+  return csvText;
+}
 const GBP_CLIENT_ID = process.env.GBP_CLIENT_ID || "";
 const GBP_CLIENT_SECRET = process.env.GBP_CLIENT_SECRET || "";
 
@@ -613,16 +632,21 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
   const allMatches: { shopName: string; summary: string; photoUrl: string; ctaUrl: string; tab: string; rawPhotoCell: string; rawDateCell: string; photoDebug: string; topicType: string; offerTitle: string; offerStartDate: any; offerEndDate: any; photoIndex?: number }[] = [];
   const pendingPhotoSearch: { index: number; photoCell: string; shopName: string }[] = [];
 
-  for (const tab of tabs) {
+  // タブのCSV取得は並列（3タブ直列だとクライアントの待ち時間に乗ってしまう）。
+  // 行の処理はタブ順のまま行う: 写真投稿の「同一店舗は最初の1行のみ」がタブ順に依存するため。
+  const csvByTab = await Promise.all(tabs.map(async (tab) => {
     try {
-      const gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
-      const headers: Record<string, string> = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" };
-      if (sheetAccessToken) headers["Authorization"] = `Bearer ${sheetAccessToken}`;
-      const res = await fetch(gvizUrl, { headers, redirect: "follow" });
-      if (!res.ok) continue;
+      const csvText = await fetchSheetCsv(sheetId, tab, sheetAccessToken);
+      return { tab, csvText };
+    } catch (e) {
+      console.error(`[auto-post] Tab "${tab}" fetch error:`, e);
+      return { tab, csvText: null as string | null };
+    }
+  }));
 
-      const csvText = await res.text();
-      if (csvText.includes("<!DOCTYPE") || csvText.includes("<html")) continue;
+  for (const { tab, csvText } of csvByTab) {
+    try {
+      if (!csvText) continue;
 
       const rows = parseCSV(csvText);
 
@@ -741,22 +765,14 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
 
   if (allMatches.length === 0) {
     // デバッグ: なぜ0件か情報を返す
-    const tabResults: string[] = [];
-    for (const tab of tabs) {
-      try {
-        const gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
-        const dbgHeaders: Record<string, string> = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" };
-        if (sheetAccessToken) dbgHeaders["Authorization"] = `Bearer ${sheetAccessToken}`;
-        const res = await fetch(gvizUrl, { headers: dbgHeaders, redirect: "follow" });
-        if (!res.ok) { tabResults.push(`${tab}: HTTP${res.status}`); continue; }
-        const csvText = await res.text();
-        if (csvText.includes("<!DOCTYPE") || csvText.includes("<html")) { tabResults.push(`${tab}: HTMLが返された`); continue; }
-        const rows = parseCSV(csvText);
-        const shopNames = rows.slice(1, 6).map(r => (r[1] || "").trim()).filter(Boolean);
-        const photoCells = rows.slice(1, 6).map(r => (r[5] || "").slice(0, 30)).filter(Boolean);
-        tabResults.push(`${tab}: ${rows.length}行, B列例:[${shopNames.join(",")}], F列例:[${photoCells.join(",")}]`);
-      } catch (e: any) { tabResults.push(`${tab}: エラー ${e?.message}`); }
-    }
+    // 取得済みのCSVを使い回す（ここで再取得すると0件のときだけ倍の時間がかかる）
+    const tabResults: string[] = csvByTab.map(({ tab, csvText }) => {
+      if (!csvText) return `${tab}: 取得できず（HTTPエラー / HTMLが返った / タイムアウト）`;
+      const rows = parseCSV(csvText);
+      const shopNames = rows.slice(1, 6).map(r => (r[1] || "").trim()).filter(Boolean);
+      const photoCells = rows.slice(1, 6).map(r => (r[5] || "").slice(0, 30)).filter(Boolean);
+      return `${tab}: ${rows.length}行, B列例:[${shopNames.join(",")}], F列例:[${photoCells.join(",")}]`;
+    });
     ctx.detail = `${targetDate}: 該当データ0件`;
     return NextResponse.json({
       matches: 0,

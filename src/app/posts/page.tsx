@@ -1003,9 +1003,17 @@ export default function PostsPage() {
                           previewFilter.filterShopNames = expandShopNames([selectedShop], gbpAliases);
                         }
                         // isAllMode（全店舗表示ヘッダー）の場合もフィルタなし
-                        const res = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, ...previewFilter }, { timeout: 60000 });
+                        const res = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, ...previewFilter }, { timeout: 120000 });
                         setAutoPostResult({ ...res.data, mode: "preview" });
-                      } catch (e: any) { setAutoPostResult({ error: e?.response?.data?.error || e?.message }); }
+                      } catch (e: any) {
+                        // プレビューは読み取りだけなので、タイムアウトしても投稿は発生していない
+                        const timedOut = e?.code === "ECONNABORTED" || /timeout/i.test(e?.message || "");
+                        setAutoPostResult({
+                          error: timedOut
+                            ? "スプレッドシートの読み取りが時間内に終わりませんでした（投稿は行われていません）。もう一度プレビューを押してください"
+                            : (e?.response?.data?.error || e?.message),
+                        });
+                      }
                       finally { setAutoPosting(false); }
                     }} disabled={autoPosting}
                       className="px-4 py-2 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200">
@@ -1024,7 +1032,7 @@ export default function PostsPage() {
                         execFilter.filterShopNames = expandShopNames([selectedShop], gbpAliases);
                       }
                       try {
-                        const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, ...execFilter }, { timeout: 60000 });
+                        const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, ...execFilter }, { timeout: 120000 });
                         const total = previewRes.data.matches || 0;
                         if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません` }); setAutoPosting(false); return; }
                         if (!confirm(`【${currentAttempt}回目実行】${autoPostDate}の投稿を実行しますか？\n\n${total}件を10件ずつバッチ処理します（${Math.ceil(total / 10)}回）`)) { setAutoPosting(false); return; }
@@ -1099,7 +1107,7 @@ export default function PostsPage() {
                     }
                     const scheduledAt = `${scheduleDate}T${scheduleHour.padStart(2, "0")}:00:00+09:00`;
                     try {
-                      const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, ...schedFilter }, { timeout: 60000 });
+                      const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, ...schedFilter }, { timeout: 120000 });
                       const total = previewRes.data.matches || 0;
                       if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません` }); setAutoPosting(false); return; }
                       if (!confirm(`${scheduleDate} ${scheduleHour}時 に予約投稿しますか？\n\n${total}件を予約登録します`)) { setAutoPosting(false); return; }
