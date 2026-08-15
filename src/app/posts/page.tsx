@@ -9,6 +9,7 @@ import DateRangePicker, { useDateRange } from "@/components/date-range-picker";
 import { usePasswordGate } from "@/components/password-gate";
 import { useRole } from "@/components/role-provider";
 import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
+import ShopPasteSelector from "@/components/shop-paste-selector";
 
 interface LocalPost {
   name?: string;
@@ -127,6 +128,8 @@ export default function PostsPage() {
   const [postStep, setPostStep] = useState<0 | 1 | 2>(0); // 0=非表示, 1=店舗選択, 2=種類選択
   const [postTargetMode, setPostTargetMode] = useState<"all" | "selected" | "current">("current");
   const [postTargetShopIds, setPostTargetShopIds] = useState<string[]>([]);
+  const [postTargetSearch, setPostTargetSearch] = useState("");
+  const [postTargetOnlySelected, setPostTargetOnlySelected] = useState(false);
   const [postSelectedType, setPostSelectedType] = useState("");
   const [newPost, setNewPost] = useState({ summary: "", topicType: "STANDARD", actionType: "", actionUrl: "", photoUrl: "", scheduledAt: "", mediaType: "PHOTO" as "PHOTO" | "VIDEO" });
   const [scheduledPosts, setScheduledPosts] = useState<any[]>([]);
@@ -855,8 +858,28 @@ export default function PostsPage() {
                     </button>
                   </div>
                   {postTargetMode === "selected" && (
-                    <div className="mt-4 border-t border-slate-200 pt-3 max-h-[200px] overflow-y-auto">
-                      {shops.map(s => (
+                    <div className="mt-4 border-t border-slate-200 pt-3">
+                      <ShopPasteSelector shops={shops} selectedIds={postTargetShopIds} onChange={setPostTargetShopIds} />
+                      <div className="flex items-center gap-2 mt-3 mb-1">
+                        <input type="text" value={postTargetSearch} onChange={(e) => setPostTargetSearch(e.target.value)}
+                          placeholder="店舗名で検索..."
+                          className="flex-1 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#003D6B]/20" />
+                        <label className="flex items-center gap-1 text-[10px] text-slate-500 cursor-pointer whitespace-nowrap">
+                          <input type="checkbox" checked={postTargetOnlySelected} onChange={(e) => setPostTargetOnlySelected(e.target.checked)} className="w-3 h-3" />
+                          選択中のみ表示
+                        </label>
+                        {postTargetShopIds.length > 0 && (
+                          <button type="button" onClick={() => setPostTargetShopIds([])}
+                            className="text-[10px] px-2 py-0.5 rounded border border-slate-200 text-red-500 hover:bg-red-50 whitespace-nowrap">すべて解除</button>
+                        )}
+                      </div>
+                      <div className="max-h-[200px] overflow-y-auto">
+                      {shops.filter(s => {
+                        if (postTargetOnlySelected && !postTargetShopIds.includes(s.id)) return false;
+                        const q = postTargetSearch.trim();
+                        if (!q) return true;
+                        return (s.name || "").normalize("NFKC").toLowerCase().includes(q.normalize("NFKC").toLowerCase());
+                      }).map(s => (
                         <label key={s.id} className="flex items-center gap-2 py-1 px-2 hover:bg-slate-50 rounded cursor-pointer">
                           <input type="checkbox" checked={postTargetShopIds.includes(s.id)}
                             onChange={(e) => {
@@ -866,6 +889,7 @@ export default function PostsPage() {
                           <span className="text-xs text-slate-700">{s.name}</span>
                         </label>
                       ))}
+                      </div>
                       <button onClick={() => setPostStep(2)} disabled={postTargetShopIds.length === 0}
                         className="mt-2 px-4 py-2 rounded-lg text-xs font-semibold bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50">
                         {postTargetShopIds.length}店舗を選択して次へ
@@ -1506,6 +1530,9 @@ export default function PostsPage() {
                     const allFilteredSelected = filteredIds.length > 0 && filteredIds.every(id => bulkPostShopIds.includes(id));
                     return (
                       <div className="mt-2">
+                        <div className="mb-2">
+                          <ShopPasteSelector shops={shops} selectedIds={bulkPostShopIds} onChange={setBulkPostShopIds} />
+                        </div>
                         <div className="flex items-center gap-2 mb-1.5">
                           <input
                             type="text"
