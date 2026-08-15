@@ -546,3 +546,26 @@ Dropbox側で30秒以内に切り出して書き出し直す必要がある。
 ## 検証
   npx tsc --noEmit … エラーなし / npx vitest run … 427テスト パス
   npx next build   … Compiled successfully
+
+## 追記9の続き: 0件は再現せず（タブ取得失敗が原因と判断）
+同じ操作をやり直したら一文字premiumは3件成功した。
+つまりシートB列と shops.name の食い違いではなく、実行時にタブのCSV取得が
+失敗して黙って飛ばされていた可能性が高い。
+fetchSheetCsv は失敗時 null を返し、呼び出し側は continue するだけなので
+「そのタブの店舗が丸ごと対象外」になっても画面には何も出ない。
+（追記2で25秒タイムアウトを入れたため、取得失敗が起きやすくなっている）
+
+[修正] auto-post/route.ts
+  - タブのCSV取得を1回だけ再試行
+  - 取得できなかったタブを failedTabs として全レスポンス（0件時・プレビュー・
+    予約登録・即時実行）に含める
+[修正] posts/page.tsx
+  - failedTabs があれば琥珀色で
+    「次のタブを読み込めませんでした: 〇〇。このタブにある店舗は今回の対象から
+      外れています。もう一度実行してください」と必ず表示する
+
+これで「一部の店舗だけ投稿されない」が無言で起きなくなる。
+
+## 検証
+  npx tsc --noEmit … エラーなし / npx vitest run … 427テスト パス
+  npx next build   … Compiled successfully

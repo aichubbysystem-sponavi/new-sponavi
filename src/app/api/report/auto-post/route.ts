@@ -715,13 +715,19 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
   // 行の処理はタブ順のまま行う: 写真投稿の「同一店舗は最初の1行のみ」がタブ順に依存するため。
   const csvByTab = await Promise.all(tabs.map(async (tab) => {
     try {
-      const csvText = await fetchSheetCsv(sheetId, tab, sheetAccessToken);
+      // 1回だけ再試行する。取得できなかったタブの行は丸ごと処理対象外になり、
+      // 「対象の店舗が0件」「一部の店舗だけ投稿されない」という気づきにくい欠落になるため
+      let csvText = await fetchSheetCsv(sheetId, tab, sheetAccessToken);
+      if (!csvText) csvText = await fetchSheetCsv(sheetId, tab, sheetAccessToken);
       return { tab, csvText };
     } catch (e) {
       console.error(`[auto-post] Tab "${tab}" fetch error:`, e);
       return { tab, csvText: null as string | null };
     }
   }));
+
+  // 取得できなかったタブは処理対象から丸ごと抜ける。黙って0件・一部欠落にせず必ず返す
+  const failedTabs = csvByTab.filter(c => !c.csvText).map(c => c.tab);
 
   for (const { tab, csvText } of csvByTab) {
     try {
@@ -863,7 +869,8 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
     return NextResponse.json({
       matches: 0,
       message: `${targetDate}に該当する投稿データがありません`,
-      debug: { isPhotoOnly, topicType, dateCompact, photoPostNumber, tabResults, filterShopName, filterShopNames },
+      failedTabs,
+      debug: { isPhotoOnly, topicType, dateCompact, photoPostNumber, tabResults, filterShopName, filterShopNames, failedTabs },
     });
   }
 
@@ -877,6 +884,7 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
       : undefined;
     return NextResponse.json({
       matches: allMatches.length,
+      failedTabs,
       data: allMatches,
       totalBatches,
       batchSize: bs,
@@ -1077,6 +1085,7 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
     ctx.detail = `${targetDate}: 予約登録${scheduled}件/エラー${schedErrors}件（マッチ${allMatches.length}件、予約時刻: ${scheduledTime}）`;
     return NextResponse.json({
       matches: allMatches.length,
+      failedTabs,
       posted: scheduled, errors: schedErrors, results: schedResults,
       batchOffset: offset, batchSize: size, batchProcessed: batchMatches.length,
       hasMore: offset + size < allMatches.length, nextOffset: offset + size,
@@ -1297,6 +1306,7 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
   ctx.detail = `${targetDate}: 投稿${posted}件/エラー${errors}件（マッチ${allMatches.length}件、バッチ${offset}〜${offset + batchMatches.length}）`;
   return NextResponse.json({
     matches: allMatches.length,
+    failedTabs,
     posted, errors, results,
     batchOffset: offset,
     batchSize: size,

@@ -1036,7 +1036,7 @@ export default function PostsPage() {
                         const res = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, ...pv.filter }, { timeout: 120000 });
                         // 0件のときはエラー表示に寄せて、原因（店舗名の食い違い）を追えるようにする
                         setAutoPostResult((res.data?.matches || 0) === 0
-                          ? { error: `${autoPostDate}に該当する投稿がありません`, zeroDebug: res.data?.debug }
+                          ? { error: `${autoPostDate}に該当する投稿がありません`, zeroDebug: res.data?.debug, failedTabs: res.data?.failedTabs }
                           : { ...res.data, mode: "preview", targetLabel: pv.label });
                       } catch (e: any) {
                         // プレビューは読み取りだけなので、タイムアウトしても投稿は発生していない
@@ -1062,7 +1062,7 @@ export default function PostsPage() {
                       try {
                         const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, ...execFilter }, { timeout: 120000 });
                         const total = previewRes.data.matches || 0;
-                        if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません`, zeroDebug: previewRes.data.debug }); setAutoPosting(false); return; }
+                        if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません`, zeroDebug: previewRes.data.debug, failedTabs: previewRes.data.failedTabs }); setAutoPosting(false); return; }
                         if (!confirm(`【${currentAttempt}回目実行】${autoPostDate}の投稿を実行しますか？\n\n投稿先: ${ex.label}\n${total}件を10件ずつバッチ処理します（${Math.ceil(total / 10)}回）`)) { setAutoPosting(false); return; }
                         // 追加ロック: 一括で公開投稿するためログインパスワードを再確認
                         if (!(await gate(`${total}件の一括自動投稿（GBPに公開されます）`))) { setAutoPosting(false); return; }
@@ -1098,7 +1098,7 @@ export default function PostsPage() {
                         const failed = allResults.filter((r: any) => !r.status?.includes("成功")).map((r: any) => r.shopName);
                         const uniqueFailed = Array.from(new Set(failed));
                         setAutoPostFailedShops(uniqueFailed);
-                        setAutoPostResult({ mode: "executed", posted: totalPosted, errors: totalErrors, results: allResults, matches: total, attempt: currentAttempt, failedShops: uniqueFailed });
+                        setAutoPostResult({ mode: "executed", posted: totalPosted, errors: totalErrors, results: allResults, matches: total, attempt: currentAttempt, failedShops: uniqueFailed, failedTabs: previewRes.data.failedTabs });
                         setAutoPostAttempt(currentAttempt + 1);
                         setMsg(`${currentAttempt}回目完了: ${totalPosted}件投稿 / ${totalErrors}件エラー`);
                         await fetchData();
@@ -1132,7 +1132,7 @@ export default function PostsPage() {
                     try {
                       const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, ...schedFilter }, { timeout: 120000 });
                       const total = previewRes.data.matches || 0;
-                      if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません`, zeroDebug: previewRes.data.debug }); setAutoPosting(false); return; }
+                      if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません`, zeroDebug: previewRes.data.debug, failedTabs: previewRes.data.failedTabs }); setAutoPosting(false); return; }
                       if (!confirm(`${scheduleDate} ${scheduleHour}時 に予約投稿しますか？\n\n投稿先: ${sc.label}\n${total}件を予約登録します`)) { setAutoPosting(false); return; }
 
                       const bs = 10;
@@ -1166,7 +1166,7 @@ export default function PostsPage() {
                       const failed = allResults.filter((r: any) => !r.status?.includes("成功")).map((r: any) => r.shopName);
                       const uniqueFailed = Array.from(new Set(failed));
                       setAutoPostFailedShops(uniqueFailed);
-                      setAutoPostResult({ mode: "executed", posted: totalPosted, errors: totalErrors, results: allResults, matches: total, attempt: autoPostAttempt, failedShops: uniqueFailed });
+                      setAutoPostResult({ mode: "executed", posted: totalPosted, errors: totalErrors, results: allResults, matches: total, attempt: autoPostAttempt, failedShops: uniqueFailed, failedTabs: previewRes.data.failedTabs });
                       setAutoPostAttempt(autoPostAttempt + 1);
                       setMsg(`完了: ${totalPosted}件予約登録 / ${totalErrors}件エラー`);
                     } catch (e: any) { setAutoPostResult({ error: e?.response?.data?.error || e?.message }); }
@@ -1190,6 +1190,18 @@ export default function PostsPage() {
                 })()}
                 <p className="text-[10px] text-slate-400">タブ「投稿用シート」「報告必須店舗 投稿用シート」「WHITE 系列 投稿用シート」のB列=店舗名、C列=投稿本文、E列=日付、F列=写真URL、J列=CTAボタンURL</p>
 
+                {/* シートのタブが読めなかった場合、そのタブの店舗は丸ごと処理対象外になる。
+                    黙って「0件」「一部だけ投稿」にならないよう必ず出す */}
+                {autoPostResult?.failedTabs?.length > 0 && (
+                  <div className="rounded-lg p-3 text-sm bg-amber-50 text-amber-800 border border-amber-300 mb-2">
+                    <p className="font-semibold">
+                      次のタブを読み込めませんでした: {autoPostResult.failedTabs.join(" / ")}
+                    </p>
+                    <p className="text-[11px] mt-0.5">
+                      このタブにある店舗は今回の対象から外れています。もう一度実行してください（結果が変わる場合があります）
+                    </p>
+                  </div>
+                )}
                 {autoPostResult && (
                   <div className={`rounded-lg p-3 text-sm ${autoPostResult.error ? "bg-red-50 text-red-700 border border-red-200" : autoPostResult.mode === "preview" ? "bg-blue-50 text-blue-700 border border-blue-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}>
                     {autoPostResult.error ? (
