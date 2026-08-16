@@ -1,0 +1,109 @@
+===========================================================
+2026-08-16 セッション総括
+「先月の実施内容」ページ完成 + AI総評の品質対策(3層) + 高速化・写真ストレージ
+※ 前提の調査・初期実装は 2026-08-15_レポート先月の実施内容セクション_実現可否調査.txt 参照
+===========================================================
+
+## 【2026-08-16】
+
+### 決定事項
+- 投稿数はGBPの実データ(localPosts)を正とする。post_logsは使わない
+  （post_logs は2026-07実績48件/10店舗しかなく、投稿の実態は外部で行われていた）
+- 写真・投稿の閲覧数はGoogle APIで取得不可（再実測で確定）→ 閲覧数は手動入力方式
+  （gbp_posts.view_count / media.view_count、初期値NULL=未計測。0と区別する）
+- メモは最終ページのみに表示（実施内容ページへの掲載は一度実装後ユーザー判断で撤回）
+- 写真は実体をSupabase Storage(report-photos)に保存する（Proプラン確認済み）。
+  拡大用の原寸も保存し、容量増（1枚約245KB）は「何もしない」で許容
+- AI総評の総括ページ重複はB案：過去分は monthly フォールバックのまま、再分析で
+  overall に置き換わる
+- 実施内容ページの写真グリッドは削除（写真一覧ページと完全重複していたため）。
+  代わりに枚数案内+投稿の内訳+その月の最新投稿1件を表示
+- 検証ゲートで落ちたAI総評は空欄で出荷し、理由を担当者にのみ表示する
+
+### 変更内容（具体的に）
+■ 新規ファイル
+- src/lib/gbp-activity.ts … GBP投稿/写真の取得・同期・集計。fast分岐、
+  取り込み済み月のGBPスキップ(isMonthFullyStored)、投稿内訳(PostsBreakdown)、
+  最新投稿(latestPost)、ストレージ取り込み(storeMissingPhotos)
+- src/lib/report-photo-store.ts … 画像実体のダウンロード→Storage保存→パス記録。
+  サムネ+拡大用の2種保存。818バイトの「画像なし」PNG除外(MIN_BYTES=2000)
+- src/app/api/report/activity/route.ts … 実施内容API。fast=1(件数のみ)、
+  権限チェック後のインスタンス内キャッシュ
+- src/app/api/report/photo-views/route.ts … 閲覧数の手動保存(権限MEMO・監査対象・
+  shop_id条件付きUPDATE)
+- src/app/api/cron/sync-activity/route.ts … 日次同期cron(sync_progressオフセット式)
+- src/lib/month-range.test.ts … 月境界テスト
+- sql/2026-08-15_gbp_posts.sql … gbp_postsテーブル/インデックス/RLS/view_count/
+  photo_path/photo_full_path/report-photosバケット（本番適用済み）
+
+■ 変更ファイル
+- src/app/report/[shopId]/client.tsx …
+  実施内容ページ(P2)・写真一覧ページ(20枚/頁)・閲覧数入力欄・写真拡大モーダル
+  （投稿本文表示付き）・投稿内訳行・最新投稿カード・計測仕様変更の注記(5箇所)・
+  総括ページの overall 優先表示・_dropped理由の担当者向け表示・
+  PDF出力前の写真到着待ち(waitForPhotos 最大20秒)・2段階fetch(fast→full)
+- src/lib/month-utils.ts … monthRangeIso / prevMonthLabel 追加(JST月境界の単一情報源)
+- src/lib/analyze-core.ts … プロンプト: overallComment新設、季節変動禁止、
+  5件未満断定禁止、複数月まとめ制約、削除・非表示言及の条件化、2025年11月またぎ
+  前年比の成果断定禁止、総括の軸ルール。reviewCountCommentの見本文を差し替え
+  （旧見本が新ルールと矛盾し再生成ループの原因になっていた）
+- src/lib/comment-validation.ts … 新検証3種(validateSeasonalityClaims/
+  validateDeletionClaims/validateSmallSampleClaims)、「◯位圏外/圏内/台」の
+  閾値表現を順位照合から除外、断定回避表現(判断できない等)の許容
+- src/app/api/report/analyze/route.ts + src/lib/analyze-batch-lib.ts …
+  空欄化時に理由を pageComments._dropped に保存（両経路）
+- src/lib/report-data.ts … PageComments.overall / _dropped 追加
+- src/app/media/page.tsx … view_count null(未計測)対応
+- src/app/api/report/sync-media/route.ts … view_count 0上書きを停止（手入力保護）
+- vercel.json … cron追加(sync-activity 0 18 * * * = JST 3:00)
+
+### 数値・設定値
+- 写真一覧: 20枚/ページ(5列×4行)、上限200枚(超過は「N枚は掲載していません」)
+- 画像URL: 投稿由来は googleUrl+"=w400"(27KB)、写真タブは thumbnailUrl(23KB)。
+  写真タブのURLにサイズ指定を付けると400（実測）。拡大用は原寸(投稿49KB/タブ~221KB)
+- activity API: fast=1 で実測3秒→0.3秒。キャッシュTTL10分・上限500件
+- 写真取り込み予算: レポート表示時12秒/店、cron 6秒/店(TIME_LIMIT 270秒)
+- ストレージ容量見込み: 月約3.7GB・年44GB(Pro 100GB内。約2年は追加費用ゼロ)
+- 検証ゲート: 再生成上限2回(通常)/MAX_CORRECTIONS(Batch)。直らなければ該当欄を
+  空欄化し _dropped に理由保存
+- 少数サンプル断定の閾値: 文中の件数最大値5件未満+断定語
+- 最新投稿カード: 本文8行クランプ、写真210px
+- 口コミ分析費用(sonnet-4-6 Batch): 1店舗 中央値約7円/平均12円/最大140円、
+  全596店1回 約7,000円
+- 注記表示条件: monthlyLabels に 202511 より前の月を含む場合のみ
+
+### 未解決・次回やること
+- 全店の既存分析は旧文言のまま。次回月次バッチ(毎月1〜10日)で新プロンプトに
+  順次置換される。即時に全店再分析するなら Batch APIで約7,000円（要承認）
+- 「◯〜◯月は◯◯台」複数月まとめ表現の機械検証は未実装（プロンプト対応のみ。
+  KPI月次系列をverifyCtxに渡す改修が必要）
+- 総括アクションに根拠口コミを添える案は提示済み・見送り中
+- ⏰ 8/7投入のBatch 32件(187店舗)がsubmittedのまま（結果9/5失効・課金済み）。
+  pollは押さず状態確認から（canceled自動再投入=再課金の既知の罠）
+- DBのGBP refresh_tokenが失効中(invalid_rapt)。現在はGo API経由のトークンのみで
+  動作。Go API停止時のフォールバックが無い状態（既存の残タスク）
+- 実施内容ページの体裁（写真の縦横比・行数など）はユーザー確認待ち
+- 日次cron(sync-activity)の初回実行結果の確認（全店一巡に数日）
+
+### 注意点・ハマったこと
+- ★gitリモートが2つある。本番は origin(aichubbysystem-sponavi/new-sponavi)。
+  omni(omni-seo/spotlight-navigator)にpushしても本番に出ない（30分ロス）。
+  GitHubの「Vercel: failure」ステータスは死んでいるomni側が付けるもので本番と無関係
+- デプロイ反映確認は本番URLのAPIを叩く(404=未反映/401・405=反映)か、
+  配信JSに新文字列が含まれるかで判定。ローカルのvercel CLIは本番チームを見られない
+- コミットメッセージにPowerShellのヒアストリング(@'...'@)をBashで使い、
+  件名が「@」だけになった（2コミット。実害なしのため履歴は残置）
+- GBPの画像URLは数日で403になり、リソース名すら付け替えられる。
+  403でも200x200の「画像なし」PNGが正常応答で返るためonErrorでは検知不能
+- AI総評の見本文(few-shot)がルールと矛盾すると、AIは見本に倣う→違反→
+  再生成でも見本に引っ張られる→上限到達で空欄化、のループになる。
+  ルール変更時は必ず見本文も点検すること
+- 検証の断定語リストに「傾向」を入れたら、correctionが提案する模範解答
+  「傾向は判断できない」自体が再違反になった。否定文脈の許容が必須
+- 「5地点すべてが10位圏外」の「10位」は閾値であり実順位ではない。
+  順位照合のafterガードに圏外/圏内/台を追加して解消
+- LLM出力はぶれるため、検証で落ちるページが試行ごとに変わる。
+  理由の永続化(_dropped)が無いと毎回サーバーログ調査になる
+- 画像のlazy loadingは使わない（未表示の写真がPDFに焼き込まれない事故）
+- PDF出力は2段階読み込みの写真到着を待ってから印刷（最大20秒）
+- クインシーで4回再分析して全21ページの数値照合・全項目通過を確認済み
