@@ -70,6 +70,8 @@ interface ActivityData {
   postsPrev: number;
   /** 当月投稿の種別・言語内訳（投稿0件なら null） */
   postsBreakdown: { standard: number; offer: number; other: number; foreign: number } | null;
+  /** その月の最新の投稿（本文付き）。投稿が無い月は null */
+  latestPost: { summary: string; topicType: string | null; createTime: string; photoUrl: string | null } | null;
   photos: number;
   photosPrev: number;
   replies: number;
@@ -2139,6 +2141,31 @@ export default function ReportClient({
                       : (activity.photosPending || activityLoading) ? "写真を読み込んでいます..." : "この月に公開した写真はありませんでした"}
                 </div>
               </div>
+
+              {/* その月の最新の投稿（本文つき）。ページ下部の余白を活かして
+                  「実際に何を発信したか」を1件だけ見せる。長文は行数で切り詰めて
+                  スライドから絶対にはみ出さないようにする */}
+              {activity.latestPost && (
+                <div style={{ marginTop: 14, background: "#fff", borderRadius: 12, boxShadow: "0 1px 6px rgba(0,0,0,.06)", padding: "16px 20px", display: "flex", gap: 18, flexShrink: 1, minHeight: 0, overflow: "hidden" }}>
+                  {activity.latestPost.photoUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={activity.latestPost.photoUrl} alt="" decoding="async"
+                      style={{ width: 210, height: 210, objectFit: "cover", borderRadius: 10, flexShrink: 0, background: "#eef1f6", alignSelf: "flex-start" }} />
+                  )}
+                  <div style={{ minWidth: 0, display: "flex", flexDirection: "column" }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: COLORS.primary, marginBottom: 6, flexShrink: 0 }}>
+                      この月の最新の投稿
+                      <span style={{ fontSize: 13, fontWeight: 400, color: "#999", marginLeft: 8 }}>
+                        {jstMonthDay(activity.latestPost.createTime)}投稿
+                        {activity.latestPost.topicType === "OFFER" ? "・特典" : "・最新情報"}
+                      </span>
+                    </div>
+                    <p style={{ fontSize: 15, lineHeight: 1.9, color: "#333", margin: 0, whiteSpace: "pre-wrap", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 8, WebkitBoxOrient: "vertical" }}>
+                      {activity.latestPost.summary}
+                    </p>
+                  </div>
+                </div>
+              )}
 
             </div>
           </div>

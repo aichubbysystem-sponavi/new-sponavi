@@ -63,6 +63,15 @@ export interface ActivityPhoto {
   topicType: string | null;
 }
 
+/** 実施内容ページに載せる「その月の最新の投稿」 */
+export interface LatestPost {
+  summary: string;
+  topicType: string | null;
+  createTime: string;
+  /** 添付写真（あれば）。保存済みストレージ優先、無ければ表示時に取り直したURL */
+  photoUrl: string | null;
+}
+
 /** 実施内容ページに出す投稿の内訳 */
 export interface PostsBreakdown {
   /** 最新情報 (STANDARD) */
@@ -91,6 +100,8 @@ export interface MonthlyActivity {
   postsPrev: number;
   /** 当月投稿の種別・言語内訳（投稿が0件なら null） */
   postsBreakdown: PostsBreakdown | null;
+  /** その月の最新の投稿（本文付き）。投稿が無い月は null */
+  latestPost: LatestPost | null;
   photos: number;
   photosPrev: number;
   replies: number;
@@ -502,6 +513,7 @@ export async function getMonthlyActivity(
     return {
       month, posts, postsPrev, photos, photosPrev, replies, repliesPrev,
       postsBreakdown: null,
+      latestPost: null,
       photoItems: [], photoTruncated: 0, photosPending: true, photoError: null,
     };
   }
@@ -645,8 +657,24 @@ export async function getMonthlyActivity(
     return Date.parse(b.createTime) - Date.parse(a.createTime);
   });
 
+  // ── その月の最新の投稿（実施内容ページの下部に本文ごと1件見せる） ──
+  // photoItems は写真がある投稿だけなので、文章のみの投稿も含む postRows から選ぶ
+  let latestPost: LatestPost | null = null;
+  const withText = postRows.filter((r) => r.summary && r.create_time);
+  if (withText.length > 0) {
+    const latest = withText.reduce((a, b) => (Date.parse(a.create_time) >= Date.parse(b.create_time) ? a : b));
+    const storedPath = pathOf.get(latest.post_name);
+    const itemUrl = items.find((it) => it.key === latest.post_name)?.url || null;
+    latestPost = {
+      summary: latest.summary as string,
+      topicType: latest.topic_type || null,
+      createTime: latest.create_time,
+      photoUrl: storedPath ? publicPhotoUrl(storedPath) : itemUrl,
+    };
+  }
+
   return {
-    month, posts, postsPrev, postsBreakdown, photos, photosPrev, replies, repliesPrev,
+    month, posts, postsPrev, postsBreakdown, latestPost, photos, photosPrev, replies, repliesPrev,
     photoItems: items.slice(0, MAX_PHOTO_ITEMS),
     photoTruncated: Math.max(0, items.length - MAX_PHOTO_ITEMS),
     photosPending: false,
