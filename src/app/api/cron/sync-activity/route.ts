@@ -14,7 +14,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, verifyCron } from "@/lib/supabase";
-import { createGbpFetcher, syncShopActivity, monthRangeIso, prevMonthLabel, type ShopRef } from "@/lib/gbp-activity";
+import { createGbpFetcher, syncShopActivity, storeMissingPhotos, monthRangeIso, prevMonthLabel, type ShopRef } from "@/lib/gbp-activity";
 import { jstNow } from "@/lib/jst-date";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +22,8 @@ export const maxDuration = 300;
 
 const JOB = "sync-activity";
 const TIME_LIMIT = 270_000;
+/** 1店舗あたり写真の取り込みに使ってよい時間。20枚で約1秒なので余裕を見て6秒 */
+const PHOTO_BUDGET_MS = 6_000;
 
 async function getOffset(): Promise<number> {
   const supabase = getSupabase();
@@ -87,6 +89,7 @@ export async function GET(request: NextRequest) {
   let processed = 0;
   let posts = 0;
   let media = 0;
+  let storedPhotos = 0;
   const failures: { shop: string; error: string }[] = [];
   let i = offset;
 
@@ -98,6 +101,9 @@ export async function GET(request: NextRequest) {
       posts += r.posts;
       media += r.media;
       if (r.error) failures.push({ shop: shop.name, error: r.error });
+      // 写真の実体を自前ストレージへ取り込む。ここが一周すると
+      // レポート表示時にGBPを叩かなくて済む（＝速く、URL失効でも写真が消えない）
+      storedPhotos += await storeMissingPhotos(shop, since.startIso, r.postItems, r.mediaItems, PHOTO_BUDGET_MS);
     } catch (e: any) {
       failures.push({ shop: shop.name, error: e?.message || "unknown" });
     }
@@ -111,12 +117,12 @@ export async function GET(request: NextRequest) {
   if (failures.length > 0) {
     console.error(`[cron/${JOB}] ${failures.length}件失敗:`, failures.slice(0, 5));
   }
-  console.log(`[cron/${JOB}] ${processed}店舗処理 (offset ${offset}→${nextOffset}) 投稿${posts}件 写真${media}件 失敗${failures.length}件`);
+  console.log(`[cron/${JOB}] ${processed}店舗処理 (offset ${offset}→${nextOffset}) 投稿${posts}件 写真${media}件 画像保存${storedPhotos}枚 失敗${failures.length}件`);
 
   return NextResponse.json({
     success: true,
     total: shops.length,
-    processed, posts, media,
+    processed, posts, media, storedPhotos,
     offset, nextOffset,
     failed: failures.length,
     failures: failures.slice(0, 20),

@@ -69,6 +69,20 @@ CREATE INDEX IF NOT EXISTS idx_gbp_posts_shop_views
   ON public.gbp_posts (shop_id, view_count DESC NULLS LAST);
 
 -- =====================================================================
+-- 写真の実体を自前ストレージに保存する  2026-08-16 追加
+-- =====================================================================
+-- GBPの画像URLは数日で403になり、リソース名すら付け替えられる（2026-08-09の調査）。
+-- URLを保存しても意味がないので、サムネイルの実体を Supabase Storage に取り込み、
+-- レポートはそちらを見る。これで表示時にGoogleを叩かなくなり、PDFからも写真が消えない。
+-- 容量: サムネイル約25KB × 全759店舗 × 月20枚 = 月375MB / 年4.5GB（Proの100GB内）
+INSERT INTO storage.buckets (id, name, public, file_size_limit)
+VALUES ('report-photos', 'report-photos', true, 5242880)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+ALTER TABLE public.gbp_posts ADD COLUMN IF NOT EXISTS photo_path TEXT;
+ALTER TABLE public.media     ADD COLUMN IF NOT EXISTS photo_path TEXT;
+
+-- =====================================================================
 -- 検証
 -- =====================================================================
 -- SELECT tablename, rowsecurity FROM pg_tables

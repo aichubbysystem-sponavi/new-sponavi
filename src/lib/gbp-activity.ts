@@ -23,6 +23,7 @@ import { getSupabase } from "@/lib/supabase";
 import { getOAuthToken, getAllOAuthTokens } from "@/lib/gbp-token";
 import { resolveLocationName } from "@/lib/gbp-location";
 import { monthRangeIso, prevMonthLabel } from "@/lib/month-utils";
+import { storePhotos, publicPhotoUrl, type StorablePhoto } from "@/lib/report-photo-store";
 
 export { monthRangeIso, prevMonthLabel };
 
@@ -57,6 +58,13 @@ export interface ActivityPhoto {
 
 /** 1レポートに載せる写真の上限。20枚/ページなので10ページぶん */
 export const MAX_PHOTO_ITEMS = 200;
+
+/**
+ * 未保存の写真を取り込むのに使ってよい時間。
+ * ルートの maxDuration は60秒。GBPの取得と集計で最大10秒程度使うので、
+ * ここは余裕を持って12秒に抑える（間に合わなかった分は次回に回る）
+ */
+const PHOTO_STORE_BUDGET_MS = 12000;
 
 export interface MonthlyActivity {
   month: string;
@@ -280,6 +288,66 @@ export async function syncShopActivity(
   };
 }
 
+/**
+ * 同期で取得した一覧のうち、まだストレージに入っていない写真を取り込む。
+ * 夜間cronから呼ぶ。これが一周すると、レポート表示時にGBPを叩く必要がなくなる。
+ *
+ * @param budgetMs 1店舗に使ってよい時間。cronの制限時間内に収めるため必ず区切る
+ */
+export async function storeMissingPhotos(
+  shop: ShopRef,
+  sinceIso: string,
+  postItems: LocalPostItem[],
+  mediaItems: MediaItemLite[],
+  budgetMs: number,
+): Promise<number> {
+  const supabase = getSupabase();
+  const sinceMs = Date.parse(sinceIso);
+
+  const [postRows, mediaRows] = await Promise.all([
+    supabase.from("gbp_posts").select("post_name, photo_path").eq("shop_id", shop.id).gte("create_time", sinceIso),
+    supabase.from("media").select("media_name, photo_path").eq("shop_id", shop.id).gte("create_time", sinceIso),
+  ]);
+  const stored = new Set<string>();
+  for (const r of postRows.data || []) if (r.photo_path) stored.add(r.post_name);
+  for (const r of mediaRows.data || []) if (r.photo_path) stored.add(r.media_name);
+
+  const targets: (StorablePhoto & { createTime: string })[] = [];
+  for (const p of postItems) {
+    if (!p.name || !p.createTime || Date.parse(p.createTime) < sinceMs || stored.has(p.name)) continue;
+    const m = (p.media || [])[0];
+    if (!m?.googleUrl) continue;
+    // 投稿由来のURLだけサイズ指定を受け付ける（メディア由来は400になる）
+    targets.push({ key: p.name, source: "post", fetchUrl: `${m.googleUrl}=w400`, createTime: p.createTime });
+  }
+  for (const m of mediaItems) {
+    if (!m.name || !m.createTime || Date.parse(m.createTime) < sinceMs || stored.has(m.name)) continue;
+    const url = m.thumbnailUrl || m.googleUrl;
+    if (!url) continue;
+    targets.push({ key: m.name, source: "media", fetchUrl: url, createTime: m.createTime });
+  }
+  if (targets.length === 0) return 0;
+
+  // 保存先は「その写真が属する月」のフォルダ。月ごとに数える・消せるようにするため
+  const byMonth = new Map<string, StorablePhoto[]>();
+  for (const t of targets) {
+    const jst = new Date(Date.parse(t.createTime) + 9 * 60 * 60 * 1000);
+    const month = `${jst.getUTCFullYear()}/${jst.getUTCMonth() + 1}`;
+    if (!byMonth.has(month)) byMonth.set(month, []);
+    byMonth.get(month)!.push({ key: t.key, source: t.source, fetchUrl: t.fetchUrl });
+  }
+
+  const deadline = Date.now() + budgetMs;
+  let saved = 0;
+  for (const [month, photos] of Array.from(byMonth.entries())) {
+    const left = deadline - Date.now();
+    if (left <= 0) break;
+    const r = await storePhotos(shop.id, month, photos, left);
+    saved += r.size;
+  }
+  return saved;
+}
+
 /** 同期用のfetcherを作る（トークン取得は呼び出し側で1回だけ） */
 export async function createGbpFetcher(): Promise<GbpGet | null> {
   const token = await getOAuthToken();
@@ -332,11 +400,33 @@ async function countReplies(shopId: string, startIso: string, endIso: string): P
 }
 
 /**
+ * その月の写真が全部ストレージに入っているか（＝GBPを叩かずに表示できるか）を判定する。
+ * 判定材料はDBの行だけ。写真付き投稿とメディアの全行に photo_path があれば取り込み済み。
+ */
+async function isMonthFullyStored(shopId: string, startIso: string, endIso: string): Promise<boolean> {
+  const supabase = getSupabase();
+  const [posts, media] = await Promise.all([
+    supabase.from("gbp_posts").select("media_name, photo_path")
+      .eq("shop_id", shopId).gte("create_time", startIso).lt("create_time", endIso),
+    supabase.from("media").select("photo_path")
+      .eq("shop_id", shopId).gte("create_time", startIso).lt("create_time", endIso),
+  ]);
+  if (posts.error || media.error) return false;
+  const postRows = posts.data || [];
+  const mediaRows = media.data || [];
+  if (postRows.length === 0 && mediaRows.length === 0) return false; // 未同期と区別できない
+  const postsOk = postRows.every(r => !r.media_name || !!r.photo_path);
+  const mediaOk = mediaRows.every(r => !!r.photo_path);
+  return postsOk && mediaOk;
+}
+
+/**
  * レポートの「実施内容」＋「投稿写真一覧」に必要なデータを返す。
  *
- * 数字はDB（gbp_posts / media / reviews）から、写真URLはGBPから取り直したものを使う。
- * 保存済みURLは数日で403になるため、表示のたびに取り直すのが唯一確実な方法
- * （2026-08-09の調査。ルート側で10分キャッシュしているので毎回は叩かない）。
+ * 数字はDB（gbp_posts / media / reviews）から。写真は次の順で解決する:
+ *   1. 自前ストレージに取り込み済み → DBのパスだけで表示（GBPを叩かない・失効しない）
+ *   2. 未取り込み → GBPから有効なURLを取り直し、ついでにストレージへ取り込む
+ * GBPのURLは数日で403になるため、保存したURLをそのまま使うことはできない（2026-08-09の調査）。
  */
 export async function getMonthlyActivity(
   shop: ShopRef,
@@ -356,7 +446,15 @@ export async function getMonthlyActivity(
   // fast: DBの件数だけ返す（GBPを一切叩かない＝実測3秒→0.3秒）。
   // 画面はまず件数を出し、写真は続けて通常モードで取りに行く。
   // 写真URLは数日で失効するため、写真を出すにはGBPを叩く以外に方法がない。
-  if (!opts.fast) {
+  // 終わった月で写真も取り込み済みなら、GBPを叩く理由がない（実測3秒→0.3秒）。
+  // 当月はまだ投稿が増えるので必ず取りに行く
+  const monthEnded = Date.parse(range.endIso) < Date.now();
+  let skipGbp = false;
+  if (!opts.fast && monthEnded) {
+    skipGbp = await isMonthFullyStored(shop.id, range.startIso, range.endIso);
+  }
+
+  if (!opts.fast && !skipGbp) {
     // 前月分まで取り直して保存する。前月比を出すのと、過去月のレポートを開いたときに
     // 「まだ同期していないから0件」になるのを防ぐため
     const gbpGet = await createGbpFetcher();
@@ -388,17 +486,46 @@ export async function getMonthlyActivity(
 
   // ── 手入力の閲覧数を読む（Googleは閲覧数を返さないので、この2列だけが情報源） ──
   const [postViews, mediaViews] = await Promise.all([
-    supabase.from("gbp_posts").select("post_name, view_count")
+    supabase.from("gbp_posts").select("post_name, view_count, photo_path, create_time, media_name")
       .eq("shop_id", shop.id).gte("create_time", range.startIso).lt("create_time", range.endIso),
-    supabase.from("media").select("media_name, view_count")
+    supabase.from("media").select("media_name, view_count, photo_path, create_time")
       .eq("shop_id", shop.id).gte("create_time", range.startIso).lt("create_time", range.endIso),
   ]);
   const viewOf = new Map<string, number | null>();
-  for (const r of postViews.data || []) viewOf.set(r.post_name, r.view_count ?? null);
-  for (const r of mediaViews.data || []) viewOf.set(r.media_name, r.view_count ?? null);
+  // 自前ストレージに保存済みの画像。あればGBPのURLではなくこちらを使う（失効しない）
+  const pathOf = new Map<string, string>();
+  for (const r of postViews.data || []) {
+    viewOf.set(r.post_name, r.view_count ?? null);
+    if (r.photo_path) pathOf.set(r.post_name, r.photo_path);
+  }
+  for (const r of mediaViews.data || []) {
+    viewOf.set(r.media_name, r.view_count ?? null);
+    if (r.photo_path) pathOf.set(r.media_name, r.photo_path);
+  }
 
   // ── その月に公開した写真をすべて集める（投稿に添付した写真＋写真タブへの追加） ──
   const items: ActivityPhoto[] = [];
+
+  if (skipGbp) {
+    // 取り込み済みなのでDBの行だけで組み立てる（GBPは叩かない）
+    for (const r of postViews.data || []) {
+      if (!r.media_name || !r.photo_path) continue;
+      const url = publicPhotoUrl(r.photo_path);
+      items.push({
+        key: r.post_name, source: "post", url, thumbUrl: url,
+        createTime: r.create_time, viewCount: r.view_count ?? null,
+      });
+    }
+    for (const r of mediaViews.data || []) {
+      if (!r.photo_path) continue;
+      const url = publicPhotoUrl(r.photo_path);
+      items.push({
+        key: r.media_name, source: "media", url, thumbUrl: url,
+        createTime: r.create_time, viewCount: r.view_count ?? null,
+      });
+    }
+  }
+
   for (const p of postItems) {
     if (!p.name || !inRange(p.createTime, range.startIso, range.endIso)) continue;
     const m = (p.media || [])[0];
@@ -422,6 +549,29 @@ export async function getMonthlyActivity(
       createTime: m.createTime!,
       viewCount: viewOf.get(m.name) ?? null,
     });
+  }
+
+  // ── まだ保存していない写真を自前ストレージへ取り込む ──
+  // 次回以降はGBPを叩かずに表示でき、URL失効でPDFから写真が消えることもなくなる。
+  // 締め切り付きなので、間に合わなかったぶんは今回GBPのURLのまま表示して次回保存する
+  const notStored: StorablePhoto[] = items
+    .filter(it => !pathOf.has(it.key))
+    .map(it => ({ key: it.key, source: it.source, fetchUrl: it.thumbUrl || it.url }));
+  if (notStored.length > 0) {
+    try {
+      const saved = await storePhotos(shop.id, month, notStored, PHOTO_STORE_BUDGET_MS);
+      for (const [key, path] of Array.from(saved.entries())) pathOf.set(key, path);
+    } catch (e: any) {
+      console.error("[activity] 写真の保存に失敗:", e?.message);
+    }
+  }
+  for (const it of items) {
+    const path = pathOf.get(it.key);
+    if (path) {
+      const stored = publicPhotoUrl(path);
+      it.url = stored;
+      it.thumbUrl = stored;
+    }
   }
 
   // 閲覧数の多い順。未入力(未計測)は末尾へ。同数・未入力どうしは新しい順
