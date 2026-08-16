@@ -24,6 +24,7 @@ import { getOAuthToken, getAllOAuthTokens } from "@/lib/gbp-token";
 import { resolveLocationName } from "@/lib/gbp-location";
 import { monthRangeIso, prevMonthLabel } from "@/lib/month-utils";
 import { storePhotos, publicPhotoUrl, type StorablePhoto } from "@/lib/report-photo-store";
+import { detectLanguage } from "@/lib/detect-language";
 
 export { monthRangeIso, prevMonthLabel };
 
@@ -56,6 +57,22 @@ export interface ActivityPhoto {
   createTime: string;
   /** 手入力の閲覧数。null = 未計測（Googleは写真ごとの閲覧数を返さない） */
   viewCount: number | null;
+  /** 投稿写真=投稿本文 / 写真タブ=写真の説明文。拡大表示で見せる */
+  summary: string | null;
+  /** 投稿写真のみ: STANDARD(最新情報) / OFFER(特典) など */
+  topicType: string | null;
+}
+
+/** 実施内容ページに出す投稿の内訳 */
+export interface PostsBreakdown {
+  /** 最新情報 (STANDARD) */
+  standard: number;
+  /** 特典 (OFFER) */
+  offer: number;
+  /** イベント等その他 */
+  other: number;
+  /** 本文が日本語以外の投稿数（多言語運用のアピール用） */
+  foreign: number;
 }
 
 /** 1レポートに載せる写真の上限。20枚/ページなので10ページぶん */
@@ -72,6 +89,8 @@ export interface MonthlyActivity {
   month: string;
   posts: number;
   postsPrev: number;
+  /** 当月投稿の種別・言語内訳（投稿が0件なら null） */
+  postsBreakdown: PostsBreakdown | null;
   photos: number;
   photosPrev: number;
   replies: number;
@@ -482,30 +501,53 @@ export async function getMonthlyActivity(
   if (opts.fast) {
     return {
       month, posts, postsPrev, photos, photosPrev, replies, repliesPrev,
+      postsBreakdown: null,
       photoItems: [], photoTruncated: 0, photosPending: true, photoError: null,
     };
   }
 
   // ── 手入力の閲覧数を読む（Googleは閲覧数を返さないので、この2列だけが情報源） ──
   const [postViews, mediaViews] = await Promise.all([
-    supabase.from("gbp_posts").select("post_name, view_count, photo_path, photo_full_path, create_time, media_name")
+    supabase.from("gbp_posts").select("post_name, view_count, photo_path, photo_full_path, create_time, media_name, summary, topic_type")
       .eq("shop_id", shop.id).gte("create_time", range.startIso).lt("create_time", range.endIso),
-    supabase.from("media").select("media_name, view_count, photo_path, photo_full_path, create_time")
+    supabase.from("media").select("media_name, view_count, photo_path, photo_full_path, create_time, description")
       .eq("shop_id", shop.id).gte("create_time", range.startIso).lt("create_time", range.endIso),
   ]);
   const viewOf = new Map<string, number | null>();
   // 自前ストレージに保存済みの画像。あればGBPのURLではなくこちらを使う（失効しない）
   const pathOf = new Map<string, string>();
   const fullPathOf = new Map<string, string>();
+  // 拡大表示用の本文（投稿本文 / 写真の説明文）と投稿種別
+  const summaryOf = new Map<string, string | null>();
+  const topicOf = new Map<string, string | null>();
   for (const r of postViews.data || []) {
     viewOf.set(r.post_name, r.view_count ?? null);
     if (r.photo_path) pathOf.set(r.post_name, r.photo_path);
     if (r.photo_full_path) fullPathOf.set(r.post_name, r.photo_full_path);
+    summaryOf.set(r.post_name, r.summary || null);
+    topicOf.set(r.post_name, r.topic_type || null);
   }
   for (const r of mediaViews.data || []) {
     viewOf.set(r.media_name, r.view_count ?? null);
     if (r.photo_path) pathOf.set(r.media_name, r.photo_path);
     if (r.photo_full_path) fullPathOf.set(r.media_name, r.photo_full_path);
+    summaryOf.set(r.media_name, r.description || null);
+  }
+
+  // ── 投稿の内訳（写真の有無に関わらず当月の全投稿から集計） ──
+  // 外国語判定は口コミの言語判定ロジックを流用（多言語で投稿している店舗の運用実績を見せる）
+  let postsBreakdown: PostsBreakdown | null = null;
+  const postRows = postViews.data || [];
+  if (postRows.length > 0) {
+    const bd: PostsBreakdown = { standard: 0, offer: 0, other: 0, foreign: 0 };
+    for (const r of postRows) {
+      const t = (r.topic_type || "").toUpperCase();
+      if (t === "STANDARD") bd.standard++;
+      else if (t === "OFFER") bd.offer++;
+      else bd.other++;
+      if (r.summary && detectLanguage(r.summary).lang !== "日本語") bd.foreign++;
+    }
+    postsBreakdown = bd;
   }
 
   // ── その月に公開した写真をすべて集める（投稿に添付した写真＋写真タブへの追加） ──
@@ -520,6 +562,7 @@ export async function getMonthlyActivity(
         key: r.post_name, source: "post", url, thumbUrl: url,
         fullUrl: r.photo_full_path ? publicPhotoUrl(r.photo_full_path) : url,
         createTime: r.create_time, viewCount: r.view_count ?? null,
+        summary: r.summary || null, topicType: r.topic_type || null,
       });
     }
     for (const r of mediaViews.data || []) {
@@ -529,6 +572,7 @@ export async function getMonthlyActivity(
         key: r.media_name, source: "media", url, thumbUrl: url,
         fullUrl: r.photo_full_path ? publicPhotoUrl(r.photo_full_path) : url,
         createTime: r.create_time, viewCount: r.view_count ?? null,
+        summary: r.description || null, topicType: null,
       });
     }
   }
@@ -545,6 +589,8 @@ export async function getMonthlyActivity(
       fullUrl: url,
       createTime: p.createTime!,
       viewCount: viewOf.get(p.name) ?? null,
+      summary: p.summary || summaryOf.get(p.name) || null,
+      topicType: p.topicType || topicOf.get(p.name) || null,
     });
   }
   for (const m of mediaItems) {
@@ -557,6 +603,8 @@ export async function getMonthlyActivity(
       fullUrl: url,
       createTime: m.createTime!,
       viewCount: viewOf.get(m.name) ?? null,
+      summary: m.description || summaryOf.get(m.name) || null,
+      topicType: null,
     });
   }
 
@@ -598,7 +646,7 @@ export async function getMonthlyActivity(
   });
 
   return {
-    month, posts, postsPrev, photos, photosPrev, replies, repliesPrev,
+    month, posts, postsPrev, postsBreakdown, photos, photosPrev, replies, repliesPrev,
     photoItems: items.slice(0, MAX_PHOTO_ITEMS),
     photoTruncated: Math.max(0, items.length - MAX_PHOTO_ITEMS),
     photosPending: false,

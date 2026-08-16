@@ -57,6 +57,10 @@ interface ActivityPhoto {
   createTime: string;
   /** 手入力の閲覧数。null = 未計測（Googleは写真ごとの閲覧数を返さない） */
   viewCount: number | null;
+  /** 投稿写真=投稿本文 / 写真タブ=写真の説明文。拡大ポップアップで表示 */
+  summary: string | null;
+  /** 投稿写真のみ: STANDARD(最新情報) / OFFER(特典) など */
+  topicType: string | null;
 }
 
 /** 「先月の実施内容」ページのデータ（/api/report/activity の戻り値） */
@@ -64,6 +68,8 @@ interface ActivityData {
   month: string;
   posts: number;
   postsPrev: number;
+  /** 当月投稿の種別・言語内訳（投稿0件なら null） */
+  postsBreakdown: { standard: number; offer: number; other: number; foreign: number } | null;
   photos: number;
   photosPrev: number;
   replies: number;
@@ -2098,6 +2104,24 @@ export default function ReportClient({
                 })}
               </div>
 
+              {/* 投稿の内訳: 何を・何語で投稿したかは運用実績のアピールになる（多言語投稿など） */}
+              {activity.postsBreakdown && activity.posts > 0 && (() => {
+                const bd = activity.postsBreakdown;
+                const parts = [
+                  bd.standard > 0 ? `最新情報 ${bd.standard}件` : null,
+                  bd.offer > 0 ? `特典 ${bd.offer}件` : null,
+                  bd.other > 0 ? `その他 ${bd.other}件` : null,
+                  bd.foreign > 0 ? `うち外国語での投稿 ${bd.foreign}件` : null,
+                ].filter(Boolean);
+                if (parts.length === 0) return null;
+                return (
+                  <div style={{ fontSize: 14, color: "#555", marginTop: 10, flexShrink: 0, background: "#fff", borderRadius: 8, padding: "8px 14px", boxShadow: "0 1px 6px rgba(0,0,0,.05)" }}>
+                    <span style={{ fontWeight: 700, color: COLORS.primary, marginRight: 10 }}>投稿の内訳</span>
+                    {parts.join("　/　")}
+                  </div>
+                );
+              })()}
+
               {/* 「投稿17件・写真投稿0枚」が起こりうる（投稿に添付した写真は写真タブに入らない）。
                   数字の食い違いに見えるため必ず注記する */}
               <div style={{ fontSize: 13, color: "#999", marginTop: 6, flexShrink: 0 }}>
@@ -3335,7 +3359,18 @@ export default function ReportClient({
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={photoModal.fullUrl || photoModal.url} alt=""
               onError={(e) => { const el = e.currentTarget; if (el.src !== photoModal.url) el.src = photoModal.url; }}
-              style={{ maxWidth: "90vw", maxHeight: "78vh", objectFit: "contain", borderRadius: 10, background: "#000" }} />
+              style={{ maxWidth: "90vw", maxHeight: photoModal.summary ? "55vh" : "78vh", objectFit: "contain", borderRadius: 10, background: "#000" }} />
+            {/* 投稿写真なら投稿本文、写真タブなら説明文を一緒に見せる（何の投稿か写真だけでは分からないため） */}
+            {photoModal.summary && (
+              <div style={{ background: "rgba(255,255,255,0.96)", borderRadius: 10, padding: "12px 16px", maxWidth: "min(90vw, 640px)", maxHeight: "24vh", overflowY: "auto" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#0f3460", marginBottom: 4 }}>
+                  {photoModal.source === "post"
+                    ? (photoModal.topicType === "OFFER" ? "特典の投稿文" : "最新情報の投稿文")
+                    : "写真の説明"}
+                </div>
+                <p style={{ fontSize: 14, lineHeight: 1.7, color: "#333", margin: 0, whiteSpace: "pre-wrap" }}>{photoModal.summary}</p>
+              </div>
+            )}
             <div style={{ color: "#fff", fontSize: 14, display: "flex", gap: 16, alignItems: "center" }}>
               <span>{jstMonthDay(photoModal.createTime)}</span>
               <span>{photoModal.source === "post" ? "投稿の写真" : "写真タブ"}</span>
