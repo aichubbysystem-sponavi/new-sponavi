@@ -188,8 +188,28 @@ new-spotlight-navigator.com/report のレポートに以下を追加したい。
     メディア一覧由来のURLでは400になる。付けずに使うこと（本体はCSSでサイズ指定）
   - Antique Chic Brooch横浜店 2026/7 = 投稿8件・返信74件・写真タブ11枚 → 写真一覧19枚
 
+## デプロイ（2026-08-15 → 08-16）
+  コミット 6db3d5e を push して本番反映済み。反映確認:
+    /api/report/activity     → 401（未デプロイなら404）
+    /api/report/photo-views  → 405
+    /api/cron/sync-activity  → 401
+    ※ 405/401 = ルートが存在する証拠。404 = まだ出ていない
+
+### ★ハマった点: gitリモートが2つある（次回必ず origin に push すること）
+  origin → github.com/aichubbysystem-sponavi/new-sponavi
+           Vercel: aichubbysystem-6689s-projects / new-sponavi (Pro)
+           ★ new-spotlight-navigator.com はここから配信される
+  omni   → github.com/omni-seo/spotlight-navigator
+           Vercel: spotlight-navigators-projects の同名プロジェクト（本番は数ヶ月Errorのまま放置）
+
+  今回 omni にだけ push したため30分以上「本番に出ない」状態になった。
+  GitHubのコミットステータス「Vercel: failure」は死んでいる omni 側が付けているもので、
+  8/9のコミット(3fb9ad5)にも同じ失敗が付いているのに本番には反映されている。
+  → このステータスで本番の成否を判断してはいけない。
+  ローカルの vercel CLI は chubbyushigusa アカウント＝omni側のチームしか見えないため、
+  本番プロジェクトはCLIから確認できない。本番URLのAPIを叩いて判断するのが確実。
+
 ### 残り
-  - デプロイ（git push）は未実施
   - 過去月の遡り取得は1リクエスト100件・最大2ページ。投稿頻度が非常に高い店舗では
     数ヶ月以上前の月を開いても取り切れない場合がある（以降は日次cronの蓄積でカバー）
 
