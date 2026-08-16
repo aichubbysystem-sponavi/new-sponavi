@@ -43,6 +43,13 @@ export interface ActivityPhoto {
   source: "post" | "media";
   /** 表示時に取り直した有効なURL（保存済みURLは失効するので使わない） */
   url: string;
+  /**
+   * 一覧表示用の軽いURL。実測(2026-08-15):
+   *   投稿の写真   … googleUrl+"=w400" で 49KB→27KB
+   *   写真タブ     … thumbnailUrl で 101KB→23KB（こちらは =w400 を付けると400になる）
+   * 22枚並ぶページで1.6MB→0.5MBになるので、読み込みの体感がここで決まる
+   */
+  thumbUrl: string;
   createTime: string;
   /** 手入力の閲覧数。null = 未計測（Googleは写真ごとの閲覧数を返さない） */
   viewCount: number | null;
@@ -63,6 +70,8 @@ export interface MonthlyActivity {
   photoItems: ActivityPhoto[];
   /** 上限を超えて載せられなかった枚数。黙って切らずに件数を出す */
   photoTruncated: number;
+  /** true = 件数だけ返した高速応答。写真は続けて取りに行く必要がある */
+  photosPending: boolean;
   /** GBPから取り直せなかった場合の理由。数字はDB値で出しつつ画像だけ欠ける状態を隠さない */
   photoError: string | null;
 }
@@ -205,8 +214,13 @@ export async function syncShopActivity(
   let mediaCount = 0;
   const errors: string[] = [];
 
+  // 投稿一覧と写真一覧は独立しているので同時に取る（逐次だと実測1.3秒、並列で0.7秒）
+  const [postRes, mediaRes] = await Promise.all([
+    fetchList<LocalPostItem>(gbpGet, fullPath, "localPosts", "localPosts", sinceIso),
+    fetchList<MediaItemLite>(gbpGet, fullPath, "media", "mediaItems", sinceIso),
+  ]);
+
   // ── 投稿 ──
-  const postRes = await fetchList<LocalPostItem>(gbpGet, fullPath, "localPosts", "localPosts", sinceIso);
   if (postRes.error) errors.push(postRes.error);
   const postRows = postRes.items
     .filter(p => p.name && p.createTime && Date.parse(p.createTime) >= sinceMs)
@@ -235,7 +249,6 @@ export async function syncShopActivity(
   }
 
   // ── 写真（既存 media テーブルを流用） ──
-  const mediaRes = await fetchList<MediaItemLite>(gbpGet, fullPath, "media", "mediaItems", sinceIso);
   if (mediaRes.error) errors.push(mediaRes.error);
   const mediaRows = mediaRes.items
     .filter(m => m.name && m.createTime && Date.parse(m.createTime) >= sinceMs)
@@ -328,6 +341,7 @@ async function countReplies(shopId: string, startIso: string, endIso: string): P
 export async function getMonthlyActivity(
   shop: ShopRef,
   month: string,
+  opts: { fast?: boolean } = {},
 ): Promise<MonthlyActivity> {
   const range = monthRangeIso(month);
   const prev = prevMonthLabel(month);
@@ -339,16 +353,21 @@ export async function getMonthlyActivity(
   let postItems: LocalPostItem[] = [];
   let mediaItems: MediaItemLite[] = [];
 
-  // 前月分まで取り直して保存する。前月比を出すのと、過去月のレポートを開いたときに
-  // 「まだ同期していないから0件」になるのを防ぐため
-  const gbpGet = await createGbpFetcher();
-  if (!gbpGet) {
-    photoError = "GBPのトークンを取得できませんでした";
-  } else {
-    const r = await syncShopActivity(shop, gbpGet, prevRange.startIso);
-    if (r.error) photoError = r.error;
-    postItems = r.postItems;
-    mediaItems = r.mediaItems;
+  // fast: DBの件数だけ返す（GBPを一切叩かない＝実測3秒→0.3秒）。
+  // 画面はまず件数を出し、写真は続けて通常モードで取りに行く。
+  // 写真URLは数日で失効するため、写真を出すにはGBPを叩く以外に方法がない。
+  if (!opts.fast) {
+    // 前月分まで取り直して保存する。前月比を出すのと、過去月のレポートを開いたときに
+    // 「まだ同期していないから0件」になるのを防ぐため
+    const gbpGet = await createGbpFetcher();
+    if (!gbpGet) {
+      photoError = "GBPのトークンを取得できませんでした";
+    } else {
+      const r = await syncShopActivity(shop, gbpGet, prevRange.startIso);
+      if (r.error) photoError = r.error;
+      postItems = r.postItems;
+      mediaItems = r.mediaItems;
+    }
   }
 
   const [posts, postsPrev, photos, photosPrev, replies, repliesPrev] = await Promise.all([
@@ -359,6 +378,13 @@ export async function getMonthlyActivity(
     countReplies(shop.id, range.startIso, range.endIso),
     countReplies(shop.id, prevRange.startIso, prevRange.endIso),
   ]);
+
+  if (opts.fast) {
+    return {
+      month, posts, postsPrev, photos, photosPrev, replies, repliesPrev,
+      photoItems: [], photoTruncated: 0, photosPending: true, photoError: null,
+    };
+  }
 
   // ── 手入力の閲覧数を読む（Googleは閲覧数を返さないので、この2列だけが情報源） ──
   const [postViews, mediaViews] = await Promise.all([
@@ -379,7 +405,10 @@ export async function getMonthlyActivity(
     const url = m?.googleUrl || m?.thumbnailUrl;
     if (!url) continue; // 文章だけの投稿
     items.push({
-      key: p.name, source: "post", url, createTime: p.createTime!,
+      key: p.name, source: "post", url,
+      // 投稿由来のURLはサイズ指定を受け付ける（実測200）。メディア由来は400になるので付けない
+      thumbUrl: m?.googleUrl ? `${m.googleUrl}=w400` : url,
+      createTime: p.createTime!,
       viewCount: viewOf.get(p.name) ?? null,
     });
   }
@@ -388,7 +417,9 @@ export async function getMonthlyActivity(
     const url = m.googleUrl || m.thumbnailUrl;
     if (!url) continue;
     items.push({
-      key: m.name, source: "media", url, createTime: m.createTime!,
+      key: m.name, source: "media", url,
+      thumbUrl: m.thumbnailUrl || url,
+      createTime: m.createTime!,
       viewCount: viewOf.get(m.name) ?? null,
     });
   }
@@ -406,6 +437,7 @@ export async function getMonthlyActivity(
     month, posts, postsPrev, photos, photosPrev, replies, repliesPrev,
     photoItems: items.slice(0, MAX_PHOTO_ITEMS),
     photoTruncated: Math.max(0, items.length - MAX_PHOTO_ITEMS),
+    photosPending: false,
     photoError,
   };
 }

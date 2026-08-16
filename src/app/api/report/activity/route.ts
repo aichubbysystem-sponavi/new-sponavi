@@ -74,13 +74,17 @@ export async function GET(request: NextRequest) {
   const shop = (rows || []).find(r => r.gbp_location_name) || (rows || [])[0];
   if (!shop) return NextResponse.json({ error: "店舗が見つかりません" }, { status: 404 });
 
+  // fast=1: DBの件数だけ返す（GBPを叩かないので実測3秒→0.3秒）。
+  // 画面はまず件数を描画し、写真は続けて通常リクエストで取りに行く
+  const fast = request.nextUrl.searchParams.get("fast") === "1";
+
   // 権限チェックの後にキャッシュを見る（他店舗のデータをキャッシュ経由で返さないため）
-  const cacheKey = `${shop.id}:${month}`;
+  const cacheKey = `${shop.id}:${month}:${fast ? "fast" : "full"}`;
   const cached = request.nextUrl.searchParams.get("refresh") === "1" ? null : readCache(cacheKey);
   if (cached) return NextResponse.json(cached);
 
   try {
-    const activity = await getMonthlyActivity(shop as ShopRef, month);
+    const activity = await getMonthlyActivity(shop as ShopRef, month, { fast });
     writeCache(cacheKey, activity);
     return NextResponse.json(activity);
   } catch (e: any) {

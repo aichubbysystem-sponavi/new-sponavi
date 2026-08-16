@@ -50,6 +50,8 @@ interface ActivityPhoto {
   key: string;
   source: "post" | "media";
   url: string;
+  /** 一覧用の軽いURL（実測で1枚100KB→23KB）。失敗したら url にフォールバックする */
+  thumbUrl: string;
   createTime: string;
   /** 手入力の閲覧数。null = 未計測（Googleは写真ごとの閲覧数を返さない） */
   viewCount: number | null;
@@ -67,6 +69,8 @@ interface ActivityData {
   /** その月に公開した写真すべて（閲覧数の多い順・未計測は末尾） */
   photoItems: ActivityPhoto[];
   photoTruncated: number;
+  /** true = 件数だけ先に返ってきた状態（写真は後続のリクエストで届く） */
+  photosPending: boolean;
   photoError: string | null;
 }
 
@@ -949,18 +953,22 @@ export default function ReportClient({
   const [activity, setActivity] = useState<ActivityData | null>(null);
   const [activityError, setActivityError] = useState("");
   const [activityLoading, setActivityLoading] = useState(false);
+  // 2段階で取る。1段階目(fast=1)はDBの件数だけで即返るので、
+  // 写真の取得（GBPを叩くので数秒かかる）を待たずに数字を出せる。
   useEffect(() => {
     if (!shop.name || !curLabel) return;
     let cancelled = false;
+    const url = (fast: boolean) =>
+      `/api/report/activity?shopId=${encodeURIComponent(shop.name)}&month=${encodeURIComponent(curLabel)}${fast ? "&fast=1" : ""}`;
+
     (async () => {
       setActivityLoading(true);
       setActivityError("");
       try {
         const authH = await getAuthHeaders();
-        const res = await fetch(
-          `/api/report/activity?shopId=${encodeURIComponent(shop.name)}&month=${encodeURIComponent(curLabel)}`,
-          { headers: authH },
-        );
+
+        // 1段階目: 件数のみ
+        const res = await fetch(url(true), { headers: authH });
         if (cancelled) return;
         if (!res.ok) {
           // 「0件」と「取得失敗」を取り違えないよう、失敗は必ず表に出す
@@ -969,11 +977,19 @@ export default function ReportClient({
           setActivityError(body?.error || `取得に失敗しました (HTTP ${res.status})`);
           return;
         }
-        const json = (await res.json()) as ActivityData;
+        const quick = (await res.json()) as ActivityData;
+        if (cancelled) return;
+        setActivity(quick);
+        setActivityLoading(false);
+
+        // 2段階目: 写真（GBPから有効なURLを取り直すぶん時間がかかる）
+        const res2 = await fetch(url(false), { headers: authH });
+        if (cancelled || !res2.ok) return;
+        const full = (await res2.json()) as ActivityData;
         if (cancelled) return;
         // 数字は出せるが写真だけ取れなかったケースを無音にしない
-        if (json.photoError) console.warn("[activity] 写真の取得に失敗:", json.photoError);
-        setActivity(json);
+        if (full.photoError) console.warn("[activity] 写真の取得に失敗:", full.photoError);
+        setActivity(full);
       } catch (e: any) {
         if (!cancelled) { setActivity(null); setActivityError(e?.message || "取得に失敗しました"); }
       } finally {
@@ -2059,7 +2075,9 @@ export default function ReportClient({
                     {summaryPhotos.map((p) => (
                       <div key={p.key} style={{ background: "#fff", borderRadius: 10, overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.06)" }}>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={p.url} alt="" style={{ width: "100%", height: 124, objectFit: "cover", display: "block", background: "#eef1f6" }} />
+                        <img src={p.thumbUrl || p.url} alt="" decoding="async"
+                          onError={(e) => { const el = e.currentTarget; if (el.src !== p.url) el.src = p.url; }}
+                          style={{ width: "100%", height: 124, objectFit: "cover", display: "block", background: "#eef1f6" }} />
                         <div style={{ fontSize: 13, color: "#888", padding: "3px 8px", display: "flex", justifyContent: "space-between" }}>
                           <span>{jstMonthDay(p.createTime)}</span>
                           {p.viewCount != null && <span style={{ color: COLORS.primary, fontWeight: 600 }}>{p.viewCount.toLocaleString()}回</span>}
@@ -2071,7 +2089,7 @@ export default function ReportClient({
                   <div style={{ fontSize: 15, color: "#999", background: "#fff", borderRadius: 10, padding: "14px 16px" }}>
                     {activity.photoError
                       ? `写真を表示できませんでした（${activity.photoError}）`
-                      : activityLoading ? "読み込み中..." : "写真付きの投稿はありませんでした"}
+                      : (activity.photosPending || activityLoading) ? "写真を読み込んでいます..." : "写真付きの投稿はありませんでした"}
                   </div>
                 )}
               </div>
@@ -2103,7 +2121,9 @@ export default function ReportClient({
                 {pagePhotos.map((p) => (
                   <div key={p.key} style={{ background: "#fff", borderRadius: 10, overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.06)" }}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={p.url} alt="" style={{ width: "100%", height: 104, objectFit: "cover", display: "block", background: "#eef1f6" }} />
+                    <img src={p.thumbUrl || p.url} alt="" decoding="async"
+                      onError={(e) => { const el = e.currentTarget; if (el.src !== p.url) el.src = p.url; }}
+                      style={{ width: "100%", height: 104, objectFit: "cover", display: "block", background: "#eef1f6" }} />
                     <div style={{ fontSize: 12, color: "#888", padding: "3px 7px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <span>{jstMonthDay(p.createTime)}</span>
                       {p.viewCount != null
