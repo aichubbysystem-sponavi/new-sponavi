@@ -1055,8 +1055,22 @@ export default function ReportClient({
   // メモは最終ページのみに出す（実施内容ページには載せない。2026-08-15 ユーザー判断）
   const memoPagePrinted = !!memo;
 
+  // 写真の到着を待ってからPDFにする。
+  // 件数を先出しする2段階読み込みにしたため、待たないと「写真だけ空のPDF」が出てしまう
+  const activityRef = useRef<ActivityData | null>(null);
+  useEffect(() => { activityRef.current = activity; }, [activity]);
+  const waitForPhotos = async () => {
+    const limit = Date.now() + 20000;
+    while (Date.now() < limit) {
+      const a = activityRef.current;
+      if (!a || !a.photosPending) return;
+      await new Promise(r => setTimeout(r, 300));
+    }
+  };
+
   const handlePdfDownload = async () => {
     setPdfGenerating(true);
+    await waitForPhotos();
     const insertedEls: HTMLElement[] = [];
     // メモが空の最終ページはno-printで除外されるため、印刷時の分母から差し引く。
     // 実施内容ページにメモを載せている場合も最終ページは印刷しない（同じ文章が2ページに出るため）
