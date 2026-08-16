@@ -594,6 +594,12 @@ async function processItemResult(
     // 再生成しても直らない → 誤った数値を含むページの総評だけ空欄にして出荷（同期版と同じ方針）
     const dropped = Array.from(new Set(violations.map((v) => v.field)));
     const pc = { ...((analysis.pageComments || {}) as Record<string, unknown>) };
+    // 空欄化の理由を保存する（担当者が画面で確認できる。無いと毎回ログ調査になる）
+    const droppedReasons: Record<string, string> = {};
+    for (const v of violations) {
+      droppedReasons[v.field] = droppedReasons[v.field] ? `${droppedReasons[v.field]} / ${v.message}` : v.message;
+    }
+    pc._dropped = droppedReasons;
     for (const f of dropped) pc[f] = "";
     analysis.pageComments = pc;
     blanked = true;

@@ -179,6 +179,12 @@ async function enforceNumericAccuracy(
       // 直らなかったページの総評を落とす（誤った数値は出荷しない）
       const dropped = Array.from(new Set(violations.map((v) => v.field)));
       const pc = { ...(current.pageComments as Record<string, unknown>) };
+      // 空欄化の理由を保存する（担当者が画面で確認できる。無いと毎回ログ調査になる）
+      const droppedReasons: Record<string, string> = {};
+      for (const v of violations) {
+        droppedReasons[v.field] = droppedReasons[v.field] ? `${droppedReasons[v.field]} / ${v.message}` : v.message;
+      }
+      pc._dropped = droppedReasons;
       for (const f of dropped) pc[f] = "";
       console.error(
         `[analyze] ${shopName}: 再生成${MAX_RETRY}回でも数値が一致せず、該当ページの総評を空にした: ${dropped.join(", ")}`,

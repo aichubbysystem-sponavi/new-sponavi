@@ -567,3 +567,25 @@ describe("少数サンプルからの断定（クインシー P19）", () => {
     expect(v.some((x) => x.kind === "small_sample_claim" && x.field === "language")).toBe(true);
   });
 });
+
+describe("閾値表現「◯位圏外/圏内」を順位として誤検知しない", () => {
+  const facts = buildKeywordFacts([{ word: "表参道 ビストロ", rank: 11, prevRank: 0 }], {
+    labels: ["2026/6", "2026/7"],
+    datasets: [{ word: "表参道 ビストロ", ranks: [null, 11] }],
+  });
+
+  it("「5地点すべてが10位圏外」の10位は閾値であり順位ではない", () => {
+    const text = "「表参道 ビストロ」は5地点すべてが10位圏外となっており、改善余地が大きい";
+    expect(validateRankMentions(text, facts)).toHaveLength(0);
+  });
+
+  it("「10位圏内を維持」も閾値表現として通す", () => {
+    const text = "「表参道 ビストロ」は10位圏内を維持している";
+    expect(validateRankMentions(text, facts)).toHaveLength(0);
+  });
+
+  it("実順位の誤りは引き続き検出する", () => {
+    const text = "「表参道 ビストロ」は7位まで上昇した";
+    expect(validateRankMentions(text, facts)).toHaveLength(1);
+  });
+});

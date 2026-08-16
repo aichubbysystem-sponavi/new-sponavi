@@ -140,7 +140,7 @@ export function validateRankMentions(
     // 「10位以内」のような閾値表現は実順位ではないので除外。
     // 「5位上昇」「3位下落」のような変動幅表現も順位ではない（実例: 15位→10位を
     // 「5位上昇」と書いた文で、5位が実データに無いとして誤検知した）
-    if (/^(以[内上下]|上昇|上げ|アップ|改善|浮上|回復|下落|下降|低下|ダウン|後退|悪化|下げ|転落|分)/.test(after)) continue;
+    if (/^(以[内上下]|上昇|上げ|アップ|改善|浮上|回復|下落|下降|低下|ダウン|後退|悪化|下げ|転落|分|圏外|圏内|台)/.test(after)) continue;
     if (!owner.allowedRanks.includes(rank)) {
       bad.push({ rank, word: owner.word });
     }

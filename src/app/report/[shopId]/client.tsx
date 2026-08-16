@@ -1457,6 +1457,9 @@ export default function ReportClient({
     const isArr = Array.isArray(value);
     const isEmpty = isArr ? (value as string[]).length === 0 : !value;
     const isEditingThis = pcEditingKey === key;
+    // 検証ゲートが空欄化した場合の理由（担当者にだけ見せる。以前はサーバーログにしか
+    // 残らず「なぜこのページだけ総評が無いのか」を毎回ログ調査していた）
+    const droppedReason = (trimmedData.pageComments as { _dropped?: Record<string, string> } | null | undefined)?._dropped?.[key as string];
     // 未生成でもログイン中の担当者は「追加」できる。閲覧者(クライアント)には出さない。
     if (isEmpty && !isEditingThis && !isLoggedIn) return null;
     return (
@@ -1465,6 +1468,11 @@ export default function ReportClient({
       // 幅指定の無い子は内容幅まで縮んで中央寄せされるため、明示的に全幅へ伸ばす
       <div className={!isEmpty && !isEditingThis ? undefined : "no-print"}
         style={{ marginTop: 10, borderTop: "1px solid #e5e7eb", paddingTop: 8, flexShrink: 0, alignSelf: "stretch", width: "100%" }}>
+        {isEmpty && !isEditingThis && droppedReason && (
+          <div className="no-print" style={{ fontSize: 12, color: "#b45309", background: "#fef3c7", borderRadius: 6, padding: "6px 10px", marginBottom: 6, lineHeight: 1.6 }}>
+            AI総評は自動検証で非表示になりました（再生成でも解消せず）: {droppedReason}
+          </div>
+        )}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
           <span style={{ fontSize: 13, fontWeight: 700, color: "#0f3460" }}>
             {label}
