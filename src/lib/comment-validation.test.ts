@@ -548,6 +548,13 @@ describe("少数サンプルからの断定（クインシー P19）", () => {
     expect(validateSmallSampleClaims("韓国語が2件、英語が1件と件数が少なく、外国語利用者の評価はまだ判断できない")).toBe(false);
   });
 
+  it("模範解答「傾向は判断できない」を誤検知しない（再生成ループの回帰テスト）", () => {
+    // 「傾向」が断定語リストにあるため、correction が提案する書き直しが再び違反になり
+    // 総評が空にされるループが実際に起きた（クインシー 2026-08-16）
+    expect(validateSmallSampleClaims("韓国語が2件、英語が1件と少なく、傾向はまだ判断できない")).toBe(false);
+    expect(validateSmallSampleClaims("外国語口コミは3件のみで、満足度の評価は難しい")).toBe(false);
+  });
+
   it("件数の言及が無い文は判定対象外（プロンプト側で抑制）", () => {
     expect(validateSmallSampleClaims("口コミの99%が日本語で、国内顧客が中心である")).toBe(false);
   });

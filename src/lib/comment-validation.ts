@@ -468,6 +468,10 @@ export function validateSmallSampleClaims(text: string): boolean {
   const counts = Array.from(text.matchAll(/(\d+)\s*件/g)).map((m) => parseInt(m[1], 10));
   if (counts.length === 0) return false;
   if (Math.max(...counts) >= 5) return false;
+  // 「傾向は判断できない」のような断定回避の文は模範解答なので違反にしない。
+  // これを許容しないと、correction が提案する書き直し自体が再び違反になり、
+  // 再生成上限まで直らず総評が空にされるループになる（クインシー 2026-08-16 で発生）
+  if (/(判断|評価|断定)(は|が|も)?\s*(でき(ない|ず|かね)|難しい|困難)/.test(text)) return false;
   return /(課題|満足度|不満|懸念|傾向)/.test(text);
 }
 
