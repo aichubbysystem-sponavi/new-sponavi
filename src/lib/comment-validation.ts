@@ -36,7 +36,8 @@ export interface CommentViolation {
   /** 違反が見つかったページ（pageCommentsのキー） */
   field: string;
   /** 違反の種類 */
-  kind: "rank_mismatch" | "average_mismatch" | "continuity_mismatch" | "exclusivity_mismatch" | "out_of_range_mismatch";
+  kind: "rank_mismatch" | "average_mismatch" | "continuity_mismatch" | "exclusivity_mismatch" | "out_of_range_mismatch"
+    | "seasonality_claim" | "deletion_claim" | "small_sample_claim";
   /** 人間が読める説明。再生成時にAIへ渡す */
   message: string;
 }
@@ -433,6 +434,43 @@ export function validateOutOfRangeClaims(
   return bad;
 }
 
+/**
+ * 「季節変動」等による説明の検出。
+ * 季節性の判断には前年同時期のデータが要るが、AIに渡していない（2026-08-16のレビューで
+ * 実際に「直近の減少は季節変動の範囲内とみられる」という根拠のない断定が出荷された）。
+ * プロンプトでも禁止しているが、破られた場合にここで止める。
+ */
+export function validateSeasonalityClaims(text: string): string[] {
+  const m = text.match(/季節(変動|性|要因)/g);
+  return m ? Array.from(new Set(m)) : [];
+}
+
+/**
+ * 「削除・非表示が相殺している」系の主張の検証。
+ * 累計が実際に減った月が無い（= 月間増減に負の値が無い）のに削除・非表示を
+ * 持ち出すと、単に新規投稿が無かっただけの月で「消されているかも」という
+ * 不要な不安をクライアントに与える（2026-08-16のレビューで実際に発生）。
+ */
+export function validateDeletionClaims(text: string, reviewDeltas: number[]): boolean {
+  if (!/削除|非表示/.test(text)) return false;
+  const hasNegativeMonth = reviewDeltas.some((d) => typeof d === "number" && d < 0);
+  return !hasNegativeMonth;
+}
+
+/**
+ * 少数サンプルからの断定の検証（言語別分析向け）。
+ * 文中で件数付きで言及された最大件数が5件未満なのに、満足度・課題などを
+ * 断定している場合を違反とする（例: 外国語口コミ3件から「インバウンド顧客の
+ * 満足度には課題」— 2026-08-16のレビューで実際に発生）。
+ * %のみで件数が書かれていない文は判定できないため通す（プロンプト側で抑制）。
+ */
+export function validateSmallSampleClaims(text: string): boolean {
+  const counts = Array.from(text.matchAll(/(\d+)\s*件/g)).map((m) => parseInt(m[1], 10));
+  if (counts.length === 0) return false;
+  if (Math.max(...counts) >= 5) return false;
+  return /(課題|満足度|不満|懸念|傾向)/.test(text);
+}
+
 /** pageComments 全体を検証して違反リストを返す */
 export function validatePageComments(
   pageComments: Record<string, unknown> | null | undefined,
@@ -443,7 +481,7 @@ export function validatePageComments(
 
   // 排他的主張（「唯一の前年超え」等）はKPIに言及しうる全ページで検証する
   if (ctx.metricFacts && ctx.metricFacts.length > 0) {
-    const kpiFields = ["monthly", "map", "search", "reactions", "summary"];
+    const kpiFields = ["monthly", "overall", "map", "search", "reactions", "summary"];
     for (const field of kpiFields) {
       const v = pageComments[field];
       if (typeof v !== "string" || !v) continue;
@@ -458,7 +496,7 @@ export function validatePageComments(
   }
 
   // 順位に言及しうるページのみ対象にする（口コミ系の文中の「位」は順位ではない可能性がある）
-  const rankFields = ["keyword", "rankingHistory", "grid", "summary", "monthly"];
+  const rankFields = ["keyword", "rankingHistory", "grid", "summary", "monthly", "overall"];
   for (const field of rankFields) {
     const v = pageComments[field];
     if (typeof v !== "string" || !v) continue;
@@ -492,6 +530,40 @@ export function validatePageComments(
         message: `「${b.word}」について「${b.claim}」と書いているが、${b.reason}`,
       });
     }
+  }
+
+  // 季節変動の断定（KPIを語りうる全ページが対象）
+  for (const field of ["monthly", "overall", "map", "search", "reactions"]) {
+    const v = pageComments[field];
+    if (typeof v !== "string" || !v) continue;
+    const words = validateSeasonalityClaims(v);
+    if (words.length > 0) {
+      violations.push({
+        field,
+        kind: "seasonality_claim",
+        message: `「${words.join("」「")}」による説明が含まれるが、季節性を確認できる前年同時期データは提供していない。理由が不明な変動は理由を書かず、減少幅と水準の事実だけを書くこと`,
+      });
+    }
+  }
+
+  // 削除・非表示の相殺主張（累計が減った月が無いのに書いている）
+  const countText = pageComments["reviewCount"];
+  if (typeof countText === "string" && countText && validateDeletionClaims(countText, ctx.reviewDeltas)) {
+    violations.push({
+      field: "reviewCount",
+      kind: "deletion_claim",
+      message: "削除・非表示の可能性に言及しているが、提供された推移に累計が減った月は無い。削除・非表示への言及を削り、新規投稿の状況だけを書くこと",
+    });
+  }
+
+  // 少数サンプルからの断定（言語別分析）
+  const langText = pageComments["language"];
+  if (typeof langText === "string" && langText && validateSmallSampleClaims(langText)) {
+    violations.push({
+      field: "language",
+      kind: "small_sample_claim",
+      message: "5件未満の件数を根拠に満足度・課題を断定している。件数が少ない言語は「件数が少なく傾向は判断できない」に留めるか、言及しないこと",
+    });
   }
 
   const deltaText = pageComments["reviewDelta"];

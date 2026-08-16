@@ -72,6 +72,7 @@ ${langStatsText || ""}
   "negativeWords": ["原文フレーズ", "原文フレーズ", ...12個以上],
   "summary": "20文字の総評",
   "monthlyComment": "全指標を俯瞰した当月の総括（2〜3文）",
+  "overallComment": "レポート最終ページ用のまとめ（2〜3文）。monthlyCommentの再掲ではなく、レポート全体（KPI・順位・口コミ）を読み終えた読者向けの結論として書く",
   "mapComment": "Googleマップ表示数についての傾向（2〜3文）",
   "searchComment": "Google検索数についての傾向（2〜3文）",
   "reactionComment": "ウェブサイト/ルート/通話等のユーザー反応数についての傾向（2〜3文）",
@@ -93,6 +94,7 @@ ${langStatsText || ""}
   "negativeWords": ["愛想が悪い", "荷物置き場がない", "待ち時間が長い"],
   "summary": "集客回復も接客課題が残る",
   "monthlyComment": "マップ・検索ともに回復基調で、集客の入口は着実に広がっている。一方で<strong>アクション率の低下</strong>が続いており、閲覧から行動への転換が当月の課題として残る。次月は写真や店舗情報など、行動につながる要素の見直しが焦点となる",
+  "overallComment": "露出は回復した一方、口コミの新規獲得が止まり接客への不満が残った月だった。数値の伸びを来店満足につなげる段階に入っており、<strong>接客品質の標準化</strong>が次月の最優先テーマとなる",
   "mapComment": "<strong>マップ表示が前月比+5%</strong>と回復傾向にある。3か月続いた下降から反転しており、施策の効果が数値に表れはじめた段階といえる。写真の定期更新や最新情報の投稿など、プロフィールの鮮度を保つ運用を引き続き続けたい",
   "searchComment": "Google検索は前月比+14%と回復傾向にある。検索経由の露出は堅調に推移しており、この流れを保つため外部媒体やSNSでの店名露出も並行して強化したい",
   "reactionComment": "ルート検索が<strong>+60%と大幅に増加</strong>し、来店意欲の高まりがうかがえる。一方で通話は減少しており、電話よりも経路確認から直接来店へ進む利用者が増えている可能性がある。営業時間や駐車場情報など来店前に確認される項目の整備が効果的だ",
@@ -119,7 +121,7 @@ ${langStatsText || ""}
 
 ■ ルール
 - 各コメントはレポートの別々のページに載る。**同じ内容を複数のコメントで繰り返さない**（例: mapCommentで書いた内容をmonthlyCommentで再度書かない）
-- ページ総評（monthlyComment/mapComment/searchComment/reactionComment/keywordComment/rankingHistoryComment/gridComment/searchQueryComment/reviewCountComment/reviewDeltaComment/languageComment/competitorComment）は**2〜3文・合計100〜180文字程度**。1文目で傾向を述べ、2文目以降で内訳・根拠やそのページ固有の示唆を書く。文字数を稼ぐための水増しや一般論の繰り返しは禁止
+- ページ総評（monthlyComment/overallComment/mapComment/searchComment/reactionComment/keywordComment/rankingHistoryComment/gridComment/searchQueryComment/reviewCountComment/reviewDeltaComment/languageComment/competitorComment）は**2〜3文・合計100〜180文字程度**。1文目で傾向を述べ、2文目以降で内訳・根拠やそのページ固有の示唆を書く。文字数を稼ぐための水増しや一般論の繰り返しは禁止
 - 対応するデータが【】ブロックとして提供されていない項目は、推測で書かず必ず空文字""を返す
 - mapComment/searchComment/reactionComment: ${hasKpi ? "各KPIの前月比傾向について2〜3文で" : "口コミから推定した概況を2〜3文で"}。絶対値（147,422回等）は書かない
 - **他店との比較は禁止（厳守）**: 「同業種平均」「グループ平均」「他店平均」「業界平均」「全国平均」
@@ -127,14 +129,15 @@ ${langStatsText || ""}
   データとして提供していないため推測になる。良し悪しの評価は自店の前月比・前年比・推移だけを根拠にすること。
   唯一の例外は【口コミ競合比較】ブロックが提供されている場合で、そこに記載された同エリア店舗との
   口コミ数の比較だけは書いてよい（competitorComment担当）
-- monthlyComment: 個別指標の羅列ではなく全体を俯瞰した総括。軸となる最も重要な変化または課題は1つに絞る
+- monthlyComment: 個別指標の羅列ではなく全体を俯瞰した総括。軸となる最も重要な変化または課題は1つに絞る。**当月に「新規口コミ0件」や「主要指標の前月比2桁減」があるなら、それを総括の軸に据える**。前向きな前年比でネガティブな当月の変化を覆い隠さない
+- overallComment: monthlyCommentと同じ文・同じ構成の再掲は禁止。当月の最重要ファクト1つ＋レポート全体から導かれる結論1つで構成する
 - 「唯一の前年超え」「唯一のプラス」のような排他的表現は、提供された全指標の前月比・前年比を数えて、条件を満たす指標が本当に1つだけの場合にのみ使う。2つ以上あるなら「唯一」は使わない
 - keywordComment: ${hasKeywordData ? "【キーワード順位】の当月変動について。**「圏外へ転落」と明記されたキーワードがあれば、他の変動より最優先で必ず言及する**（3ランク下落より圏外転落の方が重大）。圏外転落が無い場合のみ、下落幅の大きいものに言及する。「未計測」のキーワードは当月の変動を語れないため言及しない。転落・圏外・維持などの状態は必ず【】ブロックでそのキーワード自身の行に書かれたものを使い、別のキーワードの状態と取り違えない" : "キーワードデータが提供されていないため必ず空文字\"\"を返す"}
 - rankingHistoryComment: ${hasKeywordData ? "【キーワード順位の推移】の系列**のみ**を根拠に、複数月にわたるトレンド（連続下降/底打ち/安定/回復）を述べる。月名を1つ以上含めること。**当月だけの変動には触れない**（それはkeywordCommentの担当）。「下落が確認された」「監視が必要」のような、keywordCommentと区別がつかない表現は禁止" : "キーワードデータが提供されていないため必ず空文字\"\"を返す"}
 - gridComment: 【多地点グリッド計測】がある場合のみ。平均順位・圏外地点数から商圏の取りこぼし具合に言及
 - **キーワード名は【】ブロック内に記載されたものを一字一句そのまま使う。2つのキーワードを混ぜた造語（例:「一社 ランチ」と「名東区 カフェ」から「一社 カフェ」）や、記載の無いキーワードへの言及は絶対に禁止**
 - searchQueryComment: 【検索語句分析】がある場合のみ。指名検索/一般検索の比率とその意味に言及
-- reviewCountComment: 【口コミ累計件数の推移】がある場合のみ。累計が減っている月は削除・非表示が起きている旨を書く
+- reviewCountComment: 【口コミ累計件数の推移】がある場合のみ。**削除・非表示に言及してよいのは、推移の中に累計が実際に減った月がある場合だけ**。横ばい・増加しかない推移で削除・非表示の可能性を持ち出すことは禁止（新規0件で横ばいなら単に「新規投稿が無かった」だけ）
 - reviewDeltaComment: 【口コミ月間増加ペース】がある場合のみ。獲得ペースが十分か不足かに言及
 - languageComment: ${langStatsText ? "言語構成比と、それが示す客層（インバウンド需要など）に言及" : "言語データが提供されていないため必ず空文字\"\"を返す"}
 - competitorComment: 【口コミ競合比較】がある場合のみ。同エリア内での口コミ数の位置づけに言及。この欄では口コミ件数への言及を許可する。
@@ -144,6 +147,10 @@ ${langStatsText || ""}
 - 比率を「各1〜2%」のように幅で丸めて実際より大きく見せない。1%未満は「1%未満」と書く
 - データが1時点しか無い項目に「縮まっている」「広がっている」など推移の断定を書かない
 - 「◯ヶ月ぶり」「◯ヶ月連続」等の期間表現は、提供された推移データで実際に確認できる場合のみ使う
+- **「季節変動」「季節性」「季節要因」による説明は禁止**。季節性の判断には前年の同時期データが必要だが、提供データでは検証できない。減少の理由が分からないなら理由を書かず、事実（減少幅と水準）だけを書く
+- 件数が**5件未満**の言語・属性・グループについて、満足度や傾向を断定しない（例: 外国語口コミ3件が低評価でも「インバウンド顧客の満足度に課題」とは書かない）。「件数が少なく傾向は判断できない」に留めるか、言及しない
+- 「◯〜◯月は◯◯台」のような**複数月をまとめる表現は、範囲内の全ての月が条件を満たす場合のみ**使う。1ヶ月でも外れる月があるなら「◯月と◯月」と個別に書く
+- **2025年11月にGoogle側の計測仕様変更があり、それをまたぐ前年比の大幅な増減は施策の成果・失敗と断定できない**。2024年〜2025年前半と2025年11月以降を比べた大幅増を「成長」「成果」「基盤の強化」と書くことは禁止。書く場合は「計測仕様変更の影響を含む可能性がある」と必ず添える
 - 前年同月比を評価する際は推移全体を確認する。前年値が前後の月から大きく乖離した一時的スパイクの場合、単純比較で「悪化」「最優先課題」と断定しない（例外的な月との比較である旨を踏まえる）
 - reviewComments: 高評価の傾向3項目＋低評価の傾向1項目。口コミ引用は「」で囲む
 - actions: 今日から実行可能な具体施策を3つ
@@ -247,6 +254,7 @@ export function parseAnalyzeText(text: string, filteredReviews: GBPReview[]): an
     const cleanStr = (v: any): string => typeof v === "string" ? cleanItem(v) : "";
 
     const monthlyComment = cleanStr(parsed.monthlyComment);
+    const overallComment = cleanStr(parsed.overallComment);
     const mapComment = cleanStr(parsed.mapComment);
     const searchComment = cleanStr(parsed.searchComment);
     const reactionComment = cleanStr(parsed.reactionComment);
@@ -265,6 +273,7 @@ export function parseAnalyzeText(text: string, filteredReviews: GBPReview[]): an
 
     if (hasNewFields) {
       parsed.pageComments = {
+        overall: overallComment,
         monthly: monthlyComment,
         map: mapComment,
         search: searchComment,
@@ -297,6 +306,7 @@ export function parseAnalyzeText(text: string, filteredReviews: GBPReview[]): an
 
     // 不要なフィールドを削除（pageCommentsに集約済み）
     delete parsed.monthlyComment;
+    delete parsed.overallComment;
     delete parsed.mapComment;
     delete parsed.searchComment;
     delete parsed.reactionComment;

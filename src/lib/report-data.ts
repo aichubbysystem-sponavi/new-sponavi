@@ -58,6 +58,13 @@ export interface ReviewAnalysis {
 
 /** ページ別AI総評。各ページ末尾に表示され、担当者が個別に編集できる */
 export interface PageComments {
+  /**
+   * 総括ページ専用のまとめ（2026-08-16追加）。
+   * 以前は総括ページが monthly をそのまま再掲しており、月次推移ページと
+   * 一字一句同じ文章が2ページに載っていた。過去の分析には無いフィールドなので
+   * optional。無い場合の表示は従来どおり monthly にフォールバックする。
+   */
+  overall?: string;
   monthly: string;        // P2 月次推移データ
   map: string;            // Googleマップ表示数推移
   search: string;         // Google検索数推移

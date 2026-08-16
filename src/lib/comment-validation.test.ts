@@ -6,6 +6,9 @@ import {
   buildKeywordFacts,
   validateContinuityClaims,
   validateOutOfRangeClaims,
+  validateSeasonalityClaims,
+  validateDeletionClaims,
+  validateSmallSampleClaims,
 } from "./comment-validation";
 
 /**
@@ -477,5 +480,83 @@ describe("validateOutOfRangeClaims 不在の主張（2026-08-02 patty rôti再�
     // パスタは4月に転落済みで当月は圏外継続 → 「今月の転落なし」は直近2計測が[0,0]なので矛盾しない
     const text = "今月は圏外転落のキーワードはなく、順位は安定している";
     expect(validateOutOfRangeClaims(text, stayOut)).toHaveLength(0);
+  });
+});
+
+/**
+ * 2026-08-16 クインシーのレポートで実際に出荷された3種類の問題を固定する。
+ * いずれも数値の誤りではなく「データで検証できない断定」だったため、
+ * 既存の数値照合では捕まらなかった。
+ */
+describe("季節変動の断定（クインシー P6）", () => {
+  it("「季節変動の範囲内とみられる」を検出する", () => {
+    expect(validateSeasonalityClaims("直近の減少は季節変動の範囲内とみられる")).toEqual(["季節変動"]);
+  });
+
+  it("「季節性」「季節要因」も検出する", () => {
+    expect(validateSeasonalityClaims("季節性による変動で、季節要因が大きい")).toEqual(["季節性", "季節要因"]);
+  });
+
+  it("季節ワードが無ければ空", () => {
+    expect(validateSeasonalityClaims("前月比-14%と減少したが前年同月比では増加を維持")).toEqual([]);
+  });
+
+  it("validatePageComments経由でKPI系の各ページを検証する", () => {
+    const v = validatePageComments(
+      { map: "直近の減少は季節変動の範囲内とみられる", overall: "季節性が高い業態だ" },
+      { keywordFacts: [], reviewDeltas: [] },
+    );
+    expect(v.filter((x) => x.kind === "seasonality_claim").map((x) => x.field).sort()).toEqual(["map", "overall"]);
+  });
+});
+
+describe("削除・非表示の相殺主張（クインシー P15）", () => {
+  const text = "累計が増加していない月は削除、非表示が新規投稿を相殺している可能性もあるため、獲得ペースの回復が急務だ";
+
+  it("累計が減った月が無いのに削除・非表示に言及していれば違反", () => {
+    expect(validateDeletionClaims(text, [7, 20, 5, 3, 1, 0])).toBe(true);
+  });
+
+  it("実際に減った月があれば正当な言及として通す", () => {
+    expect(validateDeletionClaims(text, [7, -2, 5, 0])).toBe(false);
+  });
+
+  it("削除・非表示に触れていなければ対象外", () => {
+    expect(validateDeletionClaims("新規投稿が無かったため累計は横ばい", [0, 0])).toBe(false);
+  });
+
+  it("validatePageComments経由でreviewCountを検証する", () => {
+    const v = validatePageComments(
+      { reviewCount: text },
+      { keywordFacts: [], reviewDeltas: [7, 20, 0] },
+    );
+    expect(v.some((x) => x.kind === "deletion_claim" && x.field === "reviewCount")).toBe(true);
+  });
+});
+
+describe("少数サンプルからの断定（クインシー P19）", () => {
+  it("韓国語2件・英語1件から「満足度に課題」と断定 → 違反", () => {
+    const text = "韓国語が2件、英語が1件と外国語口コミはわずかで、かつすべて低評価であり、インバウンド顧客の満足度には課題が見られる";
+    expect(validateSmallSampleClaims(text)).toBe(true);
+  });
+
+  it("5件以上の件数に基づく断定は通す", () => {
+    expect(validateSmallSampleClaims("英語口コミが42件あり、満足度は安定して高い")).toBe(false);
+  });
+
+  it("断定を避けた表現は通す", () => {
+    expect(validateSmallSampleClaims("韓国語が2件、英語が1件と件数が少なく、外国語利用者の評価はまだ判断できない")).toBe(false);
+  });
+
+  it("件数の言及が無い文は判定対象外（プロンプト側で抑制）", () => {
+    expect(validateSmallSampleClaims("口コミの99%が日本語で、国内顧客が中心である")).toBe(false);
+  });
+
+  it("validatePageComments経由でlanguageを検証する", () => {
+    const v = validatePageComments(
+      { language: "英語が1件で低評価のため、インバウンド顧客の満足度には課題が見られる" },
+      { keywordFacts: [], reviewDeltas: [] },
+    );
+    expect(v.some((x) => x.kind === "small_sample_claim" && x.field === "language")).toBe(true);
   });
 });

@@ -387,7 +387,7 @@ export default function ReportClient({
 
   // ページ別AI総評（各データページ末尾に表示・編集）
   const emptyPageComments = {
-    monthly: "", map: "", search: "", reactions: "", keyword: "", rankingHistory: "",
+    overall: "", monthly: "", map: "", search: "", reactions: "", keyword: "", rankingHistory: "",
     grid: "", searchQuery: "", reviewCount: "", reviewDelta: "", language: "", competitor: "",
     reviews: [] as string[], actions: [] as string[],
   };
@@ -1070,6 +1070,18 @@ export default function ReportClient({
       await new Promise(r => setTimeout(r, 300));
     }
   };
+
+  // ── Google計測仕様変更の注記 ──
+  // 2025年11月にGBP APIの集計仕様が変わり、それをまたぐ前年比・推移は施策成果と
+  // 切り分けられない。注記文言(API_NOTE_TEXT相当)は以前から用意されていたが
+  // どこからも表示されておらず、AI総評が「前年比+112%=成果」と断定したレポートが
+  // 注記なしで出荷されていた（2026-08-16のレビューで発覚）。
+  // 表示条件: 表示期間が2025年11月より前を含む場合のみ（含まなくなれば自然に消える）
+  const showApiNote = monthlyLabels.some((m) => monthToNum(m) < 202511);
+  const API_CHANGE_NOTE = "※ 2025年11月にGoogleの計測仕様変更があり、それをまたぐ前年比・推移には影響が含まれる場合があります";
+  const apiChangeNote = showApiNote ? (
+    <div style={{ fontSize: 12, color: "#999", textAlign: "right", margin: "4px 8px 0", flexShrink: 0 }}>{API_CHANGE_NOTE}</div>
+  ) : null;
 
   const handlePdfDownload = async () => {
     setPdfGenerating(true);
@@ -2015,11 +2027,16 @@ export default function ReportClient({
             {/* 前年比「※」の説明。グリッドの空きマス（3列×3行の9マス目）に置くことで
                 カードの高さを一切変えない（注記をカード内に入れると3段目がはみ出す）。
                 空きマスが無いレイアウトのときは最下行の下に出さず省略する（はみ出し優先で回避） */}
-            {yoyAnomalyLabels.size > 0 && kpis.length % 3 !== 0 && (
-              <div style={{ display: "flex", alignItems: "flex-end", padding: "0 4px 2px" }}>
-                <span style={{ fontSize: 12, color: "#b8860b", lineHeight: 1.6 }}>
-                  ※ {Array.from(yoyAnomalyLabels).join("・")}の前年同月は前後の月と比べ突出した値のため参考値（Googleの集計仕様変更等の可能性）
-                </span>
+            {(yoyAnomalyLabels.size > 0 || showApiNote) && kpis.length % 3 !== 0 && (
+              <div style={{ display: "flex", flexDirection: "column", justifyContent: "flex-end", padding: "0 4px 2px" }}>
+                {yoyAnomalyLabels.size > 0 && (
+                  <span style={{ fontSize: 12, color: "#b8860b", lineHeight: 1.6 }}>
+                    ※ {Array.from(yoyAnomalyLabels).join("・")}の前年同月は前後の月と比べ突出した値のため参考値（Googleの集計仕様変更等の可能性）
+                  </span>
+                )}
+                {showApiNote && (
+                  <span style={{ fontSize: 12, color: "#999", lineHeight: 1.6 }}>{API_CHANGE_NOTE}</span>
+                )}
               </div>
             )}
           </div>
@@ -2200,6 +2217,7 @@ export default function ReportClient({
               </tbody>
             </table>
           </div>
+          {apiChangeNote}
           {renderPageComment("monthly", "AI総評")}
         </div>
       </div>
@@ -2229,6 +2247,7 @@ export default function ReportClient({
                 {dispCharts.mapMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700, color: "#fff" }}>{(v + dispCharts.mapPC[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
+          {apiChangeNote}
           {renderPageComment("map", "AI総評")}
         </div>
       </div>
@@ -2258,6 +2277,7 @@ export default function ReportClient({
                 {dispCharts.searchMobile.map((v, i) => <td key={i} style={{ padding: "3px 2px", textAlign: "center", fontWeight: 700, color: "#fff" }}>{(v + dispCharts.searchPC[i]).toLocaleString()}</td>)}</tr>
             </tbody>
           </table>
+          {apiChangeNote}
           {renderPageComment("search", "AI総評")}
         </div>
       </div>
@@ -2301,6 +2321,7 @@ export default function ReportClient({
                 })}</tr>
             </tbody>
           </table>
+          {apiChangeNote}
           {renderPageComment("reactions", "AI総評")}
         </div>
       </div>
@@ -3207,12 +3228,15 @@ export default function ReportClient({
           <div style={slideBarStyle}><span>{shop.name} — 総括</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={slideBodyStyle}>
             <div style={stitleStyle}>{curLabel} 総括</div>
-            {/* 当月サマリー: 「総括」ページに総括が無く改善策だけ、という構成を解消する */}
-            {pageComments.monthly && (
+            {/* 当月サマリー: 「総括」ページに総括が無く改善策だけ、という構成を解消する。
+                2026-08-16から専用の overall を優先する（以前は monthly の再掲で、
+                月次推移ページと同じ文章が2ページに載っていた）。過去の分析には
+                overall が無いため monthly にフォールバックする（再分析で解消） */}
+            {(pageComments.overall || pageComments.monthly) && (
               <div style={{ background: "#fff", border: "1px solid #dbe3ef", borderRadius: 12, padding: "14px 20px", marginBottom: 12 }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: "#0f3460", marginBottom: 6 }}>{curLabel} のまとめ</div>
                 <p style={{ fontSize: 16, lineHeight: 1.8, color: "#333", margin: 0 }}
-                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(pageComments.monthly, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
+                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(pageComments.overall || pageComments.monthly, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
               </div>
             )}
             {/* flex:1 だと項目3件でも枠がスライド高いっぱいに広がり8割が空白になる */}
