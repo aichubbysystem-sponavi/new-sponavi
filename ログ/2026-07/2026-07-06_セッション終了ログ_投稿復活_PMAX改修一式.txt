@@ -1,0 +1,88 @@
+========================================================================
+セッション終了ログ（2026-07-05夜〜07-06 通し）
+投稿機能復活・PWゲート・P-MAX改修一式・レポートUI改善
+========================================================================
+
+## 【2026-07-05〜06】
+
+### 決定事項
+- 全店舗反映・検索語句一括同期中の30分無操作ログアウトは batch-activity イベント発火で抑止する
+- レポートの「当月データなし」バナーは集計中案内に文言変更（反映ボタン案内は過去月欠損時のみ）
+- AIによるコメントは 番号/内容/詳細 の3カラムテーブルUIにする
+- 投稿機能（create/auto/delete/execute-posts cron）を復活。口コミ返信（auto-reply/reply-review）は停止継続
+- 危険操作の追加ロック: 対象=お金がかかる操作（多地点一括計測）＋投稿の危険操作（一括自動投稿・GBP削除・予約投稿今すぐ実行）、方式=ログインパスワード再入力
+- 投稿削除APIは社長・社員のみに統一（旧: 認証のみ）
+- P-MAXレポート2Pは棒グラフ廃止→指標×月の数値テーブル（7指標: 合計来店数/電話/経路案内/メニュークリック/予約/WEBサイト/保存・共有）
+- 「予約」はラベルそのまま、数値はGBPシートM列「注文」を採用（一度0固定→実画面確認後に注文採用で最終確定）
+- /pmax の選択月はURLクエリで保持（店舗ページから戻ってもリセットさせない）
+- GBP店舗名の照合は NFKC正規化ベースに強化。シートとAds名の完全乖離はシート側をAds表記に合わせる運用で解消する
+
+### 変更内容（具体的に）
+■ ログアウト対策（コミット 3cce871）
+- src/app/report/report-list-client.tsx: handleSyncAllのバッチループに batch-activity 発火
+- src/app/search-keywords/client.tsx: handleBulkSyncのループに同上
+■ レポートUI（コミット 63c63cd）
+- src/app/report/[shopId]/client.tsx:
+  - 当月（未確定月）選択時のバナーを「集計期間中・翌月上旬反映予定」に出し分け
+  - AIコメントを3カラムテーブル化（ヘッダー#1F3864/縞#D9DEE8・#EFF1F6/丸数字①〜/編集textarea・ページ分割・メモ欄は維持/0件時「データ準備中」行）
+■ 投稿機能復活（コミット 1884042）
+- create-post/auto-post/delete-post: 503スタブ削除、_POST_disabled→POST復元
+- cron/execute-posts: _GET_disabled→GET復元。vercel.json に "*/5 * * * *" Cron再登録
+- src/components/password-gate.tsx（新規）: usePasswordGate()。検証専用Supabaseクライアント
+  （persistSession:false, storageKey:"sb-pwgate"）で signInWithPassword 検証
+- grid-ranking/page.tsx: 一括計測に gate() 適用。posts/page.tsx: 一括自動投稿・削除に適用
+■ 投稿まわり仕上げ（コミット a1de063）
+- delete-post: requireRole(president,manager) に変更（verifyShopAccess削除=冗長化のため）
+- posts/page.tsx: 削除ボタンをpart_time非表示（canDeletePost）。
+  「予約投稿を今すぐ実行」に pending件数confirm + PWゲート追加（0件時は中断案内）
+■ P-MAX 2P（コミット 39d5fa8 → e81a3d4）
+- components/pmax-report-view.tsx: コンバージョン推移を棒グラフ→数値月次テーブル（7/3実装分をデプロイ）
+- lib/pmax-sheet.ts: reservation=parseNum(cols[12])（M列「注文」）
+- api/pmax/sync/route.ts: reservation をDB書込に追加
+- sql/2026-07-06_add_reservation_to_pmax_gbp.sql: ALTER TABLE（本番実行済み・ユーザー）
+- share/[token]・group-share/[token]/store: reservation passthrough
+■ バックフィル（コミット a8807b4 → 40dfda3 → 4096513 → bd3d2c1）
+- api/pmax/backfill-gbp/route.ts（新規）: CRON_SECRET認証。最終形は
+  pmax_store_dataの全Ads店舗名→シート行を正規化照合→Ads名で全月upsert。
+  unmatched/ambiguous返却。「Ads名+店」完全一致タイブレークあり
+- lib/pmax-sheet.ts: normShopName()（NFKC+空白除去+lower）新設、getGbpDataForShopに適用
+■ 月選択保持（コミット 4096513）
+- app/pmax/page.tsx: selectedYear/MonthをURLクエリから初期化+変更時 router.replace
+- app/pmax/store/page.tsx: エラー時「戻る」も year/month 引き継ぎ
+
+### 数値・設定値
+- execute-posts Cron: */5 * * * *（5分ごと、6/28以前と同値）
+- PWゲート対象4操作: 多地点一括計測/シート一括自動投稿/GBP投稿削除/予約投稿今すぐ実行
+- pmax_gbp_data.reservation BIGINT DEFAULT 0（本番ALTER済み）
+- バックフィル最終結果: Ads404店舗中280照合成功/3,414行upsert/エラー0
+  → unmatched 118（内86はGBP非連携のLP系キャンペーン=0が正常、約30がシート店名要修正）
+  → ambiguous 6（てっちゃん/ときわ亭/和牛と豚/焼肉Lab/NAPPA/HELIO — 複数候補で保留）
+- AIコメント総評: Claude Sonnet 4.6使用、1店舗あたり約5〜10円（全店舗反映とは無関係と確認）
+
+### 未解決・次回やること
+- 【ユーザー作業待ち】GBPシートC列の店舗名を広告側表記に修正（約30件、
+  例: SIK eatery うつぼ公園店→靭公園 / てっぱち札幌大通店→大通り店）
+  → 修正後に backfill-gbp 再実行（curl -X POST -H "Authorization: Bearer <CRON_SECRET>"
+     https://new-spotlight-navigator.com/api/pmax/backfill-gbp）
+- Ads側の重複表記統一（JEWEL Box 西梅田 / Jewel Box 西梅田）
+- 投稿機能復活後の初回スモークテスト（少数店舗で予約→5分cron自動実行の確認）未実施
+- approval_status（投稿承認フロー）の必須化は運用判断待ち
+- 口コミ返信（auto-reply/reply-review）は停止継続中
+- Supabaseセッションのリフレッシュ400による突発ログアウト（多タブ競合疑い）。再発したら
+  クライアント設定見直し
+- 全店舗反映が前回どこまで完走したかは検索語句管理の「最終同期」列で確認可能
+
+### 注意点・ハマったこと
+- 全店舗反映は毎回五十音順の先頭から。時間ベースのログアウトだと毎回同じ位置で止まる
+  （batch-activityの入れ忘れ画面が2つあった。既存機構はgrid-ranking等のみ適用だった）
+- レポートの「7月データなし」はバグではなく月次データ未確定（getExpectedMonthJST=前月が正）。
+  バナー文言が「全店舗反映を実行して」と誤誘導していた
+- P-MAX 2P改修は7/3セッションで実装済み・未コミットのまま作業ツリーに残っていた
+  （「予約=注文でよいか」の確認待ちで保留されていた）。git statusの見慣れぬ差分は要ログ確認
+- 「予約」の判断が二転: 0固定→注文採用。仕様確認は実画面を見せて聞くのが早い
+- backfill route生成時にdedupキー区切りへNUL(0x00)が混入しgitがバイナリ判定 →"|"に置換
+- Git Bashの /tmp はWindows Pythonからは C:\Users\<user>\AppData\Local\Temp として見える
+- シート店舗名の照合はNFKC正規化でも「大通り/大通」「靭公園/うつぼ公園店」は吸収不能。
+  部分一致の複数候補は誤マッチ防止でambiguous保留にした（.includes誤爆の罠対策）
+- 店舗の主キーはAds側名。シート名を直すのが正で、キャンペーン名を変えると過去データが分断する
+- sleepチェーンによるデプロイ待ちはツールにブロックされる → until+run_in_background を使う

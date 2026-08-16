@@ -1,0 +1,41 @@
+========================================================================
+2026-07-05: 全店舗反映・検索語句一括同期中の30分自動ログアウト修正
+========================================================================
+
+## 経緯
+- 検索語句管理で今月分を一括同期（467件 → 452成功/0失敗/15データなし）
+  - データなし15件は「API returned 0 months of data」（低ボリューム非開示 or GBP連携浅い店舗）
+- その後レポート管理で「全店舗反映」を実行 → 90/606店舗あたりで進行中に
+  突然ログアウトされ、処理が強制中断された
+- ユーザーの指摘: 「繰り返しても同じ200店舗しか反映されないのでは？」→ 正しい
+  （店舗はspreadsheet.ts:947でlocaleCompare五十音順に毎回同じ順序で処理されるため、
+   時間ベースで切れる限り毎回ほぼ同じ位置で止まる）
+
+## 原因
+- auth-guard.tsx:9 の SESSION_TIMEOUT_MS = 30分（無操作自動ログアウト）
+- タイマーリセットのイベント: mousedown/keydown/scroll/touchstart/batch-activity
+- 「batch-activity」カスタムイベントは長時間バッチ処理用の抑止機構として既に存在し、
+  grid-ranking/reviews/review-analysisには組み込み済みだったが、
+  report-list-client.tsx（全店舗反映）と search-keywords/client.tsx（一括同期）には
+  入れ忘れられていた
+- 補足: コンソールの /auth/v1/token 400 は重要ナレッジ記載の既知事象
+  （セッションリフレッシュ期限切れ、再ログインで解消）
+
+## 修正内容
+- src/app/report/report-list-client.tsx: handleSyncAll のバッチループ内に
+  window.dispatchEvent(new Event("batch-activity")) を追加
+- src/app/search-keywords/client.tsx: handleBulkSync のループ内に同様に追加
+- コミット: 3cce871（この2ファイルのみ。PMAX関連の未コミット変更は触っていない）
+- next build 成功確認済み → git push（Vercel自動デプロイ）
+
+## API費用の確認（ユーザー質問への回答）
+- 全店舗反映で使うのは Google Sheets API + GBP Performance API のみ → どちらも無料
+- GBP Performance API はクォータ制（約300クエリ/分）だが課金なし
+- 課金があるのは Places API（多地点順位計測）のみで今回の処理では呼ばれない
+
+## 残タスク・注意
+- handleSyncSelected（選択反映）は選択店舗全件を1回のserver action呼び出しで処理する
+  設計。数百店舗選択するとVercelのfunction timeoutに当たる可能性あり（未対応・要注意）
+- 全店舗反映は依然ブラウザループ（タブを閉じると中断）。デプロイ後に再実行して
+  606店舗完走するか要確認
+- 修正後もバッチ「完了後」は通常通り30分無操作でログアウトする（セキュリティ維持）

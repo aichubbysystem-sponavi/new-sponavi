@@ -1,0 +1,33 @@
+■ 2026-07-15 社長アカウントの2段階認証(TOTP/MFA)撤去
+
+【経緯】
+- 2026-07-08頃のコミット 9e0b548 で社長アカウントのみ2段階認証(TOTP)を追加していた
+- ログイン後にQRコード（Google/Microsoft Authenticator登録）画面が出る仕様
+- ユーザーから「無しにして欲しい」との依頼 → 完全撤去
+
+【変更内容】コミット 32b486e "revert: 社長アカウントの2段階認証(TOTP/MFA)を撤去"
+1. src/components/mfa-gate.tsx … ファイルごと削除（QR表示/6桁入力のゲート画面本体）
+2. src/components/auth-guard.tsx … 以下を削除
+   - MfaGate の import
+   - mfaRequired state
+   - president時の getAuthenticatorAssuranceLevel() によるAAL2チェック
+   - mfaRequired時の <MfaGate> 表示分岐
+3. src/lib/audit.ts … 以下を削除
+   - decodeJwtAal() ヘルパー（未使用化のため）
+   - requirePermission() 内の PAID_OP × MFA_ENFORCE_PAID_OP=on 時のAAL2必須チェック
+
+【確認済み】
+- grep で MfaGate / mfa. / aal2 / MFA_ENFORCE 等の残存参照ゼロ
+- tsc --noEmit OK / next build OK（exit 0）
+- git push origin main 済み → Vercel(aichubbysystem側 new-sponavi)自動デプロイ
+
+【補足】
+- Vercel環境変数 MFA_ENFORCE_PAID_OP が本番に設定されていても、コード参照が消えたため無害（放置可）
+- Supabase側にユーザーのTOTP factorが登録済みでも、アプリが参照しなくなったため影響なし
+  （完全に消したければ Supabase Dashboard > Authentication > Users から該当ユーザーのMFA factorを削除可能）
+- スクショで確認した既知の表示バグ（QR横に "data:image/svg+xml;utf-8," の文字列が漏れて表示）は
+  機能ごと削除したため対応不要となった
+
+【テスト観点】
+- 社長アカウントでログイン → QR/6桁入力画面が出ず、直接ダッシュボードに入れること
+- 課金操作（AI総評など PAID_OP）が社長で普通に実行できること

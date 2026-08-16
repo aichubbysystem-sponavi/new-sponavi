@@ -1,0 +1,52 @@
+■ 2026-07-31 セキュリティ対応：秘密情報の平文管理を解消
+
+【経緯】
+田中開発アプリまとめとの統合是非レビューの調査中に、秘密情報の平文管理を4件発見。
+統合自体は「非推奨」で結論（アーキテクチャ・DB・権限モデルが別物。やるなら店舗マスタの一元化から）。
+本セッションではセキュリティ問題の解消を実施した。
+
+【発見した問題と対応】
+
+1. GitHub PAT が .git/config の origin URL に平文埋め込み
+   - https://aichubbysystem-sponavi:ghp_***@github.com/... 形式で、リポジトリのコピー/バックアップ経由で漏洩するリスク
+   - 対応:
+     a. トークンを Git Credential Manager（Windows資格情報マネージャー）へ格納
+     b. origin URL を https://aichubbysystem-sponavi@github.com/aichubbysystem-sponavi/new-sponavi.git（トークンなし・ユーザー名付き）に変更
+     c. git ls-remote で接続確認 OK
+     d. ユーザーが GitHub 上で旧トークン「sponavi-push」（repo権限・無期限）を削除
+     e. 旧トークンで API を叩き HTTP 401 を確認（無効化成功）
+     f. GCM 内の旧資格情報も git credential reject で削除
+   - ※次回 push 時は GCM がブラウザ認証を出す → aichubbysystem-sponavi でログインするだけ。トークンの手動発行・貼り付けは不要
+
+2. 平文の秘密ファイル3点が OneDrive 同期フォルダ内に存在
+   - ◆広告専用◆\認証情報.txt（Google Ads OAuth Client Secret + Refresh Token + 開発者トークン）
+   - client_secret_2_286436056923-...json（同 OAuth クライアントシークレット）
+   - メモ.txt（Supabase DBパスワード / LINEチャネルトークン / GitHub PAT / Maps APIキー）
+   - 対応: C:\Users\pasok\.secrets\chubby-meo\ （OneDrive同期外・git管理外）へ移動。
+     ◆広告専用◆\認証情報の置き場所.txt に移動先の案内メモを設置
+   - ※今後の秘密情報もこのフォルダに保存すること。OneDrive内に平文で置かない
+
+3. get-ads-token.js に CLIENT_ID / CLIENT_SECRET がハードコード
+   - 対応: .env.local の GOOGLE_ADS_CLIENT_ID / GOOGLE_ADS_CLIENT_SECRET を読む方式に書き換え
+   - node --check + 読み込みテストで動作確認 OK
+
+4. delete-auto-replies.js がプロジェクト直下の client_secret_*.json を参照（影響調査で発見）
+   - ファイル移動により次回実行時に「client_secret.jsonが見つかりません」で停止するところだった
+   - 対応: %USERPROFILE%\.secrets\chubby-meo\ 配下を参照するよう修正。新パスからの読み込みテスト OK
+
+【影響範囲の検証結果】
+- 本番（new-spotlight-navigator.com / cron 6本）: 影響なし。本番秘密情報は Vercel 環境変数管理でローカルファイルと無関係。src/ 無変更
+- ローカル開発: .env.local 無変更のため影響なし
+- 補助スクリプト: check-auto-replies.js / export-auto-replies.js / write-newsponavi-sheet.js は
+  Downloads\GBP-backup の credentials.json / token.json を参照しており移動対象外 → 影響なし
+- git 追跡ファイル: 変更なし（修正した2スクリプトはいずれも gitignore / 未追跡）
+- 移動3ファイルは git 履歴に一度もコミットされていないことを確認済み（漏洩経路はローカル/OneDriveのみだった）
+
+【残タスク（任意）】
+- OneDrive Web のごみ箱・バージョン履歴に移動前ファイルの旧版が残っている可能性 → 気になる場合は完全削除
+
+【申し送り】
+- 秘密情報の置き場所の正: C:\Users\pasok\.secrets\chubby-meo\
+- 次回 push でブラウザ認証が1回出るのは正常動作（エラーではない）
+- 田中開発アプリまとめとの統合は非推奨で結論済み。将来やるなら「店舗マスタの一元化」
+  （田中側 stores 371店舗 vs chubby-meo側店舗マスタの突き合わせ）から着手する

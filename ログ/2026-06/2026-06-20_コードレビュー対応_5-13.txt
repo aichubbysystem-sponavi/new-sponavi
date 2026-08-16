@@ -1,0 +1,146 @@
+## 【2026-06-20】コードレビュー指摘 #5-#13 対応（A級問題9件）
+
+### 決定事項
+- プロ目線で全体コードレビュー実施 → 総合評価D+（MVP合格、商用不合格）
+- S級4件（パスワード平文/P-MAX認証なし/IDOR/ユーザー管理権限）は次回対応
+- A級9件（#5-#13）を本セッションで修正
+- Supabase初期化は `lib/supabase.ts` に一元化、auth-verify.tsは廃止
+- バリデーションはzodを採用
+- client.tsx(2115行)の本格分割はUI破壊リスクが高いため別セッションで実施
+
+### 変更内容（具体的に）
+
+#### lib/supabase.ts — 完全リライト
+- getSupabase()（Service Roleシングルトン）、verifyAuth()、verifyCron()、requireAuth() を統合
+- 旧lib/auth-verify.tsの機能を吸収（参照ゼロ確認済み、ファイル未削除）
+
+#### 47 APIルート（src/app/api/**） — Supabase boilerplate削除
+- 全ファイルから以下を削除:
+  - `import { createClient } from "@supabase/supabase-js"`
+  - `const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || ""`
+  - `const SUPABASE_SERVICE_KEY = ...` / `const SUPABASE_ANON_KEY = ...`
+  - `function getSupabase() { return createClient(...) }`
+  - `let _sb: any = null` キャッシュパターン
+- 全ファイルに `import { getSupabase } from "@/lib/supabase"` 追加
+- `const { verifyAuth } = await import("@/lib/auth-verify")` → 静的import `import { verifyAuth } from "@/lib/supabase"` に統一
+
+#### 8 Cronルート — 認証統一
+- auto-reply, execute-posts, health-check, monthly-analysis, sync-performance, sync-reviews, sync-search-keywords, sync-shops
+- 3行パターン（authHeader取得→cronSecret取得→if比較）→ `const cronErr = verifyCron(request); if (cronErr) return cronErr;`
+
+#### 8 libファイル — createClient削除
+- gbp-token.ts, gbp-performance.ts, gbp-search-keywords.ts, image-proxy.ts, report-cache.ts, review-analyzer.ts, report-api.ts, spreadsheet.ts
+- 全てのインラインcreateClient() → getSupabase()
+- report-api.ts: 6箇所の3行createClientパターン → getSupabase()
+- spreadsheet.ts: 動的import `await import("@supabase/supabase-js")` 5箇所 → getSupabase()
+- sync-media/route.ts: Supabase REST API直接fetch → SDK `.from().update()` に置換
+
+#### サーバーサイド空catchブロック修正（8箇所）
+- cron/sync-shops/route.ts:32 — OAuth refresh失敗ログ追加
+- cron/sync-shops/route.ts:241 — shop sync error (${name}) ログ追加
+- cron/monthly-analysis/route.ts:101 — 言語集計エラーログ追加
+- cron/monthly-analysis/route.ts:155 — JSON parseエラーログ追加
+- cron/monthly-analysis/route.ts:200 — unexpected errorログ追加
+- cron/auto-reply/route.ts:244 — reply errorログ追加
+- report/competitors/route.ts:55 — location fetchエラーログ追加
+- lib/gbp-token.ts:51,75 — RPC/DBリフレッシュ失敗ログ追加
+
+#### fetchキャッシュ漏れ修正（54箇所）
+- 全ての外部API fetch呼び出しに `cache: "no-store" as const` 追加
+- gbp-token.ts: +1、google-ads.ts: +2、line-notify.ts: +1
+- cron/auto-reply: +4、cron/execute-posts: +7、cron/monthly-analysis: +1
+- cron/sync-reviews: +3、cron/sync-shops: +4
+- report/analyze: +1、report/auto-post: +21、report/create-post: +2
+- report/sync-media: +2、report/generate-post: +3
+- report/reply-suggest: +1、report/generate-description: +1
+
+#### Cronタイムアウト改善
+- report/sync-performance/route.ts: maxDuration 60→300
+- report/sync-search-keywords/route.ts: maxDuration 60→300
+
+#### lib/validation.ts — 新規作成
+- zod パッケージ導入（npm install zod）
+- 12スキーマ定義: shopIdSchema, monthSchema, gridRankingSchema, gridRankingPutSchema, memoSchema, generatePostSchema, replySuggestSchema, bulkGenerateSchema, userCreateSchema, displaySettingsSchema, updateCommentsSchema
+- validateBody()ヘルパー: リクエストJSON → zodバリデーション → 400エラーレスポンス自動生成
+
+#### バリデーション適用（3ルート）
+- report/generate-post/route.ts: body手動パース → validateBody(request, generatePostSchema)
+- report/users/route.ts POST: 手動チェック → validateBody(request, userCreateSchema)
+- report/memo/route.ts POST: 手動チェック → validateBody(request, memoSchema)
+
+#### N+1クエリ修正
+- cron/sync-reviews/route.ts:57-68 — トークンリフレッシュ for→Promise.all並列化
+- report/bulk-generate/route.ts:35-52 — ループ内shops+hearings個別取得 → .in("id", targetIds) バッチ取得（100クエリ→2クエリ）
+
+#### lib/api-types.ts — 型定義追加
+- DbShopRow, DbReviewRow, DbOAuthTokenRow, DbPerformanceCacheRow, DbReportAnalysisRow, DbGridRankingLogRow, DbUserProfileRow（7 DB Row型）
+- ApiSuccessResponse<T>, ApiErrorResponse, ApiResponse<T>, CronResult（4 Response型）
+- GoApiShop（Go API互換型、camelCase/PascalCase両対応）
+
+#### any型排除（初手）
+- cron/sync-shops/route.ts: goShops any[] → GoApiShop[], sbByName Map any → 具体型, updateRow Record<string,any> → Record<string,string>, catch (e: any) → catch (e: unknown)
+- report/[shopId]/chart-options.ts: callback (v: any) → (v: string | number), items any[] → 具体型
+
+#### テスト追加
+- lib/validation.test.ts — 新規59テスト（全12スキーマの正常系/異常系）
+- lib/supabase.test.ts — 新規5テスト（verifyCron 3ケース + verifyAuth 2ケース）
+
+#### コンポーネント分割（初手）
+- report/[shopId]/chart-options.ts — 新規: buildStackedOptions() + lineOptions を client.tsx から分離
+- client.tsx: 2115→2089行
+
+### 数値・設定値
+- Supabase boilerplate削除: 約300行（47ファイル分）
+- fetchキャッシュ修正: 54箇所
+- report/sync-performance maxDuration: 60 → 300秒
+- report/sync-search-keywords maxDuration: 60 → 300秒
+- zodバリデーション制限値:
+  - shopName: max 200文字
+  - keyword: max 100文字
+  - memo: max 5000文字
+  - comment(reply-suggest): max 5000文字
+  - keywords(generate-post): max 500文字
+  - password: min 8文字, max 100文字
+  - bulkGenerate shopIds: max 50件
+  - gridResults: max 400件
+  - updateComments: max 10件
+- テスト: 3ファイル / 70テスト / 全合格
+- ビルド: Compiled successfully
+
+### 未解決・次回やること
+- [ ] **S級セキュリティ（最優先）**:
+  - [ ] #1 パスワード平文保存 → bcryptハッシュ化 + password_display廃止
+  - [ ] #2 P-MAX全APIルート認証なし → verifyAuth追加
+  - [ ] #3 全reportルートIDOR脆弱性 → 店舗所有権チェック追加
+  - [ ] #4 ユーザー管理API権限なし → 管理者ロールチェック追加
+- [ ] client.tsx本格分割（2089行→hooks/コンポーネント分離、各400行目標）
+- [ ] 残り400+箇所のany型排除（api-types.tsの型を各ファイルで適用）
+- [ ] 残りバリデーション適用（grid-ranking, display-settings, update-comments, bulk-generate, reply-suggest等）
+- [ ] フロントエンド page.tsx のcreateClient → supabase import統一（5ファイル）
+- [ ] auth-verify.ts ファイル削除（参照ゼロ確認済み）
+- [ ] CSP unsafe-inline除去
+- [ ] console.log 203箇所の整理（ログレベル導入検討）
+
+### 注意点・ハマったこと
+
+#### sed一括置換でimport構文が壊れる
+- `sed -i 's/{ getSupabase } /{ getSupabase, verifyCron }/'` で `} , verifyCron }` になった
+- 原因: 元の `}` の後にスペース+カンマが入る置換パターンミス
+- 対策: 閉じ括弧を含む置換は正規表現で `{ getSupabase }` → `{ getSupabase, verifyCron }` と全体指定
+
+#### sed多段置換でCron関数ボディが消える
+- getSupabase関数定義の削除sedがGET関数のボディまで巻き込んだ
+- 原因: `function getSupabase` の範囲削除が `export async function GET` の開始行まで影響
+- 対策: Node.jsの正規表現置換に切り替えて正確にパターンマッチ
+
+#### analyze/route.tsの特殊パターン（getSupabaseAdmin）
+- 他ファイルはgetSupabaseだがanalyze/route.tsだけgetSupabaseAdmin（別名）
+- sed一括処理で削除が中途半端に → 手動で残骸（コメント+return文）を削除
+
+#### libファイルのSUPABASE_URL参照残り
+- APIルートは全クリーンになったが、lib/gbp-performance.ts等で `if (!SUPABASE_URL)` ガード句が残存
+- supabase.ts側で初期化時にthrowするので不要 → 削除
+
+#### report-api.tsの3行createClientパターン
+- 末尾カンマ付き3行パターン `createClient(\n  url,\n  key,\n)` が通常の正規表現でマッチしなかった
+- Node.jsで `\s*\n\s*` を含む正規表現で対応

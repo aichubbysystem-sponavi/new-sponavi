@@ -1,0 +1,87 @@
+## 【2026-06-24】
+
+### 決定事項
+- 口コミ自動返信Cron（auto-reply）を即時停止。外部アクションは必ず事前承認が必要
+- 全report APIにIDOR認可チェック（verifyShopAccess）を必須化
+- auto-postの店舗名マッチングをincludes()から正規化完全一致に変更
+- OAuthトークン取得はgbp-token.tsに統一（reply-review/create-post/sync-mediaの独自実装を廃止）
+- LINE署名検証をtimingSafeEqualに変更、SECRET未設定時はwebhook無効化
+
+### 変更内容（具体的に）
+
+#### コミット bff87de: IDOR認可 + auto-reply停止
+- `vercel.json` — auto-reply cronエントリ削除
+- `src/lib/supabase.ts` — requireShopAccessById() ヘルパー関数追加（shopId→店舗名解決+認可チェック一括）
+- `src/app/api/report/` 配下24ファイルにverifyShopAccess認可チェック追加:
+  - delete-post: post_logsからshop_name取得→verifyShopAccess
+  - reply-review: shopId→shops.name→verifyShopAccess
+  - create-post: shopId→shops.name→verifyShopAccess
+  - shop-keywords GET/PUT: requireShopAccessById
+  - structured-data GET: requireShopAccessById
+  - hearing GET/POST: requireShopAccessById
+  - sync-performance POST: requireShopAccessById
+  - sync-media POST: shopIds配列全件検証
+  - survey POST: requireShopAccessById
+  - nap-check POST: shopIds配列全件検証
+  - grid-ranking GET/POST/PUT/DELETE: 全ハンドラに認可追加
+  - sync-reviews POST: shopIds配列全件検証
+  - analyze POST: shops配列全件verifyShopAccess
+  - generate-post POST: shopName→verifyShopAccess
+  - generate-description POST: shopName→verifyShopAccess
+  - reply-suggest POST: shopName→verifyShopAccess
+  - optimal-time GET: requireShopAccessById
+  - rank-alert GET: requireShopAccessById
+  - post-schedule GET/POST: requireShopAccessById
+  - scheduled-posts GET/POST: requireShopAccessById
+  - update-comments POST: shopName→verifyShopAccess
+  - grid-ranking-generate POST: shopName→verifyShopAccess
+  - sync-coordinates POST: shopId/shopName両方対応
+  - sync-search-keywords POST/GET: requireShopAccessById
+
+#### コミット 7f9c85d: セキュリティ強化4件
+- `src/app/api/report/auto-post/route.ts` — normName()+matchShopName()関数追加、6箇所のincludes()を正規化完全一致に変更（行7-13, 349, 661-664, 843-845, 936-938）
+- `src/app/api/webhook/line/route.ts` — verifySignature()をcrypto.timingSafeEqual()に変更（行12-18）、SECRET未設定時は503返却（行49-52）
+- `src/app/api/report/reply-review/route.ts` — OAuthリフレッシュfetchにcache:"no-store"追加（行28）
+- `src/lib/validation.ts` — userCreateSchemaのrole定義を["admin","manager","viewer"]→["president","manager","part_time"]に変更（行69）
+
+#### コミット 77e69f0: 信頼性改善5件
+- `src/app/api/report/auto-post/route.ts` — ALLOWED_PHOTO_HOSTS定数+isAllowedPhotoUrl()関数追加（行515-527）、URL抽出後に.filter(isAllowedPhotoUrl)追加（行697）
+- `src/app/api/report/auto-post/route.ts` — catch{}3箇所にconsole.error追加（fixed_messages:行828、post_logs写真:行1008、投稿確認GET:行1111）
+- `src/app/api/cron/sync-shops/route.ts` — maxDuration 120→300に変更（行6）
+- `src/app/report/[shopId]/client.tsx` — useEffect3箇所にlet cancelled=falseフラグ+クリーンアップ追加（アクセス権チェック:行53、langStats:行406、メモ読み込み:行616）
+- `src/lib/spreadsheet.ts` — getShopsFromSpreadsheet()冒頭にreadShopListFromCache()フォールバック追加（行726-733）
+
+#### コミット 87544a4: 品質改善5件
+- `src/app/report/[shopId]/client.tsx` — dangerouslySetInnerHTMLのALLOWED_ATTR:["style"]削除（行2198）
+- `src/components/auth-guard.tsx` — useCallback+handleLogout依存チェーンをuseRef(router)+ローカル変数に全面書き換え。timeoutRef/handleLogout/resetTimeout削除、useEffect内にlogout/resetTimerをローカル定義（行17-47）
+- `src/app/api/report/reply-review/route.ts` — 独自getOAuthToken()を削除、import { getOAuthToken } from "@/lib/gbp-token"に統一
+- `src/app/api/report/create-post/route.ts` — 同上
+- `src/app/api/report/sync-media/route.ts` — 同上
+- `src/app/api/cron/execute-posts/route.ts` — リフレッシュ成功時にsystem_oauth_tokens.update()追加（行39-43）
+- `src/app/api/report/auto-post/route.ts` — scheduled_posts INSERT前に同一shop_id+scheduled_atの重複チェック追加（行895-901）
+
+### 数値・設定値
+- sync-shops maxDuration: 120秒 → 300秒
+- ALLOWED_PHOTO_HOSTS: ["dropbox.com", "www.dropbox.com", "dl.dropboxusercontent.com", "dl.dropbox.com", "lh3.googleusercontent.com"]
+- セッションタイムアウト: 30分（変更なし、実装方式のみ修正）
+- ブルートフォース: 10回試行/5分ブロック（変更なし）
+- 予約投稿重複チェック: status IN ("pending", "on_hold", "processing") で同一shop_id+scheduled_at検索
+
+### 未解決・次回やること
+- [ ] report/[shopId]/client.tsx 2335行のコンポーネント分割（大規模リファクタリング）
+- [ ] CSP 'unsafe-inline' 排除（nonce実装が必要）
+- [ ] auto-postのdryRunと本番実行で件数が異なる問題（写真展開がプレビュー時にスキップされる）
+- [ ] sync-reviewsの部分スキップ問題（offset更新失敗で一部店舗が永遠に未処理）
+- [ ] Dropbox一時URL失効対策（予約投稿のphoto_urlが4時間で無効化される）
+- [ ] execute-postsのsystem.tokensソース側もDB更新追加（現在はsystem_oauth_tokensのみ更新）
+- [ ] auto-postの残り28箇所のcatch{}にもエラーログ追加（今回は最危険3箇所のみ）
+- [ ] Google Sheetsスプレッドシートの公開設定確認（認証なしCSVエクスポートのセキュリティ）
+
+### 注意点・ハマったこと
+- auto-replyが無断で口コミ返信を実行していた。Cronで外部アクション（GBP投稿・返信・削除等）を実行する機能は必ずユーザーの事前承認が必要
+- reply-review/route.tsのgetOAuthTokenにcache:"no-store"がなく、Next.jsが古いトークンをキャッシュしていた。OAuthトークン取得は必ずcache:"no-store"必須
+- auth-guard.tsxのuseCallback依存配列でrouter→handleLogout→resetTimeout→useEffectの再実行チェーンが発生し、タイマーが不安定だった。useRef(router)で依存チェーンを断ち切る
+- auto-postの店舗名マッチでincludes()を使うと「麻布」が「麻布十番店」にマッチし誤った店舗に投稿される。正規化完全一致（normName()で全角半角・スペース揺れ吸収）に統一
+- validation.tsのロール定義(admin/viewer)とroles.ts(president/part_time)が不整合だった。ユーザー作成時に存在しないロールが付与される可能性があった
+- LINE署名検証がdigest===signatureの単純比較でタイミング攻撃に脆弱だった。crypto.timingSafeEqual()に変更
+- OAuthトークンのgetOAuthToken()が6ファイルに重複実装されていた。3ファイルをgbp-token.tsのimportに統一（残り: auto-post内のgetOAuthTokenは既にgbp-token.tsをimport済み）

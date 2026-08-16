@@ -1,0 +1,95 @@
+## 【2026-06-19】レポート全面改善 + リファクタリング
+
+### 決定事項
+- マップ表示数をGoogle検索より先に表示（全箇所統一）
+- 多地点順位の色を逆転（1-3位=青、4-10位=緑）
+- AIコメントを5セクション→3セクション構成（数値分析/口コミ傾向と強み/改善策）
+- AIコメントの見出しはclient側でindex別に強制付与（Claudeの出力に依存しない）
+- 通話はグラフから除外、テーブル内にイタリック+グレーで残す（合計との整合性確保）
+- API仕様変更注記をP3(マップ)とP4(検索)の両方に追加
+- Vitest導入、ビジネスロジックをreport-utils.tsに抽出してテスト可能に
+- スタイル定数をreport-styles.tsに分離
+- コンポーネント分割は次回セッション
+
+### 変更内容（具体的に）
+
+#### src/lib/report-utils.ts（新規）
+- pctChange, monthToNum, rankColor, rankTextColor, rankColorModal抽出
+- reviewDeltaColor, reorderKpis, formatAIComment, splitCommentPages抽出
+- diffColor, formatDiff抽出
+- COLORS, CHART_COLORS, AI_COMMENT_HEADINGS, SEARCH_QUERIES_PER_PAGE, AI_CHARS_PER_PAGE定数
+- KPI型はreport-data.tsからre-export（重複定義解消）
+
+#### src/lib/report-utils.test.ts（新規）
+- 42テスト（pctChange, monthToNum, rankColor, rankTextColor, rankColorModal, reviewDeltaColor, reorderKpis, formatAIComment, splitCommentPages, diffColor, formatDiff, 定数整合性）
+
+#### src/app/report/[shopId]/report-styles.ts（新規）
+- slideStyle, slideBarStyle, slideBodyStyle, stitleStyle, footerStyle
+- kpiTopColors, apiNoteStyle, API_NOTE_TEXT
+
+#### src/app/report/[shopId]/client.tsx
+- report-utils.ts/report-styles.tsからインポートに切り替え、重複ロジック・スタイル削除（2117→2074行）
+- P3/P4入れ替え（マップ→P3、検索→P4）
+- P2テーブル列順（マップ→検索）
+- KPIカード順番: reorderKpis()使用 + label判定でモバイル/PC表示
+- 多地点順位の色: 全8箇所入れ替え（rankColor, gridRankColorModal, 凡例4箇所, テーブル2箇所）
+- 通話: グラフから除外、テーブル内イタリック表示+注記
+- 口コミ件数テーブル: 件数行を白背景に統一
+- 検索語句: PER_PAGE=SEARCH_QUERIES_PER_PAGE(20)
+- 口コミ増加数: 凡例追加（20件以上/10〜19件/1〜9件/0件）
+- エリア塗り: rgba(251,192,45,.15)→.35
+- クリックで〜: no-print追加
+- API注記: P3+P4両方に赤文字太字
+- 月数表示: ハードコード12→monthlyLabels.length
+- AIコメント: formatAIComment()+splitCommentPages()使用、見出しclient側付与
+- a-d)→a-z)に拡張、箇条書き先頭マッチ修正
+- 未使用インポート6件削除
+
+#### src/lib/spreadsheet.ts
+- kpis配列: マップ→検索の順に入れ替え（buildReportData, generateComments両方）
+
+#### src/lib/report-api.ts
+- キャッシュパスのKPI再構築: マップ→検索の順に修正
+
+#### src/app/api/report/analyze/route.ts
+- プロンプト: 5→3コメント構成、各80-130文字、合計300文字以内
+- 箇条書き3項目、各1文で端的に
+- 見出し保持の壊れた正規表現を削除
+- 文字化け対策: ゼロ幅文字・制御文字・置換文字除去
+
+#### src/app/api/cron/monthly-analysis/route.ts
+- プロンプト: 3コメント構成に統一、各80-130文字、合計300文字以内
+
+#### vitest.config.ts（新規）
+- Vitest設定（environment: node、@エイリアス）
+
+#### package.json
+- scripts: test(vitest run), test:watch(vitest)追加
+- devDependencies: vitest, @vitejs/plugin-react追加
+
+### 数値・設定値
+- SEARCH_QUERIES_PER_PAGE: 15→20
+- AI_CHARS_PER_PAGE: 750→800（ページ分割制限）
+- AIプロンプト文字数: 各200-350→各80-130、合計600→合計300
+- 口コミエリア塗り透明度: 0.15→0.35
+- AIコメント fontSize: 17→15、lineHeight: 1.9→1.8、margin: 16→12
+- COLORS.rank1to3: "#16A34A"(緑)→"#2563EB"(青)
+- COLORS.rank4to10: "#2563EB"(青)→"#16A34A"(緑)
+
+### 未解決・次回やること
+- [ ] Step 3: client.tsxのコンポーネント分割（SlideKPI, SlideChart, SlideAIComment等）
+  - pageNumをuseRefまたはindex propsに変更
+  - 口コミ言語別分析（最も独立）から着手
+- [ ] client.tsx内のインライン色コード43箇所をCOLORS定数に置換
+- [ ] PDF生成のinnerHTML内のrankTextColor相当のインラインロジック統一
+- [ ] セキュリティ修正（パスワード平文保存、P-MAX認証なし、IDOR認可）
+- [ ] AI分析の全店舗再実行（新3セクション構成を反映）
+
+### 注意点・ハマったこと
+- KPI順番の修正箇所が3ファイルに分散（spreadsheet.ts, report-api.ts, client.tsx）。データの流れが複雑で1箇所だけ直すと不整合になる
+- report-api.tsのキャッシュパスでKPIを再構築する処理を見落としていた→本番でKPI順番が旧のまま表示された
+- `export type { KPI } from "./report-data"` がNext.jsビルドで解決できない→`import type` + `export type` に変更で解決
+- AIコメントのページ分割: 文字数ベースは実際の描画高さと一致しない。750→1200→550→450→400→420→800と7回変更。見出し+箇条書きの改行が高さを大きく消費する
+- Claudeが見出し（【数値分析】等）を省略することがある→client側で強制付与する設計に変更
+- 未使用インポートの削除時にSLIDE_Hを誤って消しかけた→ビルドで検出
+- 順位色の入れ替えが8箇所に散在（rankColor関数, gridRankColorModal, PDF用凡例, PDF用テーブル2箇所, 画面凡例, 画面テーブル2箇所）。grepで全箇所確認必須

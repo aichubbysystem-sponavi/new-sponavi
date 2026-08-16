@@ -1,0 +1,66 @@
+## 2026-07-07（第3セッション）セキュリティ全数監査＋anon直アクセス封鎖
+
+### 決定事項
+- 「セキュリティは完璧か？」の問いに対し、3並列エージェントで全数監査を実施
+  （①クライアントanon直読み全数 ②API認証カバレッジ ③シークレット露出・入力検証）。
+- 結論: 完璧ではない。「壁(API認証)は堅牢だが床(DB層RLS)に穴」。最重大は anon直アクセス15テーブル。
+- コードで塞げる分（書き込み5系統サーバー化・サーバー匿名read除去・delete-post検証）は即修正・デプロイ。
+- RLS有効化SQLは作成したが、本番Supabaseへサンドボックスから到達不可のため実行はユーザーに委ねる。
+
+### 監査結果サマリ
+【① anon直アクセス】15テーブルにRLS形跡なし（sql/を自分でも全文検索し裏取り）。
+  うち書き込み5系統(scheduled_posts承認/差戻し・fixed_messages・audit_logs・line_alerts)が
+  所有チェック無しでanon実行可能だった。特にaudit_logsはuser_nameクライアント算出で偽造可能。
+【② API認証】route.ts 84本すべて認証あり。認証なしは意図的公開5本(LINE webhook=HMAC/
+  pmax共有=UUIDトークン/report登録=pending強制)のみ。保護漏れゼロ。middleware CSRFはBearer前提で妥当。
+  唯一の弱点=共有トークンにexpires_at・失効機構なし(中)。
+【③ シークレット】src/にハードコード無し。危険なのはローカル運用ファイル(メモ.txt/.env.local/
+  get-ads-token.js/client_secret*.json)への平文集積。git未追跡だがOneDrive同期。
+  delete-postのpostName無検証(パストラバーサル余地)を発見。
+
+### 変更内容（コミット順）
+dbc03a3 クライアント直書き5系統をサーバーAPI化:
+  - PATCH /api/report/scheduled-posts に approvalStatus 追加＋status/approvalStatusホワイトリスト検証。
+    posts/page.tsx の承認/差戻し/承認→予約の直update3箇所を api.patch に置換
+  - 新設 PUT/GET /api/report/fixed-messages（requireShopAccessById、件数50/文字数制限）。
+    basic-info/fixed-message から supabase直delete/insert を排除、api import に変更
+  - 新設 POST /api/report/audit-log（user_nameを検証済みJWTのsubからサーバー解決）。
+    lib/audit-log.ts を api.post 方式に全面書換
+  - 新設 PATCH /api/report/line-alerts（president/manager限定）。page.tsx の直update置換
+  - 全数grep確認: src/app配下のクライアントコンポーネントに .insert/.update/.delete/.upsert 残存ゼロ
+edb7d71 サーバー匿名read→service_role化 ＋ delete-post検証:
+  - report/survey/[shopId]/page.tsx（顧客向け公開）の shops 読取を getSupabase() に
+  - report/page.tsx getAnalyzedShops の report_analysis 読取を getSupabase() に
+  - report/actions.ts の SERVICE_ROLE||ANON フォールバックを service_role 固定に
+  - 新設 lib/gbp-validate.ts isValidGbpPostName ＋テスト6件。delete-postで形式検証
+    （../・連続スラッシュ・クエリ/不正文字・localPosts欠如・非accounts/locationsルートを拒否）
+97ab1cd RLS有効化SQL（要ユーザー実行）:
+  - sql/2026-07-07_enable_rls_client_tables.sql。15テーブルにRLS有効化+authenticatedにSELECTのみ+
+    anon全遮断。DO $$ループで冪等・存在チェック付き。検証クエリ・アプリ確認・ロールバック同梱
+
+### 数値・設定値
+- テスト: 103件 → 109件（gbp-validate 6件追加）全パス。tsc 0 / next build 成功（各コミットで確認）
+- サーバー化した書き込みAPI: 新規3本（fixed-messages/audit-log/line-alerts）＋既存PATCH拡張1本
+- RLS対象: 15テーブル。authenticatedはSELECTのみ（書き込みはservice_role経由に一本化）
+
+### 未解決・次回やること（重要度順）
+- [ ] 【最優先・ユーザー作業】sql/2026-07-07_enable_rls_client_tables.sql を本番Supabase SQL Editorで実行。
+      実行前に `select tablename,rowsecurity from pg_tables where schemaname='public'` で現状確認。
+      実行後は同SQL下部の検証手順（anon遮断・authenticated読取・アンケート表示・投稿承認）を必ず実施。
+- [ ] 【要ローテーション】メモ.txt の GitHub PAT / LINEトークン / DBパスワード（OneDrive同期のため）
+- [ ] 共有トークン(pmax/share・group-share)に expires_at ＋ 失効API/UI を追加（解約クライアントURLが恒久有効）
+- [ ] Next.js 14.2.35 の既知脆弱性（npm audit high複数）。Vercel運用で多くは緩和されるが next 更新を検討
+- [ ] 【次フェーズRLS】part_time の店舗単位行フィルタ（DB層テナント分離）。現状はアプリ層getUserAllowedShopsのみ
+- [ ] report/actions.ts のServer Actionに認証チェックなし（影響は再同期のみ・低）。要トークン受け渡し設計
+- [ ] Maps APIキーにHTTPリファラー制限を設定（Google Cloud Console）
+
+### 注意点・ハマったこと
+- RLSは「authenticated=ログイン済み」には効かせず SELECT を通すのが肝。アプリのクライアント読み取りは
+  ログイン後=authenticatedロールで動くため、anonだけ遮断すれば公開キー流出の穴は塞げる（読み取りは壊れない）。
+  書き込みは全てservice_role(BYPASSRLS)のサーバー経由に一本化済みなので authenticated に書き込み権限は不要。
+- ただしRLSを有効化する前に「サーバー側の匿名read」を service_role 化しておかないと、
+  公開アンケート(shops読取)や report一覧(report_analysis読取)が anon遮断で壊れる。→ edb7d71 で先に対応。
+- 本番Supabaseへはサンドボックスから到達不可（.env.localのrefは古い/DNS不可）。実RLS状態の確認と
+  SQL実行・SET ROLE anon 検証は Supabase ダッシュボードで行う必要がある。
+- authenticated USING(true) は「ログイン済みなら全店舗読める」まま。これは社内スタッフ信頼前提の現行方針を踏襲。
+  part_time の担当店舗限定はアプリ層で担保しており、DB層の行フィルタRLSは次フェーズ。

@@ -1,0 +1,48 @@
+■ 2026-07-15 レポートページ表示高速化（キャッシュ即表示+裏更新）
+
+【経緯】
+- /report で店舗クリック→「レポートを読み込み中...」が数秒続く件の改善依頼
+- 実測調査の結果:
+  - Vercelはhnd1(東京)、DBクエリは合計約0.5秒（1本17〜80ms）→ 問題なし
+  - 遅さの主因は /api/report/data が「シートのリアルタイム順位取得(1〜9秒)」を
+    含む全処理の完了を待ってから返す構造だったこと
+  - シート取得は順位(fetchRankingFromSheets)と推移(fetchRankingHistoryFromSheets)で
+    同じタブ探索+同じCSVダウンロードを2系統実行していた（完全な重複）
+  - 順位データがシートに存在しない店舗は全探索で4〜9秒かかる（発見できず終わる）
+
+【変更内容】コミット e0080c6
+1. src/app/report/[shopId]/data-loader.tsx
+   - 2段階取得に変更: fast=1（シート取得省略）で即表示 → source==="cache" の場合のみ
+     裏で通常リクエストを投げ、内容が変わっていれば差し替え（JSON文字列比較）
+   - fast側がスプレッドシート直読み(source!=="cache")だった場合は裏更新なし（既に最新）
+2. src/app/api/report/data/route.ts
+   - クエリパラメータ fast=1 → getReportData(..., { skipSheets: true })
+3. src/lib/report-api.ts — getReportData のキャッシュパスを並列化
+   - A:シート順位+推移 / B:グリッド順位 / C:検索語句+パフォーマンス / D:カテゴリ を
+     Promise.all で並列実行（従来は直列）
+   - 口コミ分析はperfオーバーレイ後のmonthlyLabelsに依存するため並列フェーズの後
+   - skipSheets:true でAを省略（キャッシュのrankingHistory/keywordsをそのまま使用）
+4. src/lib/ranking-fetch.ts
+   - fetchRankingAndHistoryFromSheets を新設: タブ探索+CSV取得を1回だけ行い、
+     順位と推移を両方パース（探索順・A1検証・パーサは既存関数と同一）
+   - 発見済みタブ位置のメモリキャッシュ(24h)。ミス時は全探索にフォールバック
+   - 既存の fetchRankingFromSheets / fetchRankingHistoryFromSheets は
+     analyze/route.ts・spreadsheet.ts が使用中のため残置
+
+【検証】
+- 実シート8店舗（Sheet1直hit/Sheet2経由/データなし店舗を含む）で
+  新旧関数の出力が JSON完全一致（scratchpadの compare-ranking-fetch.ts）
+- タブ位置キャッシュ有効時: 2回目取得 約0.6秒（初回3〜5秒）
+- tsc / next build ともにエラーなし
+- git push → Vercel自動デプロイ
+
+【体感の変化（期待値）】
+- 変更前: 全処理完了まで真っ暗な読み込み画面（3〜9秒）
+- 変更後: キャッシュ済みデータで即表示（1秒前後）→ 数秒後に最新順位へ静かに差し替え
+- 仕様として了承済み: 表示後に順位数値が古→新に変わる動きが起こり得る
+
+【注意・残タスク】
+- 順位データがシートに無い店舗は裏側の探索が毎回4〜9秒走る（画面には影響なし）。
+  気になる場合は「見つからなかった」結果の短期キャッシュ(負キャッシュ)追加を検討
+- ユーザーのブラウザに古いリフレッシュトークン起因の 401/400 が出ていた
+  （auth/v1/token 400, my-role 401）。ログアウト→再ログインで解消するはず。別件。

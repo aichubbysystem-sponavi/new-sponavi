@@ -1,0 +1,54 @@
+## 【2026-06-23】P-MAXレポート全面リニューアル（MEO風KPI＋GBP月次推移追加）
+
+### 決定事項
+- P-MAXレポートのページ構成を大幅変更（旧6KPIカード→MEO風10KPI＋GBP月次推移3ページ追加）
+- P1: 前月比は常に表示、前年比は1年分データがある店舗のみ表示（1年未満は前月比のみ）
+- 日次データは全期間表示→対象月のみに変更
+- 「平均CPC」→「平均クリック単価」に統一
+- 予約データはデータソース未接続のため0固定（既知問題、前回から持ち越し）
+
+### 変更内容（具体的に）
+
+#### src/lib/pmax-sheet.ts
+- PmaxGbpRowインターフェースにtotalImpressions（D列 = index 3）を追加
+- fetchAllRows()のrows.push()にtotalImpressions: parseNum(cols[3])を追加
+
+#### src/app/pmax/store/page.tsx — 全面書き換え
+- **P1 KPIサマリー**: 6カード(3x2) → 10カード(3+3+4)
+  - Row1: 総表示回数/総クリック/総広告費（Google Ads API）
+  - Row2: 合計来店数/電話/経路案内（GBPスプレッドシート）
+  - Row3: メニュークリック/予約/保存・共有/WEBサイト（GBPスプレッドシート、4列グリッド）
+  - 各カードにComparisonBadgeコンポーネント追加（前月比＋前年比）
+- **P2 言語別広告指標**: テーブルヘッダーの「平均CPC」→「平均クリック単価」に変更
+- **P3 GBP月次推移①（新規）**: 総表示回数/電話/経路案内の月次棒グラフ＋テーブル
+- **P4 GBP月次推移②（新規）**: メニュークリック/予約/WEBサイトの月次棒グラフ＋テーブル
+- **P5 GBP月次推移③（新規）**: 保存・共有の月次棒グラフ＋テーブル（1列幅広表示）
+- **P6〜 言語別月次推移**: ページ番号をP3→P6開始に変更、テーブルの「平均CPC」→「平均クリック単価」
+- **日次データ**: 全期間→currentMonthKeyでフィルタ（対象月のみ）、ヘッダーに「（X月）」表示追加
+- GBPデータをuseEffect内で/api/pmax/gbpから並列取得（Promise.all）
+- getDateRange(12)→getDateRange(13)に変更（前年比計算のため13ヶ月分取得）
+- 新コンポーネント: KpiCard, ComparisonBadge, GbpTrendPage
+- kpiTopColors: 6色→10色に拡張
+
+### 数値・設定値
+- KPIカード数: 6 → 10
+- kpiTopColors: 6色 → 10色
+- getDateRange: 12ヶ月 → 13ヶ月（前年同月比較のため）
+- GBP月次推移ページ: 3ページ（P3/P4/P5）
+- totalPages計算: 2 + gbpPages(3) + languages.length * 2
+- 予約: 0固定（booking key → return 0）
+- 日次フィルタ: date.startsWith(currentMonthKey) で対象月のみ
+
+### 未解決・次回やること
+- [ ] 予約データソースの接続（スプレッドシートに予約列がない。M列「注文」とは別？要確認）
+- [ ] P-MAXトップページのパフォーマンス改善（15+アカウント全取得で20-40秒）
+- [ ] 旧ページ（[customerId]/page.tsx）の削除判断
+- [ ] 本番Supabaseで `UPDATE user_profiles SET password_display = NULL;` 実行
+- [ ] レポートサブドメイン認証追加（P0セキュリティ）
+- [ ] review-language-stats認証追加（P0セキュリティ）
+
+### 注意点・ハマったこと
+- GBPスプレッドシートの月フォーマットは "YYYY/MM"、Google Ads APIの月フォーマットは "YYYY-MM-01" → 比較時にフォーマット変換が必要
+- GBPデータの店舗名マッチは部分一致（pmax-sheet.ts getGbpDataForShop）。意図しない店舗にマッチする可能性あり（既知問題）
+- 予約はスプレッドシートに列が存在しない。M列は「注文」で別指標。GbpTrendPageのgetValue()で"booking"キーは常に0を返す実装
+- 前年比判定: adsLastYear の impressions/clicks/costMicros いずれかが0超なら hasYearData=true。GBPは gbpLastYear の有無で判定

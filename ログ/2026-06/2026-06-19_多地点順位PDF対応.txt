@@ -1,0 +1,53 @@
+## 【2026-06-19】多地点順位計測 PDF対応（8ページ目問題の全面改修）
+
+### 課題
+- 多地点順位計測ページ（8ページ目）がタブ切替式のため、PDF化すると選択中の1KWしか表示されない
+- クライアントに全KWのマップを含むPDFを提供する必要がある
+
+### 決定事項
+- 画面表示: 1ページ+KWタブ切替（元の設計を維持）
+- PDF: サマリーページ（全KW比較+月別推移）+ マップ左右2枚/ページ
+- PDF生成: window.print()方式（ブラウザネイティブ描画でWebと完全一致）
+- マップのみhtml2canvasでキャプチャ→img埋め込み（Google Maps動的生成の制約回避）
+
+### 変更内容（具体的に）
+
+#### client.tsx
+- renderGridMapForKw: labelYOffsetパラメータ追加（PDF時-2.5でhtml2canvasのSVGラベルズレを補正）
+- gridMapRefs/gridGoogleMapRefs/gridMarkersRefs: 単一ref→Record型（全KWのマップを保持）
+- handlePdfDownload: 全面書き換え
+  - html2canvas+jsPDF方式 → window.print()方式に切替
+  - サマリースライド（全KW比較テーブル+各KW月別推移）をDOMに動的挿入
+  - マップペアスライド（左右2枚）をDOMに動的挿入
+  - 各KWのマップをアクティブスライドで切替→html2canvasキャプチャ→img埋め込み
+  - キャプチャ時labelYOffset=-2.5でラベル上方補正
+  - window.print()実行→afterprintでDOM復元
+- gridスライド: grid-kw-pairラッパー+grid-kw-hiddenクラスで全KWをDOMに配置
+  - 画面: position:absolute;left:-99999px でオフスクリーン配置
+  - 印刷: position:static に復元
+
+#### layout.tsx
+- @page { size: A4 landscape; margin: 0; } を@media printの外に配置
+- * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } 追加
+- .grid-print-slide { display: flex !important; } 追加
+- .grid-kw-hidden のscreen/print切替CSS
+
+### 数値・設定値
+- マーカーSVG: scale=18, fontSize=14px, labelYOffset=-2.5（PDF時）
+- マップキャプチャ: html2canvas scale=2, 待ち時間2000ms/KW
+- スライドサイズ: SLIDE_W=1123px, SLIDE_H=794px
+- print用マップコンテナ: width:100%, height:500px
+
+### 試行錯誤の記録（重要ナレッジ）
+1. html2canvasのテキストベースライン問題: line-height, flexbox, grid, padding, Canvas API描画すべて試したが完全解決せず
+2. HTMLオーバーレイ(OverlayView)方式: html2canvasがflexbox/gridの中央揃えを正確にレンダリングしない
+3. Google Maps動的インスタンス: 新規作成したDOMコンテナにはタイル読み込みが不安定（idle待ちでも空白になることがある）
+4. 最終解決策: SVGマーカー+labelOrigin補正（-2.5）でhtml2canvasのズレを相殺
+5. window.print()はAdobe PDFプリンタでは@page sizeが効かない → 「PDFに保存」を使う必要あり
+6. 背景色は-webkit-print-color-adjust: exact必須 + 印刷ダイアログで「背景のグラフィック」チェック
+
+### 未解決・注意点
+- 凡例+平均順位がマップキャプチャ画像とprint用スライドの両方に表示される（2重表示）→ 次回修正可能
+- 印刷ダイアログで「背景のグラフィック」を手動チェックする必要あり
+- ファイル名が自動設定されない（window.print()の制約）
+- totalPagesカウントがgridKW数分に増えている

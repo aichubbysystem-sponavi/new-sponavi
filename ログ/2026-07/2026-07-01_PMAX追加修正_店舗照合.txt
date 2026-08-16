@@ -1,0 +1,74 @@
+## 【2026-07-01 午後】P-MAX追加修正 + 店舗照合
+
+### 決定事項
+- P-MAXの自動同期を完全廃止、手動「最新データに更新」ボタンのみに変更
+- 日次データはsync時に取得せず、店舗詳細ページでオンデマンド取得に変更（API呼び出し半減）
+- アカウント→店舗マッピングをDBキャッシュし、2回目以降はP-MAXがあるアカウントだけ叩く設計に変更
+- P-MAX店舗照合API（check-shops）を追加
+- 店舗シートのC列219店舗 vs DB305店舗の照合を実施 → 134店舗一致、85店舗不一致（表記ゆれ含む）
+
+### 変更内容（具体的に）
+
+#### P-MAX sync API根本改修
+- `src/app/api/pmax/sync/route.ts` — 全面書き直し:
+  - shopNames引数を廃止（月指定のみで全店舗一括取得）
+  - バッチ分割をやめて1回のsync呼び出しで完結
+  - 日次データ取得を除外（月次のみ）
+  - 429リトライ（指数バックオフ3回: 3秒→8秒→15秒）
+  - アカウントマッピングキャッシュ（pmax_account_mapping テーブル）
+  - 初回: 全アカウントスキャン→マッピング保存、2回目以降: マッピング済みのみ
+  - forceFullScan=true で全アカウント再スキャン可
+  - トップレベルtry/catchでエラー詳細をレスポンスに含める
+  - 429エラー時はステータス429で日本語メッセージ返却
+
+#### フロントエンド
+- `src/app/pmax/page.tsx` — 全面書き直し:
+  - 自動同期を完全削除（ページロードでAPIを呼ばない）
+  - チェックボックス・全選択・全店舗取得ボタンを削除
+  - 「最新データに更新」ボタンのみ（手動同期）
+  - 429エラー時「Google Ads APIの1日の利用上限に達しました」表示
+  - データなし時「この月のデータはまだありません」+案内テキスト
+
+#### 日次データのオンデマンド取得
+- `src/app/api/pmax/store-detail/route.ts` — 日次データがDBになければ、その店舗のaccountIdだけでGoogle Ads APIから取得→DB保存
+
+#### 日付バグ修正
+- `src/app/api/pmax/sync/route.ts` — toISOString()→手動フォーマット（UTC変換で日付ズレ防止）
+- `src/app/api/pmax/list-stores/route.ts` — 同上
+
+#### 新規API
+- `src/app/api/pmax/check-shops/route.ts` — 新規: 店舗名リストがDBに存在するか照合するAPI
+
+#### 新規テーブル
+- `sql/pmax_store_data.sql` — pmax_account_mapping テーブル追加（account_id, shop_name, UNIQUE制約, RLS）
+
+### 数値・設定値
+- sync並列数: 15アカウント同時
+- sync バッチ間ウェイト: 200ms
+- 429リトライ: 3回（3秒→8秒→15秒）
+- sync maxDuration: 300秒
+- list-stores maxDuration: 300秒
+- axios timeout（フロント→sync）: 290秒
+- axios timeout（フロント→list-stores）: 120秒
+- DB insert バッチサイズ: 100行
+
+### 未解決・次回やること
+- [ ] Google Ads API 429クォータ回復後に4月/7月の同期テスト（クォータは太平洋時間深夜=日本時間16-17時頃リセット）
+- [ ] アカウントマッピングキャッシュの初回フルスキャン動作確認
+- [ ] 85店舗の不一致分析: DB内の305店舗名一覧をExport→表記ゆれ vs 本当にP-MAXなしを分類
+  - 次回SQL: `SELECT DISTINCT shop_name FROM pmax_store_data WHERE month = '2026-06' ORDER BY shop_name;`
+  - Export→CSVで全店舗名取得→85件と突き合わせ
+- [ ] store-detailの日次オンデマンド取得にリトライロジック追加
+- [ ] PostgREST .eq()回避ハック（store-summary全件取得+JSフィルタ）の根本原因調査
+- [ ] セキュリティ修正（前セッションから引き続き未着手）
+- [ ] 多地点順位チェック500店舗計測の進捗確認
+- [ ] Google Ads APIクォータ引き上げ申請の検討（GCP API Center → Basic→Standard）
+
+### 注意点・ハマったこと
+- **429 RESOURCE_EXHAUSTED**: 50店舗バッチ×6回の設計で全292アカウントを毎回走査→400回のAPI呼び出しでクォータ枯渇。1回のsyncで全店舗分を一括取得する方式に変更したが、今日中にクォータが回復せずテスト未完了
+- **290秒タイムアウト**: 292アカウント×月次+日次=584回のAPI呼び出しが300秒超過。日次データを除外して月次のみ（293回）に削減して解決
+- **自動同期の無限ループリスク**: データなし→自動sync→失敗→再レンダー→自動sync...のループ。autoSyncTriggeredのrefで防止したが、useEffectの依存配列で再トリガーされるケースあり。最終的に自動同期自体を廃止して解決
+- **エラー詳細が見えない問題**: sync APIにトップレベルtry/catchがなく、Next.jsの500レスポンスにエラー内容が含まれなかった。try/catch追加+フロントでaxiosのresponse.data.errorを表示するよう修正
+- **TypeScript Set iterable エラー**: `[...new Set()]`がtsconfig target設定で使えない。`Array.from(new Set())`に変更
+- **スプレッドシートに6月データなし**: GBPデータ用スプレッドシート(gid=372148068)に2026/06のデータが未入力。GBPデータの照合はシートではなくDBのpmax_store_dataを使う必要がある
+- **SQL vs ブラウザコンソールの混同**: ユーザーがSQLをブラウザコンソールに、JavaScriptをSupabase SQL Editorに貼り間違えるケースあり。指示を明確にする必要あり

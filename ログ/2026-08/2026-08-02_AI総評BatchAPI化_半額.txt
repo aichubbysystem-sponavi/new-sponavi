@@ -1,0 +1,56 @@
+## 【2026-08-02】AI総評の一括生成をBatch API（トークン半額）に対応（main 943b0ae）
+
+### 背景
+- コスト削減施策の②（ユーザー承認済み）。AI総評は月次一括で急がないため、
+  Anthropic Message Batches API（全トークン半額・通常1時間以内に完了）が使える
+- 効果試算: ¥15〜20/店 → ¥8〜10/店。600店規模で月▲3,000〜4,000円
+- 品質は同期版と完全同一（同じモデルclaude-sonnet-4-6・同じプロンプト・同じ照合ゲート）
+
+### アーキテクチャ
+```
+UI「Batchで一括投入」→ /api/report/analyze {batchPrepare:true}（10店ずつ）
+  └ 既存のデータ準備ループを共用し、店舗ごとの材料(payload)を収集
+  └ submitAnalysisBatch: Anthropic /v1/messages/batches へ一括投入 + DB記録
+UI「結果を取り込む」→ POST /api/report/analyze-batch
+  └ pollAnalysisBatches: 完了バッチの結果JSONLを取得
+     ├ パース成功+照合OK → fixRating→report_analysisへupsert（同期版と同じ保存）
+     ├ 生成失敗 → 口コミ全件→50件の縮小リトライ（1回・同期版踏襲）
+     ├ 照合違反 → 修正指示付き再生成（最大2回・同期版MAX_RETRY踏襲）
+     └ 2回でも違反 → 該当ページ総評だけ空欄化して保存（同期版と同じ方針）
+  └ リトライは「次ラウンドのバッチ」として自動再投入（全店完了まで1〜3時間）
+```
+
+### 変更ファイル
+- **src/lib/analyze-core.ts（新設）**: buildAnalyzePrompt / parseAnalyzeText /
+  applyFixRating / saveAnalysisRow / ANALYZE_MODEL / ANALYZE_MAX_TOKENS。
+  analyze/route.tsから移設（ロジック不変）。**今後プロンプトを直すときはここ**
+- **src/lib/analyze-batch-lib.ts（新設）**: submitAnalysisBatch / pollAnalysisBatches
+- **src/app/api/report/analyze/route.ts**: プロンプト/パース/保存をlib委譲（-408行）、
+  batchPrepareモード追加。同期パス（個別「再分析」）の挙動は不変
+- **src/app/api/report/analyze-batch/route.ts（新設）**: GET=状況一覧（社長/幹部/社員）、
+  POST=取り込み+再投入（withAudit PAID_OP。監査ログ・Slack通知は既存の枠組みに乗る）
+- **src/app/review-analysis/page.tsx**: 「Batchで一括投入（半額）」ボタン・状況パネル・
+  「結果を取り込む」ボタン・90秒自動状況更新。既存の即時実行ボタンはそのまま
+- **sql/2026-08-02_analysis_batches.sql**: analysis_batches / analysis_batch_items
+  （RLS有効・ポリシー無し=service roleのみ。psycopg2で本番適用済み 2026-08-02）
+
+### 運用（月次の全店分析のやり方が変わる）
+1. 口コミ分析ページで店舗を全選択 → **「Batchで一括投入（半額）」**
+   （10店ずつデータ準備するので600店で15〜30分。タブは投入完了まで開けておく）
+2. 投入後はタブを閉じてOK。約1時間後にページを開き **「結果を取り込む」** を押す
+3. 「再生成へN件」と出たら（照合違反の修正ラウンド）、さらに約1時間後にもう一度取り込む
+4. 全バッチが「完了」になれば終了。個別の急ぎ再分析は従来の「口コミ分析を実行」を使う
+
+### 検証
+- npx tsc --noEmit / 343テスト / npm run build 全パス
+- 同期パスはコード移設のみ（プロンプト文字列は移設前後で同一内容を維持）
+- **実バッチの動作確認は未実施**。次回の月次分析で1〜5店舗の小規模投入で
+  試してから全店に使うこと（投入→1時間→取り込み→report_analysis反映を確認）
+
+### 注意点・ハマりどころ
+- プロンプト修正は今後 src/lib/analyze-core.ts へ（route.ts側にはもう無い）
+- 再投入が失敗した場合（submit_failedバッチにpendingアイテムが残る）は
+  自動リカバリしない。対象店舗を通常の同期分析で流し直すのが早い
+- Batch結果の保存はUIの「結果を取り込む」を押した時だけ走る（cron無し。
+  必要になったら/api/cronに追加する）
+- 監査ログ: 投入はanalyze側のPAID_OP（チャンクごと）、取り込みはanalyze-batch側のPAID_OP

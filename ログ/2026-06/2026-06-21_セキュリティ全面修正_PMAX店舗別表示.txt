@@ -1,0 +1,124 @@
+## 【2026-06-21】セキュリティS級A級全面修正 + P-MAX店舗別表示リファクタ
+
+### 決定事項
+- 4エージェント並列コードレビュー実施 → 総合評価D+（MVP動作、商用不合格）
+- S級5件 + A級4件のセキュリティ修正を即日実施
+- P-MAXページをGoogle Adsアカウント単位 → 店舗単位の表示に全面変更
+- 既存の[customerId]ページは切り戻し用に残存
+- キャンペーン名パターン「P-MAX {店舗名} {言語}」「来店CV用[数字] {店舗名}」を確認・パーサー実装
+
+### 変更内容（具体的に）
+
+#### セキュリティ修正（commit: dea6945）
+
+##### S-1: P-MAX全5ルートにverifyAuth追加
+- src/app/api/pmax/accounts/route.ts — verifyAuth追加、catch (error: any) → catch (error: unknown)、error.message漏洩除去
+- src/app/api/pmax/daily/route.ts — verifyAuth追加、catch (error: any) → catch (error: unknown)、error.message漏洩除去
+- src/app/api/pmax/monthly/route.ts — 同上
+- src/app/api/pmax/summary/route.ts — 同上
+- src/app/api/pmax/gbp/route.ts — 同上
+- src/app/pmax/page.tsx — supabase.auth.getSession()からトークン取得、全fetchにAuthorizationヘッダー追加
+- src/app/pmax/[customerId]/page.tsx — 同上、authFetchヘルパーで全6箇所のfetchを認証付きに
+
+##### S-2: password_display平文保存廃止
+- src/app/api/report/users/route.ts:53 — `password_display: password` 行を削除
+- src/app/user-management/page.tsx — パスワード列（th + td）を削除、型定義からpassword_display削除
+- src/lib/api-types.ts — DbUserProfileRowからpassword_displayフィールド削除
+- ※本番DBで `UPDATE user_profiles SET password_display = NULL;` の実行が必要
+
+##### S-3: RBAC実装（役割別アクセス制御）
+- src/lib/supabase.ts — AppRole型、getUserRole()、requireRole()を追加
+- src/app/api/report/users/route.ts — GET/POST/DELETE全てrequireRole(["president"])に変更
+- src/app/api/report/shop-cancel/route.ts — POSTをrequireRole(["president", "manager"])に変更
+- src/app/api/report/analyze/route.ts — POSTをrequireRole(["president", "manager"])に変更（動的import）
+- src/app/api/report/generate-post/route.ts — import変更 verifyAuth → requireRole
+- src/app/api/report/bulk-generate/route.ts — 同上
+- src/app/api/report/create-post/route.ts — 同上
+- src/app/api/report/reply-review/route.ts — 同上
+
+##### S-4: OAuthトークンUPDATEのWHERE句修正
+- src/app/api/report/create-post/route.ts — `.not("account_id", "is", null)` → account_id有無で分岐（eq account_id or eq refresh_token）
+- src/app/api/cron/sync-shops/route.ts — 同上
+- src/app/api/report/reply-review/route.ts — 同上 + 残骸のWHERE句なしupdate文を削除（二重更新バグ修正）
+- src/app/api/report/sync-media/route.ts — 同上
+- 全4箇所でSELECTにaccount_idカラムを追加
+
+##### S-5: 監査ログにJWTユーザーID反映
+- src/app/api/report/users/route.ts — POST/DELETEでauth.sub → user_profiles検索 → 実ユーザー名を監査ログに記録（ハードコード「社長」廃止）
+
+##### A-1: SSRF防止（photoUrlドメインホワイトリスト）
+- src/app/api/report/create-post/route.ts:95-105 — new URL()でパース、httpsのみ + allowedHosts（dropbox.com, dl.dropboxusercontent.com, lh3.googleusercontent.com）チェック
+
+##### A-2: review-language-stats認証強化
+- src/app/api/report/review-language-stats/route.ts — Refererホスト名厳密チェック（new URL(referer).hostname）+ 入力上限20件（slice(0, 20)）
+
+##### A-4: エラーレスポンスから内部情報除去
+- src/app/api/report/create-post/route.ts:130 — `errBody.slice(0, 200)` → 汎用メッセージ
+- src/app/api/report/reply-review/route.ts:112 — `errBody.slice(0, 300)` + replyUrl漏洩 → 汎用メッセージ
+- src/app/api/report/users/route.ts:47 — `authError.message` → サーバーログ + 汎用メッセージ
+- src/app/api/pmax/daily|monthly|summary|gbp/route.ts — `error.message` → 汎用メッセージ
+- src/app/api/report/create-post/route.ts:152 — `catch (err: any)` + err.message → `catch {}` + 汎用メッセージ
+
+##### A-5+B-9: CSRF強化 + localhost開発限定
+- src/middleware.ts — Origin未送信時にRefererヘッダーでホスト名検証する二段階チェックに変更
+- src/middleware.ts — ALLOWED_ORIGINSのlocalhost:3000/3001をNODE_ENV==="development"時のみに変更
+
+#### P-MAX店舗別表示リファクタ（commit: e93b140）
+
+##### 新規ファイル
+- src/lib/google-ads.ts — parseCampaignName()、getStoreSummaries()、getStoreDetail()、StoreSummary型、StoreDetailCampaign型を追加
+- src/lib/google-ads.test.ts — parseCampaignNameの12テスト（全パターン網羅）
+- src/app/api/pmax/store-summary/route.ts — GET: 全アカウント横断店舗別サマリー（maxDuration: 120）
+- src/app/api/pmax/store-detail/route.ts — GET: 特定店舗の言語別月次・日次データ（maxDuration: 120）
+- src/app/pmax/store/page.tsx — 店舗詳細ページ（Suspense境界付き、useSearchParams使用）
+
+##### 変更ファイル
+- src/app/pmax/page.tsx — アカウント一覧 → 店舗一覧に全面書き換え。言語バッジ表示、store-summary API使用
+- src/lib/google-ads.ts — parseCampaignName関数追加（P-MAX/来店CV用パターン対応）
+
+### 数値・設定値
+- RBAC許可ロール:
+  - users GET/POST/DELETE: ["president"]
+  - shop-cancel POST: ["president", "manager"]
+  - analyze/generate-post/bulk-generate/create-post/reply-review POST: ["president", "manager"]
+- SSRF許可ドメイン: dropbox.com, www.dropbox.com, dl.dropboxusercontent.com, lh3.googleusercontent.com
+- review-language-stats入力上限: shopIds/shopNames各20件
+- CSRF ALLOWED_ORIGINS: localhost開発時のみ（本番ではhttps://のみ）
+- store-summary/store-detail maxDuration: 120秒
+- キャンペーンデータ取得並列数: 5（BATCH=5）
+- KNOWN_LANGUAGES: Japanese, Chinese, English, Korean, Thai, Vietnamese, French, Spanish, Portuguese, German, Italian, Russian, Arabic, Hindi
+- テスト: 82件（既存70 + parseCampaignName 12）
+
+### 未解決・次回やること
+- [ ] 本番Supabaseで `UPDATE user_profiles SET password_display = NULL;` 実行（既存平文データ削除）
+- [ ] P-MAXトップページのパフォーマンス改善（15+アカウント全取得で20-40秒かかる。キャッシュ検討）
+- [ ] 未知のキャンペーン名パターンがあればparseCampaignNameに追加
+- [ ] P-MAX旧ページ（[customerId]/page.tsx）の削除判断（新ページ安定後）
+- [ ] AI系エンドポイントのユーザー単位レート制限（A-3、Redis等が必要）
+- [ ] B級品質改善: 空catchブロックログ追加、zodバリデーション未適用ルート、月フォーマント統一
+- [ ] C級: any型400+箇所排除、console.log200+箇所整理、auth-verify.ts削除、デッドコード削除
+- [ ] client.tsx分割（2089行→hooks/コンポーネント分離）
+
+### 注意点・ハマったこと
+
+#### セルフレビューで発見した自作バグ（5件）
+1. **S-4: account_idがNULLの行でUPDATEが空振り** — `.eq("account_id", null)`はSQL的にマッチしない。refresh_tokenフォールバック追加
+2. **reply-review: 元のupdate文が残骸として残り二重更新** — WHERE句なしのupdateが全行に影響するデータ破壊バグ。残骸削除
+3. **review-language-stats: Refererのincludes()が部分一致でバイパス可能** — `referer.includes("new-spotlight-navigator.com")` → `new URL(referer).hostname`で厳密比較
+4. **create-post: catch (err: any)でerr.messageがクライアント漏洩** — 汎用メッセージに変更
+5. **users: authError.messageがクライアント漏洩** — サーバーログ+汎用メッセージに変更
+
+#### P-MAX店舗別表示で発見した問題（3件）
+1. **店舗名に`/`が含まれるとURLが壊れる** — `il pleut / イルプル`等。動的セグメント[shopName] → クエリパラメータ`?name=`に変更
+2. **`来店CV用`プレフィックスのキャンペーン名が解析不能** — 店舗グループ7で`来店CV用 とりとん 大久保店`（P-MAXプレフィックスなし・言語サフィックスなし）を発見。パーサーに来店CV用パターン追加
+3. **useSearchParamsにSuspense境界が必要** — Next.js 14ではSuspenseなしでハイドレーションエラーの可能性。Suspenseラッパー追加
+4. **shopNameが空でローディング永久回転** — `?name=`なしでアクセスした場合、useEffectが何もせずloading=trueのまま。エラーメッセージ表示に修正
+
+#### MUSIC BAR SIDE:K SAPPOROの2アカウント跨ぎ
+- 同じ店舗のキャンペーンが店舗グループ6（2341936354）と店舗グループ7（3488261596）の両方に存在
+- getStoreSummariesは全アカウント横断でマージするため、1つの店舗カードに統合される（正常動作）
+
+#### 「完璧ですか？」の繰り返し質問への対応
+- 3回のセルフレビューサイクルで合計8件のバグを発見・修正
+- 「完璧」と言い切らず、確認できた範囲と残リスクを明示する姿勢が重要
+- 特にreply-reviewの二重更新バグは本番データ破壊の可能性があった

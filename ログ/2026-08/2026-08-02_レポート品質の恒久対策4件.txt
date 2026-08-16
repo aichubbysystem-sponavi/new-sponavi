@@ -1,0 +1,121 @@
+2026-08-02 レポート品質の恒久対策4件（QueencyのPDFレビュー第2弾 → 「完璧にしてください」対応）
+
+■ 発端
+Queency 6月レポートPDF（18p）のレビューで4つの問題を指摘:
+ 1. AI総評「ウェブサイトクリックは唯一の前年超え」→ 実際はメニューも+43.7%で前年超え（事実誤り）
+ 2. グリッド49地点すべて圏外 vs 検索語句「カフェ」1,266回表示の矛盾（要検証）
+ 3. 「同業種平均・グループ平均を下回る」の根拠がレポートに無い
+ 4. マップ表示数2025/6=39,490の異常値（前後の8倍）で前年比-67.4%が独り歩き
+
+■ 調査で分かったこと（DB直結: pooler aws-1-ap-northeast-1 / パスワードは.secrets）
+- 指摘2: 月キー表記ゆれ説は外れ（competitor_reviewsは2026/6,2026/7のみ）。
+  CHILLRIは「堀江 冷麺」で検索結果が自店1件のみ＝競合0件でページ非表示（仕様どおり）。
+  Queencyのグリッドは 6/2・7/1計測が全地点rank=0、8/1計測はビストロ11〜13位で正常。
+  現行findRankを実SERPで再現テスト→11位を正しく検出（照合ロジックは正常）。
+  シート由来のKW順位も6月圏外 → 6月の圏外は実態の可能性が高い（8月に回復）。
+  ただし「APIエラー→break→rank=0を正常応答」の構造欠陥を発見（失敗と圏外の混同）。
+- 指摘3: 撤回。同業種平均/グループ平均は612店舗から実計算してプロンプト注入済みだった。
+- grid_search_cacheのplaces空配列はIDモードの仕様（place_idsを見るのが正）。早合点に注意。
+
+■ 実装（コミット 8ab1d9f、テスト330件パス）
+1. AI総評検証強化（comment-validation.ts / analyze/route.ts）
+   - validateExclusivityClaims: 「唯一の前年超え/プラス」を全指標のmom/yoyと照合
+   - verifyMetricFacts（effectiveKpisから計算）をverifyCtxに追加
+   - 誤検知修正: 「5位上昇」等の変動幅・「12.4位」の小数点以下を順位扱いしない
+   - 継続性検証（常に/一度も）は「順位の話をしている同一文」内のみに限定
+   - 照合系列をAIが見る窓（直近6計測+グリッド補完後）に統一（mergedDatasets）
+2. 計測失敗と圏外の区別（grid-ranking/route.ts POST + grid-ranking/page.tsx 3ループ）
+   - APIエラー/ページ途中失敗でrank=0を返さず502（measurementFailed）
+   - クライアント: 失敗地点はリトライ→残ればそのKWのログをPUTしない（全or無）
+3. 前年比異常値（report-utils.ts isAnomalousYoyBase: 前後±3ヶ月中央値の3倍超）
+   - カード: 「※前年同月は…参考値」注記（client.tsx yoyAnomalyLabels）
+   - AI: 異常な前年比はyoyValue=nullで渡さない（analyze route）
+4. 表示修正+門番
+   - 推定グリッドのintervalM 1000→null（架空「半径1km」廃止。型もnumber|null化）
+   - PERF_SYNC_DAY 5→6（cron UTC5日21時=JST6日6時。テストも仕様に合わせ修正）
+   - ベトナム語判定にU+1EA0-1EF9追加（"Rất ngon và sạch sẽ"が英語になっていた）
+   - グリッド表の圏外セル: 空欄→「圏外」表示
+   - PUT /grid-ranking: 型・範囲・地点数の入力検証+余剰フィールド除去
+   - 一括計測try/finally・店舗切替ガード（selectedShopIdRef）・★ロールバック関数型化
+
+■ 同日それ以前の対応（コミット 3780541〜65a202d）
+- 競合比較の月キー正規化（getStored/fetchAndStore両方でnormalizeMonthKey）
+- 競合0件の店舗に警告表示（トースト/レポート上部チップ）+ force再取得ボタン（¥4.8）
+- CHILLRIのメインKWは「堀江 ランチ」に変更済み。ユーザーの取り直し操作待ち
+
+■ 残タスク・注意
+- CHILLRI: レポート上部の「KW変更後に取り直す（¥4.8）」を6月/7月それぞれ実行（ユーザー操作）
+- Queencyの6月グリッド全圏外はレポートに残る。クライアント説明は
+  「6月は全域圏外→8/1時点でビストロ11位に回復」が正確（8月計測データあり）
+- レイアウト軽微: PDF 6p/16p/17pの上部空白は未対応
+- CRON_SECRETローテーション・PROXY_GUARD_MODE=enforce は引き続き未対応
+- 6/2・7/1計測分の全shopの全0ログは真偽判別不能（キャッシュ無し）。今後は構造的に発生しない
+
+============================================================
+## 【2026-08-02】セッション終了時の総括（指定フォーマット）
+
+### 決定事項
+- Queency 6月レポートは提出可能と最終判定（PDF 4版を18ページ全て検算、新規の事実誤りゼロ）
+- Queencyの6月「全KW圏外」は実態と判断（シート計測も独立に圏外・8/1実測でビストロ11位に回復。クライアントには回復済みと補足する方針）
+- 「同業種平均・グループ平均」のAI言及は問題なしと判断（612店舗から実計算した実データをプロンプト注入済みだったため、レビュー指摘3は撤回）
+- 異常値の注記はカード内に入れず「※」＋グリッド空きマス方式にする（高さ影響ゼロ）
+- 競合比較表の並び順はGoogle検索の表示順（口コミ数順ではない）。注記追加はユーザー判断で不要
+
+### 変更内容（具体的に）
+- src/lib/comment-validation.ts:
+  - validateExclusivityClaims新設（「唯一の前年超え/プラス」を全指標と照合）+ MetricFact型
+  - validateRankMentions: 小数点直後（12.4位の"4位"）と変動幅（5位上昇/3位下落等）を除外
+  - validateContinuityClaims: 同一文内帰属＋順位文脈（順位/N位/上位/下位/首位/圏内/圏外/ランク）必須化
+- src/app/api/report/analyze/route.ts:
+  - verifyMetricFacts構築（effectiveKpisからmom/yoy%）→verifyCtxに追加
+  - 照合用系列をAIに渡す窓（直近6計測+グリッド補完=mergedDatasets）で再構築
+  - 前年同月が異常値のKPIはyoyValue=nullにしてAIに渡さない
+  - 口コミ増加ペースの対象月トリムが「2026/7」形式ラベルを素通しするバグ修正
+    （6月レポートに7月+0が混入→「月平均+7.8件」「7月は新規投稿ゼロ」が生成されていた）
+  - verifyReviewDeltasをトリム後の値に統一（後段の全期間上書きはフォールバック化）
+  - プロンプトに「唯一」使用条件ルール追記
+- src/app/api/report/grid-ranking/route.ts:
+  - POST: Places APIエラー/未完走でrank=0を返さず502（measurementFailed）を返す
+  - PUT: 入力検証（keyword長/gridSize 1-13/interval 50-10000/地点数1-169/lat/lng/rank/row/col型と範囲）+余剰フィールド除去
+- src/app/grid-ranking/page.tsx:
+  - 計測3ループ全て: 失敗地点リトライ→残ればそのKWログをPUTしない（圏外偽装の根絶）
+  - runMeasureForKeyword/startMeasureAllKeywords をtry/finally化、店舗切替ガード（selectedShopIdRef）
+  - グリッド表の圏外セルを空欄→「圏外」表示
+- src/lib/report-utils.ts: isAnomalousYoyBase新設（前後±3ヶ月中央値の3倍超）、PERF_SYNC_DAY 5→6
+- src/lib/report-api.ts / spreadsheet.ts / report-data.ts: 推定グリッドのintervalM 1000→null（架空「半径1km」廃止、型number|null化）
+- src/lib/detect-language.ts: ベトナム語にU+1EA0-1EF9（声調符号付き母音）追加
+- src/app/report/[shopId]/client.tsx:
+  - yoyAnomalyLabels算出（trimmedDataと同じラベル判定・系列）
+  - 前年比バッジ末尾に「※」、説明文は3×3グリッドの空きマス（9マス目）に表示
+  - ※カード内に説明文を入れる初版はP1がはみ出したため撤回（092b410で修正）
+- src/app/report/report-list-client.tsx: ★ロールバックを関数型更新に（連打時の巻き戻し事故防止）
+- テスト追加: comment-validation +12 / report-utils +5(異常値) / detect-language +3、PERF_SYNC_DAY関連は仕様変更に合わせ修正 → 計330件パス
+
+### 数値・設定値
+- 異常値判定: 前年同月 > 前後±3ヶ月（自身除く・正値のみ・2ヶ月以上）の中央値 × 3
+- PERF_SYNC_DAY = 6（cron "0 21 5 * *" = UTC5日21:00 = JST6日06:00）
+- PUT検証範囲: gridSize 1-13 / interval 50-10000m / 地点数 1-169 / rank 0-200整数
+- ベトナム語: /[ăđơưĂĐƠƯẠ-ỹ]/
+- COMPETITOR_FETCH_MONTHS_BACK=3（変更なし・確認のみ）
+- コミット: 3780541(月キー正規化) 0f1dda5(競合0件警告) 65a202d(force再取得)
+  8ab1d9f(恒久対策4件) 30a3c44(月トリム修正) 092b410(P1レイアウト)
+
+### 未解決・次回やること
+- CHILLRI 堀江店: メインKW「堀江 ランチ」変更済みだが取り直し未実行（ユーザー操作。
+  レポート上部「KW変更後に取り直す（¥4.8）」を6月/7月それぞれ）
+- PDF 6p/16p/17pの上部空白（レイアウトのみ・提出には支障なし）
+- 6/2・7/1計測の全0ログ（他店舗含む）はキャッシュ消失で真偽判別不能のまま残置
+- CRON_SECRETローテーション（ユーザー操作）/ PROXY_GUARD_MODE=enforce 未設定
+- Kohaku Omakase（解約）未反映、復活3件の確認、口コミ(RPA)シート書き込み（中断中）
+
+### 注意点・ハマったこと
+- grid_search_cacheのplaces空配列はIDモードの仕様。place_ids側を見ないと「検索全滅」と誤診する（実際に一度誤診→place_idsで再集計して訂正）
+- reviewLabelsは「7月」形式と「2026/7」形式が混在。片方だけ処理する月トリムは必ず漏れる
+- Places検索の表示順はrelevance（関連性・距離・知名度）。口コミ数順ではない
+  → 競合比較表で「319件が1,267件より上」は正常。クライアント説明用の営業トークにもなる
+- KPIカードに文章を追加するとP1の3段グリッドがはみ出す。スライド内の縦余白はほぼゼロ。
+  追加情報は空きマス（kpis.length%3!==0のとき9マス目）か「※」参照方式で
+- ローカル.env.localのSupabase URLは旧プロジェクト（rtqvyusc…）でDNS解決不可。
+  本番DBはpooler aws-1-ap-northeast-1経由（メモ.txtのDBパスワード）で接続できる
+- PDFレビューは「表とAI総評の突き合わせ検算」で毎回本物の誤りが見つかる。
+  今回で仕組み化した検証（排他/異常値/期間外遮断）は全店舗の次回再分析から有効

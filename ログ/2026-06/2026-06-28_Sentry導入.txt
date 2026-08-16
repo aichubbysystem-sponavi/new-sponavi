@@ -1,0 +1,37 @@
+## 【2026-06-28】Sentry導入
+
+### 決定事項
+- Sentryアカウント作成（ai.chubby.system@gmail.com、org: chubby-4x、US リージョン）
+- 手動セットアップ（npx wizardは不要ファイルが多いため不使用）
+- 無料プラン（5,000エラー/月、500万スパン/月）
+
+### 変更内容
+
+#### コミット 0648af0: Sentry導入
+- @sentry/nextjs インストール
+- sentry.client.config.ts: クライアントサイドエラーキャプチャ（replaysOnErrorSampleRate: 1.0）
+- sentry.server.config.ts: サーバーサイドエラーキャプチャ
+- sentry.edge.config.ts: Edge Runtime（middleware等）エラーキャプチャ
+- next.config.mjs: withSentryConfig追加（hideSourceMaps: true）
+- src/app/global-error.tsx: 未キャッチエラーをSentryに送信+ユーザーにリカバリUI
+- src/instrumentation.ts: onRequestErrorでAPIルート/Cronのエラーを自動キャプチャ
+- tracesSampleRate: 0.1（パフォーマンス10%サンプリング）
+- enabled: production環境のみ
+
+#### コミット 206512e: CSP修正
+- middleware.ts connect-srcに `https://*.ingest.us.sentry.io` 追加
+- CSPがSentryのingest URLをブロックしていた問題を解消
+
+### Vercel環境変数（追加済み）
+- NEXT_PUBLIC_SENTRY_DSN: https://8da3e352a82efa96f068b3b9eac985db@o4511643040022528.ingest.us.sentry.io/4511643045593088
+- SENTRY_ORG: chubby-4x
+- SENTRY_PROJECT: javascript-nextjs
+
+### 動作確認
+- 本番サイト（new-spotlight-navigator.com）でCSPエラーなし（コンソール No errors）
+- ダッシュボード正常表示（507店舗、解約予兆スコア表示）
+
+### 未解決・次回やること
+- [ ] 店舗IDの正規化（名前マッチ→UUID統一）
+- [ ] any型解消（73箇所）
+- [ ] テスト追加

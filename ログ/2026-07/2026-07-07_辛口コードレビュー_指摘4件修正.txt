@@ -1,0 +1,57 @@
+## 2026-07-07（第2セッション）
+
+### 決定事項
+- 前日3コミット（a1cc5fb / 3dca07c / ec018e6）を「他人のコード」として辛口レビュー実施。
+  npm run build 成功・npm test 103件全パスだが、実挙動に影響する見落とし2件（高）＋中2件＋低数件を検出。
+- 高2件＋中2件を即修正し、本番デプロイ（コミット 7123e19）。低優先（下記）は未対応のまま残す。
+
+### レビューで検出した問題（重要度順）
+【高1】/api/report/oauth-accounts が常時500の可能性大
+  - system_oauth_tokens ビューの実列は access_token/refresh_token/expiry のみ
+    （sql/2026-07-07_lock_oauth_tokens_rls.sql の定義コメント参照）なのに
+    .order("created_at") していた → PostgREST「column does not exist」→ 常に500。
+  - 旧クライアント直読みフォールバックも同じ order を使っており「元から壊れていたフォールバックを
+    壊れたままサーバーに移設した」状態だった。トークン非露出の目的自体は達成済み。
+【高2】posts 一括投稿ループに batch-activity イベントが無い
+  - 重要ナレッジの「一括処理を新設したら必ずループ内に入れる」ルール違反。
+  - 1店6〜7秒 × 約280店以上で30分無操作タイマー発火 → 途中で signOut+/login 遷移 → 以降401で全滅。
+【中3】gbp-token.ts getAllOAuthTokens の system_oauth_tokens への UPDATE は
+  JOIN+LIMIT付きVIEWのため自動更新不可 → 常に失敗し error 未チェックで無音。
+  リフレッシュ済み access_token が永続化されず毎回Googleへリフレッシュ要求（既存バグ、今回発覚）。
+  health-check の .select("expiry, account_id") も account_id が無ければ同様に無音で空のはず。
+【中4】basic-info「元に戻す」: 旧形式スナップショット（raw なし）だと住所・カテゴリを
+  黙ってスキップして「GBP情報を復旧しました」と表示（住所改ざん時に未復旧なのに成功表示）。
+
+### 変更内容（コミット 7123e19）
+- src/app/posts/page.tsx: handleCreate の店舗ループ先頭に
+  window.dispatchEvent(new Event("batch-activity")) を追加。
+- src/app/api/report/oauth-accounts/route.ts: .order("created_at") を除去し、
+  created_at があればJS側で localeCompare ソート（列が無くても500にならない）。
+- src/app/basic-info/page.tsx: prev.raw が無く prev.address / prev.category がある場合も
+  extraNotes に「住所」「カテゴリ」を積み、「自動復旧できませんでした」を必ず表示。
+- src/lib/gbp-token.ts: UPDATE の error を受けて console.error でログ出力（挙動は不変）。
+
+### 数値・設定値
+- テスト: 103件全パス / next build 成功（修正前後とも）
+- auth-guard の無操作タイムアウト: 30分（SESSION_TIMEOUT_MS, auth-guard.tsx:9）
+- 一括投稿の安全域: 修正前は約280店超でログアウトリスク → 修正後は理論上無制限（ただし順次実行のまま）
+
+### 未対応（低優先・意図的に残す）
+- [ ] aio createQA: 回答POST失敗時に「Q&A作成失敗」表示だが質問は作成済み → 再実行で質問重複
+      （AIO廃止方針のため放置。触るならメッセージ分岐のみ）
+- [ ] pmax sync の gbpAmbiguous はレスポンスJSONのみで UI/Sentry 通知なし（曖昧店舗のGBPデータが無音欠落）
+- [ ] getGbpRowStrict が店舗ごとに全行 normShopName Map を再構築（O(店舗×行)。月別メモ化で改善可）
+- [ ] 一括投稿の進捗表示なし・キャンセル不可／部分失敗→再試行時に30文字一致の重複警告confirmが毎回出る
+- [ ] posts の post_logs / scheduled_posts 等 anon直読み（C-1拡張8ページ、前日ログ記載の既知残タスク）
+- [ ] 予約日時 input の min が toISOString()=UTC のため JST では過去9時間が選択可能（既存・今回diff外）
+- [ ] gbp-token の書き戻しを本当に永続化するなら system.tokens を更新する RPC が必要（DB側作業）
+
+### 注意点・ハマったこと
+- system_oauth_tokens の実列はローカルから検証不可（.env.local の ref は古く本番に到達できない）。
+  確認は本番 Supabase SQL Editor で:
+    select column_name from information_schema.columns
+    where table_schema='public' and table_name='system_oauth_tokens';
+- oauth-accounts はビュー定義が LIMIT 1 のため、列があっても最大1行しか返らない
+  （「アカウント一覧」としては元から1件表示が上限）。
+- 前日ログの残タスク（トークン再発行〜7/14、株式会社Chubby店舗一覧不在調査、
+  basic-info実地テスト）は本セッションでは未着手。

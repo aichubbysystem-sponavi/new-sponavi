@@ -1,0 +1,60 @@
+## 【2026-07-15】
+
+### 決定事項
+- 2段階認証(TOTP/MFA)を完全廃止（社長アカウントのQRゲート含む。復元はコミット9e0b548参照）
+- レポート表示は「キャッシュ即表示 → 裏で最新順位を取得して差し替え」方式に変更
+- 順位データの正は「多地点計測の中心地点順位」。優先順位＝手動生成/セル修正 > 実測(7/1〜) > シート順位（計測なし月・KWの補完）
+- ページの意味を整理: P6順位変動=P7順位推移（中心順位・完全一致）/ P8サマリー=P9地図（49地点平均、別指標）
+- 順位が一度も付いていないKWは初期OFF。表示設定でONにすると「圏外」カード表示
+- 個別キーワードのチェックON/OFFは順位4ページ+PDF全連動
+- 多地点サマリー右カラム: 7件までは従来の見た目、8件以上は詰めて縦均等配置（下余白なし）
+- レポートスライドから「グリッド自動生成」ボタン撤去（クライアントに見せる画面に内部操作を出さない。生成は表示設定モーダル専用）
+- 口コミ同期に「同期済みも強制」チェックを追加（7日スキップの回避手段）
+- シート→DBの転記はしない方針を維持（表示時3層合成）
+
+### 変更内容（具体的に）
+- 32b486e MFA撤去: src/components/mfa-gate.tsx削除 / auth-guard.tsxのAAL2チェック・ゲート表示削除 / lib/audit.tsのPAID_OP用AAL2チェックとdecodeJwtAal削除
+- e0080c6 高速化: report/[shopId]/data-loader.tsx（fast=1で即表示→cache時のみ裏で通常取得し差し替え）/ lib/report-api.ts（getReportDataにskipSheets、シート/グリッド/検索語句/パフォーマンス/カテゴリを並列化）/ lib/ranking-fetch.ts（順位+推移の探索とCSV取得を1回に統合 fetchRankingAndHistoryFromSheets、発見タブ位置のメモリキャッシュ）/ api/report/data/route.ts（fastパラメータ）
+- 9232282 P1余白調整: client.tsx（バッジ行・バッジ・KPIグリッド）
+- e38a2cc 中心順位の手入力欄: client.tsx（シート順位なし月/KWで1-100位入力→生成可能に）
+- a19c8a9 ★グリッドAPI認証欠落修正: client.tsxの grid-ranking-generate 呼び出し4箇所に getAuthHeaders() 付与+res.okチェック+失敗alert / 個別KWチェックを多地点計測へ連動（visibleGridRanking新設、PDF含む）
+- d11ed55 KW表記ゆれ正規化: lib/keyword-normalize.ts新設（normalizeKw）/ report-api.ts（overrides/logs/補完の読み取り正規化）/ grid-ranking-generate/route.ts（保存時正規化、既存行照合は取得→JS比較→id指定でDB移行不要）/ client.tsx（マージ・照合・モーダル・表示設定を正規化キーで統一）
+- 6883b3b→274d6dc 順位一本化: client.tsxに unifiedRankingHistory 新設（グリッド中心>シートの統一系列）。P6カード/P7テーブル/モーダルのKW・月リストを統一系列から描画 / grid-ranking-generate一括生成は実測ログのあるKW×月に推定を作らない
+- a17cdef サマリー左表（全キーワード比較）を右の月別表と同じ全KW表示に（データなし月は「-」）
+- b633356 ★表示設定保存500修正: 本番DBの fk_report_display_settings_shop（shops.id=UUIDへの誤FK）を削除（sql/2026-07-15_drop_display_settings_fk.sql）/ サマリー右カラム圧縮
+- a94691a/0b6366b 右カラム最終調整（7件以下従来・8件以上圧縮+space-between）
+- 294ced8/ef9d29d 店名NFC正規化: api/report/analyze/route.ts（受信shopIds正規化+fetchReviews安全網）/ components/shop-provider.tsx（fetchShopsで/api/shopの店名を読込時NFC化）※真因ではなかったが予防策として残置
+- 81de213 「同期済みも強制」: reviews/page.tsx（forceSync state+チェックUI、handleSyncAllのスキップ無効化）
+- 637f6f8 診断: analyze/route.tsのfetchReviewsでsupabase errorをthrowし画面表示（握り潰し解消）
+- 3588441 ★口コミ分析タイムアウト修正: 本番DBに idx_reviews_shop_name_time 作成（CONCURRENTLY、sql/2026-07-15_reviews_shop_name_index.sql）/ fetchReviewsの count:"exact" 廃止
+- ログイン画面の口コミ分析は 18:21 に「分析成功1/1件」（渋谷 鮨 神南 rev=146 ★4.7 2026/6保存）をDBで確認済み
+
+### 数値・設定値
+- P1スライド: バッジ行padding 10px→5px / バッジpadding 7px→0px / KPIグリッドgap 12→6
+- シート探索タブ位置キャッシュTTL: 24h（メモリ、ミス時は全探索フォールバック）
+- グリッド中心順位の手入力範囲: 1〜100位
+- 多地点サマリー右カラム(8KW以上時): 見出しfont 13→11 / 見出し余白6→2 / セルpadding 5px→2px / セルfont 12→11 / gap 10→0+space-between
+- reviews新インデックス: (shop_name, create_time DESC) → 対象クエリ 6244ms→104ms（約60倍）。dashboard系shop_nameクエリも35〜355msに
+- statement_timeout（既存設定・変更せず）: anon=3s / authenticated・authenticator=8s（service_roleもauthenticator経由で8s適用される点に注意）
+- fetchReviews: count:"exact"廃止（totalReviewCount=reviews.length）
+- 口コミ同期の重複防止スキップ: 7日以内（変更なし。「同期済みも強制」ONで無効化）
+- レポート初期表示の目標値: fastレスポンス≒0.5〜1秒（実測: キャッシュ読み79ms+DB群〜0.5s）
+
+### 未解決・次回やること
+- 残り店舗の口コミ再分析はユーザー実行待ち（いつもの店舗7店→必要なら全店。「前回の分析失敗店舗(76件)」は6/24の古い認証エラー記録なのでクリア推奨）
+- Go API側の店名NFC統一（フロントで正規化済みだが根本はGo修正。要Goコード対応）
+- report/[shopId]等「URL直の店名」経路のNFC化は未対応（症状が出たら対応）
+- ユーザーのブラウザに古いリフレッシュトークン起因の token?grant 400 / my-role 401 が残存 → ログアウト→再ログインで解消するはず（伝達済み）
+- P-MAX側（pmax/[customerId]等）の同型バッジ余白は未変更（「一旦大丈夫」との回答）
+- （以前からの残タスク）PROXY_GUARD_MODE=log明示→観察→enforce切替 / 社員→幹部昇格
+
+### 注意点・ハマったこと
+- ★grid-ranking-generateを呼ぶ4箇所だけ認証ヘッダー無しの生fetchで、7/8の全API認可必須化以降サイレント失敗していた（レスポンス未確認でreloadする作りが原因で発覚遅れ）。変更系fetchは必ずres.okを確認しユーザーに失敗を見せること
+- ★report_display_settings.shop_id に shops(id)=UUID への誤FKがあり、店舗名を入れる設計と矛盾して保存が一度も成功していなかった（テーブル0行が証拠）
+- ★「口コミなし」誤判定の真因は statement timeout（reviews 14.7万件×shop_nameインデックス無し）。当初NFC/NFD不一致と誤診→監査ログの店名がNFCだったことで棄却。supabase-jsのerrorを握り潰すと「0件」とエラーの区別がつかない。切り分け順: ①直DBで実在確認→②クエリerror/timeout→③キー不一致。時系列相関（RLS有効化以降〜）を因果と即断しない
+- KW名の全角/半角スペースがシート・DB両方で混在（同一店舗でも月によって違う）。normalizeKwで吸収
+- モーダルのsheetRankはrankingHistory.labels側のindexで引く（unified labelsと月セットが異なる場合がありズレる）
+- unifiedRankingHistoryの月別値はグリッド中心セル。supplementの推定グリッド中心=シート順位なので過去月は自動的にシート値になる
+- Vercel CLI(chubbyushigusa)は誤チーム spotlight-navigators-projects にリンク。本番(aichubbysystem-6689s-projects)のenvはCLIから取得不可
+- Supabase直結は db.*.supabase.co がIPv6のみで不可。プーラー aws-1-ap-northeast-1.pooler.supabase.com / user postgres.kxxwspavskhhjtiixcep を使う
+- 本番のanonキーはJSバンドル(c_layout*.js)から取得可能（公開前提のキー）。RLSは全主要テーブル有効・authenticatedのSELECTのみ

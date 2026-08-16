@@ -1,0 +1,99 @@
+## 【2026-06-29】P-MAX改修 + サブドメイン認証 + セキュリティ追加対応（セッション後半）
+
+### 決定事項
+- P-MAX全APIに6時間キャッシュ導入（Supabase pmax_cacheテーブル）
+- P-MAX店舗詳細ページのUI全面改修（社長FB反映）
+- サイドバーのレポート/P-MAXリンクはメインドメイン内パスで遷移（サブドメインだとlocalStorageセッション共有不可）
+- サブドメイン（report/p-max）未ログイン時はメインドメインのログインページにリダイレクト（AuthGuardで制御）
+- ESLintビルドエラー解消（a2fe640以降3デプロイ連続失敗を復旧）
+- PostgREST .eq()不具合はpmax-cache.tsでも発生 → 全件取得+JSフィルターで統一
+
+### 変更内容（具体的に）
+
+#### コミット 2dddd4e: ESLintビルドエラー解消
+- `src/app/api/cron/auto-reply/route.ts` — `// eslint-disable-next-line @typescript-eslint/no-unused-vars` 削除
+- `src/app/api/cron/execute-posts/route.ts` — 同上
+- `src/app/api/report/auto-post/route.ts` — 同上
+- `src/app/api/report/create-post/route.ts` — 同上
+- `src/app/api/report/delete-post/route.ts` — 同上
+- `src/app/api/report/reply-review/route.ts` — 同上
+
+#### コミット f07e06c: getUserRole PostgREST不具合回避
+- `src/lib/supabase.ts` — getUserRole()を.eq()2段階検索→全件取得+profiles.find()に変更。デバッグログ全除去
+
+#### コミット a4e9fa5: サイドバーにP-MAXリンク追加+外部リンク新タブ化
+- `src/components/sidebar.tsx` — P-MAX広告リンク追加、外部URLにtarget="_blank"付与
+
+#### コミット 3b23601: サブドメイン未ログインアクセスブロック（クッキー方式）
+- `src/middleware.ts` — Supabase Authクッキーチェック追加（後に削除）
+
+#### コミット 6330358: 外部リンクをaタグに変更
+- `src/components/sidebar.tsx` — Next.js Linkが外部URLを正しく処理しない→isExternalでaタグ分岐
+
+#### コミット 1c8c8bf: サブドメイン認証をクッキー→AuthGuardに変更
+- `src/middleware.ts` — クッキーチェック削除（localStorage非共有のため機能しない）
+- `src/components/auth-guard.tsx` — サブドメインで未ログイン時window.location.hrefでメインドメインログインへリダイレクト（router.pushだとサブドメイン内/loginに飛ぶため）
+
+#### コミット 31493f7: P-MAX全APIに6時間キャッシュ追加
+- `src/lib/pmax-cache.ts` — 新規作成。getPmaxCache()/setPmaxCache()
+- `src/app/api/pmax/accounts/route.ts` — キャッシュ追加
+- `src/app/api/pmax/summary/route.ts` — キャッシュ追加
+- `src/app/api/pmax/monthly/route.ts` — キャッシュ追加
+- `src/app/api/pmax/daily/route.ts` — キャッシュ追加
+- `src/app/api/pmax/store-summary/route.ts` — キャッシュ追加、refresh=trueパラメータ対応
+- `src/app/api/pmax/store-detail/route.ts` — キャッシュ追加
+- `src/lib/google-ads.ts` — 並列度BATCH 5→10に変更
+
+#### コミット 49f7d81: サイドバーリンクをメインドメイン内パスに変更
+- `src/components/sidebar.tsx` — https://report...→/report、https://p-max...→/pmax に変更
+- `src/middleware.ts` — メインドメインからサブドメインへの301リダイレクト削除
+
+#### コミット 7324d5a: /report をロール権限に追加
+- `src/lib/roles.ts` — president, managerのROLE_PERMISSIONSに/report追加（内部パスに変更したことでcanShowInSidebarに引っかかった）
+
+#### コミット ee71162: P-MAX店舗詳細ページ全面改修
+- `src/app/pmax/store/page.tsx` — P2:言語別棒グラフ→全体数値テーブル、P3新規:今月vs前月比較、P4-P6:GBP棒グラフ削除→テーブルのみ、月次1データ時棒グラフ非表示、日次を月次ページ内に統合
+
+#### コミット 38a5ef4: P3前月比%列削除
+- `src/app/pmax/store/page.tsx` — 前月比列削除、数字のみに
+
+#### コミット 06fc38f: P-MAX構成変更（P3削除、GBP統合、月次+日次統合）
+- `src/app/pmax/store/page.tsx` — P2:今月+前月2列、P3削除、P4-P6→1ページ統合、言語別:月次+日次を1ページに
+
+#### コミット f642cb0: P-MAXタイムアウトエラー修正
+- `src/lib/pmax-cache.ts` — .eq()→全件取得+JSフィルター（PostgREST不具合回避）
+- `src/app/pmax/store/page.tsx` — res.okチェック追加（非JSONレスポンス対応）
+
+#### コミット 699e71d: P-MAX店舗詳細504タイムアウト解消
+- `src/lib/google-ads.ts` — getStoreDetail()にknownAccountIdsパラメータ追加。該当アカウントのみ検索
+- `src/app/api/pmax/store-detail/route.ts` — store-summaryキャッシュからaccountIds取得して渡す。maxDuration 120→300
+
+#### コミット e29e15a: P-MAX FB対応（縦並び、文字拡大、日次フィルター修正）
+- `src/app/pmax/store/page.tsx` — P2:横並び→縦並び（前月→今月）、P3:GBPも前月/今月縦並び、文字サイズ10-11→13-15px、日次currentMonthKeyフィルター削除
+
+### 数値・設定値
+- P-MAXキャッシュTTL: 6時間（CACHE_TTL_MS = 6 * 60 * 60 * 1000）
+- Google Ads API並列度: 5→10（BATCH変数）
+- store-detail maxDuration: 120→300秒
+- pmax_cacheテーブル: Supabase本番に作成済み（cache_key TEXT PK, data JSONB, updated_at TIMESTAMPTZ）
+- 月次テーブル文字サイズ: 11px→13px、日次テーブル: 10px→13px、P2/P3の値: 18-20px
+- 日次テーブルmaxHeight: 320→350px
+- user_profiles追加: 社長 f8d0e403 president / 和田 0c947616 part_time
+- increment_use_count RPC関数作成済み
+
+### 未解決・次回やること
+- [ ] PostgREST .eq()不具合の根本原因（user_profiles + pmax_cache両方で発生。全件取得ワークアラウンドで回避中）
+- [ ] 日次データが一部店舗で空（Google Ads APIが日次データを返していない可能性。currentMonthKeyフィルターは解除済み）
+- [ ] P-MAXキャッシュの自動更新Cron（現在は初回アクセス時に生成、6時間で失効）
+- [ ] GbpTrendPageコンポーネントが未使用のまま残存（store/page.tsxの末尾）→削除可能
+- [ ] H1-H7のセキュリティ残タスク（前半セッションのレビュー結果参照）
+
+### 注意点・ハマったこと
+- Supabase AuthはlocalStorageベースのためクッキーでサブドメイン認証不可。middleware.tsでクッキーチェックを入れたが全リクエストがログインにリダイレクトされた→AuthGuard（クライアントサイド）に変更
+- サブドメインのAuthGuardでrouter.push("/login")するとサブドメイン内の/loginに飛ぶ（存在しない）→window.location.hrefでメインドメインに飛ばす必要
+- Next.js Linkコンポーネントは外部URL（https://）を正しくハンドルしない場合がある→外部リンクはaタグを使う
+- サイドバーのhrefを外部URL→内部パスに変更したら、ROLE_PERMISSIONSに/reportが入っていなくてサイドバーから消えた（外部URLはcanShowInSidebarのフィルター対象外だった）
+- pmax-cache.tsも.eq()でキャッシュが読めない問題が発生（getUserRoleと同じ現象）→全件取得+JSフィルターに統一
+- P-MAX store-detailが504タイムアウト：getStoreDetail()が全アカウント（数十件）を総当たりで2APIコール/件→store-summaryキャッシュからaccountIdsを特定して1-2アカウントのみ検索に最適化
+- Vercelのタイムアウト時はプレーンテキスト"An error occurred..."を返す→res.json()がパースエラー。res.okチェック必須
+- P-MAX store-summaryを先に開いてキャッシュ生成しないと、store-detailがaccountIdsを取得できず全アカウント検索になる（初回はstore-summaryから開く運用が必要）

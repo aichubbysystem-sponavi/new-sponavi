@@ -1,0 +1,89 @@
+## 【2026-06-21 追加セッション】セキュリティ追加修正 + P-MAX店舗別 + 動画セキュリティチェック
+
+### 決定事項
+- getUserRoleのフォールバック強化（user_profiles未登録ユーザー対応）
+- analyze/route.tsの動的importを静的importに修正
+- P5ユーザー反応数推移の予約・メニュー非表示をhasBookings/hasFoodMenusに統一
+- セキュリティ動画の3チェックポイントで自己診断実施 → レポートサブドメインの認証なし公開が最大リスク
+
+### 変更内容（具体的に）
+
+#### getUserRoleフォールバック修正（commit: 7efbfe1, 47a5adb）
+- src/lib/supabase.ts getUserRole: user_profiles.id → user_profiles.auth_uid → user_metadata.role の3段階フォールバック
+- admin API失敗時の警告ログ追加
+- role未検出時の警告ログ追加
+
+#### analyze動的import修正（commit: 47a5adb）
+- src/app/api/report/analyze/route.ts: `await import("@/lib/supabase")` → 静的 `import { requireRole }` に変更
+
+#### P5ユーザー反応非表示修正（commit: 6e03b25）
+- src/app/report/[shopId]/client.tsx: hasFoodMenusData → hasFoodMenus、hasBookingsData → hasBookings に統一
+- 表示設定（sectionVisibility）も考慮されるように修正
+
+### 数値・設定値
+- 認証済みAPIルート: 60/62（webhook/lineとreview-language-statsを除く）
+- RLS有効テーブル: 1/4（SQLファイルベース）
+- テスト: 82件全通過
+
+### 未解決・次回やること（最優先セキュリティ）
+
+#### P0: レポートサブドメイン認証追加
+- report.new-spotlight-navigator.com/{店舗名} が認証なしで全データ閲覧可能
+- クライアント公開用の仕様だったが、不要と確認済み
+- 対応: レポートページにもverifyAuth追加、または認証ガード追加
+- 関連ファイル: src/app/report/[shopId]/page.tsx, src/app/report/page.tsx, middleware.ts
+
+#### P0: review-language-stats認証追加
+- Refererチェックのみで認証なし
+- 口コミ投稿者名・コメント全文がReferer偽装で取得可能
+- 対応: verifyAuth追加（レポートサブドメイン認証と連動）
+
+#### P1: Supabase RLS有効化
+- ほとんどのテーブルでRLS未設定
+- Service Role Key経由のアクセスはRLS無関係だが、Anon Keyがフロントに露出している
+- フロントエンドの一部（grid-ranking/page.tsx等）でAnon Key直接使用あり
+- 対応: 全テーブルにRLS有効化 + ポリシー設定
+
+#### P1: フロントからのSupabase直接アクセス排除
+- grid-ranking/page.tsx:870, 1123 でcreateClient(ANON_KEY)で直接DB操作
+- report/page.tsx:11 でAnon Key参照
+- 対応: API経由に変更
+
+#### P2: 本番DBパスワード削除
+- UPDATE user_profiles SET password_display = NULL; 未実行
+
+### 注意点・ハマったこと
+
+#### getUserRole 403の根本原因
+- 社長アカウントがuser_profilesテーブルに存在しなかった
+- user_profiles.id検索 → null → requireRoleが403を返した
+- user_metadata.roleへのフォールバックで解決
+- さらにauth_uid検索も追加（idとauth_uidが異なるケース対応）
+
+#### analyze動的importのリスク
+- `await import("@/lib/supabase")` は毎リクエストでモジュール解決が走る
+- 失敗時に全リクエストがブロックされる
+- 静的importに統一して解決
+
+#### P5の判定変数不一致（hasFoodMenusData vs hasFoodMenus）
+- hasFoodMenusData: データの有無のみ
+- hasFoodMenus: データの有無 + 表示設定（sectionVisibility）
+- P2テーブルはhasFoodMenusを使っていたが、P5でhasFoodMenusDataを使ってしまい、表示設定が無視された
+
+#### 多地点順位の400エラーは既存問題
+- axiosインターセプターがGo API宛にSupabase JWTを送信
+- Go APIがSupabase JWTを受け付けず400を返す
+- next.config.mjsのrewriteルールで/api/shop/*がGo APIに転送される構造
+- 今回の修正とは無関係、以前からの問題
+
+#### 口コミ同期のセッション切れ
+- 534店舗の同期で数十分かかり、JWTトークンが期限切れ
+- axiosのgetToken()がバックグラウンドタブでリフレッシュ失敗
+- 同期データ自体は正常に保存されている（80876件）
+- 再ログインで反映確認済み
+
+#### セキュリティ動画の3チェックポイント診断
+- 1. URLがパブリック → Yes（Vercel）
+- 2. 認証あり → ほぼOK（62ルート中60ルート認証済み。レポートサブドメインが認証なし）
+- 3. PII扱い → Yes（店舗名・口コミ投稿者名・住所・電話）
+- 結論: レポートサブドメインの認証なし公開が最大リスク → 次回最優先で対応

@@ -1,0 +1,137 @@
+========================================================================
+作業ログ 2026-08-07
+P-MAX: 会社名検索対応 / アドバイスページ全店非表示 / レポート表示設定＋数値編集の永続保存
+========================================================================
+
+## 依頼内容（3件）
+1. /pmax の「店舗名で検索」で会社名（例: 株式会社アソボラボ）を入れても配下店舗が出ない → 出るように
+2. 「店舗様へのアドバイス」ページを全店舗で非表示に（また使うかもしれないのでコードは温存）
+3. 広告レポート（共有URL含む）にMEOレポート同様の表示設定を設置し、レポート内の全数値を
+   編集可能に。編集値は上書きされない限り永久保存
+
+## 変更内容
+
+■ 1. 会社名検索（src/app/pmax/page.tsx）
+- nameToGroup（正規化店舗名→グループ名）をuseMemo化して検索前に構築
+- filtered: 店舗名ヒット or 所属グループ名ヒットで表示。searchMatch（異体字吸収）を両方に適用
+
+■ 2. アドバイスページ非表示（src/components/pmax-report-view.tsx）
+- ファイル先頭に SHOW_ADVICE_PAGE = false 定数を新設。hasAdvice の条件に組み込み
+- buildPmaxAdvice ロジック・ページJSXは全て温存。再開時はこの定数を true に戻すだけ
+- 管理画面/共有URL/グループ共有の3経路すべて同コンポーネントなので一括で消える
+
+■ 3. レポート表示設定＋数値編集の永続保存
+- 新テーブル pmax_report_settings（shop_name PK, overrides JSONB, section_visibility JSONB）
+  sql/2026-08-07_pmax_report_settings.sql（本番適用済み 2026-08-07。pg直結で実行）
+- src/lib/pmax-overrides.ts 新設: 上書きキー定義と適用ロジック（テスト13件付き）
+  キー形式: m|言語|月|field（言語別月次）/ d|言語|日付|field（日次）/ g|月|field（GBP）/
+           c|月|network|impressions（媒体別）/ k|月|field（KPI合計の直接上書き）
+  field: impressions/clicks/costYen（円）/ctrPct（%）/cpcYen（円）
+- /api/pmax/report-settings 新設: GET（3役職）/ PUT（DATA_OP・withAudit監査ログ付き）
+- 共有API 2本（share/[token], group-share/[token]/store）のレスポンスに
+  overrides/sectionVisibility を追加 → 共有ページでも編集値・表示設定が反映される
+- group-share/[token]（グループ店舗一覧）も言語別集計→上書き適用→合算に変更し、
+  一覧カードの数値と詳細レポートが一致するようにした
+- pmax-report-view.tsx:
+  - settings/editable/onSettingsChange/saveState props追加
+  - 上書きは「集計後の行」に適用（impressions/clicks/cost変更でCTR/CPC自動再計算、
+    ctrPct/cpcYenの明示上書きは最優先）。グラフ・合計行・KPI・比率すべて追随
+  - KPIサマリーの広告3指標は k| キーで合計値を直接上書き可能（言語合算より優先）
+  - GBP行が無い月でも上書きがあれば0埋め行を合成してKPIカードに表示
+  - 編集UI: 右下固定の「表示設定」「数値を編集」ボタン（no-print・管理画面のみ）。
+    編集モード中は数値に赤点線→クリックでインライン入力。空にして確定＝元の値に戻す。
+    編集済みの数値は薄赤ハイライト
+  - 表示設定モーダル: コンバージョン推移/言語別ページ（言語ごと）/日次データ表/
+    媒体別配信比率/まとめ をON/OFF。OFFはページ番号からも除外。
+    「すべて元の値に戻す」ボタン（上書き全クリア）付き
+- /pmax/store（管理画面）: 設定の読込＋600msデバウンス保存（canData=社長・幹部のみ編集可）
+  「まとめ」AI文章は設定読込完了を待ってから上書き適用済みの数値で生成（本文との矛盾防止）
+- 共有2ページ（share/[token], group/[token]/store）: settingsを受け取ってビューに渡すだけ（編集UI無し）
+
+## 検証
+- vitest 393件 全パス（pmax-overrides 13件新規）
+- next build 成功
+- 本番DBに pmax_report_settings 作成済み（RLS有効・service_roleのみ）
+
+## 注意点・仕様メモ
+- 上書きはDBの元データ（pmax_store_data等）を書き換えない別テーブル保存。
+  「全店舗を更新」で再同期しても手動編集は残る（＝上書きされない限り永久保存）
+- 共有URLの「まとめ」文章はトークン発行時に保存されるため、数値を編集したら
+  「共有URLを発行」を押し直すと文章も編集後の数値で更新される（URL自体は同じ）
+- 表示設定・上書きは店舗単位（全月共通のキー空間）。同じ店の過去月レポートにも
+  該当月のキーがあれば反映される
+- チャネル「その他」は複数network合算のため個別編集不可（既知の割り切り）
+- KPIカードとコンバージョン表で同じ g| キーを共有（片方を編集するともう片方も変わる=仕様）
+
+========================================================================
+セッション終了ログ（構造化まとめ）
+========================================================================
+
+## 【2026-08-07】
+
+### 決定事項
+- /pmax の検索は「店舗名ヒット」に加え「所属グループ名（会社名）ヒット」でも配下全店舗を表示する
+- アドバイスページは全店舗で非表示。ただし削除ではなくフラグ無効化（また使う可能性があるため）
+- レポートの数値編集は元データ（pmax_store_data等）を書き換えず、別テーブルに上書きとして保存する方式
+  → 「全店舗を更新」で再同期しても手動編集が消えない（＝上書きされない限り永久保存の実現方法）
+- 上書き・表示設定は共有URL・グループ共有（一覧・詳細）にもそのまま反映。編集UIは管理画面のみ
+- スキーマ適用は本番SQL Editorではなくpg直結（pooler+パスワード）でこちらから実行した
+
+### 変更内容（具体的に）
+■ 会社名検索（main 3510edd）
+- src/app/pmax/page.tsx: nameToGroup（正規化店舗名→グループ名）をuseMemo化し、
+  filtered を「searchMatch(店舗名) or searchMatch(グループ名)」に変更
+■ アドバイスページ非表示
+- src/components/pmax-report-view.tsx: 先頭に SHOW_ADVICE_PAGE = false 定数を新設し
+  hasAdvice の条件に組み込み。JSX・buildPmaxAdviceロジックは全温存
+■ レポート表示設定＋数値編集の永続保存
+- sql/2026-08-07_pmax_report_settings.sql 新設: pmax_report_settings
+  （shop_name PK / overrides JSONB / section_visibility JSONB、RLS有効・service_roleのみ）本番適用済み
+- src/lib/pmax-overrides.ts 新設: キー定義＋適用ロジック（applyAdsOverrides/applyGbpOverrides/
+  parseReportSettings）。src/lib/pmax-overrides.test.ts 13件
+- src/app/api/pmax/report-settings/route.ts 新設: GET=requireRole(3役職) /
+  PUT=withAudit("P-MAXレポート表示設定保存","DATA_OP")、既存行はUPDATE部分更新
+- src/app/api/pmax/share/[token]/route.ts, group-share/[token]/store/route.ts:
+  レスポンスに overrides / sectionVisibility を追加
+- src/app/api/pmax/group-share/[token]/route.ts: 店舗一覧集計を「言語別集計→上書き適用→合算
+  →k|上書き」に変更（一覧カードと詳細レポートの数値一致）
+- src/components/pmax-report-view.tsx: settings/editable/onSettingsChange/saveState props追加。
+  上書きは集計後の行に適用しCTR/CPC/グラフ/合計を自動再計算。編集UI（右下固定ボタン・
+  インライン入力・表示設定モーダル・全クリアボタン）。visibleLanguagesでページ番号も追随。
+  GBP行が無い月は0埋め行を合成してKPI編集可能に
+- src/app/pmax/store/page.tsx: 設定読込＋600msデバウンス保存。「まとめ」AI生成は
+  settingsLoaded を待ち、上書き適用済み数値で生成（本文との矛盾防止）
+- src/app/pmax/share/[token]/page.tsx, group/[token]/store/page.tsx: settingsを受けてビューへ
+
+### 数値・設定値
+- SHOW_ADVICE_PAGE = false（pmax-report-view.tsx先頭。再開時はtrueに戻すだけ）
+- 上書きキー: m|言語|YYYY-MM|field / d|言語|YYYY-MM-DD|field / g|YYYY/MM|field /
+  c|YYYY-MM|network|impressions / k|YYYY-MM|field（KPI合計直接上書き・言語合算より優先）
+- field保存単位: impressions/clicks=回数、costYen=円、ctrPct=%（例2.45）、cpcYen=円（例4.1）
+- 保存デバウンス600ms / 編集可能=DATA_OP（社長・幹部）/ 閲覧GET=president・executive・manager
+- 表示設定キー: conversion / lang|<言語> / daily / channels / advice / summary（false=非表示）
+- 検証結果: vitest 393件パス（+13新規）/ next build成功 / 本番デプロイ確認済み
+
+### 未解決・次回やること
+- （引き継ぎ）和田さんの追加ナレッジシート読込によるアドバイス文ライブラリ拡張は、
+  アドバイスページ再開が決まってから（現在ページ自体が非表示）
+- （引き継ぎ）GBP対応表の保留9ペアのユーザー確認 → pmax-gbp-alias.ts に追記
+- （引き継ぎ）検索語句7月分は8/15以降に「未同期を一括同期」を再実行
+- 数値編集後の「まとめ」文章は共有URL発行を押し直さないと共有側に反映されない
+  （運用でカバー。自動再生成が必要なら次回検討）
+
+### 注意点・ハマったこと
+- 「表示設定」「数値を編集」ボタンはクライアントに見えない（3重確認済み）:
+  ①共有ページはeditable未指定でHTML自体に出力されない ②管理画面でもDATA_OP権限のみ
+  ③API直叩きも401/403。本番共有URLをPlaywrightで開きボタン要素ゼロを実確認
+- 共有ページのコンソール401（/api/report/my-role）は未ログイン共有ページの既存挙動で無害
+- psql未導入でもscratchpadに npm i pg して pooler直結でDDL実行できる
+  （host: aws-1-ap-northeast-1.pooler.supabase.com / user: postgres.kxxwspavskhhjtiixcep /
+  パスワードは .secrets\chubby-meo\メモ.txt）
+- parseReportSettingsでNumber(null)=0の罠（nullが有効な上書き0件になる）→ typeof検査で除外。
+  テストで検出した
+- グループ共有トークンは現在有効なもの0件（一覧API変更の影響を受ける稼働中リンクは無かった）
+- report-settingsのupsertは default '{}' で未送信フィールドが初期化されるため、
+  既存行はUPDATEで部分更新にした
+- 上書きは「集計後の行」に適用する設計が肝（campaign_id単位の生データに当てると
+  同一言語複数キャンペーンで曖昧になる）。KPI合計はk|キーで言語合算より優先

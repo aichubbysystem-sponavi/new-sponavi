@@ -1,0 +1,126 @@
+## 【2026-06-20】フィードバック全面対応 + AI総評刷新 + 編集機能追加
+
+### 決定事項
+- 社内フィードバック11項目の実装確認→2件の不整合を修正（KPI順序・多地点順位色）
+- 検索語句は1ページ20件のみ（2ページ目廃止）
+- 通話はグラフに戻す（別枠表示を撤回）
+- API仕様変更注記を削除
+- パフォーマンスAPI取得範囲を12→13ヶ月に拡大
+- AI総評を構造化JSON出力方式に根本変更
+- AIコメントのインライン編集機能を追加
+- メモ欄はweb=編集可能、PDF=非表示（no-print）
+- ページ番号をPDF基準に統一
+
+### 変更内容（具体的に）
+
+#### report-api.ts
+- KPI順序: キャッシュなしパスの「検索→マップ」を「マップ→検索」に修正
+- perfData を slice(-13) で上限キャップ（DB蓄積対策）2箇所
+
+#### grid-ranking/page.tsx
+- rankColor: 1-3位=緑→青(#2563EB)、4-10位=青→緑(#16A34A) に統一
+- rankBg: 同様にTailwindクラス入替
+- 凡例の色も入替
+
+#### client.tsx（report/[shopId]）
+- 多地点順位PDF: 凡例+平均順位の2重表示を修正（print-slideから削除）
+- 多地点順位PDF: mapSlotにjustify-content:center追加（上下中央配置）
+- 検索語句: 2ページ目（21-40位）を完全削除、totalPages計算も簡略化
+- 検索語句テーブル: fontSize 16→14px、padding 4px→2px（20行収容）
+- 通話: グラフに復元（dataset追加）、テーブルのイタリック・グレー解除、注記削除
+- API仕様変更注記: P3/P4両方から削除、apiNoteStyle/API_NOTE_TEXTのインポート削除
+- AIコメント編集: editingComments/savedComments/commentSaving/commentSaved/commentErrorステート追加
+- AIコメント編集: saveComments関数（/api/report/update-commentsへPOST）
+- AIコメント編集: isLoggedInチェック追加（未ログイン時は編集ボタン非表示）
+- AIコメント編集: エラー表示追加
+- AIコメント表示: displayComments（editingComments ?? savedComments ?? comments）で管理
+- メモ欄: 編集機能を復元+no-printクラスでPDF非表示
+- ページ番号: 多地点をサマリー1+ceil(kw/2)に変更、pageNumをペア単位で加算
+
+#### api/report/update-comments/route.ts（新規）
+- POST { shopName, comments[], targetMonth } でreport_analysis.commentsを上書き
+- targetMonth必須（全月上書き防止）
+- verifyAuth認証
+
+#### api/report/analyze/route.ts
+- プロンプト全面刷新: 構造化JSON出力（analysis/reviews/actions各配列）
+- few-shot例文に<strong>タグ付き具体例
+- 同業種平均との比較指示を追加
+- 口コミ件数言及禁止ワード拡充（増加数/投稿数/ゼロ/0件）
+- 後処理: analysis/reviews/actions → comments[0,1,2]にサーバー側組立
+- cleanItem: 内部「・」→「、」変換（formatAICommentの分割防止）
+- cleanItem: 先頭「・」「a)」除去（サーバーで付け直し）
+- toArr()ヘルパー: 配列/文字列/null全パターンを安全に処理
+- origComments退避→旧形式フォールバック
+- 10文字未満の断片フィルタ
+
+#### api/cron/monthly-analysis/route.ts
+- プロンプト: analyze/route.tsと同じ構造化JSON方式に統一
+- 後処理: 同上（toArr/clean/組立）
+- reviews変数名衝突をrvwsに修正
+
+#### api/cron/sync-performance/route.ts
+- force=trueパラメータ追加（当月同期済みもスキップせず再同期）
+- ハードコード12を削除（デフォルト13を使用）
+
+#### api/report/sync-performance/route.ts
+- ハードコード12を削除（デフォルト13を使用）
+
+#### gbp-performance.ts
+- fetchPerformanceFromGBP: デフォルト12→13ヶ月
+- syncShopPerformance: デフォルト12→13ヶ月
+- getPerformanceApiToken: エラーログ強化（全失敗パスにログ追加）
+- OAuthトークンリフレッシュ: cache:"no-store"追加
+- Performance API呼び出し: cache:"no-store"追加
+
+#### gbp-search-keywords.ts
+- fetchSearchKeywordsFromGBP: デフォルト12→13ヶ月
+- syncShopSearchKeywords: デフォルト13に変更
+- ハードコード12を削除
+- OAuthトークンリフレッシュ: cache:"no-store"追加
+- 検索語句API呼び出し: cache:"no-store"追加
+
+### 数値・設定値
+- パフォーマンスAPI取得月数: 12→13
+- 検索語句API取得月数: 12→13
+- 検索語句テーブル fontSize: 16→14px、padding: 4→2px
+- SEARCH_QUERIES_PER_PAGE: 20（変更なし、2ページ目を廃止）
+- 多地点順位色: 1-3位=#2563EB(青)、4-10位=#16A34A(緑)（全箇所統一）
+- AI総評cleanItem最小フィルタ: 10文字
+- report-api.ts perfData上限: slice(-13)
+
+### 未解決・次回やること
+- [ ] レポートサブドメインの口コミ言語別分析API 401問題（B案: サーバー側でデータ取得して渡す）
+- [ ] AI分析の全店舗一括再実行（新構造化プロンプト反映）
+- [ ] P2月次テーブルのサマリー表/詳細表の分離（koyoフィードバック）
+- [ ] セキュリティ修正（パスワード平文保存、P-MAX認証なし、レポートIDOR認可）
+- [ ] client.tsxコンポーネント分割
+- [ ] Google client secretローテーション
+
+### 注意点・ハマったこと
+
+#### Next.js fetchキャッシュの罠（再発・重大）
+- gbp-performance.tsのOAuthトークンリフレッシュとAPI呼び出しにcache:"no-store"がなかった
+- Next.js 14のサーバーサイドfetch()が古いアクセストークンをキャッシュし続け、Performance APIが401を返していた
+- google-ads.tsでは修正済みだったが、gbp-performance.tsとgbp-search-keywords.tsは未対応だった
+- 全店舗のsync-performanceが「skipped」になり、原因特定に時間がかかった
+- 対策: 外部API呼び出しには必ずcache:"no-store"を付ける（重要ナレッジに記録済み）
+
+#### AI総評の「韓国語」問題の根本原因
+- LLMは正しく「日本語・英語・韓国語」と1項目で出力していた
+- client.tsxのformatAICommentが全ての「・」で改行を挿入していたため「韓国語」が独立行に
+- サーバー側のフィルタやプロンプトの問題ではなくクライアント側の整形処理が原因だった
+- 対策: cleanItemで項目内部の「・」を「、」に置換してから保存
+
+#### AI総評のアプローチ変更
+- 旧: comments=["・項目1・項目2・項目3"] → 分割・トリム・フィルタの後処理が破綻し続けた
+- 新: analysis=["項目1","項目2","項目3"] → サーバーで「・」付けて結合するだけ
+- LLMに文字数制限を守らせるのは不可能。構造で制御する
+
+#### sync-performanceのスキップ条件
+- Cron側で当月同期済み店舗をスキップする仕組みがあり、force=trueを実装しないと13ヶ月データの再取得ができなかった
+- 487店舗の再同期に3回実行が必要（TIME_LIMIT=270秒）
+
+#### ページ番号のズレ
+- webでは多地点がKW数分のスライド、PDFではサマリー1+マップペアceil(kw/2)
+- totalPagesの計算を PDF基準に変更し、pageNumもペア単位で加算するよう修正

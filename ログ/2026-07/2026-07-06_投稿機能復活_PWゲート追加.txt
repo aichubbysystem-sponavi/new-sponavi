@@ -1,0 +1,88 @@
+========================================================================
+2026-07-06: 投稿機能の復活 + 危険操作へのログインパスワード再入力ゲート
+========================================================================
+
+## 背景
+- 2026-06-28（コミット a2fe640）で外部GBP操作6機能を意図的に無効化していた
+- ユーザー指示: 投稿機能を復活。ただし口コミ返信は停止のまま。
+  加えて「お金がかかる/危険なボタンにパスワードを求めたい」
+
+## 決定事項（ユーザー選択）
+- パスワード対象: お金がかかる操作（多地点順位計測の一括計測）＋
+  投稿の危険操作（一括自動投稿・GBP削除）。単発投稿・AI生成は対象外（確認ダイアログのまま）
+- 方式: ログインパスワードの再入力
+
+## 変更内容（コミット 1884042）
+### 投稿機能の復活（退避関数を本番に戻すだけ・7/4修正済みの状態で復元）
+- src/app/api/report/create-post/route.ts: 503スタブ削除、_POST_disabled→POST。requireRole(president,manager)維持
+- src/app/api/report/auto-post/route.ts: 同上。requireRole(president,manager)維持
+- src/app/api/report/delete-post/route.ts: 同上。※認証は verifyAuth のみ（元のまま。ロール制限なし）
+- src/app/api/cron/execute-posts/route.ts: _GET_disabled→GET。verifyCron維持
+- vercel.json: execute-posts の Cron を再登録（"*/5 * * * *" 5分ごと。元の値をgit履歴a2fe640^から確認）
+
+### 口コミ返信は停止維持（触っていない）
+- src/app/api/cron/auto-reply/route.ts → 503のまま
+- src/app/api/report/reply-review/route.ts → 503のまま
+
+### 危険操作のPWゲート（新規）
+- src/components/password-gate.tsx（新規）: usePasswordGate()フック + モーダル
+  - 検証専用の使い捨てSupabaseクライアント（persistSession:false, storageKey:"sb-pwgate"）で
+    signInWithPassword(email, 入力PW) → 成功=一致。メインセッションは汚さない
+  - email は supabase.auth.getUser() から取得
+  - Enter送信 / Escape/背景クリックでキャンセル / 入力はtype=password（マスク）
+- 適用箇所:
+  - grid-ranking/page.tsx: スマート一括計測ボタン。費用confirmの後に gate("多地点順位計測の一括計測（API費用が発生します）")
+  - posts/page.tsx handleDelete: 削除confirmの後に gate("GBP投稿の削除（取り消せません）")
+  - posts/page.tsx シート一括自動投稿: 実行confirmの後に gate(`${total}件の一括自動投稿…`)。キャンセル時 setAutoPosting(false)
+  - 各ページのreturn冒頭に {PasswordGateModal} を描画
+
+## 確認
+- next build 成功。復元4ルートの認証行が全て残存していることを確認済み
+- 警告は既存のもの（exhaustive-deps, <img>）のみ
+
+## 注意・セキュリティ上の位置づけ
+- PWゲートはフロント側の確認レイヤー（誤クリック・開きっぱなしセッション対策）。
+  バックエンドは従来通り Bearer + requireRole で防御。直接API叩きに対する防御ではない
+- signInWithPassword は fresh session を返すが persistSession:false なので保存されず、
+  メインの supabase クライアントのセッションには影響しない
+
+## 残課題・要検討（ユーザー判断待ち）
+- [ ] delete-post が verifyAuth のみ（ロール制限なし）。part_timeでもAPI直叩きで削除可能。
+      create/auto-post と揃えて requireRole(president,manager) にするか要検討（今回は元の挙動を維持）
+- [ ] approval_status の承認必須化は未実施（rejected除外のみ）。復活運用を見て判断
+- [ ] 投稿の予約作成→自動実行フローが8/28以来止まっていたため、復活後の初回は
+      少数店舗でスモークテスト推奨（execute-posts cron 5分ごとが正しく動くか確認）
+- [ ] posts/page.tsx は無効化前提の「一時停止バナー」等は無いので特に戻し作業不要
+
+## 関連
+- 2026-06-28_セキュリティ強化_Sentry_GBP無効化.txt（無効化の経緯・復活手順）
+- 2026-07-04_Topへ戻るボタン追加_写真投稿動作確認.txt（退避コード内の潜在バグ修正）
+
+========================================================================
+## 【追記】仕上げ対応（コミット a1de063）「完璧に」の指示による
+========================================================================
+
+### 変更内容
+1. delete-post API: requireRole(president, manager) に統一
+   - 旧: verifyAuth + 店舗アクセスチェック（バイトも担当店舗なら削除可能だった）
+   - 新: 社長・社員のみ。verifyShopAccessは削除（両ロールとも全店舗アクセスのため冗長）
+2. /posts の削除ボタン: part_time には非表示（canDeletePost = president/manager）
+   - DEFAULT_ROLE="part_time" なのでロール読込中は非表示 = fail-closed
+3. 「予約投稿を今すぐ実行」ボタン（scheduled-posts PUT force）:
+   - 旧: 確認なしで即実行（全pendingがGBPに公開される）
+   - 新: pending件数を表示するconfirm → ログインPW再入力ゲート → 実行
+   - pending 0件なら「実行対象がありません」と案内して中断
+   - バックエンドPUTは既に requireRole(president, manager) + pendingのみ + rejected除外（7/4修正済み）
+
+### PWゲート適用の最終一覧
+| 操作 | confirm | PWゲート | バックエンド認可 |
+|---|---|---|---|
+| 多地点一括計測（お金） | ✓費用表示 | ✓ | 社長のみ |
+| シート一括自動投稿 | ✓件数表示 | ✓ | 社長・社員 |
+| GBP投稿削除 | ✓ | ✓ | 社長・社員（今回統一） |
+| 予約投稿を今すぐ実行 | ✓件数表示（今回追加） | ✓（今回追加） | 社長・社員 |
+| 単発投稿・AI生成・予約作成 | 従来通り | 対象外 | 各ルートで認可済み |
+
+### 残課題
+- approval_status の承認必須化は引き続き運用判断待ち（rejected除外のみ実施済み）
+- 復活後の初回スモークテスト（少数店舗で予約→cron自動実行の確認）推奨

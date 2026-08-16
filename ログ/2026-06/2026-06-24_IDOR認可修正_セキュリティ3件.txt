@@ -1,0 +1,68 @@
+## 【2026-06-24】
+
+### 決定事項
+- レポートサブドメインのIDOR認可を user_shop_access テーブル + verifyShopAccess で実装
+- president ロールは全店舗バイパス、それ以外は明示的な割り当てが必要
+- P-MAX認証は全7エンドポイントに既に実装済みだった（重要ナレッジの記載が古いだけ）
+- Supabase 400エラーはキー形式問題ではなくセッションリフレッシュ期限切れ（再ログインで解消）
+- OAuth「アカウント3（email空）」= chubby.co.ltd.1204@gmail.com = Spotlight Navigator (286店舗)
+
+### 変更内容（具体的に）
+
+#### コミット 680282d: IDOR認可修正
+- `sql/create_user_shop_access.sql` — 新規作成。auth_uid + shop_name のユニーク制約テーブル
+- `src/app/api/report/my-shops/route.ts` — 新規作成。ユーザーのアクセス可能店舗一覧API
+- `src/app/api/report/shop-access/route.ts` — 新規作成。アクセス権管理API（GET/POST/DELETE、社長のみ）
+- `src/lib/supabase.ts` — getUserAllowedShops(), verifyShopAccess(), requireShopAccess() の3関数追加
+- `src/app/report/report-list-client.tsx` — fetchAllowedShops() 追加、allowedShops stateでフィルタ、ローディング画面追加、useMemo依存配列にallowedShops追加
+- `src/app/report/[shopId]/client.tsx` — accessDenied state + useEffectでmy-shops APIチェック + 全hooks後にearly return で拒否画面
+- `src/app/report/dashboard/[shopId]/client.tsx` — 同上（supabaseインポート追加、useState/useEffect追加）
+- `src/app/api/report/search-reviews/route.ts` — verifyShopAccess追加（shopNameパラメータで検証）
+- `src/app/api/report/memo/route.ts` — GET/POST 両方に verifyShopAccess追加
+- `src/app/api/report/display-settings/route.ts` — GET に認証(verifyAuth)追加 + GET/PUT に verifyShopAccess追加
+- `src/app/api/report/competitors/route.ts` — shopIdからshop名を取得してverifyShopAccess追加
+
+#### コミット adece92: 401エラー修正
+- `src/app/report/[shopId]/client.tsx` — display-settings GETに getAuthHeaders()→fetch headers追加、getAuthHeaders().then()でPromiseチェーン化 + 閉じ括弧追加
+- `src/app/report/[shopId]/client.tsx` — memo GETに getAuthHeaders() + headers追加
+- `src/app/report/report-list-client.tsx` — memo GET呼び出しに { headers: authH } 追加
+
+#### 本番Supabase SQL実行
+- `CREATE TABLE user_shop_access` — RLSなし
+- `UPDATE user_profiles SET password_display = NULL` — 全行
+
+#### 本番 system.accounts / system.tokens 修正（OAuth復旧）
+- system.tokens: account_id=f6dc0fa8 の refresh_token を account_id=1c3f78f2 の値で上書き
+- system.tokens: account_id=1c3f78f2 の行を削除（重複）
+- system.accounts: id=1c3f78f2 の行を削除（重複）
+- system.accounts: id=f6dc0fa8 の email を 'chubby.co.ltd.1204@gmail.com' に更新
+
+#### 重要ナレッジ.txt 更新
+- IDOR認可 → [x] 解決済み
+- パスワード平文 → [x] 解決済み
+- P-MAX認証 → [x] 既に対応済みだった
+- Supabase 400 → [x] キー形式ではなくセッション期限切れ
+
+### 数値・設定値
+- user_shop_access テーブル: UNIQUE(auth_uid, shop_name)、インデックス2つ（auth_uid, shop_name）
+- sync-shops結果: 585店舗同期成功、accounts/111148362910776147900 の401解消
+- sync-reviews結果: 20,273件口コミ同期、全440店舗完了、エラー0件
+- Supabase SDK: @supabase/supabase-js 2.108.2（変更なし）
+
+### 未解決・次回やること
+- [ ] 七宝麻辣湯 札幌大通店: sync-coordinates座標取得不可
+- [ ] GBP未連携8店舗のロケーション紐付け
+- [ ] Google client secretローテーション（保留中）
+- [ ] Vercel Hobbyプランで maxDuration=800 のCronがタイムアウト（Pro必要）
+- [ ] Next.js 14本体の脆弱性5件（メジャーアップグレード要）
+- [ ] CSP に 'unsafe-inline' が残っている
+- [ ] レポートAPI残り（delete-post, nap-check等の内部管理系）にもverifyShopAccess追加検討
+- [ ] AI分析の長時間実行でセッション期限切れ → セッション延長 or バックグラウンド処理化の検討
+
+### 注意点・ハマったこと
+- client.tsx に accessDenied の early return を hooks の前に書くと React Hooks ルール違反でビルドエラー → 全hooks の後に移動する必要あり
+- display-settings GETは元々認証なしだった → 認証追加後、呼び出し側にAuthorizationヘッダーがなく401発生 → 呼び出し側も修正必要
+- Go APIのOAuthアカウントは public スキーマではなく `system.accounts` + `system.tokens` に保存されている
+- system.accounts の email カラムに UNIQUE制約あり → 重複アカウント削除してからでないとemail更新できない
+- 再認証しても Go API は新規アカウントエントリを作るだけで、既存の空emailアカウントのトークンは更新されない → DB手動修正が必要だった
+- sync-shops の 401エラーは「自分の管理外のGBPアカウント」へのアクセス拒否で、5件程度は正常動作

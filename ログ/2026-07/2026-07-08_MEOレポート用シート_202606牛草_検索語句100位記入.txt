@@ -1,0 +1,105 @@
+=====================================================================
+2026-07-08 【RPA】MEOレポート用シート「202606牛草」タブに6月検索語句を100位まで記入
+=====================================================================
+
+■ 依頼内容
+- スプレッドシート「【RPA】MEOレポート用」(id=1tTpqYjGju0txvr6p5E--NSEzbNmysSIodCxcSGQyeW0)
+  の「202606牛草」タブ(gid=1514584068)
+- row1に横並びの全店舗(223店舗, B列〜QE列)について、2026年6月の検索語句を
+  上位100位まで(キーワード/検索数)記入して完成させる。臨時の単発作業。
+- システムには保存せず、シートへの書き込みのみ。
+
+■ 結論
+- 223店舗中 220店舗を記入完了。空欄3店舗のみ(GBPリスティング削除済みで6月データ無し)。
+- ★システム(DB/コード)は一切変更なし。DBはSELECTのみ。書き込みはGoogleシートだけ。
+
+■ たどり着いた確実なルート(次回も同じ)
+1. 本番DB(Supabase kxxwspavskhhjtiixcep)へ IPv4プーラーで直結
+   host = aws-1-ap-northeast-1.pooler.supabase.com:5432
+   user = postgres.kxxwspavskhhjtiixcep / DBパス = chubby-meo\メモ.txt
+   ※直結ホスト db.<ref>.supabase.co はIPv6専用で当PCから不可。プーラーもaws-0系は
+     tenant not found。aws-1-ap-northeast-1 でのみ接続成功。
+   ※Python純正ドライバ pg8000 使用(scramp都合でファイル名を token.py にしない)。
+2. GBP OAuthトークン: system.tokens の refresh_token + GBP client(client_id/secret は
+   chubby-meo\client_secret_*.json および Cloud Run env)。
+   ・本番Go API GET https://spotlight-api-114449938952.asia-northeast1.run.app/api/google/token
+     が広い権限のaccess_tokenを返す。ただし店舗ごとに管理アカウントが違い、単一トークンだと
+     404が出るので、4アカウント(chubby1204.meo/chubby.ushigusa/chubby.yamada/chubby.co.ltd.1204)
+     のトークンを順に試すのが確実。meo@japanselectは失効(invalid_grant, 要再認証)。
+3. 検索語句API:
+   GET businessprofileperformance.googleapis.com/v1/locations/{id}/searchkeywords/impressions/monthly
+       ?monthlyRange.startMonth.year=2026&...month=6&monthlyRange.endMonth...=6
+4. Sheets書込: 所有者 chubby1204.meo のトークンに spreadsheets スコープあり。
+   values:batchUpdate で 'TAB'!A2 に 100行×447列を一括書込。
+
+■ 重要な学び(ハマりどころ)
+(1) 6月データはキャッシュ(search_query_cache)に無かった。画面の「一括同期(451成功)」後も
+    2026/6 は0件・最新は2026/5のまま。→ キャッシュを待たずGBP直叩きで取得。
+    (GBP側には6月データは存在した)
+(2) ★検索語句のカウントは insightsValue.value(実数) か threshold(下位語句,例15) の
+    どちらか。最初 value だけ採用したら小規模店(エミナルクリニック等)が数行しか埋まらず
+    「データがない」状態に。既存202605は threshold語句も「15」等の数値で含めていたので、
+    threshold も含めて記入し直した(札幌院 18行→78行)。GBP返却順(降順)のままtop100。
+(3) 店舗名の突合は完全一致だと漏れる。例: シート「メンズエミナル 新宿院」=DB
+    「エミナルクリニックメンズ 新宿院」。部分一致 + GBPアカウントの全location title検索
+    (mybusinessbusinessinformation, 全4アカウントで818 location)で補完。
+
+■ マッピング結果(223店舗)
+- DB店舗マスタで一致: 216
+- 表記ゆれ/GBP直接検索で補完: 西口酒場ホームラン, 近江牛専門店 かど萬,
+  就労継続支援A型あんしんステイ, キャバクラMandarin Club, キャバクラMONSOON Cafe,
+  カネマス弥平とうふ店, 居酒屋とびこ(=高宮とびこ), メンズエミナル 新宿院 ほか
+- 記入不可(空欄)3店舗: 命婦のおとど / Photo Studio Lily / 韓国料理 ナッチャン三軒茶屋店
+  → 管理アカウントからは見えるが該当locationが全アカウント404 = GBP上で削除/停止。
+    5月が最終データ。営業中でGBPが生きているならマップURLから新location IDで取得可能。
+
+■ 最終カバレッジ
+- 満100件: 104店舗 / 50-99件: 67 / 1-49件(小規模で語句が少ないだけ, 5月とほぼ一致): 49
+- 空欄: 3(上記の削除済みリスティング)
+
+■ 補足
+- メモリにも手順を保存: memory/project_meo_report_sheet.md
+- 作業スクリプト一式はセッションのscratchpad(一時領域)。DB直結・トークンは秘匿情報のため
+  恒久保存はしていない。
+- GBP OAuthトークン再発行タスク(C-1, 〜2026-07-14目安)未実施のまま。meo@japanselectは失効中。
+
+
+=====================================================================
+セッション終了サマリ
+=====================================================================
+
+## 2026-07-08
+
+### 決定事項
+- 「202606牛草」タブへ2026年6月の検索語句を上位100位まで記入。システムには保存せずGoogleシートへの書き込みのみ。
+- 6月データはキャッシュ(search_query_cache)待ちにせず、GBP Performance APIを本番トークンで直接取得する方式に決定(同期後もcacheに6月が入らなかったため)。
+- 検索数はしきい値(threshold)語句も含めて記入する(既存202605タブの形式に準拠)。
+
+### 変更内容（具体的に）
+- Googleシート「【RPA】MEOレポート用」/タブ「202606牛草」(gid=1514584068)のみ書き込み:
+  - A1 = 「順位」
+  - A2:A101 = 順位 1〜100
+  - 各店舗のキーワード/検索数ペア列(B〜QE, 223店舗)に6月データを記入 → 220店舗記入・3店舗空欄
+- SPOTLIGHTシステム(Supabase DB / Goバッチ / フロントコード / Vercel / Cloud Run): 変更なし(すべて読み取りのみ、DBはSELECTのみ)
+- memory/project_meo_report_sheet.md 新規作成、memory/MEMORY.md に1行追記
+- ログ本ファイル新規作成
+
+### 数値・設定値
+- 対象月: 2026/6 / 上位: 100位まで(GBP返却も実質約100が上限)
+- カウント値: insightsValue.value(実数) または threshold(下位語句, 例15) を数値でそのまま記入
+- DB接続: aws-1-ap-northeast-1.pooler.supabase.com:5432 (IPv4プーラー / user=postgres.kxxwspavskhhjtiixcep)
+- 取得並列数: 4 / トークン失敗時は4アカウントを順に試行
+- 結果分布: 記入220店舗(満100=104, 50-99=67, 1-49=49) / 空欄3店舗
+
+### 未解決・次回やること
+- 空欄3店舗(命婦のおとど / Photo Studio Lily / 韓国料理 ナッチャン三軒茶屋店): GBPリスティングが全アカウント404(削除/停止)。営業中でGBPが生きていればGoogleマップURLから新location IDで取得可能。
+- meo@japanselect.co.jp のトークン失効(invalid_grant)→ 再認証必要。GBP OAuthトークン再発行(C-1対応, 〜2026-07-14目安)未実施。
+- 画面「一括同期(451成功)」後もcacheに2026/6が入らなかった原因(本番デプロイのfetch月範囲/挙動)は未調査。
+
+### 注意点・ハマったこと
+- 本番DB直結ホスト db.<ref>.supabase.co はIPv6専用で当PCから接続不可。プーラーもaws-0系は"tenant not found"、aws-1-ap-northeast-1 のみ接続成功。
+- pg8000使用時、スクリプト名を token.py にすると標準ライブラリと衝突しImportError。別名にする。
+- 店舗ごとにGBP管理アカウントが異なり、単一トークンだと404。4アカウントを順に試すこと。
+- 店舗名の完全一致だと突合漏れ(例: シート「メンズエミナル 新宿院」= DB「エミナルクリニックメンズ 新宿院」)。部分一致+GBP全location title検索で補完。
+- ★最重要: threshold語句を除外すると小規模店が数行しか埋まらず「データがない」状態になる。threshold(15等)も含めて記入すること(エミナルクリニック札幌院 18行→78行に改善)。
+

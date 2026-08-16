@@ -1,0 +1,57 @@
+## 【2026-06-16】解約店舗管理機能追加・レポートテーブルUI改善
+
+### 決定事項
+- 解約店舗はSupabase shopsテーブルの`cancelled_at`カラムで管理（NULLなら契約中、値があれば解約済み）
+- 解約店舗はサイドバー・検索語句・cron系処理から自動除外する設計
+- 顧客マスタのデフォルト表示は「契約中」のみ。「解約店舗」カードで切替
+- シート「MEO対策 終了店舗」B列の225店舗のうち、DB内にマッチした46件を解約マーク済み（残り179件はDBに未登録 or 既に削除済み）
+- レポートテーブルの背景色をヘッダー:ダークネイビー、行:青グレー縞模様に統一
+
+### 変更内容（具体的に）
+- `sql/add_cancelled_at_to_shops.sql`: 新規。cancelled_at timestamptzカラム + インデックス追加
+- `src/app/api/report/shop-cancel/route.ts`: 新規。GET（解約一覧）/ POST（解約設定/解除）API
+- `src/app/customer-master/page.tsx`:
+  - MasterRowにcancelledAtフィールド追加
+  - filterStatus state追加（"all" | "active" | "cancelled"、デフォルト"active"）
+  - fetchDataでshop-cancel APIから解約情報も並列取得、cancelledMapで管理
+  - サマリーカードに「解約店舗」カード（赤）追加。グリッドを6→7列に
+  - 全店舗カードの数字をactiveShops.lengthに変更
+  - handleToggleCancel関数追加（解約設定/解除、confirm付き）
+  - フィルタロジックにfilterStatus条件追加
+  - テーブル行: 解約店舗は赤背景+取り消し線+「解約」バッジ表示
+  - 操作列に「解約」/「解約解除」ボタン追加
+  - フィルタタグ表示に解約フィルタタグ追加
+- `src/components/shop-provider.tsx`:
+  - fetchShopsでshop-cancel APIを並列取得
+  - cancelledIds Setで解約店舗をフィルタしてからsetShops
+- `src/app/api/search-keywords/status/route.ts`: cancelled_atカラムも取得し、cancelled_at有りの店舗を除外
+- `src/app/api/cron/sync-reviews/route.ts`: 3.5に解約フィルタ追加（Supabaseからcancelled shop IDを取得）
+- `src/app/api/cron/sync-performance/route.ts`: .is("cancelled_at", null)追加
+- `src/app/api/cron/sync-search-keywords/route.ts`: .is("cancelled_at", null)追加
+- `src/app/api/cron/monthly-analysis/route.ts`: .is("cancelled_at", null)追加
+- `src/app/api/cron/auto-reply/route.ts`: .is("cancelled_at", null)追加
+- `src/app/report/[shopId]/client.tsx`:
+  - 検索表示数テーブル(P3): 月ヘッダー→#0f3460白文字、モバイル→#dce3ed、PC→#eef1f6、合計→#c5d0e0
+  - マップ表示数テーブル(P4): 同上
+  - アクション詳細テーブル(Web/ルート/通話/メニュー/予約): 月ヘッダー→#0f3460白文字、縞模様#dce3ed/#eef1f6、合計→#c5d0e0
+  - 月別一覧テーブル(P2): 偶数行→#eef1f6、罫線→#ddd、テキスト→#222
+
+### 数値・設定値
+- 解約マーク済み店舗数: 46件（完全一致20 + 表記ゆれ部分一致26）
+- シート解約店舗数: 225件（DB未登録179件）
+- Supabase全店舗数: 584件
+- テーブル背景色: ヘッダー#0f3460、奇数行#dce3ed、偶数行#eef1f6、合計行#c5d0e0
+- 解約シート: `1Rv4IF_tDEfgfsex0jKMhoBLpvUijA7Qfch2kSxSiRnU` gid=1141257086 タブ「MEO対策　終了店舗」B列
+
+### 未解決・次回やること
+- AIコメント文字化け調査: みそラーメンのよしの 札幌アピア店の16ページ目。DB上のcommentsは正常に見えるため、表示側（DOMPurify/dangerouslySetInnerHTML）か特殊文字の問題を詳細調査
+- 前年比「なし」問題: スプレッドシートのGBPデータが12ヶ月分あるか確認。データが12ヶ月未満なら仕様通り（yoyIdx = idx >= 12 ? idx - 12 : -1）
+- セキュリティ3件（持ち越し）: パスワード平文保存 / P-MAX認証なし / ブルートフォース対策
+- Supabase 400エラー: 新APIキー形式（sb_publishable_*）対応
+- LUXBE系8店舗の誤マッチ除外: 部分一致で「LUXBE」がヒットしたが別店舗のため除外済み。今後シート更新時に注意
+
+### 注意点・ハマったこと
+- anon key (sb_publishable_*) ではRLSによりshopsテーブルの読み書き不可。解約一括マークはSupabase SQL Editorで直接実行が必要だった
+- 解約店舗の名前マッチングで全角/半角スペース・記号の表記ゆれが多発。LOWER + REGEXP_REPLACE('\s+', ' ')で正規化しても20/225件しか完全一致せず、部分一致で+26件追加
+- SQLのコメント行（日本語）をそのままSQL Editorに貼るとシンタックスエラーになる。SQL文のみ提示すること
+- shop-providerで解約フィルタを入れると、サイドバーだけでなくuseShop()を使う全ページ（ダッシュボード、口コミ、投稿、基礎情報、診断等）に自動適用される

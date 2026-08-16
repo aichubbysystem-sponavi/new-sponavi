@@ -1,0 +1,78 @@
+========================================================
+2026-07-08 4段階役職権限 + 全操作の監査ログ 実装
+========================================================
+
+■ 依頼内容
+new-spotlight-navigator.com/user-management の権限を4段階に再編：
+  社長(president)   … 全操作
+  幹部(executive)【新設】… API課金がある操作以外は全部OK（GBP投稿・返信・削除など外部反映も可）
+  社員(manager)     … 閲覧＋レポートのメモ追加のみ
+  バイト(part_time) … 閲覧のみ
+操作ログを「誰が・いつ・何を・どの店舗に」で細かく追えるようにする。閲覧は社長のみ。
+データ保持期間の質問 → 容量次第で実質無期限（1行≈0.5KB、1000操作/日でも月15MB）。削除cronは入れていない。
+
+■ 設計の核（単一情報源）
+- src/lib/permissions.ts（新設・isomorphic）… AppRole 4値、ActionType 6種、ACTION_ROLES表、can()、GO_PROXY_RULES。
+  ActionType: PAID_OP(社長)/EXTERNAL_OP(社長+幹部)/DATA_OP(社長+幹部)/MEMO(社長+幹部+社員)/ADMIN(社長)/STAFF_VIEW(社長+幹部+社員)
+- src/lib/audit.ts（新設・server-only）… requirePermission()＝認可の単一入口、withAudit()＝ハンドラを包んで成功時にaudit_logs自動記録、
+  requireCtxShopAccess/ById＝店舗チェック＋targetShop記録、writeAudit()＝insert（失敗してもメイン処理を止めない）。
+- 認可を通った変更操作は withAudit で構造的に記録漏れしない設計。
+
+■ 変更ファイル一覧
+[Phase0 DB]
+- sql/2026-07-08_extend_audit_logs.sql（列追加 user_id/role/action_type/target_shop/method/path/ip/status/source ＋index
+  ＋audit_logsのauthenticated SELECTポリシー剥がし＝閲覧はサーバーAPI経由=社長のみ）
+  ★本番Supabase SQL Editorで手動実行が必要（未実行）
+[Phase1 型・権限表]
+- src/lib/permissions.ts（新設）
+- src/lib/supabase.ts（AppRoleをpermissions.tsから再export、getUserAllowedShopsにexecutive追加、requirePermission系はaudit.tsへ）
+- src/lib/roles.ts（Role4値化、ROLE_LABELSに幹部、ROLE_PERMISSIONSにexecutive追加、presidentに/audit-log追加）
+- src/lib/validation.ts（role enum 4値化）
+- src/app/user-management/page.tsx（ROLE_OPTIONSをROLE_LABELSから生成、幹部バッジ色、audit_logsをAPI経由取得に変更）
+[Phase2 API認可＋監査ログ 約45ルート]
+- src/app/api/report/users/route.ts（POST/PATCH/DELETEをwithAudit化、PATCHにrole許可リスト検証追加）
+- src/app/api/report/audit-log/route.ts（GET新設＝社長のみ・フィルタ・CSV。POSTはsource='client'付与）
+- PAID_OP化(社長のみ): chat, analyze, bulk-generate, generate-post, generate-description, reply-suggest,
+  competitors, keyword-volume, sync-coordinates, pmax/summary-text, pmax/sync, grid-ranking(POST)
+- EXTERNAL_OP化: create-post, delete-post, reply-review, auto-post, scheduled-posts(PUT手動=一括実行)
+- DATA_OP化: sync-reviews/media/performance/search-keywords/categories, update-comments, display-settings,
+  shop-keywords, hearing, survey, nap-check, grid-ranking-generate/presets, grid-ranking(PUT/DELETE),
+  tasks, search-keywords, shop-cancel, line-alerts, post-schedule, fixed-messages, reply-templates,
+  scheduled-posts(POST/PATCH/DELETE), pmax/share, pmax/group-share, pmax/check-shops
+- MEMO化: report/memo（社員も可）
+- ADMIN化: users, shop-access, oauth-accounts(変更系)
+- STAFF_VIEW化(GETにexecutive追加): pmax/accounts,groups,daily,monthly,summary,store-summary,store-detail,
+  known-shops,list-stores,gbp / report/grid-export,grid-stats,churn-score,kw-missing,nap-check(GET),tasks(GET),
+  oauth-accounts(GET),customer-sheet(GET)
+- クライアントlogAudit呼び出し削除（posts/reviews）→サーバー自動記録に一本化
+[Phase3 middleware Goプロキシ防御]
+- src/middleware.ts（/api/shop|owner|group|gbp|google|setting の変更系メソッドのみ、PostgRESTでrole取得→can判定→
+  event.waitUntilで監査記録。PROXY_GUARD_MODE env: log(既定)/enforce/off。60秒ロールキャッシュ。fail-close 503）
+[Phase4 フロントUI]
+- src/app/audit-log/page.tsx（新設・社長専用。ユーザー/種別/期間/店舗フィルタ＋ページネーション＋CSV(BOM付)）
+- src/components/sidebar.tsx（「操作ログ」をシステム管理に追加）
+- ボタン非活性: posts, reviews, grid-ranking, report/report-list-client, report/[shopId]/client,
+  search-keywords, citation, media, basic-info, basic-info/fixed-message, setup, aio, pmax, pmax/store,
+  chatbot, page(トップ), review-analysis, diagnosis
+  （can(role,ActionType)でdisabled＋title案内。メモ保存だけmanager活性。usePasswordGateは維持）
+
+■ 検証済み
+- npx tsc --noEmit エラーゼロ
+- npx next build 成功（/audit-log ページ・/api/report/audit-log 含む）
+- requireRole残存は全て ["president"] のGET（一覧/管理系）で正しい。executive漏れゼロ。
+- 変更系でwithAudit未適用は cron / webhook / users(PUT登録申請) / audit-log(POST) / review-language-stats(POST=集計閲覧) のみ＝いずれも意図通り
+
+■ デプロイ前の必須作業（本番反映の順序）★重要
+1. sql/2026-07-08_extend_audit_logs.sql を本番SupabaseのSQL Editorで実行（列追加・後方互換）
+2. コードをデプロイ（この時点でexecutiveユーザーは存在しないので既存挙動は「社員の書き込み剥奪」のみ）
+   ※Phase2で manager(社員) はAI生成・投稿・同期・設定変更が全て403になる → 社内周知が必要
+3. PROXY_GUARD_MODE を Vercel環境変数に設定。まず "log" で数日 audit_logs(source='middleware') を観察し
+   社長・社員の正常操作が正しく判定されているか確認 → 問題なければ "enforce" に切替（障害時はenvをlog/offに戻すだけ）
+4. 全Phase稼働確認後、社長が user-management で必要な社員を「幹部」に昇格
+   ★幹部ロールの付与は全部が動いてから（先に付与すると想定外の403リスク）
+
+■ 既知の判断・残課題
+- report/[shopId] の表示設定トグル(display-settings)はチェックボックスのため、saveToDb冒頭で canData ガード＋サーバー403で防御（トグルの見た目は動くがDB保存されない）
+- middleware は Goプロキシ経由の変更操作を記録するが body は読まない（店舗名の粒度が粗い。必要ならGo側ログで補完）
+- review-language-stats(POST) は口コミ言語別集計の読み取りなので verifyAuth のまま（getUserAllowedShopsで店舗は絞られる）
+- ロール降格の反映は middleware の60秒キャッシュにより最大60秒遅延（許容）

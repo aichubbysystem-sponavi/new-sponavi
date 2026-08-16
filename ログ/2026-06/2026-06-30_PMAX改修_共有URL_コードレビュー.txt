@@ -1,0 +1,81 @@
+## 【2026-06-30】P-MAX店舗詳細ページ全面改修 + 共有URL機能 + コードレビュー
+
+### 変更内容
+
+#### UI変更
+- P1: WEBサイトと保存・共有の表示位置を入れ替え
+- P2(広告指標)・P3(GBP指標)を削除
+- 平均CPC→平均クリック単価に表記変更
+- 各言語ページに月次グラフ+テーブル+日次スクロールテーブルを統合表示
+- 最終ページ: Claude API(Sonnet 4.6)でKPIデータからまとめ文章を自動生成
+
+#### 月選択対応
+- 一覧ページの月セレクターからyear/monthパラメータをstore詳細に渡す
+- store詳細ページで対象月のKPI・日次・まとめ文章を表示
+
+#### 日次データ取得の分離
+- 月次: 13ヶ月分（グラフ用）、日次: 対象月1ヶ月のみ（別パラメータ）
+- getStoreDetailにdailyStartDate/dailyEndDate引数を追加
+- store-detail APIにdailyStart/dailyEndパラメータ追加
+- 日次データ量を13ヶ月→1ヶ月に削減（API負荷軽減）
+
+#### 複数キャンペーン集約
+- 同一言語+同一月/日の複数キャンペーンデータを合算（6月が2列表示される問題を修正）
+
+#### タイムゾーンバグ修正
+- getDateRange: toISOString()→手動フォーマットに変更（JST→UTC変換で日付が1日ズレる問題）
+
+#### コードレビュー全10件修正
+- C1: pageNumのレンダー中++を計算式に（React純粋性違反）
+- C2: AI文章生成useEffectにsummaryRequestedフラグ（無限API呼び出し防止）
+- C3: toLocaleString("ja-JP")明示指定（サーバーロケール対策）
+- H1: formatCpcを小数1桁表示に
+- H2: languagesをmonthly+daily両方から抽出
+- H3+H4: gbpSorted変数+GbpTrendPageコンポーネント(45行)を削除
+- H5: summary-text APIにsanitizeKpiDataバリデーション追加
+- H6: totalPagesをsummaryText有無で動的計算
+- M1: new Date()をuseStateで初期化しレンダー全体で統一
+- M3: ComparisonBadgeにformat関数を伝播（micros生値表示→¥変換）
+
+#### 認証修正
+- summary-text API: requireRole→verifyAuth（PostgREST .eq()不具合回避）
+- share API: 同上
+
+#### 共有URL機能
+- pmax_share_tokensテーブル（UUID, shop_name, year, month, summary_text, created_by）
+- POST /api/pmax/share: トークン発行（同一店舗+月は既存を再利用、summaryText更新）
+- GET /api/pmax/share/[token]: トークンでデータ取得（認証不要、knownAccountIds検索で高速化）
+- /pmax/share/[token]: 共有レポートページ（認証不要、まとめ文章含む）
+- app-shell.tsx: /pmax/share/*をAuthGuard skipAuth
+- store詳細に「共有URLを発行」ボタン追加（クリップボードにコピー）
+
+### 変更ファイル
+- src/app/pmax/store/page.tsx — 全面改修
+- src/app/api/pmax/store-detail/route.ts — dailyStart/dailyEndパラメータ追加
+- src/app/api/pmax/summary-text/route.ts — 新規（AI文章生成）
+- src/app/api/pmax/share/route.ts — 新規（トークン発行）
+- src/app/api/pmax/share/[token]/route.ts — 新規（共有データ取得）
+- src/app/pmax/share/[token]/page.tsx — 新規（共有ページ）
+- src/app/pmax/page.tsx — リンクにyear/month追加
+- src/lib/google-ads.ts — getStoreDetailにdailyStartDate/dailyEndDate引数追加
+- src/components/app-shell.tsx — /pmax/share/*をAuthGuard除外
+- sql/pmax_share_tokens.sql — テーブル定義
+
+### 数値・設定値
+- summary-text: Claude Sonnet 4.6, max_tokens 1024, timeout 45秒
+- 日次データ取得: 対象月1ヶ月分のみ（monthsBack=0）
+- 共有キャッシュ: share:{token}キー、6時間TTL
+- formatCpc: Math.round()→toFixed(1)（小数1桁）
+
+### 未解決・次回やること
+- [ ] PostgREST .eq()不具合の根本原因（summary-text/shareはverifyAuthで回避済みだが、他APIのrequireRoleは依然不安定）
+- [ ] summary-text 401が再発する場合はSupabase Authセッション期限切れの可能性（再ログインで解消）
+- [ ] 日次データがGoogle Ads APIから返らない月は日次セクション非表示（正常動作）
+- [ ] H1-H7セキュリティ残タスク（前セッションから引き続き）
+
+### ハマったこと
+- toISOString()のUTC変換: JST midnight→UTC前日15:00でendDateが1日ズレ、日次データが全月0件になった。5回フィルター変更を繰り返した末に根本原因発見
+- 日次データ13ヶ月取得: Google Ads APIが返すデータ量に上限があり、古い月で枠を使い切って新しい月のデータが返らなかった。月次と日次の取得期間を分離して解決
+- requireRoleの不安定な401: PostgREST .eq()が間欠的にnullを返す既知問題。verifyAuth(JWT検証のみ)に変更して回避
+- 同一言語の複数キャンペーン: キャンペーン再作成等で同じ言語に2つのキャンペーンが存在し、6月が2列表示された。言語+月でグループ集約して解決
+- AuthGuardが共有ページをブロック: /pmax/share/*がAuthGuardの認証チェック対象だった。app-shell.tsxでskipAuth=trueに設定

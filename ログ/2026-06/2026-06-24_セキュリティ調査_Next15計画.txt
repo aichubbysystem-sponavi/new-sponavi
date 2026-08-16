@@ -1,0 +1,105 @@
+## 【2026-06-24】セキュリティ調査 + Next.js 15アップグレード計画
+
+### 調査結果
+
+#### Next.js 14.2.35 の脆弱性（npm audit: 14件）
+14.2.35は14系の最終パッチ。これ以上修正は出ない。
+
+| # | 脆弱性 | 重要度 | このプロジェクトへの影響 |
+|---|--------|--------|----------------------|
+| 1 | Image Optimizer DoS (GHSA-9g9p) | high | 影響あり。remotePatternsで *.supabase.co を許可中 |
+| 2 | Image disk cache exhaustion (GHSA-3x4c) | high | 影響あり。next/imageを使用中 |
+| 3 | Image Optimization API DoS (GHSA-h64f) | high | 影響あり |
+| 4 | Server Components DoS (GHSA-q4gf) | high | 影響あり。RSCを使用中 |
+| 5 | Server Components DoS (GHSA-8h8q) | high | 影響あり |
+| 6 | HTTP request deserialization DoS (GHSA-h25m) | high | 影響あり |
+| 7 | HTTP request smuggling in rewrites (GHSA-ggv3) | high | 影響あり。rewritesでGo APIにプロキシ中 |
+| 8 | RSC cache poisoning (GHSA-vfv6) | high | 影響あり |
+| 9 | RSC cache poisoning collisions (GHSA-wfc6) | high | 影響あり |
+| 10 | Middleware cache poisoning (GHSA-3g8h) | high | 影響あり。middlewareでサブドメインルーティング中 |
+| 11 | CSP nonce XSS (GHSA-ffhc) | high | 現在nonceは未使用。nonce実装すると影響あり |
+| 12 | beforeInteractive XSS (GHSA-gx5p) | high | beforeInteractive未使用。影響なし |
+| 13 | SSRF via WebSocket upgrades (GHSA-c4j6) | high | WebSocket未使用。影響低 |
+| 14 | Middleware bypass i18n (GHSA-36qx) | high | i18n未使用。影響なし |
+
+加えて: PostCSS XSS (GHSA-qx2v, moderate)、glob command injection (GHSA-5j98, high, devDependency)
+
+#### CSP 'unsafe-inline' の現状
+- script-src: 'unsafe-inline' あり → XSS緩和が無効
+- style-src: 'unsafe-inline' あり → Tailwind CSS/Next.jsが依存、排除困難
+- Next.js 14でnonce実装 → nonce自体のXSS脆弱性(GHSA-ffhc)があるため逆にリスク増
+- 結論: Next.js 15アップグレード後にnonce実装するのが唯一安全な方法
+
+#### 今すぐ適用可能な緩和策
+- [x] images.remotePatterns: 既に *.supabase.co のみに制限済み
+- [x] frame-ancestors 'none': 設定済み（クリックジャッキング防止）
+- [x] X-Content-Type-Options: nosniff 設定済み
+- [x] HSTS: 設定済み
+- [x] Referrer-Policy: 設定済み
+- [x] productionBrowserSourceMaps: false 設定済み
+- [x] poweredByHeader: false 設定済み
+
+### セキュリティ監査対応（コミット 88ebb5c）
+
+10ファイル修正、ビルド確認済み、push済み。
+
+| # | ファイル | 修正内容 |
+|---|---|---|
+| 1 | review-language-stats | Refererチェック → verifyAuth |
+| 2 | search-keywords | GET に verifyAuth 追加 |
+| 3 | grid-ranking-generate | GET/PUT/DELETE に verifyAuth + verifyShopAccess |
+| 4 | execute-posts | staleリカバリ 5分→10分（二重投稿緩和） |
+| 5 | middleware.ts | 旧Supabase URLハードコード削除 |
+| 6 | scheduled-posts | DELETE/PATCH に verifyShopAccess |
+| 7 | post-schedule | delete action に requireShopAccessById |
+| 8 | churn-score | verifyAuth → requireRole(president/manager) |
+| 9 | grid-ranking-presets | POST/DELETE に verifyShopAccess |
+| 10 | reply-review | GBP API fetch に timeout(30000) |
+
+残存課題（HIGH/MEDIUM）:
+- [ ] レート制限をインメモリMap→外部ストア（Upstash Redis等）に移行
+- [ ] Supabase service_role keyの使用範囲をCron/管理操作のみに限定
+- [ ] auto-post sheetId検証（SSRF類似）
+- [ ] send-report HTMLインジェクション対策
+- [ ] scheduled-posts PUT（手動実行）のクレーム処理追加
+- [ ] execute-posts の根本修正: processing_started_atカラム追加
+- [ ] P-MAXにロール制限追加
+
+### Next.js 15 アップグレード計画
+
+#### 前提
+- 現在: Next.js 14.2.35（App Router）
+- 目標: Next.js 15.5.x（最新安定版）
+- 14→15の破壊的変更が多数あるため、専用セッションで実施
+
+#### 主な破壊的変更（事前調査必要）
+1. **React 19 必須** — React 18→19のアップグレードが同時に必要
+2. **async Request APIs** — headers(), cookies(), params, searchParams が非同期に
+   - layout.tsx の headers() 呼び出し（行20）が影響
+   - 全ページでparamsの扱いが変わる可能性
+3. **fetch キャッシュデフォルト変更** — no-store がデフォルトに
+   - 現在 cache: "no-store" を明示している箇所は変更不要
+   - 明示していない箇所のキャッシュ動作が変わる
+4. **next/image の変更** — 一部プロパティ廃止
+5. **Middleware の変更** — geo, ip プロパティ廃止
+
+#### 作業見積もり
+1. package.json 更新 + npm install: 30分
+2. TypeScriptエラー修正（async API対応）: 2-4時間
+3. 全画面動作確認: 2-3時間
+4. nonce実装（CSP unsafe-inline排除）: 1-2時間
+5. バッファ: 2時間
+- 合計: 約1-2日
+
+#### 進め方
+1. git branch next15-upgrade で別ブランチ作成
+2. npm install next@15 react@19 react-dom@19
+3. ビルドエラーを1つずつ修正
+4. ローカルで全画面動作確認
+5. CSP nonce実装
+6. mainにマージ → デプロイ
+
+#### 注意
+- アップグレード中は本番デプロイしない（mainブランチは触らない）
+- eslint-config-nextも15系に上げる必要あり
+- Prisma等のORM互換性は問題なし（Prisma未使用、Supabase直接）

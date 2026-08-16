@@ -1,0 +1,94 @@
+## 【2026-07-02〜03】P-MAX表示修正・多地点チェック最適化・ユーザー登録申請機能
+
+### 決定事項
+- P-MAX表示バグの根本原因は3つの複合問題（service role降格/PostgREST 1000行制限/Next.js fetchキャッシュ）
+- 「.eq()不安定」は誤認識 → 真因はservice roleのauth設定不備によるRLSブロック
+- P-MAXは店舗選択同期に対応（全店舗一括 or 選択店舗のみ）
+- 多地点チェックのPhase 1/2は取得済みデータをスキップ、KW未取得店舗には空マーカー保存
+- ユーザー登録は申請→社長承認フローに変更
+- ユーザーのロールはユーザー管理画面からドロップダウンで直接変更可能
+
+### 変更内容（具体的に）
+
+#### P-MAX表示バグ修正（3ファイル）
+- `src/lib/supabase.ts` — getSupabase()のcreateClientに3オプション追加:
+  - `auth.autoRefreshToken: false` — service role keyのリフレッシュでanon降格を防止
+  - `auth.persistSession: false` — サーバー環境対応
+  - `global.fetch: cache: "no-store"` — Next.js 14の内部fetchキャッシュ無効化
+- `src/lib/supabase.ts` — service keyの先頭20文字のログ出力を削除（セキュリティ）
+- `src/lib/supabase.ts` — getUserRole()を全件取得+JSフィルタ → `.eq()`に変更（パフォーマンス）
+- `src/app/api/pmax/store-summary/route.ts` — 全件取得+JSフィルタ → `.eq("month", month)`でDB側フィルタに変更
+- `src/app/api/pmax/sync/route.ts` — DELETE/INSERTのエラーログ詳細出力追加、shopNames選択同期対応
+
+#### P-MAX店舗選択同期（3ファイル）
+- `src/app/api/pmax/known-shops/route.ts` — 新規: pmax_account_mappingから店舗名一覧返却
+- `src/app/api/pmax/sync/route.ts` — shopNamesパラメータ追加（選択店舗のみ同期、選択店舗のデータだけdelete→insert）
+- `src/app/pmax/page.tsx` — 「全店舗を更新」「店舗を選んで更新」の2ボタン、選択パネル（チェックボックス+検索+全選択）、月別クライアントキャッシュ
+
+#### 多地点チェック最適化（4ファイル）
+- `src/app/grid-ranking/page.tsx`:
+  - Phase 1: shopsテーブルで座標有無を確認、全店舗取得済みならスキップ
+  - Phase 2: shop_keywordsテーブルでKW有無を確認、未取得分のみAPI呼び出し
+  - KW見つからず店舗に空マーカー（source="not_found"）保存 → 次回スキップ
+  - ステータスダッシュボード（4カード: 今月計測済み/未計測/座標あり/KW設定済み）
+  - CSVダウンロード（月選択ドロップダウン、中心順位のみ出力）
+  - KW未取得一覧パネル（黄色、リロード永続）
+- `src/app/api/report/kw-missing/route.ts` — 新規: shop_keywords.source="not_found"の店舗一覧
+- `src/app/api/report/grid-stats/route.ts` — 新規: 計測済み/未計測/座標あり/KW設定済みの集計
+- `src/app/api/report/grid-export/route.ts` — 新規: 月別の全計測ログをCSV出力（店舗名/KW/中心順位/計測日時、BOM付きUTF-8）
+
+#### セッション切れ防止（2ファイル）
+- `src/app/reviews/page.tsx` — 口コミ同期ループ内にbatch-activityイベント追加
+- `src/app/review-analysis/page.tsx` — 口コミ分析ループ内にbatch-activityイベント追加
+- （grid-ranking/page.tsxは前回対策済み）→ 長時間バッチ処理の3ページ全てに対策完了
+
+#### ユーザー登録申請・承認・ロール管理（5ファイル）
+- `src/app/login/page.tsx`:
+  - "register"モード追加（表示名+ユーザー名+パスワード）
+  - 「アカウント登録申請はこちら」リンク追加
+  - 申請後は「登録申請を送信しました。管理者の承認をお待ちください。」表示
+- `src/app/api/report/users/route.ts`:
+  - PUT: 登録申請（認証不要、role="pending"で保存、重複チェック付き）
+  - PATCH: 承認(approve)/却下(reject)/ロール変更(change_role)（社長のみ）
+  - 全操作をaudit_logsに記録（操作者名・対象者・アクション）
+- `src/app/api/report/my-role/route.ts` — 新規: ログイン中ユーザーのロール取得
+- `src/components/auth-guard.tsx`:
+  - ログイン時にmy-role APIでロール確認
+  - role="pending"なら「承認待ち」画面を表示しアクセスを遮断（ログアウトボタン付き）
+- `src/app/user-management/page.tsx`:
+  - 承認待ち一覧（黄色パネル）: 表示名設定+ロール選択+承認/却下ボタン
+  - ユーザー一覧: ロール列がドロップダウンに変更 → 直接ロール変更可能
+  - pendingユーザーはユーザー一覧から除外
+
+#### スプレッドシート
+- `write-newsponavi-sheet.js` — 新規: NEWSPONAVI全容をSheets APIで書き込み（73行、書式付き）
+- 対象シート: `1fREtiHUO-PSfkWmrrFTbXmE9xswTjBAO-ljw5Vr0hio` タブ「NEWSPONAVI」
+
+### 数値・設定値
+- PostgRESTデフォルト最大行数: 1000行（.limit(50000)指定しても無視される）
+- P-MAXクライアントキャッシュ: 月別、sync後はforceRefresh=true
+- P-MAX sync進行表示: dbCountとinsertErrors表示（30秒後に消える）
+- 多地点チェック KW未取得マーカー: shop_keywords.source="not_found", keywords=[]
+- CSVエクスポート: 中心地点(row=center,col=center)の順位のみ、BOM付きUTF-8
+- batch-activity対策済みページ: grid-ranking, reviews, review-analysis（3ページ全て）
+- ユーザーロール: president/manager/part_time/pending（pendingは承認待ち）
+
+### 未解決・次回やること
+- [ ] 他のAPI（store-detail等）で全件取得+JSフィルタしている箇所があれば.eq()に変更
+- [ ] セキュリティ修正（前セッションから引き続き）:
+  - auto-reply/execute-posts に verifyCron追加
+  - Supabase exec_sql RPC関数削除
+  - RLSポリシー有効化（全テーブル）
+  - NEXT_PUBLIC_API_URL → API_URL変更
+  - Go APIにサービス間認証追加
+- [ ] GBP未連携20店舗（エミナルクリニック系）のOAuth連携
+- [ ] KW未取得149店舗のシートへのKW設定
+- [ ] 6月分パフォーマンスデータの同期（7/5以降にsync-performance実行）
+- [ ] 口コミ分析の失敗店舗（SIK eatery うつぼ公園店等）の再実行
+
+### 注意点・ハマったこと
+- **P-MAX 3重バグ**: service role降格 + PostgREST 1000行制限 + Next.js fetchキャッシュが同時に発生。1つずつ解消しないと原因特定できなかった
+- **".eq()不安定"は誤り**: 重要ナレッジに記載されていた「PostgREST .eq()の不安定動作」は、service roleのauth設定不備によるRLSブロックが真因。重要ナレッジを更新済み
+- **KW未取得の繰り返し**: シートにKWがない153店舗はshop_keywordsに何も保存されないため、毎回Phase 2で再取得を試みていた。空マーカー（source="not_found"）を保存して解決
+- **口コミ分析でもセッション切れ**: batch-activityは口コミ同期（reviews）には対策済みだったが、口コミ分析（review-analysis）には未対策だった。411エラー発生後に対策追加
+- **GBPパフォーマンスデータのタイムラグ**: 月末から3〜5日遅れでGBP APIからデータが確定。7/3時点では6月分が取得できない場合がある

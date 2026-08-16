@@ -1,0 +1,84 @@
+## 【2026-06-23】コードレビュー＋修正（セキュリティ・パフォーマンス・データ整合性・OAuth統一）
+
+### セッション概要
+全ソースコード厳密レビュー → CRITICAL問題を段階的に修正 → 本番デプロイ → OAuth再認証
+
+### 修正1: GET /api/report/memo に認証追加（IDOR修正）
+- ファイル: src/app/api/report/memo/route.ts
+- 問題: GETに認証チェックなし → ?shopName=競合店名 で他社メモが丸見え
+- 修正: verifyAuth() を GET ハンドラ冒頭に追加
+- 本番確認済み: 認証なしで401返却 ✓
+
+### 修正2: GET /api/report/nap-check に認証追加（IDOR修正）
+- ファイル: src/app/api/report/nap-check/route.ts
+- 修正: verifyAuth() を GET ハンドラに追加
+- 本番確認済み: 認証なしで401返却 ✓
+
+### 修正3: innerHTML XSS修正
+- ファイル: src/app/report/[shopId]/client.tsx 行680
+- 修正: innerHTML → createElement + textContent に変更
+
+### 修正4: セキュリティヘッダー追加
+- ファイル: src/middleware.ts
+- X-Content-Type-Options: nosniff ✓
+- Referrer-Policy: strict-origin-when-cross-origin ✓
+- Strict-Transport-Security: max-age=63072000; includeSubDomains; preload ✓
+- 本番確認済み: 全ヘッダーがレスポンスに含まれる ✓
+
+### 修正5: Supabase認証エラー修正
+- @supabase/supabase-js 2.100.0 → 2.108.2（sb_publishable_*キー対応）
+
+### 修正6: analyze API N+1クエリ解消
+- 450クエリ → バッチ取得で約10クエリに削減
+- 空配列ガード追加、重複クエリ統合
+
+### 修正7: sync-reviews shop_id混同修正
+- Go API ID → Supabase IDに修正
+
+### 修正8: エラーハンドリング改善
+- execute-posts: 全件失敗時にstatus 500
+- analyze: fetchReviews の catch にログ追加
+
+### 修正9: OAuthトークン取得を gbp-token.ts に統一（根本原因修正）
+- 問題: 3ファイルが独自のトークン取得ロジックを持っていた
+  - cron/sync-shops: ローカル getOAuthToken() → system_oauth_tokens直接 → 失敗
+  - cron/sync-reviews: ローカル getAllValidTokens() → PostgreSQL直接 → 失敗
+  - report/sync-reviews: 同上
+- 修正: 全て lib/gbp-token.ts の getOAuthToken() に統一（235行削除、9行追加）
+- gbp-token.ts は Go API /api/google/token を最優先で使う
+- 本番確認済み: sync-shops が「OAuthトークンなし」→ 成功(585店舗同期) ✓
+
+### 修正10: GBPロケーション情報をSupabaseに永続保存（OAuth切れ耐性）
+- 新カラム: shops.gbp_full_path TEXT（本番SQL実行済み）
+- getLocationMap(): Go APIに加えSupabaseのgbp_full_pathからも補完
+- 口コミ/sync-shops成功時: fullPathをgbp_full_path + gbp_location_nameに永続保存
+- locMapの店舗名マッチに正規化(normName)を追加
+
+### 修正11: X-Powered-By削除 + npm脆弱性修正
+- next.config.mjs: poweredByHeader: false
+- npm audit fix: undici 12脆弱性修正（7 high, 5 moderate → 0）
+
+### OAuth再認証（手動作業）
+- chubby.yamada@gmail.com → 再認証済み ✓
+- chubby1204.meo@gmail.com → 再認証済み ✓
+- meo@japanselect.co.jp → 再認証済み ✓
+- chubby.ushigusa@gmail.com → 再認証済み ✓ → type=0→1に変更済み
+- アカウント3（email空） → 未認証（どのGoogleアカウントか不明）
+
+### 本番OAuth状態（セッション終了時点）
+- 有効: 4アカウント（yamada, 1204.meo, japanselect, ushigusa）
+- 401: 2 GBPアカウント（accounts/111148362910776147900, accounts/110039756860280629835）
+- Go API: 585店舗同期成功、50店舗がgbp_location_name=null
+
+### 残存する問題
+- [ ] OAuth未認証2アカウント（花京大正店など50店舗が影響）
+- [ ] Vercel Hobbyプランで maxDuration=800 のCronがタイムアウト（Pro必要）
+- [ ] Next.js 14本体の脆弱性5件（メジャーアップグレード要）
+- [ ] レポートサブドメインのIDOR認可（クライアント公開前に対応必要）
+- [ ] CSP に 'unsafe-inline' が残っている
+
+### コミット履歴
+1. 8930f07 fix: セキュリティ修正・N+1解消・GBPロケーション補完
+2. 86acad1 fix: OAuthトークン取得を gbp-token.ts に統一
+3. dae118c fix: GBPロケーション情報をSupabaseに永続保存（OAuth切れ耐性）
+4. ad49f4c fix: X-Powered-By削除 + undici脆弱性修正

@@ -1,0 +1,124 @@
+=====================================================================
+2026-07-03 P-MAXレポート改修（3件）
+=====================================================================
+
+■ 依頼内容（共有リンク https://new-spotlight-navigator.com/pmax/share/... のレポート）
+  1. 2P（コンバージョン推移）に「予約」が入っていないので追加
+  2. 3P（指標の数字のテーブル）を追加
+  3. 管理画面/pmaxの店舗ボタンをCtrl+クリックで別タブ表示できるようにする
+
+■ 事前調査で判明した重要事項
+  - GBPシート(1wludlpnMw7xithCJc3-9iIkjnhx2RFSWR9A8ihOsJ4A / gid=372148068)には
+    「予約」列が存在しない。列は …メニュークリック(K)/保存・共有(L)/注文(M)/来店ビュースルー(N)/合計来店数(O)。
+  - 従来 P1 の「予約」KPIは value:0 のハードコード（プレースホルダ）だった。
+  - 共有リンクはSupabase DB(pmax_gbp_data)から読み込む構成。DBにも予約列なし。
+  - M列「注文」には実データあり（2077行が>0）。restaurant系の実質的なコンバージョン。
+
+■ 判断（ユーザー離席中のため best judgment）
+  ★「予約」= GBPシートM列「注文」を採用。要ユーザー確認。
+   → 変えたい場合: pmax-sheet.ts の cols[12] を別indexに、または0固定に。
+
+■ 変更ファイル
+  1. src/app/pmax/page.tsx
+     - グループ内店舗カードを <button onClick=router.push> → <a href onClick>（block追加）
+     - Ctrl/Cmd/Shift/中クリックはブラウザ既定（新タブ）に委ね、通常クリックはSPA遷移(router.push)
+  2. src/components/pmax-report-view.tsx
+     - GbpRow に reservation を追加
+     - convMetrics に {reservation:"予約"} を メニュークリックとWEBサイトの間に追加（2Pグラフに予約が出る）
+     - P1「予約」KPIを gbpCurrent?.reservation に接続（0固定を解除）
+     - convOffset を 1→2 に（コンバージョン=グラフ+数値テーブルの2ページ構成）
+     - 新規スライド「コンバージョン数値」(3P) を追加：指標×月のマトリクス表＋計列。
+       言語別ページは4P以降にずれる。
+  3. src/lib/pmax-sheet.ts       … PmaxGbpRow.reservation 追加 / parseNum(cols[12])
+  4. src/app/api/pmax/sync/route.ts … upsertに reservation を追記
+  5. src/app/api/pmax/share/[token]/route.ts … reservation: Number(r.reservation ?? 0)
+  6. src/app/api/pmax/group-share/[token]/store/route.ts … 同上
+  7. sql/pmax_store_data.sql … pmax_gbp_data に reservation カラム追記
+  8. sql/2026-07-03_add_reservation_to_pmax_gbp.sql（新規・マイグレーション）
+
+■ デプロイ手順（重要・順序）
+  1. 本番Supabaseで sql/2026-07-03_add_reservation_to_pmax_gbp.sql を実行
+     （ALTER TABLE ... ADD COLUMN IF NOT EXISTS reservation）
+  2. デプロイ
+  3. /api/pmax/sync を再実行 → 予約(=注文)値がDBに入り、共有レポートに反映
+  ※ 1未実行でもアプリは壊れない（?? 0 フォールバック、sync書込は各店try/catchで握り潰し）。
+    予約は0表示になるだけ。
+
+■ 確認結果
+  - npx tsc --noEmit … エラー0
+  - npx next build … 成功（全ルートコンパイル）
+
+■ 未確認・要ユーザー確認
+  - 「予約」=「注文(M列)」で良いか（意味的にはGBPのbooking≠order）
+  - 3Pテーブルの配置（新規ページで良いか／2Pグラフ下でよいか）
+  - /pmax/[customerId]/page.tsx（内部別画面）は独自GbpRow型で予約未対応のまま（今回スコープ外）
+=====================================================================
+
+---------------------------------------------------------------------
+【追記 2026-07-03 その後の変更】
+■ 依頼: 「グラフがあると数値が見にくい。グラフをなくして数値のみで月次表示に」
+■ 対応:
+  - コンバージョン推移ページ(2P)を グラフ廃止 → 数値のみの月次テーブルに変更
+    （縦=指標7項目 / 横=各月 + 計列、最新月ハイライト）
+  - 前回追加した別ページ「コンバージョン数値」(3P)は重複するため削除
+  - convOffset を 2→1 に戻す（コンバージョンは1ページ構成）→ 言語別は3P以降
+  - chart.js/Bar は言語別ページで継続使用のため import は残す
+■ 確認: tsc エラー0 / next build 成功(225ページ)
+
+【現在の状態】
+  - コード編集・ビルド確認まで完了。★デプロイは未実施★
+  - main ブランチに未コミットの変更あり（作業ツリーに保持、セッション閉じてもディスクに残る）
+  - 別セッションで grid-ranking(api/report/grid-ranking) を並行作業中
+    → build と git commit/push は片方のセッションに集約すること（同時実行で競合の恐れ）
+
+【残タスク（デプロイ手順・順序厳守）】
+  1. 本番Supabaseで sql/2026-07-03_add_reservation_to_pmax_gbp.sql を実行
+  2. git commit → push（Vercel自動デプロイ）※grid-ranking側とまとめて実施推奨
+  3. /api/pmax/sync を再実行 → 予約(=注文/M列)値がDBに反映
+
+【要ユーザー確認（保留中）】
+  - 「予約」= GBPシートM列「注文」で確定してよいか
+=====================================================================
+
+---------------------------------------------------------------------
+【完結 2026-07-06】デプロイ実施（コミット 39d5fa8）
+■ 保留だった「予約=M列『注文』でよいか」→ ユーザー回答: 不採用。予約は0固定に戻す
+■ 最終構成:
+  - 2P: グラフ廃止→指標×月の数値テーブル（7指標: 合計来店数/電話/経路案内/
+    メニュークリック/予約/WEBサイト/保存・共有、横=各月+計、最新月ハイライト）… 7/3実装のまま
+  - 予約の値: pmax-sheet.ts で reservation:0 固定（cols[12]読み取りを撤回）
+  - sync/route.ts と sql/pmax_store_data.sql は git checkout で復元（DB書込なし）
+  - sql/2026-07-03_add_reservation_to_pmax_gbp.sql は不要になったため削除（未コミットのまま破棄）
+  - share/group-share ルートの reservation: Number(r.reservation ?? 0) は残置
+    （select("*")なのでカラム無しでもエラーなし→常に0。型整合のため）
+■ 効果: 本番SupabaseでのALTER TABLE実行が不要に。/api/pmax/sync再実行も不要
+  （予約は常に0、他指標は既存データで表示が変わるのみ）
+■ next build 成功 → push（Vercel自動デプロイ）
+
+---------------------------------------------------------------------
+【再変更 2026-07-06】予約=M列「注文」で最終確定（コミット e81a3d4）
+■ ユーザー回答の変転: 「0固定に戻す」→ 実画面を見て「ラベルは予約のまま、数値は注文を取得」で確定
+■ 対応: 7/3の元実装に復元
+  - pmax-sheet.ts: reservation = parseNum(cols[12])（M列）
+  - sync/route.ts: pmax_gbp_data.reservation へ書込
+  - sql/pmax_store_data.sql: reservationカラム定義
+  - sql/2026-07-06_add_reservation_to_pmax_gbp.sql（マイグレーション、今回はコミット済み）
+■ 残タスク（ユーザー作業）:
+  1. 本番Supabase SQL Editorで ALTER TABLE public.pmax_gbp_data
+     ADD COLUMN IF NOT EXISTS reservation BIGINT DEFAULT 0; を実行
+  2. P-MAX管理画面から同期（/api/pmax/sync）を再実行 → 予約値が反映
+  ※ SQL未実行の間: アプリは動くが sync のGBP書込が失敗（try/catch握潰し）し予約=0のまま
+
+---------------------------------------------------------------------
+【完了 2026-07-06】予約データの本番反映まで完了
+■ 本番Supabaseで ALTER TABLE（reservationカラム追加）実行済み（ユーザー、SQL Editor）
+■ 課題: /api/pmax/sync は選択月しか書かない → レポート表示の過去11ヶ月分が0のままになる
+■ 対応: /api/pmax/backfill-gbp を新設（コミット a8807b4 / NUL修正 40dfda3）
+  - GBPシート全行(全店舗×全月)を pmax_gbp_data に一括upsert（CRON_SECRET認証）
+  - shop_name|month でdedupe（シート内重複134行あり→後方採用）
+  - 実行結果: sheetRows 4,609 / uniqueRows 4,475 / upserted 4,475 / errors 0
+  - 副次効果: 予約以外のGBP指標も全月分シートと同期し直された
+■ 今後の運用: 通常の「全店舗を更新」(sync)がreservationも書くので追加作業不要。
+  シート全体と整合を取り直したい時は backfill-gbp を再実行すればよい
+■ ハマり: backfill route の dedupキー区切りに NUL(0x00) が混入し
+  gitがバイナリ判定 → "|" に置換して解消（コミット40dfda3）

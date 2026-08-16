@@ -270,3 +270,130 @@ auto-post の「店舗未登録（スキップ）」で静かに止まる。
   Go APIのレスポンス項目 ≠ shops のカラム。書き込む前に必ず
   information_schema.columns と突き合わせること。
   owner_id / full_address / owner / group はGo API側の結合結果。
+
+
+==========================================================
+セッション終了ログ
+==========================================================
+
+## 2026-08-08
+
+### 決定事項
+- shops.name は「システム全体の結合キー」として不変にする。GBP側の改名には追従しない。
+  GBP上の現在名は shops.gbp_shop_name に同期し、検索・表示・照合に使う。
+  理由: name は reviews / report_analysis / pmax_* / grid_ranking_logs /
+  report_display_settings / user_shop_access / 投稿用シートB列 / Dropbox写真フォルダ名 が
+  文字列一致で紐付く。書き換えると auto-post が「店舗未登録（スキップ）」で静かに止まる。
+- 無人実行(cron)は shops テーブルに行を追加しない。新規登録も再紐付けも人が画面から実行する。
+  cronは検出して報告するだけ（pendingInserts / linkable を返す）。
+- 手動実行でも新規登録が20件を超えたら保留し、一覧を見せてから承認で確定する。
+- 「ロケーション解除」は意図的な操作として記録し、同期が自動で戻さない。
+- 重複店舗の統合は、口コミを持つ古い行を残して新しい行を消す（P-MAXは shops を参照しないため影響なし）。
+- 本番デプロイはユーザー指示により main 直プッシュで実施（featureブランチ経由は今回見送り）。
+
+### 変更内容（具体的に）
+[新規] src/lib/gbp-locations.ts
+  全OAuthトークン×全GBPアカウント×全ロケーションを列挙。ページネーション完走、
+  PERSONALアカウントを後回しにする決定的ソート、401/403は別トークンで再試行、
+  全トークン試行後もスキャンできなかったアカウントを必ずerrorsに積む。
+[新規] src/lib/gbp-shop-sync.ts
+  スキャン結果を shops へ反映。name は新規INSERT時にしか書かない。
+  差分があるときだけUPDATE / 店名変更を shop_name_changes に記録（gbp_shop_name更新より前）/
+  未登録アカウント配下は取り込まない / 同一ロケーション重複は報告のみ /
+  autoLink・allowInsert・confirmBulkImport で書き込み範囲を制御。
+[新規] src/app/api/report/gbp-sync/route.ts   GET=差分プレビュー / POST=実行（withAudit DATA_OP）
+[新規] src/app/api/report/shop-gbp-info/route.ts  Go APIが返さない項目をSupabaseから補完（1000行ページング）
+[新規] src/app/api/report/shop-unlink/route.ts    解除したロケーションIDを previous_gbp_location_name に記録
+[新規] sql/2026-08-08_shop_name_changes.sql       店名変更履歴テーブル（本番適用済み）
+[修正] src/lib/normalize.ts          normShopName / isSameShopName を追加（同期側とUIで共有）
+[修正] src/lib/gbp-location.ts       Authorization ヘッダーからトークン変数が抜けていた4箇所を修正
+[修正] src/lib/report-api.ts         getShopDbIds に gbp_shop_name 完全一致を追加（部分一致より前）
+[修正] src/lib/spreadsheet.ts        同上
+[修正] src/app/api/cron/sync-shops/route.ts
+  Step1を syncShopsFromGbp() に置換（accounts.slice(0,5) 撤廃）。Step2のshops取得を1000行ページング化。
+  insertRow から owner_id を削除し business_group_id に変更。
+[修正] src/app/api/cron/execute-posts/route.ts  店舗解決に gbp_shop_name フォールバック追加
+[修正] src/app/customer-master/page.tsx
+  検索対象に gbp_shop_name 追加 / 「店名変更あり」カード＋フィルタ / 行に「GBP改名」バッジとGBP現在名 /
+  エリア・電話番号をSupabaseから補完（従来は常に空）/ ロケーション解除を新ルート経由に変更
+[修正] src/app/gbp-accounts/page.tsx
+  インポートをサーバールート1発に変更 / 「登録保留」カウンタと一覧（GBPアカウント別グループ表示）/
+  「N件をすべて登録する」承認ボタン / 切断時は「失敗」と断定しない文言に変更
+[修正] 重要ナレッジ.txt  今回判明した罠を追記
+
+コミット: 2016a0d → 58f1646 → c0fdeda → dd3f13f（すべて main、本番反映確認済み）
+
+### 数値・設定値
+- BULK_INSERT_THRESHOLD = 20        1回の新規登録がこれを超えたら保留（lib/gbp-shop-sync.ts）
+- MAX_PAGES = 100                   GBP APIページネーションの安全上限（lib/gbp-locations.ts）
+- CONCURRENCY = 5                   shops UPDATE の並列数
+- maxDuration = 300                 gbp-sync / sync-shops
+- クライアントtimeout = 320000ms    サーバー300秒より長くする（290秒だと食い違う）
+- 店舗数 611 → 780（169登録）→ 778（重複2件統合）
+- shop_name_changes 31件（同期29 + 手動統合2）
+- 本番スキャン結果: 15アカウント / 835ロケーション
+- 同期実績: 新規追加169 / 紐付け修復29 / 情報更新330 / 店名変更検出29 / 要確認105
+- GBP未連携 21 → 19件
+- 顧客マスタ「店名変更あり」= 23（稼働中のみ。解約6件を除いた数）
+
+### 未解決・次回やること
+- [ ] 明朝、夜間cron(5:00)の初回実行結果を確認。想定は「新規追加0・エラー0」。
+      勝手に店舗が増えていたら異常
+- [ ] 自動投稿の実地確認（本日は予約投稿0件で一度も実行されていない）。
+      「店舗未登録（スキップ）」が増えていないか
+- [ ] 要確認105件（未登録アカウント「MEO用 Chubby」配下）を取り込むかの判断
+- [ ] 重複登録5件の統合（ニュークラブ NOBLE / Four Seasons / SEASIDE CLUB / Red Shoes /
+      熱塩温泉 山形屋）。口コミがどちらに付いているか要調査
+- [ ] 文字化け行 ガールズバーPICASSO（同名の正常な行が別に存在）の削除
+- [ ] GBP未連携19件 / gbp_full_path 未設定分の棚卸し
+- [ ] 他4アカウントのGBPトークン再取得（実質 chubby.yamada 1本に依存）
+- [ ] monthly-analysis の課金増（169店舗分で月¥150程度）を許容するかの判断。
+      止めるなら paused_at を立てて対象外にする
+- [ ] （見送り）同期の同時実行ロック。UNIQUE(name)で破壊はしないため優先度低
+- [ ] （見送り）cron Step2 が毎日607行を updated_at だけ更新している既存の無駄
+
+### 注意点・ハマったこと
+■ shops に owner_id カラムが無い ← 今回最大のミス
+  Go APIの GET /api/shop は owner_id / full_address / owner / group を返すが、これらは
+  結合結果であって列ではない。INSERTに渡すと
+  column "owner_id" of relation "shops" does not exist で全件失敗する。
+  カラム一覧を取得済みだったのに突き合わせず、APIレスポンスだけを見て存在すると思い込んだ。
+  → shops に書き込むコードを足したら必ず information_schema.columns と照合する。
+     本番検証は BEGIN → INSERT → ROLLBACK が安全で確実。
+
+■ 失敗が画面に出ない構造だった
+  169件のINSERT失敗は conflicts に「追加失敗: 〜」として積まれたが、UIは先頭20件しか出さず、
+  その20件が前回と同じ内容だったため「要確認274件」の中に完全に埋もれた。
+  数字（274 = 105 + 169）で気づけた。件数の内訳が合うかを必ず確認すること。
+
+■ POSTでのデプロイ判定は不可能
+  middleware のCSRFチェックは存在しないパスへのPOSTにも403を返す。
+  デプロイ確認はGET（401なら存在／404なら未配備）か、
+  ページのJSバンドルを取得して新しい文字列が含まれるかで判定する。
+
+■ ローカルのドライランは「下限」であって正解ではない
+  ローカルは Go APIの /api/google/token（chubby.yamada 1本）しか使えず 9アカウント/517ロケーション。
+  本番は getAllOAuthTokens() が全トークンを更新するため 15アカウント/835ロケーション。
+  ローカル検証で「0件」でも本番では大量に出うる。
+
+■ 「ロケーション解除」が自動で戻る構造だった
+  名前一致による自動紐付けが、担当者が意図的に外した連携を毎晩復活させる設計になっていた。
+  現時点の該当は0件だが構造的欠陥。previous_gbp_location_name に印を残す方式で解消。
+
+■ link分岐が knownAccounts チェックより前にあった
+  レビューで気づきながら「影響は小さい」と判断して残した結果、本番で紐付け29件により
+  未知アカウントが「既知」に昇格し、その配下169件が承認なしで登録される状態になった。
+  → アカウント単位の判定に頼らず、件数でガードする構造側の対策に変更した。
+
+■ 検出数とUIバッジ数の基準がズレていた
+  同期側はNFC完全一致、UI側はNFKC+空白除去+小文字化。表記ゆれ3件がバッジに出なかった。
+  lib/normalize.ts の isSameShopName を両者で共有して解消。
+
+■ 履歴は gbp_shop_name の更新より先に書く
+  後に書くと、記録に失敗した時点で差分が消えて二度と検出できない。
+  順序を入れ替え、記録に失敗したら該当行の店名同期を次回に持ち越すようにした。
+
+■ 課金の所在
+  自動実行6本のうち課金するのは monthly-analysis のみ（Anthropic Haiku 4.5、$1/$5 per MTok）。
+  Maps Platform / Google Ads を叩くcronは無い（座標一括取得・place-id補完・P-MAX同期は手動ボタン）。
+  今回のコードは Anthropic も Maps も一切呼ばない。新規店舗の緯度経度はGBPの latlng から無料で取得。

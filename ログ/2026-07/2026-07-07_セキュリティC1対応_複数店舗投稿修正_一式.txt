@@ -1,0 +1,89 @@
+## 2026-07-07
+
+### 決定事項
+- セキュリティレビュー（6並列エージェントで全191ファイル/約43,000行を精査）で発覚した重大バグのうち、
+  「B群＝実際の挙動・外部動作が変わる系」5件を修正・本番デプロイ・実証まで完了。
+- C-1（トークン露出）は即日ふさぐ。ただし「既に漏れた可能性のあるトークンの再発行」は
+  後日（〜2026-07-14目安）に延期する（ユーザー判断。流出単体では悪用困難と判断したため）。
+- AIO（Q&A）機能は今後使わないため、#4（Q&A回答）のライブテストはスキップ（コード修正自体は入れてある）。
+- basic-info「元に戻す」の実地テストは、自社店舗（株式会社Chubby）が店舗一覧に戻ってから行う。
+- 本番へのpushは origin/main（new-sponavi リポジトリ）→ Vercel自動デプロイで実施。
+
+### 変更内容（具体的に）
+【C-1: system_oauth_tokens のトークン露出】
+- 新規 src/app/api/report/oauth-accounts/route.ts
+  … service_role(getSupabase)で取得し、access_token/refresh_token等を除いた非機密フィールドのみ返す。
+- src/app/gbp-accounts/page.tsx: fetchAccounts フォールバックの system_oauth_tokens anon直読み(select *)を
+  上記サーバーAPI経由に変更（クライアントへトークンを渡さない）。
+- sql/2026-07-07_lock_oauth_tokens_rls.sql（新規）
+  … system_oauth_tokens は VIEW だったためRLS不可。REVOKE方式に変更。本番Supabaseで実行済み。
+
+【posts: 複数店舗投稿（未配線バグ）】
+- src/app/posts/page.tsx handleCreate: selectedShopId 1店舗固定 → targetIds ループ化。
+  bulkPostMode時は bulkPostShopIds を対象に。複数時は confirm＋usePasswordGate。
+  部分失敗時は失敗店舗のみ bulkPostShopIds に残し再試行可能に。
+- 系列店選択UIを「全店スクロールのみ」→「店舗名検索(bulkPostSearch)＋表示中全選択/解除＋選択件数表示」に刷新。
+  検索は NFKC正規化＋toLowerCase で全半角吸収。チェックON時の初期選択を「全513店」→「現在店舗のみ」に変更。
+
+【basic-info: GBP「元に戻す」の no-op】
+- 新規 src/lib/gbp-snapshot.ts（catNameOf/addressOf/buildGbpSnapshot/detectGbpChanges）＋ gbp-snapshot.test.ts。
+- src/app/basic-info/page.tsx: 変更検知時はスナップショットを上書きしない（正常時のみ更新）。
+  復旧に住所/カテゴリを追加（コア3項目と別PATCHで失敗波及なし）。JSON.parseガード。
+  fetchLocation に trustCurrent 引数（自分の編集/復旧直後は現在値をベースライン化＝誤検知防止）。
+  「承認」ボタンで現在値をベースライン更新。
+
+【aio: Q&A新規作成で回答が破棄】
+- src/app/aio/page.tsx createQA: 質問POST後、作成レスポンスname→無ければ本文一致でリロード特定し
+  /question/answer を投げる。特定不能時は黙って捨てず通知メッセージ。
+
+【H-5: P-MAX sync の相互includes誤マッチ】
+- src/lib/pmax-sheet.ts に pickGbpMatch()（純粋関数）と getGbpRowStrict() を追加＋ pmax-sheet.test.ts。
+- src/app/api/pmax/sync/route.ts: gbpRows[0]先頭採用 → getGbpRowStrict に置換。曖昧店舗はスキップし
+  gbpAmbiguous として返却。
+- src/app/api/pmax/backfill-gbp/route.ts: 同じ照合を pickGbpMatch に統一（sync/backfillで乖離しないように）。
+
+【その他UX】
+- src/components/password-gate.tsx: パスワード欄を <form onSubmit> で囲みEnter送信＆Chrome警告解消。
+
+### 数値・設定値
+- REVOKE対象ロール: anon / authenticated（service_roleは温存＝アプリは影響なし）。
+  対象: public.system_oauth_tokens ／ 多層防御で system.tokens・system.accounts・SCHEMA system も。
+- 系列店一括投稿の初期選択: 全513店 → 現在店舗のみ。
+- 系列店検索リストの高さ: max-h-[160px]。
+- テスト件数: 82件 → 103件（全パス。tsc型エラー0 / next build成功）。
+- 複数店舗投稿の所要時間: 2店舗で約13秒（1店あたり6〜7秒、GBP APIを順次呼び出し）。
+- 本番コミット: a1cc5fb（B群5件）→ 3dca07c（C-1 SQLをVIEW対応=REVOKEに修正）→ ec018e6（検索複数選択＋PWゲートform化）。
+
+### 未解決・次回やること
+- [ ] ③ GBP OAuthトークン再発行（〜2026-07-14目安）:
+      Google Cloud Console でGBP OAuthクライアントのシークレット再発行 → Vercel本番の GBP_CLIENT_SECRET 更新
+      → アプリ「アカウント追加」からGBP再認証（この間、全店GBP投稿・返信が一時停止）。実行前に要相談。
+      → memory: project_spotlight_token_rotation.md
+- [ ] 株式会社Chubby（自社店舗, chubby1204.meo@gmail.com配下, GBPでは確認済み）が投稿画面の店舗一覧(512)に出ない。
+      「株式会社」でも「Chubby」でもヒットせず=リストに不在。解約扱い(shops.cancelled_at)かGo API未同期か未確定。
+      customer-master(店舗一覧)の「解約店舗」フィルタで検索→出れば解約解除、出なければ同期問題。要調査。
+- [ ] basic-info「元に戻す」の実地テスト（自社店舗が一覧に戻ってから）。
+- [ ] （任意）password-gate に隠しusername欄追加でa11yヒント(「Password forms should have username fields」)も消す。
+- [ ] （任意）AIOメニューをサイドバー非表示（使わない方針）。
+- [ ] 大量一括投稿の並列化検討（現状は順次のため数十店で1〜2分・タイムアウトリスク）。
+- [ ] （レビュー残）C-1のうち reviews/shops等 他テーブルのanon直読み(8ページ: reviews/grid-ranking/diagnosis/citation/
+      survey等)のサーバーAPI化＋RLS。今回は system_oauth_tokens のみ対応。
+
+### 注意点・ハマったこと
+- system_oauth_tokens は「テーブルではなく VIEW」。定義は
+  SELECT access_token,refresh_token,expiry FROM system.tokens t JOIN system.accounts a ... WHERE a.type=1 ...
+  → VIEWにはRLSを張れず ERROR 42809。ビューは既定でオーナー権限で動くため下位テーブルのRLSも素通りする。
+  対策は「ビューへのSELECT権限を anon/authenticated から REVOKE」。system スキーマはPostgREST未公開のため
+  外部到達経路はこのpublicビューのみ＝REVOKEで露出停止。SET ROLE anon → permission denied(42501) で検証済み。
+- .env.local のプロジェクトref（rtqvyuscibswachlewks）は古く、DNS解決不可＝存在しない/別プロジェクト。keylen46の新形式キー。
+  → ローカルから本番Supabaseのanon検証はできない。本番検証はSupabaseのSQL Editorで SET ROLE anon を使う。
+- アプリのトークン取得(gbp-token.ts getOAuthToken/getAllOAuthTokens, oauth-accounts route)は全て getSupabase()=service_role。
+  だから anon/authenticated への REVOKE でアプリは壊れない（GBP投稿・返信も継続動作）。
+- 流出refresh_token単体では悪用困難（交換に GBP_CLIENT_SECRET が必要。これはVercel環境変数でanon経由未漏洩）
+  → 即時パニック不要と判断し、トークン再発行は後日に。
+- 投稿画面の店舗一覧 = Go API /api/shop − 解約店舗(shop-cancel: Supabase shops.cancelled_at IS NOT NULL)。
+  ヘッダー検索(header.tsx:20-21)は name.toLowerCase().includes のみでNFKC正規化なし＝全角店名は半角検索でヒットしない。
+- create-post(GBPローカル投稿localPosts)は summary 必須。「写真投稿」も内部はtopicType=STANDARDのローカル投稿なので
+  本文キャプションは必須（GBP仕様）。キャプション不要の写真だけ載せたい場合は別API(メディア/写真アップロード)が必要。
+- Sandbox から *.supabase.co へは到達不可（curl HTTP 000）。外形確認はユーザー側/ダッシュボードで行う。
+- git remote: 本番は origin（github: aichubbysystem-sponavi/new-sponavi）、omni は別リポジトリ。main直pushでVercel自動デプロイ。

@@ -1,0 +1,56 @@
+## 【2026-07-20】P-MAXレポート 月次グラフ改修・予約KPIバグ修正・ラベル変更
+
+※詳細な試行錯誤・ハマり記録は同フォルダ「2026-07-20_PMAX月次グラフ線グラフ化.txt」に残す。本ファイルは総括。
+
+### 決定事項
+- P-MAXレポート「月次推移」の表示形式を最終確定:
+  - 表示回数・クリック数 = 棒グラフ（背面）、半透明38%
+  - クリック率・クリック単価 = 折れ線グラフ（前面）、不透明
+  - 指標色は固定: 表示回数=赤 / クリック数=青 / クリック率=黄 / クリック単価=緑
+  - 凡例順は 表示回数→クリック数→クリック率→クリック単価（数値テーブルと同順）
+- スケール分離: 表示回数=左軸、クリック数=右軸、クリック率・クリック単価は非表示軸（桁差吸収）
+- KPI「保存・共有」の表示ラベルを「保存・共有・写真」に変更（数値=GBPシートL列 saveShare のまま、ラベルのみ）
+- 「予約」= GBPシートM列「注文」由来という既存仕様は維持（2026-07-06確定）。全画面で実データ表示に統一
+
+### 変更内容（具体的に）
+■ src/components/pmax-report-view.tsx（コミット c8ff9bd → f33f9a3 → 84e74f5 → 862dbfa で段階的に）
+- chart.js登録: BarElement/BarController/LineController/PointElement/LineElement を追加、Bar/Line→<Chart type="bar">（mixed chart）
+- 月次推移を4データセットの混合グラフ化。棒2本(order:2=背面)＋線2本(order:1=前面)
+- 色定数を2つに分離: monthlyLineColors(不透明)＝線＋テーブル用、monthlyBarColors(rgba .38)＝棒用
+- plugins.legend.labels.sort で datasetIndex 順に固定（orderによる凡例並び替えを打ち消す）
+- tooltipコールバック: クリック率=%、クリック単価=¥、他=カンマ区切り。ctx.parsed.y は `?? 0`（null型対策）
+- KPI「保存・共有」→「保存・共有・写真」（サマリーKPIカード＋コンバージョン月次テーブル行見出し）
+■ src/app/api/pmax/store-detail/route.ts（コミット b7927cf）
+- GBPデータのcamelCaseマッピングに reservation: Number(r.reservation ?? 0) を追加（社内storeページの予約0固定バグ修正）
+■ src/app/pmax/[customerId]/page.tsx（コミット 862dbfa）
+- 型 GbpRow に reservation を追加
+- KPI「予約」が value:0/prev:0 のハードコードだったのを gbpCurrent?.reservation に接続
+- KPI「保存・共有」→「保存・共有・写真」
+■ src/app/api/pmax/summary-text/route.ts（コミット 862dbfa）
+- AI総評プロンプト雛形(L31)と入力データ(L127)の「・保存・共有：」を「・保存・共有・写真：」に
+
+### 数値・設定値
+- 棒の不透明度: 38%（rgba(...,.38)）。線は不透明
+- 描画順(order): 棒=2（背面）/ 線=1（前面）※Chart.jsはorder大ほど先に描画
+- 棒: borderWidth 0 / borderRadius 3。線: borderWidth 2 / pointRadius 3 / tension 0.3 / fill false
+- グラフ高さ: 200→220px（下部凡例分）
+- 軸: y=表示回数(左)・y1=クリック数(右)・y2=クリック率(非表示)・y3=クリック単価(非表示)
+- 指標色HEX: 表示回数#e53935 / クリック数#1e88e5 / クリック率#fdd835 / クリック単価#43a047
+
+### 未解決・次回やること
+- まとめページのAI総評は「既に生成・保存済みのテキスト」は旧ラベル「保存・共有」のまま。再生成で新表記に切替
+- KW見出し18px固定でキーワード8件以上の店舗のPDF収まり未確認（前セッションからの持ち越し・ユーザー確認待ち）
+- summary-text(AI総評)の指標リストに「予約」は含まれていない（電話〜保存・共有・写真のみ）。仕様意図か要確認
+- 7月分のP-MAX/GBPデータは未sync（レポート作成時のsyncで反映される想定）
+
+### 注意点・ハマったこと
+- 【予約KPIが0だった真因】GBPデータを返すAPIが3系統ある（store-detail / share / group-share store）。
+  2026-07-03に「予約」追加時 share/group-share の2つには入れたが store-detail だけ漏れ→社内ページのみ0だった。
+  さらに [customerId] ページは value:0 ハードコード。GBP項目を追加する時は「4系統(3API＋customerId)＋sync＋backfill」を必ず全部直す
+- 【Chart.js order の副作用】order で棒を背面に回すと凡例の並び順まで order順にソートされる。
+  正解は order維持＋legend.labels.sort で datasetIndex順に戻す（orderを消すやり方は追記2で試したが背面制御と両立しない）
+- 【Vercelデプロイ確認】push後に画面が変わらず「未デプロイ」と誤認しがちだが実体はブラウザキャッシュ。
+  確実な判定: curlでページHTML取得→chunk URL一覧をgrep→各chunkをcurlして新コード固有文字列を検索。
+  ブラウザ側は ?cb=xxx クエリ付与で回避。デプロイ反映は概ね60秒程度
+- mixed chartは Controller（BarController/LineController）の登録を忘れると動かない
+- averageCpcはmicros単位（/1_000_000）、ctrは小数（×100）してからプロット

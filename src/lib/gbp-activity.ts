@@ -51,6 +51,8 @@ export interface ActivityPhoto {
    * 22枚並ぶページで1.6MB→0.5MBになるので、読み込みの体感がここで決まる
    */
   thumbUrl: string;
+  /** クリックで拡大したときに出す画像（原寸）。一覧はサムネイル、拡大はこちらを使う */
+  fullUrl: string;
   createTime: string;
   /** 手入力の閲覧数。null = 未計測（Googleは写真ごとの閲覧数を返さない） */
   viewCount: number | null;
@@ -318,13 +320,13 @@ export async function storeMissingPhotos(
     const m = (p.media || [])[0];
     if (!m?.googleUrl) continue;
     // 投稿由来のURLだけサイズ指定を受け付ける（メディア由来は400になる）
-    targets.push({ key: p.name, source: "post", fetchUrl: `${m.googleUrl}=w400`, createTime: p.createTime });
+    targets.push({ key: p.name, source: "post", fetchUrl: `${m.googleUrl}=w400`, fullUrl: m.googleUrl, createTime: p.createTime });
   }
   for (const m of mediaItems) {
     if (!m.name || !m.createTime || Date.parse(m.createTime) < sinceMs || stored.has(m.name)) continue;
     const url = m.thumbnailUrl || m.googleUrl;
     if (!url) continue;
-    targets.push({ key: m.name, source: "media", fetchUrl: url, createTime: m.createTime });
+    targets.push({ key: m.name, source: "media", fetchUrl: url, fullUrl: m.googleUrl || url, createTime: m.createTime });
   }
   if (targets.length === 0) return 0;
 
@@ -334,7 +336,7 @@ export async function storeMissingPhotos(
     const jst = new Date(Date.parse(t.createTime) + 9 * 60 * 60 * 1000);
     const month = `${jst.getUTCFullYear()}/${jst.getUTCMonth() + 1}`;
     if (!byMonth.has(month)) byMonth.set(month, []);
-    byMonth.get(month)!.push({ key: t.key, source: t.source, fetchUrl: t.fetchUrl });
+    byMonth.get(month)!.push({ key: t.key, source: t.source, fetchUrl: t.fetchUrl, fullUrl: t.fullUrl });
   }
 
   const deadline = Date.now() + budgetMs;
@@ -486,21 +488,24 @@ export async function getMonthlyActivity(
 
   // ── 手入力の閲覧数を読む（Googleは閲覧数を返さないので、この2列だけが情報源） ──
   const [postViews, mediaViews] = await Promise.all([
-    supabase.from("gbp_posts").select("post_name, view_count, photo_path, create_time, media_name")
+    supabase.from("gbp_posts").select("post_name, view_count, photo_path, photo_full_path, create_time, media_name")
       .eq("shop_id", shop.id).gte("create_time", range.startIso).lt("create_time", range.endIso),
-    supabase.from("media").select("media_name, view_count, photo_path, create_time")
+    supabase.from("media").select("media_name, view_count, photo_path, photo_full_path, create_time")
       .eq("shop_id", shop.id).gte("create_time", range.startIso).lt("create_time", range.endIso),
   ]);
   const viewOf = new Map<string, number | null>();
   // 自前ストレージに保存済みの画像。あればGBPのURLではなくこちらを使う（失効しない）
   const pathOf = new Map<string, string>();
+  const fullPathOf = new Map<string, string>();
   for (const r of postViews.data || []) {
     viewOf.set(r.post_name, r.view_count ?? null);
     if (r.photo_path) pathOf.set(r.post_name, r.photo_path);
+    if (r.photo_full_path) fullPathOf.set(r.post_name, r.photo_full_path);
   }
   for (const r of mediaViews.data || []) {
     viewOf.set(r.media_name, r.view_count ?? null);
     if (r.photo_path) pathOf.set(r.media_name, r.photo_path);
+    if (r.photo_full_path) fullPathOf.set(r.media_name, r.photo_full_path);
   }
 
   // ── その月に公開した写真をすべて集める（投稿に添付した写真＋写真タブへの追加） ──
@@ -513,6 +518,7 @@ export async function getMonthlyActivity(
       const url = publicPhotoUrl(r.photo_path);
       items.push({
         key: r.post_name, source: "post", url, thumbUrl: url,
+        fullUrl: r.photo_full_path ? publicPhotoUrl(r.photo_full_path) : url,
         createTime: r.create_time, viewCount: r.view_count ?? null,
       });
     }
@@ -521,6 +527,7 @@ export async function getMonthlyActivity(
       const url = publicPhotoUrl(r.photo_path);
       items.push({
         key: r.media_name, source: "media", url, thumbUrl: url,
+        fullUrl: r.photo_full_path ? publicPhotoUrl(r.photo_full_path) : url,
         createTime: r.create_time, viewCount: r.view_count ?? null,
       });
     }
@@ -535,6 +542,7 @@ export async function getMonthlyActivity(
       key: p.name, source: "post", url,
       // 投稿由来のURLはサイズ指定を受け付ける（実測200）。メディア由来は400になるので付けない
       thumbUrl: m?.googleUrl ? `${m.googleUrl}=w400` : url,
+      fullUrl: url,
       createTime: p.createTime!,
       viewCount: viewOf.get(p.name) ?? null,
     });
@@ -546,6 +554,7 @@ export async function getMonthlyActivity(
     items.push({
       key: m.name, source: "media", url,
       thumbUrl: m.thumbnailUrl || url,
+      fullUrl: url,
       createTime: m.createTime!,
       viewCount: viewOf.get(m.name) ?? null,
     });
@@ -556,11 +565,14 @@ export async function getMonthlyActivity(
   // 締め切り付きなので、間に合わなかったぶんは今回GBPのURLのまま表示して次回保存する
   const notStored: StorablePhoto[] = items
     .filter(it => !pathOf.has(it.key))
-    .map(it => ({ key: it.key, source: it.source, fetchUrl: it.thumbUrl || it.url }));
+    .map(it => ({ key: it.key, source: it.source, fetchUrl: it.thumbUrl || it.url, fullUrl: it.fullUrl }));
   if (notStored.length > 0) {
     try {
       const saved = await storePhotos(shop.id, month, notStored, PHOTO_STORE_BUDGET_MS);
-      for (const [key, path] of Array.from(saved.entries())) pathOf.set(key, path);
+      for (const [key, paths] of Array.from(saved.entries())) {
+        pathOf.set(key, paths.path);
+        if (paths.fullPath) fullPathOf.set(key, paths.fullPath);
+      }
     } catch (e: any) {
       console.error("[activity] 写真の保存に失敗:", e?.message);
     }
@@ -571,6 +583,8 @@ export async function getMonthlyActivity(
       const stored = publicPhotoUrl(path);
       it.url = stored;
       it.thumbUrl = stored;
+      const fullPath = fullPathOf.get(it.key);
+      if (fullPath) it.fullUrl = publicPhotoUrl(fullPath);
     }
   }
 

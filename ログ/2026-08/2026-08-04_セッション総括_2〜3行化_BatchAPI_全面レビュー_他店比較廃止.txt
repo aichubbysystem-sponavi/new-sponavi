@@ -1,0 +1,137 @@
+========================================================================
+セッション終了ログ（2026-08-02〜04 通し）
+AI総評2〜3行化 / Batch API半額化 / 全面コードレビューと修正 / 他店比較の全面廃止
+========================================================================
+
+## 【2026-08-02〜04】
+
+### 決定事項
+- **AI総評を1文→2〜3文（100〜180字）に増量**（田中さん要望「2.3行の枠を基本にできる？」）
+- **AI総評の一括生成をAnthropic Batch APIに対応**（トークン半額。品質は同期版と同一）
+- **多地点計測の距離を500m刻みに細分化・5km廃止**（田中さん要望。250mが技術的下限だが未実装）
+- **AI総評から他店比較を全面廃止**（同業種平均・グループ平均とも。ユーザー判断）
+  - 理由: 弊社の運用支援店舗を寄せ集めた平均であり、外部の業界統計ではないため
+    クライアントに示す根拠として不適切
+  - 例外はP16「口コミの競合比較」のみ（Google検索結果由来で根拠が明確なため継続）
+- **牛草クチコミ専用シートの8月分(AU/AV)はDB値で埋める**（無料。件数の数件ズレは許容）
+- **PROXY_GUARD_MODE=enforce を本番適用**（未認証の第三者がGBP操作を通せる穴を封鎖）
+- 4観点並列の全面コードレビューを実施し、指摘は実コード・実テスト・実DBで裏取りしてから修正
+  （誤報1件を検証で却下: 月平均の全角表記は現行実装で既に正常）
+
+### 変更内容（具体的に）
+
+■ AI総評の2〜3文化（main 60cffa5）
+- src/app/api/report/analyze/route.ts（当時。現在はanalyze-core.tsへ移設済み）
+  - ページ総評12フィールドの指定を「傾向1文」→「傾向（2〜3文）」
+  - ルール追加「2〜3文・合計100〜180文字程度。1文目で傾向、2文目以降で根拠・示唆。水増し禁止」
+  - 「20〜35文字」ルールを reviewComments/actions のみに限定
+  - 出力例12フィールドを2〜3文のサンプルに全書き換え（例に引っ張られるため）
+  - max_tokens 4096→8192
+
+■ 照合ゲートの強化（main 854fd50 / 6d62593 / 5e202f9の一部）
+- src/lib/comment-validation.ts
+  - validateOutOfRangeClaims 新設（圏外主張の照合）
+    a) 計測に圏外の月が無いのに圏外と書いた b) 転落と書いたが順位→圏外の推移が無い
+    c) 継続と書いたが直近2計測が圏外×2でない
+  - 「圏外転落のキーワードはなく」等の不在主張も検証（転落KWが実在すれば違反）
+  - **予防表現の除外を不在主張判定より前に評価するよう順序修正**（レビュー指摘M-2）
+  - buildCorrectionPromptに圏外違反時の修正指示を追加
+- src/lib/comment-validation.test.ts / review-findings.test.ts に再現テスト13件追加
+
+■ Batch API化（main 943b0ae）
+- src/lib/analyze-core.ts 新設: buildAnalyzePrompt / parseAnalyzeText / applyFixRating /
+  saveAnalysisRow / ANALYZE_MODEL / ANALYZE_MAX_TOKENS を route.ts から移設（ロジック不変）
+  → **今後プロンプトを直すときはこのファイル**
+- src/lib/analyze-batch-lib.ts 新設: submitAnalysisBatch / pollAnalysisBatches /
+  rescueFailedItems / findPendingShopNames
+- src/app/api/report/analyze/route.ts: batchPrepareモード追加（データ準備を共用）
+- src/app/api/report/analyze-batch/route.ts 新設: GET=状況一覧 / POST=取り込み・救済（PAID_OP）
+- src/app/review-analysis/page.tsx: 「Batchで一括投入（半額）」ボタン・状況パネル・
+  「結果を取り込む」「失敗N件を再投入」ボタン・90秒自動更新
+- sql/2026-08-02_analysis_batches.sql / _analysis_batch_guards.sql（本番適用済み）
+
+■ 多地点計測の距離刻み（main fd52058 + 5e202f9の一部）
+- src/app/grid-ranking/page.tsx: INTERVALS を 500m/1km/1.5km/2km/2.5km/3km/4km に
+- src/app/api/report/grid-interval/route.ts: ALLOWED_INTERVALS 同上
+- src/app/api/report/grid-ranking/route.ts: gridFactor の上限 1.0→0.5（格子1km→500m）
+- UI注記を実測に合わせ修正（後述の数値参照）
+
+■ コードレビュー指摘の修正一式（main 5e202f9）
+- Batch: 二重投入防止(findPendingShopNames) / poll排他ロック(analysis_batch_lock TTL6分) /
+  取り残しpendingのfailed確定 / 再投入失敗時のfailed確定 / poll_attemptsで死にバッチ除外 /
+  submitted_at比較で新しい分析結果を上書きしない / 50件縮小時のパース範囲を揃える /
+  errored・expired・canceledの区別 / payloadを300字に切って1件ずつinsert
+- src/app/report/[shopId]/client.tsx
+  - 口コミ前年比: 13ヶ月未満のフォールバックを廃止（偽の前年比バッジ）
+  - メモ: 月切替時に setMemo("") を必ず実行（前月メモの混入・誤月保存）
+  - ページ番号: 口コミ2ページの pageNum++ を hasReviews の中へ（「10 / 8」問題）
+  - hasSearchQueries に history非空条件を追加（幽霊ページで番号が飛ぶ）
+- src/lib/page-count.test.ts 新設（条件付きページ全128通りで 最終番号==分母 を検証）
+- src/app/grid-ranking/page.tsx: 一括計測2箇所に中断ボタン＋abortRefチェック、
+  クライアントtimeout 15秒→60秒、タイムアウト時の再送を停止
+- src/app/api/report/audit-log/route.ts: POSTを410で廃止（誰でも監査ログを偽造できた）
+- src/lib/audit-log.ts: logAudit を no-op 化（元々未使用）
+
+■ 他店比較の全面廃止（main 9df4a00 → 159095a）
+- src/app/api/report/analyze/route.ts
+  - グループ平均・同業種平均の算出ブロックを削除
+  - 比較用クエリ（shops.in(business_group_id) / .in(gbp_main_category)）と
+    同業種店舗のキャッシュ一括取得も削除 → 分析1回あたりのDB負荷が減った
+  - kpiTextに「他店との比較禁止」を明示（データを渡さないだけではAIが推測で書くため）
+- src/lib/analyze-core.ts: ルールを「一切禁止」に統一、出力例からも比較表現を削除
+
+### 数値・設定値
+- AI総評: 2〜3文 / 合計100〜180字（reviewComments・actionsは従来通り20〜35字）
+- max_tokens: 4096 → **8192**
+- 計測距離の選択肢: 500m / 1km / 1.5km / 2km / 2.5km / 3km / 4km（**5km廃止**、既定500m）
+- gridFactor: `Math.min(0.5, Math.max(0.25, intervalM/1000))` → 実質**定数0.5＝格子約500m**
+  （clampの形は将来250m刻みを足したときの保険として残置。下限0.25=250m格子）
+- 距離刻みの衝突確率（実測4000サンプル・斜め配置で5地点が完全一致する確率）:
+  **500m⇔1km 1.5% / 1.5km⇔2km 2.6% / 2.5km⇔3km 0.6%**（他ペアは0.5%未満）
+- Batch: MAX_CORRECTIONS=2 / LOCK_TTL=6分 / MAX_POLL_ATTEMPTS=20 / 1回のpollで最大5バッチ
+- クライアントtimeout（一括計測）: 15秒 → **60秒**（サーバmaxDuration 300秒より短いと二重課金）
+- 1店舗あたりの原価: 通常 **¥50〜70** / 理論上の最大 **¥175**
+  （Places API ¥120 + AI総評 ¥45 + 競合比較 ¥5 + P-MAXまとめ ¥4）
+  Batch化が実運用に乗れば AI総評が半額になり最大 **¥140前後**
+- 牛草シート: 371店中 **366店**をAU/AV記入（DB349店 / Places API 17店）。Places API実費 約¥850
+
+### 未解決・次回やること
+- **【最優先】Batch分析の実走行テスト**: 本番でのBatch往復はまだ一度も走っていない。
+  次回の月次分析で **1〜3店舗だけ投入 → 約1時間後に「結果を取り込む」→ レポート反映を確認**
+  してから全店に使うこと。失敗したら「失敗N件を再投入」ボタンで復旧できる
+- **patty rôtiの再分析**: 他店比較の廃止が効いているか（P3〜P5から「同業種平均、グループ平均を
+  ともに大きく上回る」が消えるか）を確認する
+- **田中さんへの返信**: ①2〜3行版のサンプルPDF送付と感触確認 ②距離500m刻み・15度が実質最小の説明
+  ③他店比較廃止のbefore/after（文面は作成済み）
+- 8月の月初一括計測後に **GCP請求のSKU確認**（「Text Search Essentials (IDs Only)」が
+  出ているか。¥0.75単価の実証。まだ答え合わせできていない）
+- 残るコスト削減候補: 順位計測4ページ→2ページ（圏外店▲半減・41〜80位が圏外表示になる）/
+  AI総評の入力口コミ上限（直近200件＋低評価全件で大型店▲2/3）
+- report_analysis に同内容のユニークインデックスが2本重複（要DROP検討）
+- 牛草シート空欄5店（口コミ0件3店 + Google上で発見不能2店: 北海道炉端アカオニ・鮨玄）
+- 250m刻みの追加は技術的に可能（格子も250mになる）。ただしlocationBias半径2kmのため
+  順位が変わらない可能性が高く、実装は保留
+
+### 注意点・ハマったこと
+- **プロンプトの出力例が実在店舗の実データだと事故る**: 旧例が patty rôti の実KW名で
+  「一社 イタリアン/名東区 パスタが1位から圏外に転落」と書かれており、その店の生成時に
+  例文と実データが混同されてP6の状態取り違えが起きた。例は必ず架空にし「例は架空」と明記する
+- **AIにデータを渡さないだけでは足りない**: 他店平均を渡さなくても「平均を上回る」と推測で
+  書くことがある。禁止をプロンプトに明文化して初めて消える
+- **照合ゲートの判定順**: 予防表現（「転落しないよう」）の除外を後ろに置くと、
+  不在主張の alternation「ない」に部分一致して正しい文が違反になる。除外は必ず先に評価する
+- **Batchは投入〜取込の約1時間、DBに痕跡が出ない**: そのため「押したか不安→リロード→再クリック」
+  で全店二重投入になりうる。pendingチェックが無いと課金が倍になる
+- **クライアントtimeout < サーバmaxDuration は二重課金の温床**: サーバがまだ処理中なのに
+  クライアントが諦めて再送すると、同じ地点・同じプロンプトで二重に課金される
+- **Mapsの口コミ件数はヘッドレスブラウザで取得できない**: 自動化検知で簡易レイアウトが返り、
+  評価(4.3)は取れるが件数が描画されない。静的HTML・embedにも数値は入っていない
+  → 公式値が必要なら Places API（Pro単価¥4.8）しかない
+- **DB集計の口コミ件数はGoogle公式表示と一致しない**: Googleで削除された口コミがDBに残るため
+  DBの方が数件〜十数件多い（逆に同期漏れで少ない店もある）。評価は±0.1以内で一致する
+- **business_group_id は全608店が自社**（未設定ゼロ）。「グループ平均」は系列店の平均ではなく
+  焼肉店も脱毛サロンも混ざった全店平均だった
+- **gridFactorは実質定数**: 許可インターバルが500m以上なので intervalM/1000 は常に0.5以上。
+  「距離に比例」というコメントは実態と合っていなかったため修正済み
+- レビューエージェントの指摘も鵜呑みにしない: 「500m⇔1kmの衝突29%」は実測1.5%で過大、
+  「月平均の全角表記が誤検知」はテストで正常動作を確認して却下した

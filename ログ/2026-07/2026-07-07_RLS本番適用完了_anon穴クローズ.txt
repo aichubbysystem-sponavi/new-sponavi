@@ -1,0 +1,49 @@
+## 2026-07-07（第3セッション続き）RLS本番適用完了
+
+### 決定事項
+- セキュリティ監査で判明した「anon直アクセス穴」を、本番Supabaseへのライブ確認→SQL適用まで完遂。
+- 本番のgrants/RLS/policies/行数をユーザー経由(SQL Editor + CSVエクスポート)で実測しながら、
+  推測でなく実データに基づいて対処範囲を確定した（サンドボックスから本番DBに到達不可のため）。
+
+### 実測でわかった重要事実
+- public全テーブルで anon/authenticated にフルGRANT（Supabase既定）→ RLS/policyだけが防御。
+- rowsecurity=true でも roles={public} の ALL/SELECT USING(true) ポリシーが多数残存し実質無防備だった
+  （media/reviews/line_alerts/shop_keywords/survey_responses/hearing_sheets等）。
+  performance_metrics_cache/pmax_cache/report_memos/sync_progress は名前service_roleだが実体{public}。
+- 未参照23表のうち22表は行0・書き込み0の死んだ表（別SaaSの名残）。ranking_search_settingsのみ使用中。
+
+### 本番適用したSQL（Supabase SQL Editorで実行、いずれもSuccess）
+1. sql/2026-07-07_enable_rls_client_tables.sql
+   - Group A(14表): RLS有効化+authenticated SELECTのみ（shops/scheduled_posts/post_logs/audit_logs/
+     owners/user_profiles/user_shop_access/nap_check_results/grid_ranking_presets/report_display_settings/
+     report_data_cache/report_shop_list/business_groups/settings）
+   - Group B(2表): pmax_share_tokens/pmax_group_shares はRLSのみ(authenticatedにも読ませない)
+2. sql/2026-07-07_fix_public_policies.sql
+   - {public}ゆるポリシーの一掃19表: 既存ポリシー全削除→authenticated SELECTのみ再付与
+3. sql/2026-07-07_enable_rls_group_c.sql
+   - 未使用22表: RLS有効化+authenticated SELECT（ranking_search_settingsは使用中で除外）
+
+### 動作確認
+- ユーザーが本番でログイン後の各画面(口コミ/写真/順位/ヒアリング/レポート)の表示を確認=問題なし。
+- アンケート機能はユーザーが「使っていない」と回答=テスト不要。送信経路は元々service_role(api/report/survey)。
+
+### 到達状態
+- アプリ用publicテーブルの「公開anonキーで読み書きできる穴」は事実上ゼロ。
+- API 84ルートは認証漏れゼロ（監査確認済）。クライアント直書きは全てサーバーAPI(認可付き)に移行済み。
+
+### 残タスク（軽微）
+- [ ] ranking_search_settings(行1・更新5)の使用元特定。本アプリコード参照なし=Go APIか手動処理か。
+      service_role経由と確認できたら同様にロック。
+- [ ] メモ.txt のGitHub PAT/LINEトークン/DBパスワードのローテーション（OneDrive同期対策・急ぎでない）
+- [ ] 共有トークンにexpires_at/失効機構を追加（Group Bでanon列挙は封じたが、URL自体の失効は別途）
+- [ ] Next.js 14.2.35 既知脆弱性（Vercel運用で多くは緩和）
+- [ ] 【別件】Supabase STATUS=Unhealthy / COMPUTE=NANO。リソース不足の兆候。監視/アップグレード検討。
+      同Orgに別プロジェクト「AIO-tool」あり（別DB=無関係）。
+
+### 注意点・教訓
+- 「rowsecurity=true」だけで安全と判断してはいけない。pg_policies で roles を必ず確認する。
+  {public} は anon を含む。名前が"service_role"でも roles が{public}なら anon に開いている。
+- RLSのロックは「authenticated=ログイン済みにはSELECTを通し、anonだけ遮断」が肝。書き込みは
+  service_role(BYPASSRLS)のサーバー経由に一本化してあるので authenticated 書き込み権限は不要。
+- 破壊的になりうる本番DB操作は、Fable 5が勝手に実行せず、冪等SQL+検証+ロールバックを用意して
+  ユーザーのSQL Editor実行に委ね、CSVエクスポートで結果を検証しながら段階適用した。

@@ -1,0 +1,80 @@
+## 2026-07-07（セッション終了ログ・セキュリティ完全対応＋共有URL失効）
+
+### 決定事項
+- 前日3コミット(a1cc5fb/3dca07c/ec018e6)を「他人のコード」として辛口レビュー。build成功/test全パスでも
+  実挙動に影響する見落とし4件を検出→修正。
+- 「セキュリティは完璧か？」を3並列サブエージェント(クライアント直読み/API認証/シークレット)で全数監査。
+  最重大=anon直アクセス。コードで塞げる分は即修正、DB側(RLS)は本番SQL Editorで段階適用。
+- RLSは「authenticated=ログイン済みにはSELECTのみ、anonは全遮断、書き込みはservice_role経由」で統一。
+  破壊的になりうる本番DB操作はFable 5が勝手に実行せず、冪等SQL＋検証＋ロールバックを用意し、
+  ユーザーのSQL Editor実行＋CSVエクスポートで実測しながら段階適用。
+- 共有トークン(監査②指摘の失効手段なし)に有効期限＋手動失効を実装。既存URLは無期限grandfatherで温存。
+- アンケート機能はユーザーが未使用と回答→テスト不要。ranking_search_settings(使途不明・無害)は保留。
+- Group C(未使用テーブル)は行数実測で22表が空=死んだ表と確定してからロック。
+
+### 変更内容（具体的に）
+【辛口レビュー指摘4件 (コミット 7123e19)】
+- src/app/posts/page.tsx handleCreate: 一括投稿ループ先頭に batch-activity イベント追加(途中ログアウト防止)
+- src/app/api/report/oauth-accounts/route.ts: 存在しない created_at での .order() を除去→JSソート(常時500修正)
+- src/app/basic-info/page.tsx: 旧形式スナップショット(rawなし)でも住所/カテゴリ未復旧を extraNotes で必ず通知
+- src/lib/gbp-token.ts: VIEWへのUPDATE失敗(自動更新不可)を握りつぶさずログ出力
+
+【クライアント直書き5系統のサーバーAPI化 (コミット dbc03a3)】
+- src/app/api/report/scheduled-posts/route.ts PATCH: approvalStatus 対応追加＋status/approvalStatusホワイトリスト検証
+- src/app/posts/page.tsx: 承認/差戻し/承認→予約の supabase直update3箇所を api.patch に置換
+- src/app/api/report/fixed-messages/route.ts(新規): GET/PUT。requireShopAccessById。件数50/文字数制限
+- src/app/basic-info/fixed-message/page.tsx: supabase直delete/insert を api経由に
+- src/app/api/report/audit-log/route.ts(新規): POST。user_nameを検証済みJWTのsubからサーバー解決
+- src/lib/audit-log.ts: api.post 方式に全面書換
+- src/app/api/report/line-alerts/route.ts(新規): PATCH。president/manager限定
+- src/app/page.tsx: line_alerts の直update を api.patch に置換
+
+【サーバー匿名read除去＋delete-post検証 (コミット edb7d71)】
+- src/app/report/survey/[shopId]/page.tsx / report/page.tsx / report/actions.ts: anon createClient→getSupabase()
+- src/lib/gbp-validate.ts(新規)＋test6件: isValidGbpPostName。delete-post/route.ts で postName 形式検証
+
+【RLS本番適用 (SQL、コミット da21eca/02dc0ff/da04b70)】
+- sql/2026-07-07_enable_rls_client_tables.sql: GroupA14表 RLS+authenticated SELECT / GroupB共有トークン2表 RLSのみ
+- sql/2026-07-07_fix_public_policies.sql: {public}ゆるポリシー19表を全削除→authenticated SELECT再付与
+- sql/2026-07-07_enable_rls_group_c.sql: 未使用22表 RLS+authenticated SELECT
+
+【共有URL 有効期限＋失効 (コミット d2b86db)】
+- src/lib/share-token.ts(新規)＋test6件: isShareActive / shareExpiryISO(365日)
+- sql/2026-07-07_share_token_expiry.sql: pmax_share_tokens/pmax_group_shares に expires_at/revoked_at 追加
+- src/app/api/pmax/share/route.ts: POST=有効な既存のみ再利用し期限延長/新規発行、DELETE=失効追加
+- src/app/api/pmax/group-share/route.ts: POST=再利用or無効ならトークン回転(UNIQUE対応)、DELETE=失効追加
+- share/[token]・group-share/[token]・group-share/[token]/store の3検証ルート: isShareActive 必須化
+- src/app/pmax/store/page.tsx / pmax/page.tsx: 「共有を停止」ボタン追加
+
+### 数値・設定値
+- テスト件数: 103 → 109(gbp-validate6) → 115(share-token6)。全パス。tsc0/next build成功。
+- 共有トークン有効期限: SHARE_TTL_DAYS = 365日（発行/再発行のたびに延長）。既存トークンは expires_at=NULL=無期限。
+- fixed-messages: タイトル最大200字/本文最大5000字/最大50件。
+- audit-log: action最大200字/detail最大2000字。
+- RLS対象: GroupA14表 + GroupB2表 + {public}一掃19表 + GroupC22表。ranking_search_settingsのみ除外。
+- 本番の実測事実: public全テーブルで anon/authenticated にフルGRANT(既定)。RLS/ポリシーが唯一の防御。
+
+### 未解決・次回やること
+- [ ] ranking_search_settings(行1・更新5)の使用元特定。本アプリコード参照なし=Go APIか手動処理か。
+      service_role経由と確認できたら同様にRLS+authenticated SELECTでロック。
+- [ ] メモ.txt のGitHub PAT/LINEトークン/DBパスワードのローテーション（OneDrive平文同期対策・急ぎでない）
+- [ ] Next.js 14.2.35 の既知脆弱性（npm audit high複数）。Vercel運用で多くは緩和。next更新を検討。
+- [ ] 【別件・インフラ】Supabase(kxxwspavskhhjtiixcep) STATUS=Unhealthy / COMPUTE=NANO。リソース不足の兆候。
+      監視/アップグレード要否を調査。同Orgに別プロジェクト「AIO-tool」あり(別DB=無関係)。
+- [ ] 前日からの持ち越し: GBP OAuthトークン再発行(〜7/14)、株式会社Chubby店舗一覧不在調査、
+      basic-info「元に戻す」実地テスト、C-1拡張(他テーブルのサーバーAPI化＝今回のRLSで実質カバー)。
+- [ ] （任意）共有URL発行→停止→URLが開けないことのライブ確認。
+
+### 注意点・ハマったこと
+- 「rowsecurity=true」だけで安全と判断してはいけない。pg_policies で roles を必ず確認する。
+  {public} は anon を含む。名前が "service_role" でも roles が {public} なら anon に開いている
+  （performance_metrics_cache/pmax_cache/report_memos/sync_progress が実際にこの罠だった）。
+- RLSを有効化する前に「サーバー側の匿名read」を service_role 化しておく必要がある。でないと
+  公開アンケート(shops読取)や report一覧(report_analysis読取)が anon遮断で壊れる。→ edb7d71 で先に対応。
+- oauth-accounts の旧フォールバックは元から壊れていた(VIEWに無いcreated_atでorder)。「壊れたまま
+  サーバーに移設」されていた。VIEWは access_token/refresh_token/expiry の3列のみ。
+- system_oauth_tokens はVIEWのため UPDATE も自動更新不可でサイレント失敗していた（既存バグ、ログ追加のみ）。
+- グループ共有は group_name が UNIQUE のため、失効後の再発行は行追加できない→トークンをUUID回転させて旧URL失効。
+- 本番Supabaseへはサンドボックスから到達不可(.env.localのrefは古くDNS不可)。実RLS状態・行数・grantsの確認と
+  SQL実行は全てユーザーのダッシュボード操作＋CSVエクスポートで実施。推測せず実測で対処範囲を確定した。
+- Date.now()はアプリ実コードでは使用可（Workflowスクリプト内のみ禁止）。share-token.tsで使用。

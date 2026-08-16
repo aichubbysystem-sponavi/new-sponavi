@@ -1,0 +1,99 @@
+## 【2026-06-25 セッション2】Phase 0 + P0 セキュリティ強化
+
+### 背景
+- システム全体を4観点（セキュリティ/アーキテクチャ/パフォーマンス/運用保守）で監査
+- 総合スコア 58/100 → 構造的な問題が多数発見
+- Phase 0（即座に対応）+ P0（Critical）を本セッションで修正
+
+### 決定事項
+- Vercelプランは Pro（maxDuration上限300秒）
+- レート制限はUpstash Redis（Vercel Storage経由、Free、東京リージョン）
+- pg直接接続は完全廃止、gbp-token.tsに一本化
+- P-MAXとchatはpresident/managerのみアクセス可
+- execute-postsの二重投稿防止にprocessing_started_atカラムを導入
+
+### 変更内容（コミット f9acde3）
+
+#### Phase 0: 即座に対応すべき問題
+
+1. **CSRF対策修正** — `src/middleware.ts`
+   - Origin/Referer両方なしの場合、Authorizationヘッダーがなければ403拒否
+   - 以前: Origin/Referer両方なし → 無条件許可（CSRF攻撃に脆弱）
+
+2. **PostgreSQL直接接続削除** — `src/app/api/cron/auto-reply/route.ts`
+   - getAllValidTokens()関数（70行）を削除
+   - pg直接接続（rejectUnauthorized: false、MITM脆弱）を完全廃止
+   - gbp-token.tsのgetValidTokens()に統一
+   - DB_PASSWORD, SUPABASE_PROJECT_ID変数も削除
+   - GBP_CLIENT_ID, GBP_CLIENT_SECRET変数も不要に（gbp-token.ts側で管理）
+
+3. **レート制限のRedis移行** — `src/middleware.ts` + `package.json`
+   - @upstash/redis + @upstash/ratelimit をインストール
+   - インメモリMap → Upstash Redisに移行（サーバーレスでもインスタンス間共有）
+   - API全体: slidingWindow(500, "1 m")
+   - ログイン: slidingWindow(10, "5 m")
+   - Redis未設定時はインメモリフォールバック（開発環境用）
+   - 環境変数: UPSTASH_REDIS_REST_KV_REST_API_URL / TOKEN（Vercel自動設定済み）
+
+4. **maxDuration修正** — `monthly-analysis/route.ts`, `sync-search-keywords/route.ts`
+   - maxDuration: 800 → 300（Pro上限に合わせる）
+   - TIME_LIMIT: 750_000 → 270_000（安全マージン）
+   - monthly-analysis バッチ上限: 150 → 60店舗/実行
+
+#### P0: Critical（即修正必須）
+
+5. **P-MAX 7ルートにrequireRole追加**
+   - accounts, daily, gbp, monthly, store-detail, store-summary, summary
+   - verifyAuth → requireRole(["president", "manager"])
+   - 以前: 認証のみ → part_timeユーザーでもGoogle Ads全データ閲覧可能だった
+
+6. **/api/chatにrequireRole追加** — `src/app/api/chat/route.ts`
+   - verifyAuth → requireRole(["president", "manager"])
+   - 以前: 認証のみ → part_timeユーザーでもAI社長チャット（Dify）にアクセス可能だった
+
+7. **execute-posts二重投稿防止** — `src/app/api/cron/execute-posts/route.ts`
+   - クレーム時にprocessing_started_atを記録
+   - staleリカバリ: scheduled_at（予約時刻）→ processing_started_at（処理開始時刻）で判定
+   - staleリカバリ閾値: 10分 → 5分に短縮
+   - 以前の問題: GBP投稿成功→DB更新前タイムアウト→processing残留→staleリカバリでpendingに戻る→同じ投稿が再実行
+   - SQL: `ALTER TABLE scheduled_posts ADD COLUMN processing_started_at timestamptz` + インデックス追加（本番実行済み）
+
+### 外部操作
+- Supabase SQL Editor: processing_started_atカラム追加 + インデックス作成（成功）
+- Vercel Storage: Upstash for Redis作成（upstash-kv-charcoal-lens、Free、hnd1）→ new-sponaviにConnect済み
+- 環境変数: UPSTASH_REDIS_REST_KV_REST_API_URL / TOKEN が自動設定済み
+
+### 数値・設定値
+- maxDuration: 800 → 300秒（2ファイル）
+- TIME_LIMIT: 750_000 → 270_000ms（2ファイル）
+- monthly-analysis バッチ上限: 150 → 60店舗
+- staleリカバリ閾値: 10分 → 5分
+- APIレート制限: 500req/1min（変更なし、Redis化）
+- ログインレート制限: 10回/5min（変更なし、Redis化）
+- Upstash Redis: Free（500,000 commands/month）
+
+### pgパッケージについて
+- auto-replyのpg直接接続削除により、コード内でpgを使用する箇所がなくなった
+- npm uninstall pg @types/pg は未実施（次回セッションで対応推奨）
+
+### 監査で発見された未解決の重要問題（次回以降）
+
+#### P1（1-2週間以内）
+- [ ] ロケーションマッピングが4箇所でコピペ実装 → gbp-location.tsに統一
+- [ ] OAuthトークン取得が3系統で競合 → gbp-token.tsに統一
+- [ ] 店舗IDが3系統（Go API UUID / Supabase UUID / 店舗名）→ 名前マッチの根本改善
+- [ ] 認可チェック漏れ残り（setup-cache, sync-*, generate-post等の店舗チェック不足）
+- [ ] Sentry導入 + Cron結果のSlack通知
+
+#### P2（1ヶ月以内）
+- [ ] any型 73箇所の解消
+- [ ] 巨大ファイル分割（page.tsx 750行, posts 1000行, grid-ranking 1500行）
+- [ ] APIレスポンス形式の統一（4パターン混在）
+- [ ] テスト追加（現在4ファイルのみ、APIテスト0）
+- [ ] コード品質スコア: 62/100 → 80目標
+
+### 注意点
+- middleware.tsがasync functionに変更された（Upstash Redis呼び出しのため）
+- Redis環境変数名: UPSTASH_REDIS_REST_KV_REST_API_URL（Vercel自動生成の長い名前）
+  - コード側でUPSTASH_REDIS_REST_URLもフォールバックで対応
+- pgパッケージは依然としてpackage.jsonに残っている（削除推奨だが影響範囲確認済みで安全）

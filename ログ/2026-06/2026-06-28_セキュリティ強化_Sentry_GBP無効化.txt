@@ -1,0 +1,69 @@
+## 【2026-06-28】
+
+### 決定事項
+- 外部GBP操作（口コミ返信・投稿・削除）は構造改善完了まで全面停止
+- Sentryを導入し本番エラー監視を開始（無料プラン、USリージョン）
+- user_metadata.roleフォールバックは廃止（user_profilesのみ信頼）
+- 認可チェック漏れ4ルート（auto-post, sync-categories, sync-coordinates, sync-search-keywords GET）を修正
+- gbp-search-keywords/gbp-performanceのトークン取得コピペも統一
+- scheduled-postsのトークン取得コピペも統一（最後の1箇所）
+- 現状スコア78/100。「今すぐ壊れる・攻撃される」リスクは潰した
+
+### 変更内容（具体的に）
+
+#### コミット af75e1e: 認可チェック漏れ4ルート + トークン統一2箇所
+- `src/app/api/report/auto-post/route.ts` — verifyAuth → requireRole(president, manager)。import修正
+- `src/app/api/report/sync-categories/route.ts` — verifyAuth → requireRole(president, manager)。ローカルgetOAuthToken(32行)削除、gbp-token.tsに統一。GBP_CLIENT_ID/SECRET変数削除
+- `src/app/api/report/sync-coordinates/route.ts` — 全店舗対象時（shopId/shopNameなし）にrequireRole(president, manager)追加。requireRole importを追加
+- `src/app/api/report/sync-search-keywords/route.ts` — GET name指定時にverifyShopAccess追加。verifyShopAccess importを追加。エラーメッセージから店舗名を除去
+- `src/lib/gbp-search-keywords.ts` — getPerformanceApiToken(54行)削除 → getOAuthToken()に統一。GBP_CLIENT_ID/SECRET変数削除
+- `src/lib/gbp-performance.ts` — getPerformanceApiToken(43行)削除 → getOAuthToken()に統一。GBP_CLIENT_ID/SECRET変数削除
+
+#### コミット 0648af0: Sentry導入
+- `sentry.client.config.ts` — クライアントサイドエラーキャプチャ（replaysOnErrorSampleRate: 1.0）
+- `sentry.server.config.ts` — サーバーサイドエラーキャプチャ
+- `sentry.edge.config.ts` — Edge Runtimeエラーキャプチャ
+- `next.config.mjs` — withSentryConfig追加（hideSourceMaps: true, telemetry: false）
+- `src/app/global-error.tsx` — 未キャッチエラーをSentryに送信+リカバリUI
+- `src/instrumentation.ts` — onRequestErrorでAPIルート/Cronのエラーを自動キャプチャ
+- `package.json` — @sentry/nextjs追加
+
+#### コミット 206512e: CSP修正
+- `src/middleware.ts` — connect-srcに `https://*.ingest.us.sentry.io` 追加（SentryのCSPブロック解消）
+
+#### コミット a2fe640: 外部GBP操作6機能を無効化
+- `vercel.json` — execute-postsのCron定義を削除
+- `src/app/api/cron/auto-reply/route.ts` — GET関数を即時return化。元の実装を_GET_disabledに退避
+- `src/app/api/cron/execute-posts/route.ts` — GET関数を即時return化。元の実装を_GET_disabledに退避
+- `src/app/api/report/reply-review/route.ts` — POST関数を503返却化。元の実装を_POST_disabledに退避
+- `src/app/api/report/delete-post/route.ts` — POST関数を503返却化。元の実装を_POST_disabledに退避
+- `src/app/api/report/create-post/route.ts` — POST関数を503返却化。元の実装を_POST_disabledに退避
+- `src/app/api/report/auto-post/route.ts` — POST関数を503返却化。元の実装を_POST_disabledに退避
+
+#### コミット a76876b: ロール偽装リスク排除 + 最後のコピペ削除
+- `src/lib/supabase.ts` — getUserRole()のuser_metadata.roleフォールバック(10行)を削除。user_profilesに未登録ならロールなし（=全API拒否）
+- `src/app/api/report/scheduled-posts/route.ts` — getAllOAuthTokens()独自実装(47行)を削除。gbp-token.tsからimportに変更。GBP_CLIENT_ID/SECRET変数削除
+
+### 数値・設定値
+- Sentry tracesSampleRate: 0.1（10%サンプリング）
+- Sentry replaysOnErrorSampleRate: 1.0（エラー時100%リプレイ）
+- Sentry org: chubby-4x / project: javascript-nextjs
+- 無効化した機能: 6（auto-reply, execute-posts, reply-review, delete-post, create-post, auto-post）
+- 削除コピペ行数: 約180行（sync-categories 32行 + gbp-search-keywords 54行 + gbp-performance 43行 + scheduled-posts 47行 + user_metadata 10行）
+- Vercel環境変数追加: NEXT_PUBLIC_SENTRY_DSN, SENTRY_ORG, SENTRY_PROJECT
+
+### 未解決・次回やること
+- [ ] 店舗IDの3系統問題（Go API UUID / Supabase UUID / 店舗名）→ DB設計変更+マイグレーション必要（1-2日）
+- [ ] monthly-analysis/report-cacheの同名店舗上書き → shop_nameキーをshop_idに変更（上記のID統一が前提）
+- [ ] getAllOAuthTokensのrace condition → 分散ロック未実装（複数Cron同時リフレッシュ時の競合）
+- [ ] any型解消（73箇所）
+- [ ] テスト追加（APIテスト0件、Cronテスト0件）
+- [ ] GBP操作機能の復活 → 構造改善完了後に_GET_disabled/_POST_disabledを戻す+vercel.jsonにCron再追加
+
+### 注意点・ハマったこと
+- TypeScriptが早期return後のunreachableコードの型チェックを行う。verifyCron()がnull返却するため `NextResponse | null` が `void | Response` を満たさないビルドエラー。対策: export関数を閉じて、元のコードを_GET_disabled/_POST_disabled関数に退避
+- CSPがSentryのingest URLをブロックしていた。connect-srcに `https://*.ingest.us.sentry.io` を追加する必要があった
+- Vercel StorageでUpstash Redis作成時、Custom Prefixを `UPSTASH_REDIS_REST` にすると環境変数名が `UPSTASH_REDIS_REST_KV_REST_API_URL` のように長くなる。コード側で両方の変数名をフォールバックで対応済み
+- user_metadata.roleはSupabase Auth UIでは通常変更不可だが、セルフサインアップやIdP連携で設定される可能性があるため、セキュリティ上は信頼すべきでない
+- scheduled-postsにトークン取得のコピペが1箇所残っていた（前回の監査で見落とし）
+- 現状スコア78/100。残りは設計レベルの問題（店舗ID統一、テスト追加）で、コード修正だけでは解決できない

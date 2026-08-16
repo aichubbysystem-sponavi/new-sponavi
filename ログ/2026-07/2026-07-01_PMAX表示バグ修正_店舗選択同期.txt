@@ -1,0 +1,70 @@
+## 【2026-07-01 夜】P-MAX表示バグ3重修正 + 店舗選択同期機能
+
+### 問題
+- P-MAXデータをsync（272店舗/445件保存）しても、ページに0店舗と表示される
+- 月を切り替えるたびにAPIが呼ばれてAPI代が無駄
+
+### 根本原因（3つの複合問題）
+
+#### 1. service roleクライアントのauth設定不備
+- `createClient(url, serviceKey)` にauthオプションなし
+- Supabase JSがservice role keyのセッションをリフレッシュ → anon roleに降格 → RLS（service_roleのみ許可）でブロック
+- 修正: `autoRefreshToken: false, persistSession: false` 追加
+
+#### 2. PostgREST 1000行デフォルト制限
+- store-summaryが`.limit(50000)`で全件取得+JSフィルタ方式だった
+- PostgRESTのデフォルト最大行数は1000行 → 1807件中969件しか返らない
+- 969件 = May(460)+June(509)で、April/Julyのデータが切り捨て
+- 以前の「.eq()が不安定」は実はRLS問題が原因だった
+- 修正: `.eq("month", month)` でDB側フィルタに変更
+
+#### 3. Next.js 14のfetchキャッシュ
+- Supabase JSの内部fetch()がNext.js 14にキャッシュされる
+- sync前の「0件」結果がキャッシュに残り、sync後も0件が返される
+- google-ads.tsには対策済みだったがSupabaseクライアントは未対策
+- 修正: `global.fetch` に `cache: "no-store"` を設定
+
+### 変更ファイル
+
+#### バグ修正（3ファイル）
+- `src/lib/supabase.ts` — getSupabase()のcreateClientに3つのオプション追加:
+  - `auth.autoRefreshToken: false`（service role降格防止）
+  - `auth.persistSession: false`（サーバー環境対応）
+  - `global.fetch: cache: "no-store"`（Next.jsキャッシュ無効化）
+- `src/app/api/pmax/store-summary/route.ts` — 全件取得+JSフィルタ → `.eq("month", month)` + sync_logも `.eq()` + `.order()` に最適化
+- `src/app/api/pmax/sync/route.ts` — DELETE/INSERTのエラーログ詳細出力追加
+
+#### 店舗選択同期（3ファイル）
+- `src/app/api/pmax/known-shops/route.ts` — 新規: pmax_account_mappingから店舗名一覧返却
+- `src/app/api/pmax/sync/route.ts` — `shopNames`パラメータ追加:
+  - 選択同期時: 選択店舗のアカウントだけAPI呼び出し
+  - 選択店舗のデータだけdelete→insert（他店舗のデータは維持）
+- `src/app/pmax/page.tsx`:
+  - 「全店舗を更新」「店舗を選んで更新」の2ボタン
+  - 店舗選択パネル（チェックボックス+検索+全選択/全解除）
+  - 月別クライアントキャッシュ（同じ月の再取得防止、sync後はforceRefresh）
+
+### 重要な学び
+- **重要ナレッジの「.eq()不安定」は誤り** — 真因はservice roleのauth設定不備によるRLSブロック
+- **PostgRESTのデフォルト最大行数は1000行** — `.limit(50000)`を指定しても無視される
+- **Supabase JSクライアントの内部fetchもNext.jsにキャッシュされる** — google-ads.tsと同じ対策が必要
+
+### 追加作業（7/2未明）
+
+#### 多地点順位チェック最適化
+- **Phase 1/2スキップ**: 座標/KW取得済み店舗はDBチェックでスキップ（500店舗→数秒）
+- **KW未取得マーカー**: KWがシートに見つからない店舗にも空マーカー（source="not_found"）を保存 → 次回Phase 2スキップ
+- **KW未取得一覧パネル**: 全店舗計測パネル内に黄色パネルで常時表示（リロード永続）
+  - シートにKW設定 → 次回バッチで取得成功 → source="sheet"に更新 → 一覧から消える
+- **ステータスダッシュボード**: 4カード（今月計測済み/未計測/座標あり/KW設定済み）+ 最終計測日時
+- **CSVエクスポート**: 月別の全計測ログをCSVダウンロード（店舗名/KW/平均順位/TOP3率/TOP10率/圏外率/計測日時）
+
+#### 新規ファイル
+- `src/app/api/report/kw-missing/route.ts` — KW未取得店舗一覧API
+- `src/app/api/report/grid-stats/route.ts` — ステータスサマリーAPI
+- `src/app/api/report/grid-export/route.ts` — CSVエクスポートAPI
+
+### 未解決
+- [x] 重要ナレッジ.txtの「PostgREST .eq()不安定」記述を更新済み
+- [ ] 他のAPI（store-detail等）で全件取得+JSフィルタしている箇所があれば.eq()に変更
+- [ ] セキュリティ修正（前セッションから引き続き）

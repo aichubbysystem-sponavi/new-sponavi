@@ -1,0 +1,63 @@
+■ 2026-07-15 口コミ分析(AI)が「口コミなし」誤判定 → 店名NFC正規化で修正
+
+【症状】
+- /review-analysis で「口コミ分析を実行」→ 分析結果が全店「口コミなし／
+  ロコミデータなし（先に口コミ同期が必要）」。だが /reviews には176件など口コミは存在
+- 監査ログ: action=AI口コミ分析 status=200「分析成功0/1件」（＝ライブ実行でno_reviews）
+- report_analysis には2026/7/2まで成功記録(rev=472等)あり→7/2以降に発生
+
+【調査（実DB）】
+- reviews テーブルに対象7店とも十分な口コミあり（新橋店:490/コメント付き直近1年58 等）
+- shops.name == reviews.shop_name はバイト完全一致（reviews.shop_nameがshopsに無い店名=0）
+- reviews/report_data_cache/grid/display_settings/analysis 全RLS有効・authenticatedのSELECTのみ
+  だがレポート表示(report_data_cache読取)は動く→getSupabaseは本物のservice_roleでRLSバイパスできている
+- ★核心: reviews.shop_name は NFC(濁点=合成形, 35char/65octet)で保存。
+  同名をNFD(分解形,38char)で検索すると 0件（NFC検索234件 / NFD検索0件）
+  「デザイン」の「ザ」= さ+U+3099(結合濁点) がNFDでは別バイト列
+
+【原因】
+- フロントは useShop().shops（/api/shop=Go API由来）の店名をanalyzeに送る。
+  Go APIがNFD正規化の店名を返すため、.eq("shop_name", NFD名) がバイト不一致で0件→no_reviews
+- 7/2以降に発生したのはGo API側の店名正規化が変わった等が推定（Go側は未確認）
+
+【修正】
+1. src/app/api/report/analyze/route.ts コミット294ced8
+   - POSTで受け取る shopIds の name を .normalize("NFC") に統一
+     （reviews取得だけでなく report_data_cache/shops照合/認可も同じ名前で揃う）
+   - fetchReviews 内にも安全網でNFC正規化
+2. src/components/shop-provider.tsx コミットef9d29d（根本対策）
+   - fetchShops で /api/shop の各店名を読み込み時にNFC正規化
+   - useShop().shops が全画面のAPI呼び出しの店名起点なので、ここで揃えて波及を予防
+
+【検証】tsc / next build OK。デプロイ済み
+
+【残・横展開の注意】
+- 同種のNFD不一致は他の店名キーAPIでも起こり得たが、shop-provider起点の正規化で大半カバー。
+  URL直/別ソースの店名を使う経路（レポートの [shopId] 等）は今回未対応。必要なら順次NFC化。
+- Go API側でNFCに揃えるのが最も根本的（要Goコード修正・別途）
+
+■ 追記: 真因はNFCではなく statement timeout（インデックス欠如）だった
+
+【訂正】NFC/NFD不一致は真因ではなかった（NFC修正デプロイ後も失敗。監査ログの店名はNFC）。
+無害な予防策としてNFC正規化は残置。
+
+【真因特定の経緯】
+1. fetchReviews が supabase の error を無視して null 返し→「口コミなし」表示だったため、
+   error を throw して画面に出す診断版をデプロイ（コミット637f6f8）
+2. ユーザーの再実行で「reviews-query: canceling statement due to statement timeout」を捕捉
+3. EXPLAIN ANALYZE: reviews=14.7万件、shop_name にインデックスが無く
+   idx_reviews_create_time 経由で7万行走査→Filter。単体6244ms
+4. authenticator/authenticated に statement_timeout=8s。count:"exact" の別カウントで
+   負荷倍増し8秒超過（service_roleもauthenticator経由のため8s適用）
+5. 7/2まで成功していたのはデータ量とタイミングの問題。7/7-8のRLS有効化は相関で因果ではない
+
+【対処】コミット 3588441
+- CREATE INDEX CONCURRENTLY idx_reviews_shop_name_time (shop_name, create_time DESC)
+  → 6244ms → 104ms（本番適用済み。sql/2026-07-15_reviews_shop_name_index.sql）
+- fetchReviews の count:"exact" 廃止（totalReviewCount=reviews.lengthで代替）
+- 横展開確認: dashboard-data等の shop_name クエリも全て35〜355msに改善済みを実測
+
+【教訓】
+- supabase-jsのerrorは必ず検査（握り潰すと「0件」とエラーの区別がつかない）
+- 「データがない」症状の切り分け順: ①直DBで実在確認 → ②クエリerror/timeout → ③キー不一致
+- 時系列の相関（RLS有効化以降〜）を因果と即断しない

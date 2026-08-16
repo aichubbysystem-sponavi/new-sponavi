@@ -1,0 +1,80 @@
+## 【2026-07-20】P-MAX月次推移グラフを線グラフ化
+
+### 決定事項
+- P-MAXレポート「月次推移」の棒グラフ（表示回数のみ）を4指標の線グラフに変更（ユーザー指示）
+- 指標色は固定: 表示回数=赤(#e53935) / クリック数=青(#1e88e5) / クリック率=黄(#fdd835) / クリック単価=緑(#43a047)
+- スケール分離: 表示回数=左軸(y)、クリック数=右軸(y1)、クリック率(y2)・クリック単価(y3)は非表示軸
+  （数千〜数%の桁差があるため。非表示軸でも折れ線の形状・ツールチップ値は正しく出る）
+- 凡例はグラフ下部に表示（従来は単一データセットのため非表示だった）
+
+### 変更内容（コミット c8ff9bd）
+■ src/components/pmax-report-view.tsx のみ
+- chart.js登録: BarElement削除 → PointElement, LineElement追加。react-chartjs-2のBar→Lineに変更
+- chartColors/chartBorderColors（言語別ローテーション色）を削除 → monthlyLineColors（指標固定色）に置換
+- 言語別ページの月次グラフ: Bar→Line、4データセット化（borderWidth:2, pointRadius:3, tension:0.3, fill:false）
+- ツールチップ: クリック率=%表記(×100済み)、クリック単価=¥表記(micros/1e6済み)、他はカンマ区切り
+- グラフ高さ 200→220px（下部凡例の分）
+
+### 影響範囲
+- pmax-report-viewの利用元3つ全てに適用: /pmax/store（社内）、/pmax/share/[token]（共有）、/pmax/group/[token]/store（グループ共有）
+- ファイル内の他グラフ（媒体別Pie）は変更なし。Barはこのファイルで1箇所のみだった
+
+### 注意点・ハマったこと
+- Chart.jsツールチップの ctx.parsed.y は number|null 型 → `?? 0` しないと next build の型エラーで落ちる
+- averageCpcはmicros単位（formatCpcと同様に/1_000_000してからプロット）、ctrは小数（×100してからプロット）
+
+### 動作確認
+- next build 成功。main へ push 済み（Vercel自動デプロイ）
+- テスト方法: https://new-spotlight-navigator.com/pmax/share/af71276c-fc23-4316-b54d-158ac9893107 を再読込
+  → 「月次推移」が4色の折れ線＋下部凡例になっていること、各線にホバーで正しい値が出ること
+
+## 追記: 社内ページの「予約」が常に0だったバグ修正（コミット b7927cf）
+- 症状: /pmax/store（社内ページ）のKPI「予約」が0（前月比・前年比も0→0）。共有ページは正常
+- 真因: /api/pmax/store-detail の pmax_gbp_data → camelCase マッピングに reservation が欠落
+  （2026-07-03に「予約」を追加した際、share/group-share の2APIには入れたが store-detail だけ漏れ）
+- 修正: store-detail/route.ts の gbp マッピングに reservation: Number(r.reservation ?? 0) を追加
+- 教訓: 同じテーブルを返すAPIが3つある（store-detail / share / group-share store）。
+  GBP項目を追加する時は3つ全部+sync/backfillを修正すること
+- 別件メモ: summary-text（AI総評）の指標リストには予約が入っていない（電話〜保存・共有のみ。仕様どおりかは未確認）
+
+## 追記2: 混合グラフ化（棒＋線）に変更（コミット f33f9a3 / 2cdb937）
+- ユーザー指示: 表示回数・クリック数は棒グラフ、クリック率・クリック単価は線グラフのまま
+- 実装: react-chartjs-2の <Chart type="bar"> + datasetごとに type:"bar"/"line" を指定（mixed chart）
+  chart.js登録に LineController / BarElement / BarController を追加（Controller登録を忘れるとmixedは動かない）
+- 棒: borderWidth 0 / borderRadius 3。線: 従来どおり borderWidth 2, pointRadius 3, tension 0.3
+- 【ハマり】最初 order:2(棒)/order:1(線) を付けたら、Chart.jsの凡例の並び順まで order順にソートされ
+  「クリック率/クリック単価/表示回数/クリック数」になった。
+  → order を削除。データセット定義順（棒2本→線2本）だけで棒が線の背面に描画される。凡例も定義順に戻る
+- 本番でPlaywright実測確認済み: 赤棒=表示回数(左軸)/青棒=クリック数(右軸)/黄線=クリック率/緑線=クリック単価、
+  凡例順も 表示回数→クリック数→クリック率→クリック単価 でOK
+
+## 追記3: 棒を背面へ・棒色を半透明に（コミット 84e74f5）
+- ユーザー指示: 折れ線を前面に、棒（赤・青）は不透明度を下げて見やすく
+- 実装:
+  - 棒 order:2 / 線 order:1 → orderが大きい方が先に描画=背面。折れ線が棒に隠れなくなった
+  - 棒色を専用定数 monthlyBarColors に分離: rgba(229,57,53,.38) / rgba(30,136,229,.38)
+    （線の色 monthlyLineColors は不透明のまま維持）
+  - orderを使うとChart.jsは凡例もorder順に並べ替えるため、
+    plugins.legend.labels.sort で datasetIndex 順に戻した（追記2のハマりの正しい解法）
+- 本番Playwright実測で確認済み: 薄い赤/薄い青の棒の手前を黄・緑の線が通る。凡例順も表示回数→クリック数→率→単価
+
+## Vercelデプロイ確認のコツ（今回ハマった）
+- push後3分待っても画面が変わらず「未デプロイ？」と誤認したが、実際は配信済みでブラウザ側キャッシュだった
+- 確実な判定法: ページHTMLからチャンクURL一覧を取り、新コード固有の文字列でgrepする
+  curl でHTML取得 → grep -o '/_next/static/chunks/[^"]*\.js' → 各chunkをcurlして新文字列を検索
+- ブラウザ側は ?cb=xxx のクエリ付与で回避（Ctrl+F5相当）
+
+## 追記4: 「保存・共有」→「保存・共有・写真」にラベル変更（コミット 862dbfa）
+- 変更した表示箇所（データ項目 saveShare = GBPシートL列。値は変更なし、ラベルのみ）:
+  1. src/components/pmax-report-view.tsx:226 コンバージョン月次推移テーブルの行見出し
+  2. src/components/pmax-report-view.tsx:264 主要指標サマリーのKPIカード
+  3. src/app/pmax/[customerId]/page.tsx:353 顧客別ページのKPI
+  4. src/app/api/pmax/summary-text/route.ts:31,127 AI総評のプロンプト雛形と入力データ
+     → まとめページのAI文面も「保存・共有・写真：」表記になる（既存の保存済みテキストは再生成するまで旧表記）
+- lib/pmax-sheet.ts のコメント（L列の元名称「保存・共有」）は変更していない＝シート側の列名はそのまま
+- 本番確認済み（共有ページで「保存・共有・写真」表示）
+
+## ついでに発見・修正: [customerId]ページの「予約」がvalue:0ハードコードだった
+- src/app/pmax/[customerId]/page.tsx:352 が `value: 0, prev: 0` の固定値だった（型GbpRowにもreservationが無かった）
+- /api/pmax/gbp はシート由来のreservationを返しているので、型に追加してgbpCurrent.reservationに接続
+- これで「予約」を出す3画面（レポート/共有・社内store・顧客別）すべてが実データになった

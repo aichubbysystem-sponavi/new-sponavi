@@ -1,0 +1,90 @@
+## 【2026-06-26】P1: コード統一・コピペ解消
+
+### 決定事項
+- ロケーションマッピングは gbp-location.ts に一元化
+- OAuthトークン取得は gbp-token.ts に一元化
+- pgパッケージは完全削除
+
+### 変更内容（コミット 90835e7）
+
+#### ロケーションマッピング統一（4箇所→1箇所）
+
+**gbp-location.ts の拡張:**
+- Supabase補完ステップを追加（Go API→Supabase→GBP APIフォールバックの3段階）
+- normName()関数をexport（全角半角・スペースの正規化）
+- LocMapping interfaceをexport
+- 5分キャッシュ（CACHE_TTL）
+
+**削除したローカル実装:**
+- `cron/auto-reply/route.ts`: getLocationMap(token) 25行削除。GO_API_URL変数も不要に
+- `cron/sync-reviews/route.ts`: getLocationMap() 20行削除
+- `report/sync-reviews/route.ts`: getLocationMap() 73行 + locationMapCache + normName 削除
+
+**注意点:**
+- cron/sync-reviews と report/sync-reviews は GO_API_URL を他の用途でも使用 → 変数定義は残した
+- auto-reply は GO_API_URL 不要になったが、将来の変更に備えそのまま（ビルドは通る）
+- report/sync-reviews の行146にローカル normName 再定義があった → import と競合するため削除
+
+#### OAuthトークン取得統一（3系統→1系統）
+
+**gbp-token.ts に getAllOAuthTokens() を追加:**
+- Go APIトークン + system_oauth_tokens + system.tokens(RPC) の3ソースから全トークン収集
+- 期限切れトークンはリフレッシュ＆DB永続化
+- Set でトークン重複を排除
+
+**削除したローカル実装:**
+- `execute-posts/route.ts`: getAllOAuthTokens() 71行削除
+- GBP_CLIENT_ID, GBP_CLIENT_SECRET 変数も不要に（gbp-token.ts側で管理）
+
+#### pgパッケージ削除
+- `npm uninstall pg @types/pg` 実行
+- 15パッケージ削除（依存含む）
+- 前セッションでauto-replyのpg直接接続コードを削除済みだったため、コード側の変更なし
+
+### 数値
+- 削除: 420行（コピペコード）
+- 追加: 136行（共通モジュール拡張）
+- 純減: 284行
+- 削除パッケージ: pg, @types/pg + 依存13個
+
+### 追加変更（コミット af75e1e）
+
+#### 認可チェック漏れ4ルート修正
+- `report/auto-post`: verifyAuth → requireRole(president, manager)
+  - 全店舗の自動投稿操作を管理者のみに制限
+- `report/sync-categories`: verifyAuth → requireRole(president, manager)
+  - ローカルgetOAuthToken(32行)も削除、gbp-token.tsに統一
+  - GBP_CLIENT_ID/SECRET変数も不要に
+- `report/sync-coordinates`: 全店舗対象時にrequireRole(president, manager)追加
+  - shopId/shopName指定時は従来通りrequireShopAccessById/verifyShopAccess
+- `report/sync-search-keywords` GET: name指定時にverifyShopAccess追加
+  - shopId指定時はrequireShopAccessById済み、name指定パスのみ漏れていた
+
+#### トークン取得コピペ最後の2箇所を解消
+- `gbp-search-keywords.ts`: getPerformanceApiToken(54行) → getOAuthToken()
+- `gbp-performance.ts`: getPerformanceApiToken(43行) → getOAuthToken()
+- 合計97行のコピペコードを削除
+
+#### 調査結果（修正不要と判断したルート）
+- `/api/report/google-updates`: 全ユーザー向けニュース → 認可不要
+- `/api/report/ranking-keywords`: スプレッドシート読取 → 認可不要
+- `/api/report/my-shops`: ユーザー自身の店舗一覧 → 認可不要
+- `/api/report/customer-sheet`: 共有シート情報 → 認可不要
+- `/api/search-keywords/status`: 読取のみ → 現状維持（要検討）
+- `/api/report/rank-alert`: requireShopAccessById済み
+- `/api/report/structured-data`: requireShopAccessById済み
+- `/api/report/churn-score`: requireRole済み
+
+### 数値（本セッション合計）
+- 削除: 574行（コピペコード）
+- 追加: 168行（共通モジュール拡張）
+- 純減: 406行
+
+### 未解決・次回やること
+- [x] gbp-search-keywords.ts の getPerformanceApiToken() → 統一済み
+- [x] gbp-performance.ts の getPerformanceApiToken() → 統一済み
+- [x] 認可チェック漏れ → 4ルート修正済み
+- [ ] Sentry導入 + Cron結果のSlack通知
+- [ ] 店舗IDの正規化（名前マッチ→UUID統一）
+- [ ] any型解消（73箇所）
+- [ ] テスト追加

@@ -1,0 +1,127 @@
+## 【2026-06-20】多地点順位UI全面改善 + コードレビュー対応 + ビルドエラー修正
+
+### 決定事項
+- 多地点順位サマリーページをJSXに統一（DOM動的生成版を廃止→二重管理解消）
+- PDFマップペアにヘッダーバー+ページ番号を追加（他スライドとデザイン統一）
+- ページ番号をweb基準で連番化、PDF印刷時にPDF基準に自動補正→印刷後に復元
+- PDF凡例・平均順位をhtml2canvasキャプチャから分離→HTMLで直接配置
+- review-language-stats APIの認証をスキップ（レポートサブドメイン対応）
+- マップキャプチャはlabelYOffset:-2.5のシンプル方式を維持（上端1行ラベル欠けはhtml2canvas限界）
+
+### 変更内容（具体的に）
+
+#### client.tsx — サマリー二重管理の解消
+- JSXサマリーを唯一のソースに統一（web/PDF共用）
+- PDF印刷ハンドラから動的サマリー生成（約50行）を完全削除
+- JSXサマリーのクラス: grid-kw-pair → grid-summary-slide（印刷時も表示）
+- サマリーに見出し「多地点順位 総合レポート（対象月）」追加（stitleStyle）
+
+#### client.tsx — ページ番号の連番化+PDF自動補正
+- totalPages: グリッドを1+ceil(KW/2)→2（サマリー+KW切替1ページ、web基準）
+- 全KWスライドで同一ページ番号を共有（ペア毎のインクリメント廃止）
+- 全15箇所のページ番号spanにclassName="pn-label"を付与
+- PDF印刷前: pn-label全要素をPDF基準（totalPages+pageShift、分子もシフト）に書き換え
+- PDF印刷後: data-origPnから元のweb基準に復元（エラー時も復元実行）
+
+#### client.tsx — PDFマップペアにヘッダーバー追加
+- slideBarStyle準拠のヘッダーバー（紺グラデ+店舗名+ページ番号）
+- マップ高さ: 500→440x400（grid-map-containerと同サイズ）
+- bodyにalign-items:stretchで左右マップスロットの高さを統一
+
+#### client.tsx — PDF凡例・平均順位をHTMLで直接配置
+- html2canvasのキャプチャ範囲を.grid-kw-map-area(全体)→.grid-map-container(マップのみ)に変更
+- 凡例（5色丸+テキスト）をPDFスライドにHTMLで配置（inline-block+vertical-align:middle）
+- 平均順位もHTMLで配置（実データで動的更新、前月比の変動も表示）
+- html2canvasを凡例に通さないので、webとPDFで完全に同じ凡例表示
+
+#### client.tsx — 凡例デザイン改善（web+PDF共通）
+- 丸サイズ: 10→20px
+- 凡例幅: マップと同じ440px、justifyContent: space-between
+- 平均順位幅: 440px、フォント16→20px、数値22→28px、変動16→20px
+- 凡例フォント: 16→18px
+- マップエリアにjustifyContent:center追加（上下中央配置）
+
+#### client.tsx — PDFマップキャプチャ
+- キャプチャ前にGoogleMapsコントロール(.gmnoprint等)をCSS非表示→キャプチャ後復元
+- renderGridMapForKwにhideControlsパラメータ追加（未使用、将来用）
+- labelOriginを常に設定（条件分岐if(offset!==0)を削除）
+- PDF用labelYOffset: -2.5（html2canvasのラベルレンダリング補正）
+
+#### review-language-stats/route.ts — 認証スキップ
+- レポートサブドメインは未ログイン閲覧のためverifyAuth削除
+- shopNames/shopIds指定必須なのでデータ範囲は限定される
+
+#### ビルドエラー修正（既存の壊れ 6ファイル）
+- sync-shops/route.ts: gbp_shop_nameのnull型エラー（|| null → || ""）
+- validation.ts: generatePostSchemaにTRANSLATE/PROOF追加、targetLangフィールド追加、z.recordにキー型追加
+- generate-post/route.ts: topicLabel[topicType]のundefined index型エラー
+- chart-options.ts: parsed.yのnull許容（number → number | null）
+- google-ads.ts: cacheプロパティ重複削除（2箇所）
+- gbp-search-keywords.ts, image-proxy.ts: getSupabase import漏れ追加
+
+### 数値・設定値
+- totalPages計算: グリッド 1+ceil(KW/2) → 2（web基準）
+- PDFマップスロット: width:440px, height:400px（grid-map-containerと同サイズ）
+- PDF凡例丸: 20px、inline-block+vertical-align:middle、marginRight:6px
+- PDF平均順位: fontSize:20px、数値fontSize:28px、変動fontSize:20px
+- 凡例丸サイズ(web): 10 → 20px
+- 凡例フォント(web): 16 → 18px
+- 平均順位フォント(web): 16 → 20px、数値 22 → 28px
+- 凡例・平均順位幅(web): 440px（マップと統一）
+- PDFマップキャプチャlabelYOffset: -2.5
+- PDFマップキャプチャscale: 2
+
+### 未解決・次回やること
+- [ ] **PDFマップ上端1行のラベル欠け**（html2canvasの限界）→ Google Maps Static API等で根本解決必要
+- [ ] S級セキュリティ（パスワード平文/P-MAX認証なし/IDOR/ユーザー管理権限）
+- [ ] client.tsx本格分割（2089行→hooks/コンポーネント分離）
+- [ ] 残り400+箇所のany型排除
+- [ ] 残りバリデーション適用
+- [ ] auth-verify.tsファイル削除（参照ゼロ確認済み）
+- [ ] review-language-stats認証スキップのセキュリティ改善（refererチェック等）
+
+### 注意点・ハマったこと
+
+#### サマリー二重管理が見落としの温床
+- JSX版とDOM動的版が存在し、見出し追加がJSX版にしか反映されなかった
+- 解決: JSXを唯一のソースにし、PDF印刷時もJSXをそのまま使用
+
+#### html2canvasとflexboxの非互換（凡例の丸テキスト位置）
+- flexboxのalignItems:centerでPDFの凡例丸がテキストより上にズレた
+- 試行した方法（全てPDFでは効果なし）:
+  1. display:block + alignItems:center
+  2. position:relative + top:N px（マジックナンバー）
+  3. lineHeight調整
+  4. alignItems:baseline + offset
+- 最終解決: html2canvasに凡例を描かせない
+  キャプチャ範囲をマップのみに限定し、凡例・平均順位はPDFにHTMLで直接配置
+  inline-block + vertical-align:middle はブラウザのネイティブレンダリングなのでweb/PDF同一
+
+#### PDFマップ上端ラベル欠け（未解決・html2canvas限界）
+- html2canvasがgrid-map-container(440x400)をキャプチャすると上端1行のマーカーラベルが消える
+- 試行した方法（全て失敗または悪化）:
+  1. overflow:hidden + border-radius解除 → 変化なし
+  2. コンテナ一時拡大(540x500) + Google Maps resize → 変化なし
+  3. map-area全体キャプチャ→canvas切り抜き → オフセット計算が不正確で不安定
+  4. ズームアウト(zoom-1) → マーカーが極小化して使い物にならない（大幅悪化）
+  5. hideControls=trueで再描画 → fitBoundsのpadding配分が変わり別の問題発生
+  6. labelYOffset:0（補正なし） → ラベルが大幅に下にズレる
+- 現状: labelYOffset:-2.5 + コントロールCSS非表示のシンプルキャプチャで安定化（上端1行のみ欠け）
+- 根本解決案: Google Maps Static API、Playwright/Puppeteerサーバーサイドスクリーンショット
+
+#### ビルドエラーのままプッシュした（反省）
+- ビルド確認とgit pushを&&チェーンで実行したが、ビルドエラー時もgitが実行されてしまった
+- 2回のErrorデプロイ（31925f5, 2a0b5d2）がVercelに記録された
+- 対策: next buildの成功出力を目視確認してからコミット・プッシュする。&&チェーンに頼らない
+
+#### ページ番号のweb/PDF二重管理
+- webは2ページ（サマリー+KW切替）、PDFは1+ceil(KW/2)ページ
+- 解決: web基準で連番管理し、PDF印刷直前にpn-label要素を一括書き換え→印刷後に復元
+
+#### 場当たり的修正の連鎖で悪化させた（最大の反省）
+- 元は「上端1行のラベル欠け」だけだった問題に対して、
+  コンテナリサイズ→overflow解除→canvas切り抜き→ズームアウト と試行を重ねた結果、
+  マーカーが極小化するなど元より大幅に悪化した
+- 根本原因（html2canvasのGoogleMapsラベルレンダリング限界）を早期に見極め、
+  「これ以上は別アプローチが必要」と判断すべきだった
+- 教訓: 効果がない修正を重ねるのではなく、早い段階で立ち止まって別アプローチを検討する

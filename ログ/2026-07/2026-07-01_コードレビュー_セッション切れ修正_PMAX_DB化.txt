@@ -1,0 +1,64 @@
+## 【2026-07-01】全体コードレビュー + バッチ計測セッション切れ修正 + P-MAX DB保存方式改修
+
+### 決定事項
+- 全体コードレビューを4エージェント並列で実施（セキュリティ/データフロー/フロントエンド/インフラ）
+- 多地点順位チェックのバッチ計測中にセッション切れする問題を修正
+- P-MAXをGoogle Ads API直接呼び出し→DB保存方式に全面改修
+- P-MAXの日次データは同期時に取得せず、店舗詳細を開いた時にオンデマンド取得
+- P-MAXの自動同期は廃止、手動「最新データに更新」ボタンのみ
+- アカウント→店舗マッピングをDBキャッシュし、2回目以降はP-MAXがあるアカウントだけ叩く
+
+### 変更内容（具体的に）
+
+#### セッション切れ修正（3ファイル）
+- `src/components/auth-guard.tsx` — セッションタイムアウトのリセットイベントに`batch-activity`追加
+- `src/app/grid-ranking/page.tsx` — バッチ計測ループ内で`window.dispatchEvent(new Event("batch-activity"))`を2箇所追加、インラインcreateClientを共有supabaseに統一（4箇所）、`import { supabase } from "@/lib/supabase"`追加
+- `src/lib/api.ts` — `getToken()`でトークン期限切れ時に`supabase.auth.refreshSession()`を明示的に呼ぶよう変更
+
+#### P-MAX DB保存方式改修（8ファイル）
+- `sql/pmax_store_data.sql` — 新規: 5テーブル定義（pmax_store_data, pmax_store_daily, pmax_sync_log, pmax_gbp_data, pmax_account_mapping）+ RLS + インデックス
+- `src/app/api/pmax/sync/route.ts` — 新規: POST /api/pmax/sync（Google Ads API→DB保存、429リトライ、アカウントマッピングキャッシュ）
+- `src/app/api/pmax/list-stores/route.ts` — 新規: GET /api/pmax/list-stores（Google Ads APIから店舗一覧取得）※現在は使用していない
+- `src/app/api/pmax/store-summary/route.ts` — DB読み込みに変更（PostgREST .eq()回避で全件取得+JSフィルタ）
+- `src/app/api/pmax/store-detail/route.ts` — DB読み込み+日次データのオンデマンドAPI取得+GBPデータ返却追加
+- `src/app/api/pmax/share/[token]/route.ts` — DB読み込みに変更+GBPデータ返却追加
+- `src/app/pmax/page.tsx` — 全面書き直し: DB読み込み、手動「最新データに更新」ボタン、自動同期廃止
+- `src/app/pmax/store/page.tsx` — API呼び出しをmonthパラメータ方式に変更、GBPデータをAPIレスポンスから取得
+
+### 数値・設定値
+- auth-guard SESSION_TIMEOUT_MS: 30分（変更なし、batch-activityイベントでリセット）
+- api.ts refreshSession: トークン期限60秒前にリフレッシュ
+- sync API maxDuration: 300秒
+- sync API並列数: 15アカウント同時
+- sync APIバッチ間ウェイト: 200ms
+- 429リトライ: 3回（3秒→8秒→15秒の指数バックオフ）
+- list-stores maxDuration: 300秒
+- store-detail: 日次データはDBになければAPIからオンデマンド取得
+- store-summary: PostgREST回避のためlimit=50000で全件取得+JSフィルタ
+
+### 未解決・次回やること
+- [ ] Google Ads API 429クォータ上限で4月/6月/7月の初回同期が未完了（クォータ回復後に「最新データに更新」で同期）
+- [ ] 初回フルスキャン後のアカウントマッピングキャッシュの動作確認（明日実施）
+- [ ] store-summaryのPostgREST .eq()回避ハック → 根本原因調査
+- [ ] pmax_account_mapping全削除が`.neq("account_id", "")`のハック → 正しい全削除方法に変更
+- [ ] store-detailの日次オンデマンド取得にリトライロジック追加
+- [ ] sync API同時実行の競合防止（分散ロック）
+- [ ] GBP同期のcatchブロックが空 → エラーログ追加
+- [ ] セキュリティ修正（コードレビューで指摘済み、未着手）:
+  - supabase.ts:30 キーログ出力削除
+  - auto-reply/execute-posts に verifyCron追加
+  - user-management パスワード type="password"
+  - Supabase exec_sql RPC関数削除
+  - RLSポリシー有効化（全テーブル）
+  - NEXT_PUBLIC_API_URL → API_URL変更
+  - Go APIにサービス間認証追加
+  - google-ads.ts 日付パラメータバリデーション追加
+- [ ] 多地点順位チェック: 500店舗一括計測の進捗確認
+
+### 注意点・ハマったこと
+- **セッション切れの根本原因**: AuthGuardの30分タイムアウト + Supabase JWTの1時間有効期限 + grid-ranking内のインラインcreateClientによるGoTrueClient競合の3重問題。batch-activityイベント + refreshSession + 共有supabase統一の3つで解決
+- **toISOString()のタイムゾーンバグ**: JST midnight→UTC前日15:00で日付が1日ズレる。sync/list-storesの日付生成で発生。手動フォーマット`${year}-${String(mon).padStart(2,"0")}-01`に変更
+- **Google Ads API 429 RESOURCE_EXHAUSTED**: 50店舗バッチ×6回で全292アカウントを毎回走査→400回のAPI呼び出しでクォータ枯渇。1回のsyncで全店舗分を一括取得する方式に変更+アカウントマッピングキャッシュで2回目以降50回程度に削減
+- **PostgREST .eq()不安定**: pmax_store_dataテーブルで.eq("month", "2026-05")が0件を返す問題。全件取得+JSフィルタで回避（重要ナレッジに記載の既知問題）
+- **Vercel関数タイムアウト**: 292アカウント×月次+日次の584回API呼び出しが300秒を超える。日次データを同期から除外し、店舗詳細で個別取得する方式に変更
+- **P-MAXのGBPデータ**: Google Ads APIでは取れない（来店/電話/経路案内/メニュー/保存共有）。スプレッドシート(gid=372148068)から取得してDB保存する方式に変更

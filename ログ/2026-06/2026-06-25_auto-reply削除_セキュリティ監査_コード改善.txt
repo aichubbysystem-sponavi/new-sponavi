@@ -1,0 +1,71 @@
+## 【2026-06-25】
+
+### 決定事項
+- auto-replyで自動投稿された返信のうち、口コミ返信契約「なし」＋定期更新シート未掲載の店舗分を削除
+- 顧客管理スプレッドシートのB列「解約」32店舗をSupabase shopsテーブルにcancelled_at反映
+- セキュリティ全体監査（認証・認可・データ整合性・フロントエンド）を実施し、CRITICAL 5件 + HIGH 5件を修正
+- Next.js 15アップグレードは専用セッションで実施（CSP nonce実装含む）
+- execute-postsのsystem.tokens（systemスキーマ）はanon keyで更新不可 → Go APIのリフレッシュサイクルに委ねる
+
+### 変更内容（具体的に）
+
+#### コミット 86c396d: コード改善3件
+- `src/app/api/report/auto-post/route.ts` — 空catch{} 12箇所にconsole.error追加（Dropboxページネーション、サブフォルダ展開、メタデータ取得、DLリンク取得方法1/2/3 × 2関数）
+- `src/app/api/cron/sync-reviews/route.ts` — lastProcessedIndex変数追加。!fullPath/reviews.length===0のcontinue前にもインクリメント。offset更新を`offset + lastProcessedIndex`に変更（スキップ防止）
+- `src/app/api/cron/execute-posts/route.ts` — system.tokensリフレッシュ後のDB書き戻しコードを削除（anon keyでsystemスキーマ更新不可のため無効だった）。コメントで理由を明記
+
+#### コミット 88ebb5c: セキュリティ監査対応10件
+- `src/app/api/report/review-language-stats/route.ts` — Refererチェックのみ → verifyAuth必須に変更（認証欠落修正）
+- `src/app/api/report/search-keywords/route.ts` — GETハンドラにverifyAuth追加（認証欠落修正）
+- `src/app/api/report/grid-ranking-generate/route.ts` — GET/PUT/DELETEにverifyAuth + verifyShopAccess追加（認証+認可欠落修正）
+- `src/app/api/cron/execute-posts/route.ts` — staleリカバリ閾値5分→10分に延長（二重投稿リスク軽減）
+- `src/middleware.ts` — 旧SupabaseプロジェクトURL（kxxwspavskhhjtiixcep）のハードコードを空文字に変更
+- `src/app/api/report/scheduled-posts/route.ts` — DELETE/PATCHにshop_name経由のverifyShopAccess追加（IDOR防止）
+- `src/app/api/report/post-schedule/route.ts` — delete actionにrequireShopAccessById追加（IDOR防止）
+- `src/app/api/report/churn-score/route.ts` — verifyAuth → requireRole(president/manager)に変更（経営情報保護）
+- `src/app/api/report/grid-ranking-presets/route.ts` — POST/DELETEにverifyShopAccess追加（IDOR防止）
+- `src/app/api/report/reply-review/route.ts` — GBP API fetchにAbortSignal.timeout(30000)追加
+
+#### スプレッドシート操作（外部）
+- export-auto-replies.js実行: auto-reply自動返信340件をスプレッドシート（1Nc_b-DSGyKClIs1KHS_Bb70vMrKffn6jyVmYXFTiqtI）に書き出し
+- check-auto-replies.js実行: 口コミ返信「なし」39件 + 定期更新シート未掲載115件 = 154件にチェック
+- delete-auto-replies.js実行: チェック済み154件のうち85件のGBP返信を削除、69件はロケーション不明でスキップ
+
+#### Supabase SQL実行（外部）
+- `UPDATE shops SET cancelled_at = NOW() WHERE name IN (...) AND cancelled_at IS NULL` — 32店舗を解約済みに更新
+- 結果: 全589店舗中 → 解約78件 / 契約中511件
+
+### 数値・設定値
+- execute-posts staleリカバリ閾値: 5分 → 10分
+- reply-review GBP APIタイムアウト: なし → 30秒
+- churn-score 許可ロール: 全ユーザー → president, manager のみ
+- auto-reply削除: 340件中154件をチェック → 85件削除成功 / 0件失敗 / 69件スキップ
+- 解約店舗: 46件 → 78件（+32件）
+- GBP未連携（契約中）: 51件 → 44件（7件が解約に含まれていた）
+- Next.js: 14.2.35（14系最終パッチ、npm audit脆弱性14件）
+
+### 未解決・次回やること
+- [ ] auto-reply削除スキップ69件（ロケーション不明: うなぎや花道、The Attachment、NOBLE等）→ GBP未連携のため削除不可
+- [ ] GBP未連携44店舗の紐付け（sync-shops手動実行 → 残りは手動）
+- [ ] 七宝麻辣湯3店舗の住所手動セット
+- [ ] Next.js 15アップグレード（専用セッション1-2日、React 19同時アップグレード必須）
+- [ ] CSP 'unsafe-inline' 排除（Next.js 15アップグレード後にnonce実装）
+- [ ] レート制限をインメモリMap → Upstash Redis等に移行
+- [ ] Supabase service_role keyの使用範囲をCron/管理操作のみに限定
+- [ ] auto-post sheetId検証（SSRF類似）
+- [ ] send-report HTMLインジェクション対策
+- [ ] scheduled-posts PUT（手動実行）のクレーム処理追加（二重投稿防止）
+- [ ] execute-posts の根本修正: processing_started_atカラム追加
+- [ ] P-MAXにロール制限追加
+- [ ] スプレッドシート8枚の公開設定 → Service Account認証移行（顧客管理シート優先）
+- [ ] Google client secretローテーション
+
+### 注意点・ハマったこと
+- auto-replyのコードはreply_commentをUPDATEするだけで「自動返信した」ログを残していなかった → reply_time（GBP側の返信日時）の時刻フィルタ（9:00-9:30 JST = 00:00-00:30 UTC）で推定特定
+- execute-postsのsystem.tokens DB更新: RPCに依存するコードを書いたが、そもそもanon keyではsystemスキーマにアクセスできないため無効だった → セルフレビューで発見し削除
+- sync-reviewsのoffset: continueでスキップした店舗がlastProcessedIndexに反映されず、次回同じ店舗を再処理する問題 → !fullPathとreviews.length===0のcontinue前にもlastProcessedIndex更新を追加
+- middleware.tsに旧SupabaseプロジェクトURL（kxxwspavskhhjtiixcep）がハードコードされていた → .env.localの値（rtqvyuscibswachlewks）と異なる別プロジェクト。環境変数未設定時に別DBに接続するリスク
+- review-language-statsのRefererチェック: Refererなし（curl等）の場合if文が偽になりチェック自体がスキップされる → verifyAuthに置き換え
+- Next.js 14のnonce実装自体にXSS脆弱性（GHSA-ffhc）があるため、14でCSP nonce実装すると逆にリスクが増える → 15アップグレード後に対応
+- 定期更新シートの店舗名はB列（A列は番号）。最初A列で照合して0件マッチだった
+- Sheets APIでシート名を指定しないとデフォルトの最初のタブが取得される → 口コミ管理シートは明示的に「'口コミ管理シート'!A:C」と指定が必要だった

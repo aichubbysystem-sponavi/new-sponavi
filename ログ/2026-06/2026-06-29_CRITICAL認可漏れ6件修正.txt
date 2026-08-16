@@ -1,0 +1,64 @@
+## 【2026-06-29】全体コードレビュー + CRITICAL修正 + サブドメイン認証
+
+### 決定事項
+- 全コードを原点から5並列エージェントで厳格レビュー（セキュリティ/データ整合性/コード品質/フロントエンド/インフラ）
+- CRITICAL 6件を即日修正・デプロイ
+- send-report（メール送信機能）は未使用のため削除
+- サブドメイン（report/p-max）に未ログインアクセスブロック追加
+- 和田さん閲覧用アカウント作成（chubby.k.wada@gmail.com / kazu1234 / part_time）
+- getUserRoleのPostgREST .eq()不具合を全件取得+JSフィルターで回避
+
+### 変更内容（具体的に）
+
+#### コミット eafa5e2: CRITICAL認可漏れ6件修正
+- `src/app/api/report/ranking-keywords/route.ts` — import に verifyShopAccess 追加。GET関数内で auth.sub チェック + verifyShopAccess(auth.sub, shopName) を追加（IDOR修正）
+- `src/app/api/report/setup-cache/route.ts` — import を verifyAuth → requireRole に変更。認証チェックを requireRole(request, ["president"]) に変更
+- `src/app/api/report/send-report/route.ts` — ファイルごと削除（82行）。メール送信先無検証・shopName HTMLインジェクション・reportUrl Open Redirect
+- `src/app/api/report/reply-templates/route.ts` — import に requireRole 追加。action=delete に requireRole(["president","manager"]) 追加 + id未指定時400。action=increment を RPC(increment_use_count) 優先に変更（TOCTOU回避）、RPCなければフォールバック
+- `src/app/api/report/post-schedule/route.ts` — GET: shopId必須化（未指定時400）、verifyAuth import削除、requireShopAccessById に統一。POST delete: verifyAuth削除 → schedのshop_idからrequireShopAccessById、sched未存在時404
+- `src/lib/supabase.ts` — getSupabase(): SUPABASE_SERVICE_KEY未設定時に throw Error に変更（Anon Keyフォールバック削除）
+
+#### コミット 2dddd4e: ESLintビルドエラー解消
+- `src/app/api/cron/auto-reply/route.ts` — `// eslint-disable-next-line @typescript-eslint/no-unused-vars` 削除
+- `src/app/api/cron/execute-posts/route.ts` — 同上削除
+- `src/app/api/report/auto-post/route.ts` — 同上削除
+- `src/app/api/report/create-post/route.ts` — 同上削除
+- `src/app/api/report/delete-post/route.ts` — 同上削除
+- `src/app/api/report/reply-review/route.ts` — 同上削除
+
+#### コミット f07e06c: getUserRole PostgREST不具合回避
+- `src/lib/supabase.ts` — getUserRole()を全面書き換え。.eq("id",userId).maybeSingle()の2段階検索 → .select("id, auth_uid, role")全件取得 + profiles.find(p => p.id === userId || p.auth_uid === userId) に変更。デバッグログ(f0b7b30, e4ef488, ca873cb)も全て除去
+
+#### コミット a4e9fa5: サイドバー改善
+- `src/components/sidebar.tsx` — navSections のコンテンツ管理セクションに `{ href: "https://p-max.new-spotlight-navigator.com", label: "P-MAX広告 ↗" }` 追加。Linkコンポーネントに `item.href.startsWith("http")` 判定で `target="_blank" rel="noopener noreferrer"` を付与
+
+#### コミット 3b23601: サブドメイン認証ブロック
+- `src/middleware.ts` — isReportSubdomain/isPmaxSubdomain判定の直後に認証チェック追加。静的リソース(_next, api, favicon, login)を除外し、Supabase Authクッキー(`sb-{projectId}-auth-token`)を確認。未ログイン時は `https://new-spotlight-navigator.com/login` にリダイレクト
+
+### 数値・設定値
+- 変更ファイル: 合計15ファイル（うち1削除）
+- 削除行: send-report 82行、デバッグログ約30行、eslintコメント6行
+- Supabase RPC追加: `increment_use_count(template_id UUID)` — `UPDATE reply_templates SET use_count = use_count + 1, updated_at = NOW() WHERE id = template_id`
+- user_profiles追加: 社長 f8d0e403-25f6-4856-baae-294bb00d9486 president / 和田 0c947616-113a-466c-9a70-d6e729d86e84 part_time
+- レビュー総合スコア: 64/100（CRITICAL 6件修正前）
+
+### 未解決・次回やること
+- [ ] H1: sync-reviews オフセット競合（ロック機構必要）
+- [ ] H2: execute-posts 二重投稿リスク（stale recovery改善）
+- [ ] H3: gbp-token.ts 並列リフレッシュ競合
+- [ ] H4: CSP unsafe-inline 除去（script-src, style-src）
+- [ ] H5: report/[shopId]/client.tsx innerHTML 4箇所 → textContent/createElement 置換
+- [ ] H6: レポートページのサーバーサイド認可（現在クライアントサイドのみ、300ms間データ表示）
+- [ ] H7: middleware.ts IPスプーフィング対策（x-forwarded-for → Vercel request.ip）
+- [ ] M1-M8: Cronバッチ単一店舗失敗時の改善、AI呼び出しレート制限、report/[shopId]/client.tsx 2347行の分割
+- [ ] PostgREST .eq()不具合の根本原因調査（UUID型カラムとの文字列比較？Supavisor接続プール？）
+- [ ] getSupabase()のデバッグログ（コミットca873cb）は本番コードに残存 → f07e06cで除去済み確認OK
+
+### 注意点・ハマったこと
+- ESLintの@typescript-eslint/no-unused-varsルールが未定義のためdisableコメントがビルドエラーになる。@typescript-eslintプラグインが未導入（eslint-config-next/core-web-vitalsのみ）。a2fe640以降3デプロイ連続失敗していた
+- post-schedule/route.ts のPOST delete分岐内にverifyAuthの直接呼び出しが残っていてimport削除後にビルドエラー。requireShopAccessByIdに統一して解決
+- user_profilesテーブルにnameカラムがNOT NULL制約。最初のINSERTがエラーになった
+- PostgREST .eq("id", userId) が不安定にnullを返す。同じリクエスト内でSELECT * は成功、.eq()フィルターは失敗。Service Role Keyは正しい（isServiceKey=true, len=219）。全件取得してfind()するワークアラウンドで解決
+- Supabase Authセッションクッキー名は `sb-{projectId}-auth-token` 形式。projectIdはSUPABASE_URLから抽出（`//`と`.`の間）。チャンク分割時は `.0` サフィックス付きもチェック必要
+- VercelのLogsでサーバーサイドconsole.errorを確認可能。[getSupabase]ログはシングルトン初期化時のみ出力（ウォームインスタンスでは出ない）
+- getUserRoleのconsole.warnは「Role not found」のみ表示。詳細（query結果・エラー）はconsole.errorで別行出力 → Vercel Logsで行をクリックして展開しないと見えない

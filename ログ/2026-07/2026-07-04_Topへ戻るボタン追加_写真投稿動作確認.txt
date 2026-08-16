@@ -75,3 +75,67 @@
 - approval_statusの承認必須化はしていない（rejected除外のみ）。
   承認済みのみ実行にすると既存フローが全停止するため、運用判断が必要
 - post-images バケットの古い画像掃除（cleanupImageを呼ばない設計にしたため蓄積する。実害小）
+
+========================================================================
+## 【2026-07-04】セッション終了ログ（Topへ戻るボタン + 投稿機能バグ修正 + 残課題棚卸し）
+
+### 決定事項
+- /report と /pmax のヘッダーに「← Topへ戻る」ボタンを設置する
+- report.* / p-max.* サブドメイン（顧客向け）ではボタンを非表示にする
+  （middlewareで"/"が同一ページにリライトされ機能しない + 顧客に社内Top導線を見せないため）
+- GBP操作の503無効化（2026-06-28決定）は維持したまま、退避コード内の潜在バグのみ修正する
+- 稼働中の scheduled-posts PUT は安全側の挙動変更のみ許容
+  （保留の誤実行防止・差戻し除外・写真URL変換）
+- 承認必須化（approved のみ実行）は今回見送り（既存フローが全停止するため運用判断が必要）
+
+### 変更内容（具体的に）
+■ src/components/back-to-top-link.tsx（新規）
+  - "use client"。hostnameが report./p-max. なら非表示、それ以外で href="/" リンク表示
+■ src/app/report/report-list-client.tsx
+  - ヘッダー左（SPOTLIGHT NAVIGATORタイトル前）に BackToTopLink 設置
+■ src/app/pmax/page.tsx
+  - ヘッダー左（アイコン前）に BackToTopLink 設置
+■ src/app/api/report/auto-post/route.ts（_POST_disabled内・本番挙動変化なし）
+  - scheduleMode: Dropbox一時URL(4h失効)を resolveImageUrl() で安定URL化してから
+    scheduled_posts.photo_url に保存。失敗時: PHOTO=エラースキップ / 通常=写真なし+警告
+  - 写真失敗リトライで topicType/OFFERのevent(題名・期間) を維持するよう修正
+■ src/app/api/report/scheduled-posts/route.ts（稼働中）
+  - PUT force=true の対象を pending のみに変更（on_hold誤実行防止）
+  - approval_status="rejected" をJS側フィルタで実行対象から除外
+  - 実行時に resolveImageUrl() で写真URLを公開URL化（cronと同方式）
+■ src/app/api/cron/execute-posts/route.ts（_GET_disabled内・本番挙動変化なし）
+  - approval_status="rejected" をJS側フィルタで除外（PUTと整合）
+■ コミット: 9d72fec（Topへ戻るボタン）/ 95ab2d5（投稿バグ修正）→ main push済み・Vercel自動デプロイ
+
+### 数値・設定値
+- 変更したパラメータ・閾値なし（挙動フラグのみ: PUT force の対象 pending+on_hold → pending）
+- Dropbox get_temporary_link の有効期限: 4時間（予約保存時に安定URL化が必要な根拠）
+
+### 未解決・次回やること
+- 【優先高】予約投稿が自動実行されない片肺状態（cron停止中なのに予約作成は可能）
+  → 予約作成ブロック or 「自動実行停止中・手動実行が必要」の画面表示
+- 【優先高】停止中機能（投稿・削除・口コミ返信）の503を押すまで分からない
+  → /posts・/reviews に一時停止バナー
+- 【優先高】/posts のAI生成ボタンがバイトに見える（403で実行は不可）→ useRoleガード追加
+- 【優先中】grid-ranking POST の body parse がtry外（route.ts:81、壊れたJSONで500）
+  ※同パターン（.catchなしのrequest.json()）は約30ルートにあるが実害小
+- 【優先中】keyword-volume 休眠API削除 / post-images バケットの画像掃除cron
+- 【優先低・設計】店舗ID3系統問題 / monthly-analysis同名店舗上書き /
+  getAllOAuthTokens race condition / テスト0件
+- 【数日後】GCP請求レポートに「Text Search Essentials (IDs Only)」SKU出現の答え合わせ
+- 別セッション由来の未コミット変更が作業ツリーに残存
+  （pmax-sheet.ts / pmax/sync/route.ts / pmax-report-view.tsx / share系route / sql 等6ファイル+新規スクリプト）
+  → 本番とローカルがズレた状態。次セッションで内容確認してコミット or 破棄の判断が必要
+
+### 注意点・ハマったこと
+- PostgRESTの .neq("col", "value") はNULL行も除外する（NULL != value がNULL評価）。
+  approval_status はNULL行が大半のため、DBフィルタでなくJS側 filter で除外した
+- 無効化の仕組みは「export関数が即503を返し、元実装は _POST_disabled/_GET_disabled に退避」。
+  退避関数の中身を直しても本番挙動は変わらない＝無効化維持のままバグ修正が可能
+- scheduled-posts PUT の写真パスは www.dropbox.com 共有リンクをそのままGBPに渡していた
+  （GBPがHTMLを取得して失敗する）。cronの実行時 resolveImageUrl 変換がPUTには無かった
+- 予約保存時の安定URL化では cleanupImage を呼ばないこと（実行完了まで画像が必要）
+- /report と /pmax はサブドメインからも同一ページが表示される（middlewareリライト）。
+  この2ページにリンクを足す時は必ずサブドメイン表示時の挙動を考慮すること
+- git status に他セッションの未コミット変更が混在していたため、git add はファイル指定で
+  自分のセッション分のみ選択的にコミットした

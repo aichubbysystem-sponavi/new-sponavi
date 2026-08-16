@@ -1,0 +1,194 @@
+===========================================================
+2026-07-03 セキュリティ・コード品質・正確性の全面改善
+（多角レビュー→確実に直せる項目を全て修正）
+===========================================================
+
+## 経緯
+ユーザー依頼「このシステムは完璧に作り込まれているか。プロ開発者/セキュリティ等
+多方面からフィードバック」→ レビュー実施 →「改善が必要なところ全て確実に改善」
+
+多角レビュー（セキュリティ/コード品質/正確性の並行監査）で検出した問題のうち、
+テストなしで安全・確実に直せるものを全て修正。検証: tsc --noEmit / vitest(82) /
+next build すべてPASS。
+
+## 修正内容
+
+### セキュリティ: IDOR（店舗アクセス権の適用漏れ）
+- api/report/search-keywords GET/POST: verifyAuthのみ→requireShopAccessByIdに変更。
+  任意shopIdで他店の検索語句を削除+上書き/閲覧できた穴を封鎖。
+- api/report/review-language-stats POST: getUserAllowedShopsで許可店舗フィルタを追加。
+  他店の口コミ本文・投稿者名(PII)取得を防止。
+- api/report/scheduled-posts GET: shopId省略時に全店舗の予約投稿を返していた→
+  president以外は許可店舗のみに絞る。
+
+### セキュリティ: 全社データ開示にロール制限
+- api/report/customer-sheet GET: requireRole(["president","manager"])。顧客マスタ保護。
+- api/report/nap-check GET: requireRole(["president","manager"])。
+- api/report/tasks GET: requireRole(["president","manager"])。
+- api/report/gbp-urls: /postsはpart_timeも使うためロール制限でなく許可店舗フィルタに。
+
+### セキュリティ: 認証・シークレット強化
+- lib/supabase.ts: safeEqual()（crypto.timingSafeEqual）追加。verifyCronを定数時間比較化。
+- api/report/scheduled-posts PUT:
+  - x-cron-secret比較をsafeEqual化。
+  - 非cron（手動「今すぐ実行」）はrequireRole(president/manager)+許可店舗フィルタに。
+    part_timeが全店舗を一斉公開できた穴を封鎖。
+  - pending→processingのクレーム機構を追加（二重投稿防止。execute-postsと同方式）。
+- middleware.ts: PUT /api/report/users（未認証の登録申請）にレート制限を追加（悪用防止）。
+- lib/image-proxy.ts: SSRF対策。includes("dropbox")の緩い判定→URL.hostnameの厳格な
+  許可リスト（dropbox.com / dropboxusercontent.com のみ）に。
+
+### 正確性バグ
+- lib/pmax-cache.ts: 全件取得+JSフィルタ→.eq("cache_key")に修正。
+  1000行超でキャッシュが常時ミスし6h TTLが無効化していた問題を解消（重要ナレッジ既知）。
+- api/report/shop-cancel POST: .update().select("id")で0行更新を検出し404。
+  ID不一致でサイレント成功していた問題を修正。
+- api/report/analyze: fetchReviewsが.eq("shop_id")で検索→reviewsはSupabase UUID保存の
+  ため不一致で「口コミなし」誤判定。.eq("shop_name")に修正（monthly-analysisと同方式）。
+- api/cron/sync-reviews:
+  - 270秒の経過時間ガードを追加。ループ後のオフセット保存に必ず到達させ、Vercelの
+    強制killでオフセット未保存→後半店舗が永久に未同期になる問題を防止。
+  - 401/403(トークン失効)を検出。従来は「口コミ0件」と誤認し同期済み扱いにしていた。
+    単発401はスキップ前進、連続3回はオフセット非前進で中断（次回再試行）。
+- api/report/memo GET: エラー時 {memo:""} の握りつぶしに _error フィールド+console.error
+  を追加（テーブル未作成等を観測可能に。重要ナレッジ既知パターン）。
+
+### Critical-1: レポートRSCの未認証データ配信（最重要）
+問題: report/[shopId]/page.tsx と report/dashboard/[shopId]/page.tsx が
+サーバーコンポーネントで実データ（KPI・口コミ本文・投稿者名等）をHTMLに埋め込み、
+クライアント側AuthGuardが描画を隠す前に未ログインでもcurl等で取得できた。
+※クライアント側認証では直せない（データが既にHTMLに入るため）。サーバー認証が必須。
+
+対応（ログインフローには触れず、レポートページ内に閉じた形で修正）:
+- 新規: api/report/data （認証+verifyShopAccessでgetReportData+googleReviewUrlを返す）
+- 新規: api/report/dashboard-data （同様。ダッシュボード用）
+- 新規: report/[shopId]/data-loader.tsx / dashboard/[shopId]/data-loader.tsx
+  （クライアントでBearerトークン付きfetch→ReportClient/DashboardClientを描画。
+   401=ログインへ / 403=アクセス権なしUI / 準備中UI）
+- page.tsxはデータを取得せずローダーのシェルのみ描画。
+  → SSR HTMLに実データが乗らなくなり漏洩を封鎖。ReportClient/DashboardClientは無改修。
+
+### コード品質
+- 死にコード削除: lib/auth-verify.ts（import 0、supabase.tsと重複）。
+- 不要依存削除: jose（未使用）、dompurify+@types/dompurify（isomorphic版のみ使用）。
+- lib/supabase.ts verifyShopAccessの正規化をNFKC対応に（全角/半角の揺れを吸収）。
+
+## 検証
+- npx tsc --noEmit: PASS
+- npx vitest run: 82 passed
+- npx next build: PASS（report/[shopId]・dashboard/[shopId]はDynamicシェルに）
+
+## 未対応（要判断・要テスト。今回は安全のため見送り）
+1. client_secret_2_*.json: .gitignore済み&git未追跡&コードはenv変数使用のため
+   デプロイに含まれず公開露出なし。ローカル成果物。削除+GCPローテーションは任意。
+2. CRON_SECRET(chubby-cron-secret-20261204): 比較はsafeEqual化済み。値のローテーション
+   と重要ナレッジ.txtからの平文除去はユーザー作業。
+3. vercel.jsonへのexecute-posts/auto-reply/health-cronの登録: これらは現在コード上で
+   無効化(早期return)中。再有効化時に「承認チェック」「滞留pending棚卸し」「cron登録」を
+   セットで行う必要あり（今回は無効のまま登録せず）。
+4. ロールの真実が2系統（role-provider=user_metadata / server=user_profiles）。
+   統一は影響範囲が広くテスト必須のため見送り。
+5. 手動「今すぐ実行」をpresident/managerに制限したため、part_timeで運用していた場合は
+   ロール見直しが必要（least-privilegeを優先）。
+
+## 次回やるとよいこと
+- 上記1〜5の判断。特にPUT scheduled-posts手動実行のロール制限が運用に合うか確認。
+- 店舗名正規化の完全一本化（8箇所→lib/normalize）はマッチング挙動が変わるため、
+  実店舗名データで回帰テストしてから実施。
+
+## 追記（同日）: 社員がレポート一覧を見られない件
+- ユーザー報告: 社員(manager)でログインするとレポート一覧が0件。
+- 原因調査: これは今回の変更が原因ではなく元からの仕様だった（my-shops/
+  report-list-client/roles.ts はすべて今回未変更）。
+  レポート一覧は getUserAllowedShops で絞り込み、これが president のみ "all"、
+  manager は user_shop_access の割当店舗のみを返す。この社員は割当0のため0件。
+  一方ダッシュボードは店舗アクセスで絞らず507店舗表示 → 不整合。
+- 対応: lib/supabase.ts getUserAllowedShops を「president または manager は "all"」に変更。
+  → 社長・社員=全店舗、バイトのみ担当店舗限定の2段階モデルに統一。
+  ダッシュボードと整合。今回追加した各フィルタ（gbp-urls/scheduled-posts/
+  review-language-stats等）も社員は全件、バイトのみ制限で一貫。
+- ※もし「社員も担当店舗のみ」にしたい場合は、この1行を president のみに戻し、
+  各社員に user_shop_access で担当店舗を登録する運用にする。
+- 検証: tsc --noEmit PASS。
+
+
+===========================================================
+## 2026-07-03（セッションまとめ・構造化）
+===========================================================
+
+### 決定事項
+- 多角レビュー（セキュリティ/コード品質/正確性）で検出した問題のうち、テストなしで
+  安全・確実に直せるものを全て修正し本番反映する。
+- 権限モデルは「社長・社員=全店舗、バイト(part_time)のみ担当店舗限定」の2段階に統一。
+- AI社長は Dify（VPS依存）→ Claude API 直結へ移行。方針は①「使い方特化」
+  （システム操作案内＋MEO一般知識。会議録等のRAGは今回対象外）。
+- 本番デプロイ先は origin = github.com/aichubbysystem-sponavi/new-sponavi（Vercel接続）。
+  omni = github.com/omni-seo/spotlight-navigator は別リポジトリで本番ではない。
+
+### 変更内容（具体的に）
+- IDOR修正（店舗アクセス権追加）:
+  - src/app/api/report/search-keywords/route.ts … verifyAuth→requireShopAccessById(GET/POST)
+  - src/app/api/report/review-language-stats/route.ts … getUserAllowedShopsで許可店舗フィルタ
+  - src/app/api/report/scheduled-posts/route.ts … GET shopId省略時は許可店舗のみ／
+    PUTに二重投稿防止クレーム＋手動実行を社長社員+許可店舗に限定＋x-cron-secretをsafeEqual化
+- 全社データ開示のロール制限:
+  - customer-sheet/route.ts, nap-check/route.ts(GET), tasks/route.ts(GET) … requireRole(president,manager)
+  - gbp-urls/route.ts … part_timeの/postsを壊さないため許可店舗フィルタに
+- 認証・シークレット強化:
+  - src/lib/supabase.ts … safeEqual()追加、verifyCronを定数時間比較化、
+    getUserAllowedShopsをmanagerも"all"に、verifyShopAccessの正規化をNFKC化
+  - src/middleware.ts … PUT /api/report/users（未認証登録申請）にレート制限追加
+  - src/lib/image-proxy.ts … SSRF対策。includes("dropbox")→URL.hostnameの厳格許可リスト
+- 正確性バグ:
+  - src/lib/pmax-cache.ts … 全件取得+JSフィルタ→.eq("cache_key").maybeSingle()
+  - src/app/api/report/shop-cancel/route.ts … update().select("id")で0行更新検出→404
+  - src/app/api/report/analyze/route.ts … fetchReviewsを.eq("shop_id")→.eq("shop_name")
+  - src/app/api/cron/sync-reviews/route.ts … 経過時間ガード＋401/403検出（authError）
+  - src/app/api/report/memo/route.ts … エラー時に_errorフィールド+console.error追加
+- Critical-1（レポートRSC未認証配信の封鎖）:
+  - 新規 src/app/api/report/data/route.ts, dashboard-data/route.ts（認証+verifyShopAccess）
+  - 新規 src/app/report/[shopId]/data-loader.tsx, dashboard/[shopId]/data-loader.tsx
+  - src/app/report/[shopId]/page.tsx, dashboard/[shopId]/page.tsx をシェル化（データ非埋め込み）
+- コード品質:
+  - src/lib/auth-verify.ts 削除（未使用・重複）
+  - package.json から jose / dompurify / @types/dompurify 削除（npm installでlock同期）
+- AI社長 Claude API化:
+  - src/app/api/chat/route.ts … Dify呼び出し→Anthropic Messages API。feature-details.tsの
+    全機能を使い方ナレッジとしてsystem promptに注入。会話履歴(history)でマルチターン対応
+  - src/app/chatbot/page.tsx … conversationId送信→history送信に変更、「新しい会話」ボタン条件を
+    messages.length>0に、UIラベル修正（「Dify連携中」→「AI稼働中」／説明文・フッター文言）
+
+### 数値・設定値
+- 登録申請レート制限: ログイン用loginRateLimit(10回/5分)を register:${ip} で流用
+- sync-reviews: TIME_LIMIT=270_000ms(=270秒, maxDuration=300s)、連続authError>=3で中断、BATCH_SIZE=100
+- pmax-cache: CACHE_TTL_MS=6時間（設定は不変、取得方式のみ.eq化）
+- image-proxy 許可ホスト: dropbox.com / dropboxusercontent.com（サブドメイン含む）
+- AI社長 chat: CHAT_MODEL 既定=claude-haiku-4-5-20251001（env CHAT_MODELで変更可）、
+  max_tokens=1500、履歴は直近20メッセージ、fetch timeout=90秒、maxDuration=120
+- 本番Vercel環境変数 DIFY_BASE_URL=http://162.43.39.90/v1（形式は正しかった）
+
+### 未解決・次回やること
+- CRON_SECRET(chubby-cron-secret-20261204)の値ローテーション＋重要ナレッジ.txtからの平文除去
+- client_secret_2_*.json はgitignore済み・git未追跡・デプロイ非含有で露出なし。削除は任意
+- vercel.jsonへのexecute-posts/auto-reply/health-check cron登録は「投稿機能再有効化」とセットで実施
+  （承認チェック・PUTクレーム・滞留pending棚卸しも同時に）
+- ロールの真実が2系統（role-provider=user_metadata / server=user_profiles）の統一（要影響調査）
+- 店舗名正規化の8箇所一本化（lib/normalizeへ集約。マッチング挙動が変わるため実データで回帰テスト後）
+- AI社長②「マニュアル知識も入れる」は未実装（必要なら参照文書を指定してもらう）。口調・精度調整は
+  src/app/api/chat/route.ts の SYSTEM_PROMPT で可能
+- コミットメッセージ先頭の余計な「@」（bashでの入力ミス）は本番mainのため未修正のまま
+
+### 注意点・ハマったこと
+- リモートが2つ: origin(=Vercel本番)とomni(=別リポジトリ)。最初omniに誤push→
+  git push omni --force-with-lease で 10d171d に巻き戻して取り消し。以後 origin main に push。
+- 「社員でレポート一覧が0件」は今回の変更が原因ではなく元からの仕様。my-shops→
+  getUserAllowedShopsが president のみ"all"、manager は user_shop_access のみ返す設計だった。
+  → getUserAllowedShops を manager も"all"に変更して解決。
+- Critical-1はクライアント側認証では直せない（RSCが実データをHTMLに埋め込むため既に漏れている）。
+  サーバー側認証が必須 → データ取得を認証付きAPI＋クライアントローダーに移す方式で解決。
+- AI社長の404はVercel/コードではなくVPS(162.43.39.90)のDify停止が原因。ルート/すらnginx404。
+  DIFY_BASE_URLは/v1付きで正しかった。→ Claude API直結にしてVPS依存自体を排除。
+- package.jsonから依存を削除したら、npm installでpackage-lock.jsonを同期しないと
+  Vercelのnpm ciがsync不一致で失敗する。削除時はlockも必ずコミット。
+- Windows/Git BashでのCRLF警告は無害。commit -m の @'...'@ はPowerShell構文でbashでは
+  メッセージ先頭に「@」が1文字混入する（コード・デプロイには影響なし）。

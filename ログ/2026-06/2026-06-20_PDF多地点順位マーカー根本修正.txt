@@ -1,0 +1,70 @@
+## 【2026-06-20】PDF多地点順位マーカー崩れ＋数値不一致の根本修正
+
+### 決定事項
+- PDFの多地点順位マップキャプチャ方式をhtml2canvas+SVGマーカーから「地図タイルのみキャプチャ→新Canvas合成→Canvas 2Dマーカー直描画」に全面変更
+- Mercator投影の数学計算でlat/lng→ピクセル座標変換（Google Maps Projection API不使用）
+- 中心▼マーカーはPDFから削除（順位数字が隠れるため）
+- labelOrigin -2.5ハックを廃止
+- supplementGridFromRankingのMath.random()を決定論的ハッシュに置換
+
+### 変更内容（具体的に）
+
+#### src/app/report/[shopId]/client.tsx — PDFマップキャプチャ全面書き換え
+- renderGridMapForKw(kw, -2.5)のPDF用ラベル補正 → renderGridMapForKw(kw, 0)に変更（オフセット不要）
+- gmap.getCenter()/getZoom()からMercator投影でマーカーピクセル座標を数学計算（toWX/toWY関数）
+- マーカーをsetMap(null)で非表示にしてhtml2canvasで地図タイルだけキャプチャ
+- html2canvasが返すcanvasに直接描画せず、新しいcanvas(finalCanvas)を作成しdrawImage()で地図転写後にマーカー描画
+- Canvas 2D APIでマーカー描画: ctx.arc()で円、ctx.fillText()で順位テキスト
+- 中心▼マーカー描画コードを削除
+- centerPixel計算コードを削除
+- labelYOffsetパラメータは残存するが実質未使用（常に0）
+
+#### src/lib/report-api.ts — グリッド推定のランダム性排除
+- supplementGridFromRanking内のgenerateSimpleGrid関数を修正
+- Math.random()ベースのrandInt() → keyword+month+row+col+centerRankのハッシュ値ベースのdetRandInt()に置換
+- generateSimpleGridの引数にkeyword, monthを追加
+- 呼び出し元(237行目)にds.word, monthを渡すように修正
+- デバッグログ追加→原因特定後に削除（commit: 6d05e20→fdf3b6e）
+
+### 数値・設定値
+- labelOrigin Y offset: -2.5 → 0（廃止）
+- html2canvas scale: 2（変更なし）
+- Canvas描画マーカー半径: 18 * scale(2) = 36px
+- Canvas描画フォントサイズ: 14 * scale(2) = 28px
+- Canvas描画枠線幅: 2 * scale(2) = 4px
+- Mercator定数: TILE_SIZE = 256
+- ハッシュ関数: djb2変種（(h << 5) - h + charCode）、seed = "keyword|month|row|col|centerRank"
+
+### 未解決・次回やること
+- [ ] S級セキュリティ（パスワード平文/P-MAX認証なし/IDOR/ユーザー管理権限）
+- [ ] client.tsx本格分割（2000行超→hooks/コンポーネント分離）
+- [ ] 残り400+箇所のany型排除
+- [ ] AI分析の全店舗一括再実行（新構造化プロンプト反映）
+- [ ] grid_ranking_logsに実測データを入れれば推定生成が不要になる（現状5月は推定）
+
+### 注意点・ハマったこと
+
+#### html2canvasのcanvasに追加描画できない（4回失敗の核心）
+- html2canvasが返すcanvasオブジェクトにはclip/transform/compositeOperationの内部状態が残っている
+- getContext("2d")で追加描画（arc, fillText等）しても画面に反映されない
+- 解決: 新しいcanvasを作成→drawImage()で転写→追加描画→toDataURL()
+- 試行1（同canvasに描画）、試行3（Mercator計算+同canvas）は両方これが原因で失敗
+
+#### OverlayView.draw()は非同期イベント
+- Google Maps OverlayViewのdraw()はマップの描画サイクルで呼ばれる非同期コールバック
+- PDF生成のような同期的フロー中にはタイミングが合わず、3秒タイムアウトで空配列が返る
+- 解決: OverlayViewを使わずMercator投影の数学計算でlat/lng→ピクセル変換
+
+#### Mercator投影計算の公式
+- toWorldX(lng) = 256 * (0.5 + lng / 360)
+- toWorldY(lat) = 256 * (0.5 - ln((1 + sin(lat)) / (1 - sin(lat))) / (4π))
+- pixelX = toWorldX(lng) * 2^zoom - centerWorldX + containerWidth / 2
+- pixelY = toWorldY(lat) * 2^zoom - centerWorldY + containerHeight / 2
+- gmap.getCenter().lat()/lng()とgmap.getZoom()のみ使用（即座に取得可能）
+
+#### supplementGridFromRankingのMath.random()が全ての数値不一致の原因
+- 5月のgrid_ranking_logsに実測データがなかった
+- rankingHistory（スプレッドシート）の中心順位からMath.random()で周辺セルを推定生成
+- ページロードのたびにランダム値が変わり、avgRankも変動
+- Vercelログで `supplementGrid RANDOM data for 2026/5` を確認して原因特定
+- WEB/PDF不一致だけでなく、ブラウザを開くたびに数値が変わる問題もこれが原因だった

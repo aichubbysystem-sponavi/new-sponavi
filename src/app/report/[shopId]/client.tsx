@@ -52,6 +52,8 @@ interface ActivityPhoto {
   url: string;
   /** 一覧用の軽いURL（実測で1枚100KB→23KB）。失敗したら url にフォールバックする */
   thumbUrl: string;
+  /** クリックで拡大したときに出す原寸のURL */
+  fullUrl: string;
   createTime: string;
   /** 手入力の閲覧数。null = 未計測（Googleは写真ごとの閲覧数を返さない） */
   viewCount: number | null;
@@ -76,8 +78,6 @@ interface ActivityData {
 
 /** 1ページに並べる写真の枚数（5列×4行）。スライドの高さに収まる上限 */
 const PHOTOS_PER_PAGE = 20;
-/** 実施内容ページに抜粋で載せる枚数 */
-const PHOTOS_ON_SUMMARY = 8;
 
 /** ISO日時 → JSTの "M/D" */
 function jstMonthDay(iso: string): string {
@@ -998,6 +998,9 @@ export default function ReportClient({
     })();
     return () => { cancelled = true; };
   }, [shop.name, curLabel]);
+
+  // 写真の拡大表示（クリックで原寸をポップアップ。印刷には出さない）
+  const [photoModal, setPhotoModal] = useState<ActivityPhoto | null>(null);
 
   // 写真の閲覧数（手入力）。保存できたら画面上も即座に並べ替える
   const [viewSaving, setViewSaving] = useState<string | null>(null);
@@ -2037,9 +2040,7 @@ export default function ReportClient({
         ];
         // 「投稿件数 - 表示枚数」ではなく「写真付き投稿の総数 - 表示枚数」。
         // 文章だけの投稿を「載せきれなかった写真」として数えないため
-        const summaryPhotos = activity.photoItems.slice(0, PHOTOS_ON_SUMMARY);
         const totalPhotos = activity.photoItems.length + activity.photoTruncated;
-        const restPhotos = Math.max(0, totalPhotos - summaryPhotos.length);
         return (
           <div style={slideStyle} className="slide">
             <div style={slideBarStyle}>
@@ -2078,34 +2079,16 @@ export default function ReportClient({
                 ※「写真投稿」はプロフィールの写真タブに追加した枚数です。投稿に添付した写真は「投稿」に含まれます
               </div>
 
-              {/* 公開した写真（抜粋。全部は次ページの一覧に出す） */}
-              <div style={{ marginTop: 12, flexShrink: 0 }}>
-                <div style={{ fontSize: 16, fontWeight: 700, color: COLORS.primary, marginBottom: 8 }}>
-                  公開した写真
-                  {restPhotos > 0 && <span style={{ fontSize: 14, fontWeight: 400, color: "#999", marginLeft: 8 }}>ほか{restPhotos}枚（次ページに一覧）</span>}
-                </div>
-                {summaryPhotos.length > 0 ? (
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>
-                    {summaryPhotos.map((p) => (
-                      <div key={p.key} style={{ background: "#fff", borderRadius: 10, overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.06)" }}>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={p.thumbUrl || p.url} alt="" decoding="async"
-                          onError={(e) => { const el = e.currentTarget; if (el.src !== p.url) el.src = p.url; }}
-                          style={{ width: "100%", height: 124, objectFit: "cover", display: "block", background: "#eef1f6" }} />
-                        <div style={{ fontSize: 13, color: "#888", padding: "3px 8px", display: "flex", justifyContent: "space-between" }}>
-                          <span>{jstMonthDay(p.createTime)}</span>
-                          {p.viewCount != null && <span style={{ color: COLORS.primary, fontWeight: 600 }}>{p.viewCount.toLocaleString()}回</span>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ fontSize: 15, color: "#999", background: "#fff", borderRadius: 10, padding: "14px 16px" }}>
-                    {activity.photoError
+              {/* 写真そのものは次ページの一覧に全部出す。
+                  ここにも8枚並べると同じ写真が2ページに重複するため、枚数の案内だけにする */}
+              <div style={{ marginTop: 18, flexShrink: 0, background: "#fff", borderRadius: 10, padding: "14px 18px", boxShadow: "0 1px 6px rgba(0,0,0,.06)" }}>
+                <div style={{ fontSize: 15, color: "#444" }}>
+                  {totalPhotos > 0
+                    ? <>この月に公開した写真 <span style={{ fontSize: 20, fontWeight: 700, color: COLORS.primary }}>{totalPhotos}</span> 枚は次のページに掲載しています。</>
+                    : activity.photoError
                       ? `写真を表示できませんでした（${activity.photoError}）`
-                      : (activity.photosPending || activityLoading) ? "写真を読み込んでいます..." : "写真付きの投稿はありませんでした"}
-                  </div>
-                )}
+                      : (activity.photosPending || activityLoading) ? "写真を読み込んでいます..." : "この月に公開した写真はありませんでした"}
+                </div>
               </div>
 
             </div>
@@ -2134,10 +2117,13 @@ export default function ReportClient({
               <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 8 }}>
                 {pagePhotos.map((p) => (
                   <div key={p.key} style={{ background: "#fff", borderRadius: 10, overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.06)" }}>
+                    {/* クリックで原寸をポップアップ。一覧は正方形に切り抜かれるので全体を見る手段が要る */}
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={p.thumbUrl || p.url} alt="" decoding="async"
+                      onClick={() => setPhotoModal(p)}
+                      title="クリックで拡大"
                       onError={(e) => { const el = e.currentTarget; if (el.src !== p.url) el.src = p.url; }}
-                      style={{ width: "100%", height: 104, objectFit: "cover", display: "block", background: "#eef1f6" }} />
+                      style={{ width: "100%", height: 104, objectFit: "cover", display: "block", background: "#eef1f6", cursor: "zoom-in" }} />
                     <div style={{ fontSize: 12, color: "#888", padding: "3px 7px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <span>{jstMonthDay(p.createTime)}</span>
                       {p.viewCount != null
@@ -3307,6 +3293,27 @@ export default function ReportClient({
           </div>
         </div>
       ); })()}
+
+      {/* 写真の拡大表示。切り抜かれていない全体を見るためのもの（印刷には出さない） */}
+      {photoModal && (
+        <div className="no-print" style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", background: "rgba(0,0,0,0.8)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 32 }}
+          onClick={() => setPhotoModal(null)}>
+          <div style={{ maxWidth: "90vw", maxHeight: "90vh", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}
+            onClick={(e) => e.stopPropagation()}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={photoModal.fullUrl || photoModal.url} alt=""
+              onError={(e) => { const el = e.currentTarget; if (el.src !== photoModal.url) el.src = photoModal.url; }}
+              style={{ maxWidth: "90vw", maxHeight: "78vh", objectFit: "contain", borderRadius: 10, background: "#000" }} />
+            <div style={{ color: "#fff", fontSize: 14, display: "flex", gap: 16, alignItems: "center" }}>
+              <span>{jstMonthDay(photoModal.createTime)}</span>
+              <span>{photoModal.source === "post" ? "投稿の写真" : "写真タブ"}</span>
+              {photoModal.viewCount != null && <span>閲覧 {photoModal.viewCount.toLocaleString()}回</span>}
+              <button onClick={() => setPhotoModal(null)}
+                style={{ background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", borderRadius: 6, padding: "4px 12px", cursor: "pointer", fontSize: 14 }}>閉じる</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ワード詳細モーダル（ポジティブ/ネガティブ共用） */}
       {negativeModal && (
