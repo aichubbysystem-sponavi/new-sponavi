@@ -1,0 +1,48 @@
+## 【2026-08-21】シート自動投稿（写真投稿）の不具合3件＋再発防止
+
+### 決定事項
+- 写真のみ投稿（PHOTO）ではシートJ列のCTA URLを一切使わない（読み取り時点で空にする）
+- バッチ分割は「シートの行（=店舗）」単位にし、同一店舗の2枚目以降は同じリクエスト内で登録する
+- 「未完了N件を実行」の再実行対象は、成功でも保留でもない実店舗のみ（保留・「バッチN」擬似行は除外）
+- GBP非対応画像（WebP等）と5MB超の写真はサーバー側でJPEGに自動変換する（Dropbox側の手直しは不要にする）
+- 食べログ/ホットペッパーのHEAD 400/403は誤検知の可能性が高いが、通常投稿のCTAチェックは現状維持（保留→手動確認）
+
+### 変更内容（具体的に）
+- src/app/api/report/auto-post/route.ts
+  - J列読み取り: `const ctaUrl = isPhotoOnly ? "" : row[9]` に変更。CTA生存確認にも `!isPhotoOnly` の二重ガード
+  - バッチ再構成: `rowCount`/`offset`/`size` を写真検索の前に確定し、Dropbox検索は当該バッチ範囲の行のみ実行。
+    2枚目以降は `allMatches.push` をやめ `extrasByRow(Map<行index, extra[]>)` に入れ、`batchMatches` 組み立て時に親行の直後へ並べる。
+    `hasMore` / `matches` は行数ベース（プレビュー件数と一致）
+  - 即時投稿の写真エラー: GBPの `error.details` ＋ファイル名＋Storage保存サイズを `detail` に併記
+- src/lib/image-proxy.ts
+  - `resolveMediaUrl` の戻り値に `bytes` を追加
+  - 写真判定時、拡張子/Content-Typeが jpg/png 以外、または5MB超なら `toGbpJpeg()` でJPEG化
+  - `toGbpJpeg`: sharp動的import、`.rotate()`（EXIF向き反映）→ `resize(fit:inside)` → `flatten(白背景)` → `jpeg(mozjpeg)`。4096/90 → 3000/85 → 2048/82 → 1600/80 の順で5MB以下になるまで試行
+- src/app/posts/page.tsx
+  - 即時実行・予約登録の両方で `failed` 抽出を「成功・保留を除外」＋`/^バッチ\d+$/` 除外に変更
+- package.json: sharp@^0.33.5 追加
+- コミット: f7a15f6 → 5b97292 → 4bcb361 → 01f5d47（全て origin/main、Vercel自動デプロイ済みを commit status と本番バンドルで確認）
+
+### 数値・設定値
+- 写真上限 MAX_PHOTO_BYTES = 5MB（GBP仕様。動画は従来通り75MB）
+- JPEG変換の段階: 長辺4096px/品質90 → 3000/85 → 2048/82 → 1600/80
+- Dropbox写真検索の並列数 PHOTO_BATCH=5（変更なし）、クライアントのバッチサイズ10件・タイムアウト180秒（変更なし）
+- 2枚目以降の予約時刻オフセット: photoIndex×1分（変更なし）
+
+### 未解決・次回やること
+- 今日12時分の写真投稿: 2〜3枚目は未登録。新コードで同条件（第3回目・40店舗・8/21 12時）を再登録すれば1枚目は「重複スキップ」、2〜3枚目のみ追加される
+- 保留4件（que キュー・焼肉家かずちゃん・てっちゃん北口・R20有頂天）は on_hold のまま → 予約一覧から手動で予約に戻す
+- 「写真なし（スキップ）」24件: おおもとフォルダ221件に店名フォルダが完全一致しない（さぶろう/れたす/てっちゃん系が全滅）。Dropboxフォルダ名とシートB列の突き合わせが必要
+- しゃぶしゃぶ れたす 中目黒本店: シート3タブのB列に一致行なし → 表記を揃えるかエイリアス登録
+- 通常投稿のCTAチェック: tabelog/hotpepper のHEAD 400/403 誤検知対策（既知ドメインはスキップ or 警告のみ）は未着手
+- バッチ5タイムアウト時に登録済みかどうかの確認（予約一覧）
+
+### 注意点・ハマったこと
+- 「写真投稿でCTAリンク異常→保留」は写真と無関係。J列にURLが書いてあるだけで発火していた
+- 2枚目以降を配列末尾にpushする構造＋先頭からの固定幅バッチ＝「全店舗の2〜3枚目が最終バッチに集中」し、そこがタイムアウトすると全店1枚だけになる。プレビュー39件に対し実行が40件以上になるズレも同じ原因
+- 各バッチのリクエストで毎回全店舗のDropbox検索をやり直していたのがタイムアウトの根本原因（店舗数が増えるほど1リクエストが重くなる）
+- GBPの写真400 "Request contains an invalid argument" はWebP等の非対応形式・5MB超・250px未満で出る。message だけでは判別不可、実ファイル（Dropbox一覧の拡張子・サイズ）を見るのが最短
+- Vercelのデプロイ一覧に新コミットが見えなくても、GitHubのcommit status（`gh api repos/.../commits/<sha>/status`）と本番バンドルのgrepで確認できる
+- Windowsで `python3` はストアのスタブに化ける。`python` を使う
+- ローカルにSupabaseサービスキー・Dropboxトークンは無い（Vercel envのみ）。Storageの失敗ファイル直接確認は不可
+- sharp の `toBuffer()` は `Buffer<ArrayBufferLike>` を返すので、`let buffer: Buffer` と明示しないとTS2322
