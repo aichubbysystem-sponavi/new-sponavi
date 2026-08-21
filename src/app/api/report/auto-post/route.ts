@@ -1157,10 +1157,12 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
         const { resolveMediaUrl, cleanupImage } = await import("@/lib/image-proxy");
         const postId = `auto-${shop.id}-${photoPostNumber}-${Date.now()}`;
         let stableUrl = match.photoUrl;
+        let resolvedBytes = 0;
         if (match.photoUrl.includes("dropbox")) {
           const resolved = await resolveMediaUrl(match.photoUrl, postId, match.mediaFileName || "");
           if (resolved.url) {
             stableUrl = resolved.url;
+            resolvedBytes = resolved.bytes || 0;
           } else {
             // 理由を出さないと「なぜ失敗したか」が画面から分からない（サイズ超過が多い）
             results.push({
@@ -1198,7 +1200,11 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
           }
           cleanupImage(postId).catch(() => {});
         } else {
-          const errDetail = mediaBody?.error?.message || JSON.stringify(mediaBody).slice(0, 200);
+          // GBPの400は message が "Request contains an invalid argument." だけで、本当の理由は details 側に入る。
+          // ファイル名・サイズも併記しないと「同じ店の1枚目は成功、2枚目は失敗」の原因が追えない（2026-08-21 ワイロ）
+          const gbpDetails = mediaBody?.error?.details ? JSON.stringify(mediaBody.error.details).slice(0, 300) : "";
+          const sizeNote = resolvedBytes ? ` / ${(resolvedBytes / 1024 / 1024).toFixed(2)}MB` : "";
+          const errDetail = `${mediaBody?.error?.message || JSON.stringify(mediaBody).slice(0, 200)}${gbpDetails ? ` | ${gbpDetails}` : ""} / ファイル: ${match.mediaFileName || "?"}${sizeNote}`;
           results.push({ shopName: match.shopName, status: `写真エラー(${mediaRes.status})`, detail: errDetail, summary: match.photoDebug, sourceUrl: stableUrl });
           errors++;
         }

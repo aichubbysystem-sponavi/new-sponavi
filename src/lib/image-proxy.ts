@@ -9,6 +9,7 @@ import { extFromContentType } from "@/lib/media-format";
 const BUCKET = "post-images";
 // GBPの動画上限（75MB）。写真はこれよりずっと小さいので共通の上限として使う
 const MAX_BYTES = 75 * 1024 * 1024;
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024; // GBP写真上限
 
 // GBPの動画要件: 75MB以下 / 30秒以内 / 720p以上。サイズ超過は必ず30秒以内に収める作業も伴う
 function sizeOverMessage(bytes: number): string {
@@ -46,7 +47,7 @@ export async function resolveMediaUrl(
   imageUrl: string,
   postId: string,
   sourceName = "",
-): Promise<{ url: string | null; error?: string }> {
+): Promise<{ url: string | null; error?: string; bytes?: number }> {
   if (!imageUrl) return { url: null, error: "URLが空" };
 
   // Dropboxの正規ホストのみサーバー側でダウンロード（SSRF防止）。それ以外はそのまま返す
@@ -88,6 +89,15 @@ export async function resolveMediaUrl(
       console.error(`[image-proxy] ${msg}: ${sourceName || imageUrl.slice(0, 60)}`);
       return { url: null, error: msg };
     }
+    // 写真はGBPの上限が5MB（10KB〜5MB・250px以上）。超過分をGBPに投げると
+    // 「400 Request contains an invalid argument」としか返らず原因が画面から分からないため、ここで弾く
+    const isPhoto = !/^video\//.test(contentType) && !/\.(mov|mp4|m4v|avi|mpeg|mpg|webm|3gp)$/i.test(sourceName);
+    if (isPhoto && buffer.length > MAX_PHOTO_BYTES) {
+      const mb = (buffer.length / 1024 / 1024).toFixed(1);
+      const msg = `写真が大きすぎます（${mb}MB > GBPの上限5MB）。5MB以下に縮小して書き出し直してください`;
+      console.error(`[image-proxy] ${msg}: ${sourceName || imageUrl.slice(0, 60)}`);
+      return { url: null, error: msg };
+    }
 
     // 2. Supabase Storageにアップロード
     // 拡張子を保つこと: 予約投稿は実行時にこのURLの拡張子で PHOTO / VIDEO を判定する
@@ -114,7 +124,7 @@ export async function resolveMediaUrl(
     // 3. 公開URLを返す
     const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(fileName);
     console.log(`[image-proxy] 変換成功: ${imageUrl.slice(0, 50)}... → ${urlData.publicUrl}`);
-    return { url: urlData.publicUrl };
+    return { url: urlData.publicUrl, bytes: buffer.length };
   } catch (e: any) {
     const msg = e?.name === "TimeoutError"
       ? "Dropboxからのダウンロードが90秒以内に終わらなかった（ファイルが大きい可能性）"
