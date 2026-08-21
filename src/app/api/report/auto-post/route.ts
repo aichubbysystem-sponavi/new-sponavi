@@ -798,11 +798,23 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
     }
   }
 
-  // Dropbox写真検索を5件ずつバッチ実行（レート制限対策）
-  if (!dryRun && pendingPhotoSearch.length > 0) {
+  // バッチ分割は「シートの行（=店舗）」単位で行う。
+  // 以前は写真検索で見つかった2枚目以降を allMatches の末尾に push していたため、
+  // 全店舗の2〜3枚目が最終バッチに固まり、そのバッチがタイムアウトすると
+  // 「12店舗すべて1枚しか投稿されない」状態になっていた（2026-08-21）。
+  // さらに各バッチのリクエストで全店舗分のDropbox検索をやり直していたのがタイムアウトの原因。
+  // → 今のバッチ範囲の行だけ写真検索し、2枚目以降は親行の直後に並べて同じリクエスト内で登録する。
+  const rowCount = allMatches.length; // プレビューの件数と一致する安定した母数
+  const offset = batchOffset || 0;
+  const size = batchSize || rowCount; // 未指定時は全件
+  const extrasByRow = new Map<number, any[]>(); // 行index → 2枚目以降のマッチ
+
+  // Dropbox写真検索を5件ずつバッチ実行（レート制限対策）。対象は今回のバッチ範囲の行のみ
+  const photoSearchTargets = dryRun ? [] : pendingPhotoSearch.filter(p => p.index >= offset && p.index < offset + size);
+  if (photoSearchTargets.length > 0) {
     const PHOTO_BATCH = 5;
-    for (let bi = 0; bi < pendingPhotoSearch.length; bi += PHOTO_BATCH) {
-      const batch = pendingPhotoSearch.slice(bi, bi + PHOTO_BATCH);
+    for (let bi = 0; bi < photoSearchTargets.length; bi += PHOTO_BATCH) {
+      const batch = photoSearchTargets.slice(bi, bi + PHOTO_BATCH);
       await Promise.all(batch.map(async (p) => {
       const match = allMatches[p.index];
 
@@ -848,11 +860,13 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
       } else if (isPhotoOnly || total > 1) {
         // 1件目をこのマッチに、残りは別マッチとして追加（1ファイル=1投稿）
         applyItem(match, 0);
+        const extras: any[] = [];
         for (let pi = 1; pi < total; pi++) {
           const extra: any = { ...match, summary: "", photoIndex: pi };
           applyItem(extra, pi);
-          allMatches.push(extra);
+          extras.push(extra);
         }
+        if (extras.length > 0) extrasByRow.set(p.index, extras);
       } else {
         applyItem(match, 0);
       }
@@ -903,10 +917,12 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
     });
   }
 
-  // バッチ分割: batchOffset/batchSizeが指定されている場合、その範囲のみ実行
-  const offset = batchOffset || 0;
-  const size = batchSize || allMatches.length; // 未指定時は全件
-  const batchMatches = allMatches.slice(offset, offset + size);
+  // バッチ分割: 今回の範囲の行＋その行の2枚目以降（親の直後に並べる）。同一店舗の全枚数が同じリクエストで登録される
+  const batchMatches: typeof allMatches = [];
+  for (let ri = offset; ri < Math.min(offset + size, rowCount); ri++) {
+    batchMatches.push(allMatches[ri]);
+    for (const extra of extrasByRow.get(ri) || []) batchMatches.push(extra);
+  }
 
   const supabase = getSupabase();
   const { data: shops } = await supabase.from("shops")
@@ -1093,7 +1109,7 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
       failedTabs,
       posted: scheduled, errors: schedErrors, results: schedResults,
       batchOffset: offset, batchSize: size, batchProcessed: batchMatches.length,
-      hasMore: offset + size < allMatches.length, nextOffset: offset + size,
+      hasMore: offset + size < rowCount, nextOffset: offset + size,
       scheduleMode: true, scheduledAt: scheduledTime,
     });
   }
@@ -1316,7 +1332,7 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
     batchOffset: offset,
     batchSize: size,
     batchProcessed: batchMatches.length,
-    hasMore: offset + size < allMatches.length,
+    hasMore: offset + size < rowCount,
     nextOffset: offset + size,
     photoPostNumber: isPhotoOnly ? photoPostNumber : undefined,
     photoFilePattern,
