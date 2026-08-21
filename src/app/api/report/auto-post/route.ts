@@ -743,7 +743,12 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
         const dateCell = (row[4] || "").trim(); // E列（index 4）
         const photoCell = (row[5] || "").trim(); // F列（index 5）
         const offerTitle = (row[7] || "").trim(); // H列（index 7）特典用の題名
-        const ctaUrl = (row[9] || "").trim(); // J列（index 9）CTAボタンURL
+        // J列（index 9）CTAボタンURL。
+        // 写真のみ投稿（PHOTO）はCTAを一切使わないので、ここで必ず空にする。
+        // 以前は写真投稿でもJ列のURLを読んで生存確認していたため、食べログ等がHEADを400/403で弾くと
+        // 写真も本文も正常なのに「CTAリンク異常」で保留になっていた（2026-08-21 que キュー等4件）。
+        // 下流（生存確認・DB保存・即時投稿のcallToAction）は全てこの値を見るので、ここで遮断すれば再発しない。
+        const ctaUrl = isPhotoOnly ? "" : (row[9] || "").trim();
 
         // WHITE系列タブ: A列に「特典投稿」→OFFER、それ以外→STANDARD
         const isOffer = tab === "WHITE 系列 投稿用シート" && aCell.includes("特典投稿");
@@ -1011,8 +1016,8 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
         }
       }
 
-      // 1. CTAリンク生存確認（J列にURLがある場合）
-      if (match.ctaUrl) {
+      // 1. CTAリンク生存確認（J列にURLがある場合）。写真のみ投稿はCTA無関係なので絶対に走らせない（二重ガード）
+      if (!isPhotoOnly && match.ctaUrl) {
         try {
           const linkRes = await fetch(match.ctaUrl, { method: "HEAD", signal: AbortSignal.timeout(8000), redirect: "follow" });
           if (!linkRes.ok) warnings.push(`CTAリンク異常(${linkRes.status}): ${match.ctaUrl.slice(0, 60)}`);

@@ -1095,7 +1095,11 @@ export default function PostsPage() {
                           }
                         }
                         // 失敗店舗を抽出（再実行用）
-                        const failed = allResults.filter((r: any) => !r.status?.includes("成功")).map((r: any) => r.shopName);
+                        // 再実行対象 = 成功でも保留でもない実店舗のみ。
+                      // 保留はDB登録済み（再実行しても重複スキップになるだけ）、「バッチN」は通信エラーの擬似行で店舗ではない
+                      const failed = allResults
+                        .filter((r: any) => !r.status?.includes("成功") && !r.status?.includes("保留") && !/^バッチ\d+$/.test(r.shopName || ""))
+                        .map((r: any) => r.shopName);
                         const uniqueFailed = Array.from(new Set(failed));
                         setAutoPostFailedShops(uniqueFailed);
                         setAutoPostResult({ mode: "executed", posted: totalPosted, errors: totalErrors, results: allResults, matches: total, attempt: currentAttempt, failedShops: uniqueFailed, failedTabs: previewRes.data.failedTabs });
@@ -1163,7 +1167,11 @@ export default function PostsPage() {
                           hasMore = false;
                         }
                       }
-                      const failed = allResults.filter((r: any) => !r.status?.includes("成功")).map((r: any) => r.shopName);
+                      // 再実行対象 = 成功でも保留でもない実店舗のみ。
+                      // 保留はDB登録済み（再実行しても重複スキップになるだけ）、「バッチN」は通信エラーの擬似行で店舗ではない
+                      const failed = allResults
+                        .filter((r: any) => !r.status?.includes("成功") && !r.status?.includes("保留") && !/^バッチ\d+$/.test(r.shopName || ""))
+                        .map((r: any) => r.shopName);
                       const uniqueFailed = Array.from(new Set(failed));
                       setAutoPostFailedShops(uniqueFailed);
                       setAutoPostResult({ mode: "executed", posted: totalPosted, errors: totalErrors, results: allResults, matches: total, attempt: autoPostAttempt, failedShops: uniqueFailed, failedTabs: previewRes.data.failedTabs });
