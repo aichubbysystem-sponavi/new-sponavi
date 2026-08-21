@@ -115,6 +115,10 @@ const DROPBOX_APP_KEY = process.env.DROPBOX_APP_KEY || "";
 const DROPBOX_APP_SECRET = process.env.DROPBOX_APP_SECRET || "";
 const DROPBOX_REFRESH_TOKEN = process.env.DROPBOX_REFRESH_TOKEN || "";
 
+/** Dropboxフォルダ探索の深さ上限と訪問フォルダ数上限（深い階層の写真も拾いつつ暴走を防ぐ） */
+const DROPBOX_MAX_DEPTH = 6;
+const DROPBOX_MAX_FOLDERS = 300;
+
 let cachedDropboxToken: { token: string; expires: number } | null = null;
 
 async function getDropboxAccessToken(): Promise<string | null> {
@@ -218,7 +222,9 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
       const root = await listSharedFolder("");
       files.push(...root.files.map((e: any) => ({ name: e.name || "", path: e.path_display || e.path_lower || "" })));
 
-      // サブフォルダを最大3階層まで再帰展開（パスは共有ルートからの相対パス）
+      // サブフォルダを最大DROPBOX_MAX_DEPTH階層まで再帰展開（パスは共有ルートからの相対パス）
+      // 例: 店舗/お客様共有/神戸牛しゃぶしゃぶ/横400縦300以下/4:3トリミング/写真.png のような深い配置に対応
+      let visitedFolders = 0;
       const pendingFolders = root.folders.map((f: any) => ({
         // 共有リンクのlist_folderでは相対パスを使う必要がある
         // path_displayが返される場合もあるが、安全のため name ベースで組み立て
@@ -227,7 +233,8 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
       }));
       while (pendingFolders.length > 0) {
         const sf = pendingFolders.shift()!;
-        if (sf.depth > 3) continue; // 3階層まで
+        if (sf.depth > DROPBOX_MAX_DEPTH) continue;
+        if (++visitedFolders > DROPBOX_MAX_FOLDERS) { debugSteps.push(`フォルダ数上限${DROPBOX_MAX_FOLDERS}到達で探索打ち切り`); break; }
         try {
           const sub = await listSharedFolder(sf.relativePath);
           files.push(...sub.files.map((e: any) => ({ name: e.name || "", path: e.path_display || e.path_lower || "" })));
@@ -480,23 +487,48 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
       } catch { break; }
     }
 
-    // サブフォルダも再帰的に展開（1階層のみ）
-    const fileEntries = allEntries.filter((e: any) => e[".tag"] === "file");
-    const folderEntries = allEntries.filter((e: any) => e[".tag"] === "folder");
-    files.push(...fileEntries.map((e: any) => ({ name: e.name || "", path: e.path_display || e.path_lower || "" })));
-
-    for (const sf of folderEntries) {
+    // サブフォルダを最大DROPBOX_MAX_DEPTH階層まで幅優先で再帰展開
+    // （店舗/お客様共有/◯◯/横400縦300以下/4:3トリミング/ のような深い配置に対応）
+    const toFile = (e: any) => ({ name: e.name || "", path: e.path_display || e.path_lower || "" });
+    files.push(...allEntries.filter((e: any) => e[".tag"] === "file").map(toFile));
+    const pendingFolders: { relativePath: string; depth: number }[] = allEntries
+      .filter((e: any) => e[".tag"] === "folder")
+      .map((e: any) => ({ relativePath: `${relativePath}/${e.name}`, depth: 1 }));
+    let visitedFolders = 0;
+    while (pendingFolders.length > 0) {
+      const sf = pendingFolders.shift()!;
+      if (sf.depth > DROPBOX_MAX_DEPTH) continue;
+      if (++visitedFolders > DROPBOX_MAX_FOLDERS) { console.warn(`[auto-post] フォルダ数上限${DROPBOX_MAX_FOLDERS}到達: ${matched.name}`); break; }
       try {
         const subRes = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
           cache: "no-store" as const,
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
-          body: JSON.stringify({ path: `${relativePath}/${sf.name}`, shared_link: { url: shareUrl }, limit: 2000 }),
+          body: JSON.stringify({ path: sf.relativePath, shared_link: { url: shareUrl }, limit: 2000 }),
           signal: AbortSignal.timeout(15000),
         });
-        if (subRes.ok) {
-          const subData = await subRes.json();
-          files.push(...(subData.entries || []).filter((e: any) => e[".tag"] === "file").map((e: any) => ({ name: e.name || "", path: e.path_display || e.path_lower || "" })));
+        if (!subRes.ok) continue;
+        const subData = await subRes.json();
+        let subEntries = subData.entries || [];
+        let subMore = subData.has_more;
+        let subCursor = subData.cursor;
+        while (subMore && subCursor) {
+          const contRes = await fetch("https://api.dropboxapi.com/2/files/list_folder/continue", {
+            cache: "no-store" as const,
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
+            body: JSON.stringify({ cursor: subCursor }),
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!contRes.ok) break;
+          const contData = await contRes.json();
+          subEntries = subEntries.concat(contData.entries || []);
+          subMore = contData.has_more;
+          subCursor = contData.cursor;
+        }
+        files.push(...subEntries.filter((e: any) => e[".tag"] === "file").map(toFile));
+        for (const f of subEntries.filter((e: any) => e[".tag"] === "folder")) {
+          pendingFolders.push({ relativePath: `${sf.relativePath}/${f.name}`, depth: sf.depth + 1 });
         }
       } catch (e: any) { console.error("[auto-post] subfolder list error:", e?.message); }
     }
