@@ -65,7 +65,7 @@ export async function resolveMediaUrl(
       return { url: null, error: msg };
     }
 
-    const contentType = res.headers.get("content-type") || "image/jpeg";
+    let contentType = res.headers.get("content-type") || "image/jpeg";
 
     // 本体を読む前にサイズを見る。167MBの動画をVercel関数のメモリに載せてから捨てるのは
     // 無駄なうえ、90秒のダウンロード待ちも丸ごと無駄になる（2026-08-15 実例）
@@ -76,7 +76,7 @@ export async function resolveMediaUrl(
       return { url: null, error: msg };
     }
 
-    const buffer = Buffer.from(await res.arrayBuffer());
+    let buffer: Buffer = Buffer.from(await res.arrayBuffer());
 
     if (buffer.length < 1000) {
       const msg = `ファイルが小さすぎる (${buffer.length} bytes) — HTMLが返っている可能性`;
@@ -92,16 +92,31 @@ export async function resolveMediaUrl(
     // 写真はGBPの上限が5MB（10KB〜5MB・250px以上）。超過分をGBPに投げると
     // 「400 Request contains an invalid argument」としか返らず原因が画面から分からないため、ここで弾く
     const isPhoto = !/^video\//.test(contentType) && !/\.(mov|mp4|m4v|avi|mpeg|mpg|webm|3gp)$/i.test(sourceName);
-    if (isPhoto && buffer.length > MAX_PHOTO_BYTES) {
-      const mb = (buffer.length / 1024 / 1024).toFixed(1);
-      const msg = `写真が大きすぎます（${mb}MB > GBPの上限5MB）。5MB以下に縮小して書き出し直してください`;
-      console.error(`[image-proxy] ${msg}: ${sourceName || imageUrl.slice(0, 60)}`);
-      return { url: null, error: msg };
+    let ext = extFromContentType(contentType, sourceName);
+
+    if (isPhoto) {
+      // GBPが受け付ける写真は JPG/PNG のみ。WebP/GIF/BMP/HEIC をそのまま投げると
+      // 「400 Request contains an invalid argument」で落ちる（2026-08-21 ワイロ: .webp の2枚が失敗）。
+      // 5MB超も同じエラーになる。どちらもここで JPEG に変換・縮小して吸収する
+      const unsupported = !/^(jpg|jpeg|png)$/i.test(ext) || /image\/(webp|gif|bmp|heic|heif|avif)/i.test(contentType);
+      if (unsupported || buffer.length > MAX_PHOTO_BYTES) {
+        const converted = await toGbpJpeg(buffer);
+        if (!converted) {
+          const msg = unsupported
+            ? `GBP非対応の画像形式（${ext} / ${contentType}）をJPEGに変換できませんでした。JPG/PNGで保存し直してください`
+            : `写真が大きすぎます（${(buffer.length / 1024 / 1024).toFixed(1)}MB > GBPの上限5MB）。縮小にも失敗しました`;
+          console.error(`[image-proxy] ${msg}: ${sourceName || imageUrl.slice(0, 60)}`);
+          return { url: null, error: msg };
+        }
+        console.log(`[image-proxy] 画像変換: ${ext}/${contentType} ${(buffer.length / 1024).toFixed(0)}KB → jpeg ${(converted.length / 1024).toFixed(0)}KB (${sourceName})`);
+        buffer = converted;
+        contentType = "image/jpeg";
+        ext = "jpg";
+      }
     }
 
     // 2. Supabase Storageにアップロード
     // 拡張子を保つこと: 予約投稿は実行時にこのURLの拡張子で PHOTO / VIDEO を判定する
-    const ext = extFromContentType(contentType, sourceName);
     const fileName = `${postId}.${ext}`;
     const supabase = getSupabase();
 
@@ -131,6 +146,35 @@ export async function resolveMediaUrl(
       : (e?.message || "不明なエラー");
     console.error(`[image-proxy] エラー:`, msg);
     return { url: null, error: msg };
+  }
+}
+
+/**
+ * 任意の画像をGBP向けJPEGにする。5MBに収まるまで品質→長辺の順で段階的に落とす。
+ * sharp は動的importにして、動画だけの経路や未対応環境で読み込み失敗しても他が巻き込まれないようにする
+ */
+async function toGbpJpeg(input: Buffer): Promise<Buffer | null> {
+  try {
+    const sharp = (await import("sharp")).default;
+    const attempts: { maxSide: number; quality: number }[] = [
+      { maxSide: 4096, quality: 90 },
+      { maxSide: 3000, quality: 85 },
+      { maxSide: 2048, quality: 82 },
+      { maxSide: 1600, quality: 80 },
+    ];
+    for (const a of attempts) {
+      const out = await sharp(input, { failOn: "none" })
+        .rotate() // EXIFの向きを反映してから（GBPはEXIFを見ない）
+        .resize({ width: a.maxSide, height: a.maxSide, fit: "inside", withoutEnlargement: true })
+        .flatten({ background: "#ffffff" }) // 透過PNG/WebPの背景を白に
+        .jpeg({ quality: a.quality, mozjpeg: true })
+        .toBuffer();
+      if (out.length <= MAX_PHOTO_BYTES) return out;
+    }
+    return null;
+  } catch (e: any) {
+    console.error("[image-proxy] JPEG変換失敗:", e?.message);
+    return null;
   }
 }
 
