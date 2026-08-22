@@ -188,78 +188,58 @@ export async function fetchGridRankingLive(shopIds: string[], shopName?: string)
 }
 
 /**
- * rankingHistoryから不足月のグリッドデータを推定生成
- * grid_ranking_overrides/logsにない月をP7のキーワード順位から補完
+ * rankingHistoryから不足月のグリッドデータを補完
+ * grid_ranking_overrides/logsにない月を、シート（P7キーワード順位）の実値1地点で埋める。
+ *
+ * 【2026-08-22 変更】以前はシートの中心順位1個から決定論ハッシュで48地点分の順位を
+ * 作り出して7×7に見せていた（generateSimpleGrid）。多地点計測を始める前の月まで
+ * 「49地点を計測した」体の地図が出てしまい、クライアントに架空の実測値を見せていた。
+ * 実在するのはシートの1順位だけなので、gridSize=1・1地点のスナップショットにする。
  */
 export function supplementGridFromRanking(
   gridRanking: GridRankingReport | undefined,
-  rankingHistory: { labels: string[]; datasets: { word: string; ranks: (number | null)[] }[] }
+  rankingHistory: { labels: string[]; datasets: { word: string; ranks: (number | null)[]; outOfRange?: boolean[] }[] }
 ): GridRankingReport | undefined {
   if (!rankingHistory || rankingHistory.labels.length === 0) return gridRanking;
 
-  // 実測/手動データをコピーし、不足分（KW×月単位）だけ推定で補完する
+  // 実測/手動データをコピーし、不足分（KW×月単位）だけシート順位で補完する
   // （以前は月単位だったため、実測がある月のシートのみKWが欠けていた）
   const newHistory: GridRankingMonthData[] = (gridRanking?.history || []).map(h => ({ ...h, snapshots: [...h.snapshots] }));
   const monthIndex = new Map<string, number>(newHistory.map((h, i) => [h.month, i]));
   const allKeywords = new Set(gridRanking?.keywords || []);
 
-  // 簡易グリッド推定（centerRankから7×7を生成、決定論的ハッシュ使用）
-  const generateSimpleGrid = (centerRank: number, keyword: string, month: string) => {
-    const GRID_SIZE = 7, CENTER = 3;
-    const grid: { lat: number; lng: number; rank: number; row: number; col: number }[] = [];
-    // 決定論的ハッシュ: 同じ入力なら常に同じ出力（Math.random()を排除）
-    const hash = (seed: string) => {
-      let h = 0;
-      for (let i = 0; i < seed.length; i++) {
-        h = ((h << 5) - h + seed.charCodeAt(i)) | 0;
-      }
-      return Math.abs(h);
-    };
-    const detRandInt = (min: number, max: number, row: number, col: number) => {
-      const h = hash(`${keyword}|${month}|${row}|${col}|${centerRank}`);
-      return min + (h % (max - min + 1));
-    };
-    for (let row = 0; row < GRID_SIZE; row++) {
-      for (let col = 0; col < GRID_SIZE; col++) {
-        const dist = Math.max(Math.abs(row - CENTER), Math.abs(col - CENTER));
-        let rank: number;
-        if (dist === 0) rank = centerRank;
-        else if (dist === 1) rank = centerRank + detRandInt(1, 3, row, col);
-        else if (dist === 2) rank = centerRank + detRandInt(3, 7, row, col);
-        else rank = centerRank + detRandInt(7, 15, row, col);
-        if (rank > 100 || centerRank <= 0) rank = 0;
-        grid.push({ lat: 0, lng: 0, rank, row, col });
-      }
-    }
-    return grid;
-  };
+  // シート順位1件＝計測地点1つ。座標は持たない（表示側で店舗位置に置く）
+  const singlePointGrid = (rank: number) => [{ lat: 0, lng: 0, rank, row: 0, col: 0 }];
 
   for (let i = 0; i < rankingHistory.labels.length; i++) {
     const month = rankingHistory.labels[i];
     const mi = monthIndex.get(month);
-    // この月に既にデータがあるKW（実測/手動）は推定で上書きしない
+    // この月に既にデータがあるKW（実測/手動）はシート値で上書きしない
     const existingKws = mi !== undefined
       ? new Set(newHistory[mi].snapshots.map(s => normalizeKw(s.keyword)))
       : new Set<string>();
 
-    // この月のキーワード順位を取得してグリッド推定（不足KWのみ）
+    // この月のシート順位を1地点スナップショットにする（不足KWのみ）
     const snapshots: any[] = [];
     for (const ds of rankingHistory.datasets) {
-      const rank = ds.ranks[i];
-      if (rank === null || rank <= 0) continue;
+      const sheetRank = ds.ranks[i];
+      // 空欄（未計測）は補完しない。「圏外」と明記されたセルだけ -1 として計測済み扱いにする
+      // （両方をnullのまま落とすと、圏外の月が「未計測」に見えて推移が途切れる）
+      const rank = sheetRank !== null && sheetRank > 0 ? sheetRank
+        : ds.outOfRange?.[i] ? -1
+        : null;
+      if (rank === null) continue;
       const word = normalizeKw(ds.word);
       if (existingKws.has(word)) continue;
       allKeywords.add(word);
-      const results = generateSimpleGrid(rank, word, month);
-      const ranked = results.filter(r => r.rank > 0);
-      const avg = ranked.length > 0 ? ranked.reduce((s, r) => s + r.rank, 0) / ranked.length : 0;
+      const results = singlePointGrid(rank);
       snapshots.push({
         keyword: word,
-        gridSize: 7,
-        intervalM: null, // シート順位からの推定グリッド。実測間隔は存在しない（半径表記を出さない）
+        gridSize: 1,
+        intervalM: null, // 1地点＝範囲を持たない（半径表記を出さない）
         results,
         measuredAt: new Date().toISOString(),
-        avgRank: Math.round(avg * 10) / 10,
+        avgRank: rank > 0 ? rank : 0,
       });
     }
     if (snapshots.length > 0) {

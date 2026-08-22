@@ -364,6 +364,8 @@ export function centerCell<T extends { row: number; col: number }>(
  * それ以外（旧3×3全9点・7×7等）→ 「N×N」。
  */
 export function gridLayoutLabel(gridSize: number, pointCount: number): string {
+  // gridSize=1 は多地点計測を始める前の月。シートの店舗所在地1地点の順位しか無い
+  if (gridSize === 1 || pointCount === 1) return "1地点";
   if (gridSize === 2) return "4地点";
   if (gridSize === 3 && pointCount === 5) return "5地点";
   return `${gridSize}×${gridSize}`;

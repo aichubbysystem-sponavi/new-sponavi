@@ -880,7 +880,9 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
               const gHist = (gridRanking?.history || []).filter((h: any) => monthToNum2(h.month) <= targetNum2);
               const gLatest = gHist.length > 0 ? gHist[gHist.length - 1] : null;
               const snaps = (gLatest?.snapshots || [])
-                .filter((s: any) => Array.isArray(s.results) && s.results.length > 0)
+                // 1地点しか無い月（多地点計測の開始前＝シート順位）は「多地点」ではない。
+                // 渡すと「圏外0地点／商圏の取りこぼし無し」のような、1点から商圏を語る総評になる
+                .filter((s: any) => Array.isArray(s.results) && s.results.length > 1)
                 // グリッドも表示設定でフィルタ。既定はclient.tsx effVisibleと同条件
                 // （kwDataにあればrank>0||prevRank>0、無ければtrue）
                 .filter((s: any) => {

@@ -490,7 +490,10 @@ async function fetchAllExternalData(
           .eq("shop_name", shopName)
           .order("month", { ascending: true });
         if (overrides && overrides.length > 0) {
-          const keywords = Array.from(new Set(overrides.map(o => o.keyword)));
+          // KWは全角/半角スペースの表記ゆれがある（overridesは正規化済み・logsは生のまま）。
+          // 正規化せずに並べると同じキーワードが2行に割れて出る
+          const { normalizeKw } = await import("./keyword-normalize");
+          const keywords = Array.from(new Set(overrides.map(o => normalizeKw(o.keyword))));
           // 月別にグループ化
           const monthMap = new Map<string, import("./report-data").GridRankingSnapshot[]>();
           for (const o of overrides) {
@@ -501,7 +504,7 @@ async function fetchAllExternalData(
             const avg = ranked.length > 0 ? Math.round(ranked.reduce((s: number, r: any) => s + r.rank, 0) / ranked.length * 10) / 10 : 0;
             monthMap.get(month)!.push({
               // overridesは計測間隔を持たない。1000と偽ると「半径1km」という架空の実測条件が表示される
-              keyword: o.keyword, gridSize: o.grid_size || 7, intervalM: null,
+              keyword: normalizeKw(o.keyword), gridSize: o.grid_size || 7, intervalM: null,
               results: o.results || [], measuredAt: o.updated_at, avgRank: avg,
             });
           }
@@ -514,9 +517,10 @@ async function fetchAllExternalData(
                 const overrideMonths = new Set(history.map(h => h.month));
                 for (const mh of measured.history) {
                   if (!overrideMonths.has(mh.month)) {
-                    history.push(mh);
+                    history.push({ ...mh, snapshots: mh.snapshots.map(s => ({ ...s, keyword: normalizeKw(s.keyword) })) });
                     for (const s of mh.snapshots) {
-                      if (!keywords.includes(s.keyword)) keywords.push(s.keyword);
+                      const w = normalizeKw(s.keyword);
+                      if (!keywords.includes(w)) keywords.push(w);
                     }
                   }
                 }

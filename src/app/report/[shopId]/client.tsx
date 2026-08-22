@@ -819,23 +819,30 @@ export default function ReportClient({
     const cLat = centerPt?.lat ?? pts.reduce((s, p) => s + p.lat, 0) / pts.length;
     const cLng = centerPt?.lng ?? pts.reduce((s, p) => s + p.lng, 0) / pts.length;
 
-    // 既存マップを破棄して毎回新規作成（キーワード切替時の描画ズレ防止）
-    if (gridGoogleMapRefs.current[kw]) {
-      // 既存マーカー削除
-      (gridMarkersRefs.current[kw] || []).forEach(m => m.setMap(null));
-      gridMarkersRefs.current[kw] = [];
-    }
+    // 既存マーカーだけ消し、マップ本体は使い回す。
+    // ★同じ要素に new Map() を重ねると前のインスタンスのタイルがDOMに残り、
+    //   新インスタンスのマーカーだけが別の中心・ズームで描かれて「地図とピンがずれる」。
+    //   月/KWを切り替えるたびにインスタンスが増えるため、切り替えるほど酷くなる（2026-08-22）
+    (gridMarkersRefs.current[kw] || []).forEach(m => m.setMap(null));
+    gridMarkersRefs.current[kw] = [];
 
-    const gmap = new window.google.maps.Map(mapEl, {
-      center: { lat: cLat, lng: cLng }, zoom: 13,
+    const mapOptions = {
       mapTypeControl: !hideControls, streetViewControl: false, fullscreenControl: false, zoomControl: !hideControls,
       styles: [
         { featureType: "poi", stylers: [{ visibility: "off" }] },
         { featureType: "transit", stylers: [{ visibility: "off" }] },
       ],
-    });
-    gridGoogleMapRefs.current[kw] = gmap;
-    gridMarkersRefs.current[kw] = [];
+    };
+    let gmap = gridGoogleMapRefs.current[kw];
+    // 再マウントで別のdivになっていたら作り直す（前のdivは破棄済みなので参照ごと捨てる）
+    if (gmap && gmap.getDiv() !== mapEl) gmap = null;
+    if (gmap) {
+      gmap.setOptions(mapOptions);
+    } else {
+      mapEl.innerHTML = ""; // 取りこぼした旧インスタンスのタイルが残っていても確実に消す
+      gmap = new window.google.maps.Map(mapEl, { center: { lat: cLat, lng: cLng }, zoom: 13, ...mapOptions });
+      gridGoogleMapRefs.current[kw] = gmap;
+    }
 
     const bounds = new window.google.maps.LatLngBounds();
 
@@ -863,7 +870,14 @@ export default function ReportClient({
       zIndex: 999,
     });
     gridMarkersRefs.current[kw].push(cm);
-    gmap.fitBounds(bounds, 40);
+    // 1地点（多地点計測前の月＝シート順位）はfitBoundsだと最大ズームに張り付いて
+    // 何の場所か分からなくなるため、店舗周辺が見える固定ズームにする
+    if (pts.length === 1) {
+      gmap.setCenter({ lat: cLat, lng: cLng });
+      gmap.setZoom(15);
+    } else {
+      gmap.fitBounds(bounds, 40);
+    }
   }, [gridRecentHistory, gridMonthIdx, shop.lat, shop.lng]);
 
   useEffect(() => {
@@ -894,6 +908,54 @@ export default function ReportClient({
     const timer = setTimeout(tryRender, 300);
     return () => clearTimeout(timer);
   }, [showGridRanking, gridRanking, renderGridMapForKw]);
+
+  // AI総評がスライド（固定794px）からはみ出して文末が切れる問題の防止。
+  // スライドは overflow:hidden なので、溢れた分は黙って消える＝クライアントには
+  // 「文の途中で終わったレポート」が届く（2026-08-22 指摘）。
+  // 収まるまで総評ブロックだけ段階的に縮小する。表や見出しには触らない。
+  useEffect(() => {
+    if (!mounted) return;
+    const PC_BASE_FS = 13, PC_MIN_FS = 9;
+    const fitComments = () => {
+      document.querySelectorAll<HTMLElement>(".slide .page-comment").forEach(node => {
+        const slide = node.closest(".slide") as HTMLElement | null;
+        if (!slide) return;
+        node.style.fontSize = "";
+        // 総評とスライドの間で実際に溢れている要素を探す（bodyがoverflow:hiddenのため
+        // slide自身のscrollHeightでは溢れを検知できない）
+        const overflows = () => {
+          let el: HTMLElement | null = node.parentElement;
+          while (el && el !== slide) {
+            if (el.scrollHeight > el.clientHeight + 1) return true;
+            el = el.parentElement;
+          }
+          return false;
+        };
+        if (!overflows()) return;
+        for (let fs = PC_BASE_FS - 0.5; fs >= PC_MIN_FS; fs -= 0.5) {
+          node.style.fontSize = `${fs}px`;
+          if (!overflows()) return;
+        }
+        // 最小サイズでも収まらない場合はそのまま（これ以上小さくすると読めない）
+      });
+    };
+    // フォント読み込み・写真到着でレイアウトが動くため、描画が落ち着いてから測る
+    const t = setTimeout(fitComments, 600);
+    return () => clearTimeout(t);
+    // gridKwIdx: 非表示のKWスライドは高さ0で測れないため、表示されたときに測り直す
+  }, [mounted, pageComments, trimmedData, sectionVisibility, kwVisibility, gridKwIdx]);
+
+  // KWタブ切替: 非表示スライドのマップは幅0で初期化されており、そのまま表示すると
+  // 縮尺も中心も合わない。表示された時点で必ず描き直す
+  useEffect(() => {
+    if (!showGridRanking) return;
+    const kw = visibleGridRanking?.keywords[gridKwIdx];
+    if (!kw) return;
+    const timer = setTimeout(() => {
+      if (gridMapRefs.current[kw]) renderGridMapForKw(kw);
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [gridKwIdx, showGridRanking, visibleGridRanking, renderGridMapForKw]);
 
   // ワードクリック: 直近1年の口コミからAPI検索。0件なら分析時に保存した根拠口コミ（word_sources）を表示
   // （分析の「直近1年」は対象月基準・検索APIは今日基準のため、境界の口コミは日が経つと検索で見つからなくなる）
@@ -1474,15 +1536,15 @@ export default function ReportClient({
       // 中身が無い/編集中のブロックはPDFに出さない（メモ欄と同じ方針）
       // alignSelf:stretch — 親が alignItems:center の縦フレックス（口コミ件数推移・月間増加数）だと
       // 幅指定の無い子は内容幅まで縮んで中央寄せされるため、明示的に全幅へ伸ばす
-      <div className={!isEmpty && !isEditingThis ? undefined : "no-print"}
-        style={{ marginTop: 10, borderTop: "1px solid #e5e7eb", paddingTop: 8, flexShrink: 0, alignSelf: "stretch", width: "100%" }}>
+      <div className={`page-comment${!isEmpty && !isEditingThis ? "" : " no-print"}`}
+        style={{ marginTop: 10, borderTop: "1px solid #e5e7eb", paddingTop: 8, flexShrink: 0, alignSelf: "stretch", width: "100%", fontSize: 13 }}>
         {isEmpty && !isEditingThis && droppedReason && (
           <div className="no-print" style={{ fontSize: 12, color: "#b45309", background: "#fef3c7", borderRadius: 6, padding: "6px 10px", marginBottom: 6, lineHeight: 1.6 }}>
             AI総評は自動検証で非表示になりました（再生成でも解消せず）: {droppedReason}
           </div>
         )}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: "#0f3460" }}>
+          <span style={{ fontSize: "inherit", fontWeight: 700, color: "#0f3460" }}>
             {label}
             {/* 分析実行時点を明示する。表は表示のたびに最新DBから再計算されるが総評は分析時点で固定のため、
                 その後の口コミ同期で数値がズレる（例: 総評「英語3.9%」vs 表4.7%）。時点が見えれば読者が判別できる */}
@@ -1517,16 +1579,16 @@ export default function ReportClient({
             placeholder={isArr ? "1行につき1項目を入力..." : "この指標についての総評を入力..."}
             style={{ width: "100%", minHeight: isArr ? 70 : 40, padding: "6px 8px", fontSize: 13, lineHeight: 1.6, border: "1px solid #ccd", borderRadius: 6, resize: "vertical", fontFamily: "inherit", color: "#333", background: "#fff" }} />
         ) : isEmpty ? (
-          <p style={{ fontSize: 13, color: "#aaa", margin: 0, fontStyle: "italic" }}>未設定</p>
+          <p style={{ fontSize: "inherit", color: "#aaa", margin: 0, fontStyle: "italic" }}>未設定</p>
         ) : isArr ? (
           /* Tailwind preflightで list-style が消えるため明示指定（指定なしだと記号が出ない） */
-          <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, lineHeight: 1.7, color: "#444", listStyleType: "disc", listStylePosition: "outside" }}>
+          <ul style={{ margin: 0, paddingLeft: 20, fontSize: "inherit", lineHeight: 1.7, color: "#444", listStyleType: "disc", listStylePosition: "outside" }}>
             {(value as string[]).map((v, i) => (
               <li key={i} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(v, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
             ))}
           </ul>
         ) : (
-          <p style={{ fontSize: 13, lineHeight: 1.7, color: "#444", margin: 0 }} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(value as string, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
+          <p style={{ fontSize: "inherit", lineHeight: 1.7, color: "#444", margin: 0 }} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(value as string, { ALLOWED_TAGS: ["strong", "em", "br"] }) }} />
         )}
       </div>
     );
@@ -2635,6 +2697,13 @@ export default function ReportClient({
                 );
                 })()}
                 </div>
+                {/* 多地点計測の開始前後で「1地点の順位」と「複数地点の平均」が同じ行に並ぶ。
+                    断らないと、計測方式が変わっただけの段差を順位変動と読まれる */}
+                {recentHistory.some(h => h.snapshots.some(s => s.gridSize === 1)) && (
+                  <div style={{ fontSize: 13, color: "#888", marginTop: 6 }}>
+                    ※「1地点」の月は多地点計測を開始する前のため、店舗所在地1地点の順位です（複数地点の平均とは前提が異なります）
+                  </div>
+                )}
                 {renderPageComment("grid", "AI総評")}
               </div>
             </div>
