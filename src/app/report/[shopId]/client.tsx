@@ -795,6 +795,11 @@ export default function ReportClient({
   const renderGridMapForKw = useCallback((kw: string, labelYOffset: number = 0, hideControls: boolean = false) => {
     const mapEl = gridMapRefs.current[kw];
     if (!mapEl || !window.google?.maps) return;
+    // ★マーカーの消去は「この月にデータが無い」判定より前に行う。
+    //   後ろに置くと、データの無い月へ切り替えたときに前の月のピンが残り、
+    //   「2026/3のはずが7×7のピンが出ている」という食い違いになる（2026-08-22）
+    (gridMarkersRefs.current[kw] || []).forEach(m => m.setMap(null));
+    gridMarkersRefs.current[kw] = [];
     const monthI = gridMonthIdx >= 0 && gridMonthIdx < gridRecentHistory.length ? gridMonthIdx : gridRecentHistory.length - 1;
     const snap = gridRecentHistory[monthI]?.snapshots.find(s => s.keyword === kw);
     if (!snap) return;
@@ -819,30 +824,22 @@ export default function ReportClient({
     const cLat = centerPt?.lat ?? pts.reduce((s, p) => s + p.lat, 0) / pts.length;
     const cLng = centerPt?.lng ?? pts.reduce((s, p) => s + p.lng, 0) / pts.length;
 
-    // 既存マーカーだけ消し、マップ本体は使い回す。
-    // ★同じ要素に new Map() を重ねると前のインスタンスのタイルがDOMに残り、
-    //   新インスタンスのマーカーだけが別の中心・ズームで描かれて「地図とピンがずれる」。
-    //   月/KWを切り替えるたびにインスタンスが増えるため、切り替えるほど酷くなる（2026-08-22）
-    (gridMarkersRefs.current[kw] || []).forEach(m => m.setMap(null));
-    gridMarkersRefs.current[kw] = [];
-
-    const mapOptions = {
+    // ★マップは毎回作り直す。使い回すと、オフスクリーン（.grid-kw-hidden は
+    //   left:-99999px 配置）で作られたインスタンスの縮尺が fitBounds で直らず、
+    //   表示に切り替えても初期zoomのままズレて出る（ヘッドレスChromeで再現確認済み:
+    //   オフスクリーン生成 zoom=13固定 / 表示中生成 zoom=12）。
+    //   作り直す前に innerHTML を空にしないと旧インスタンスのタイル層(.gm-style)が
+    //   DOMに残り、古い地図の上に新しいピンだけが乗る（2026-08-22）
+    mapEl.innerHTML = "";
+    const gmap = new window.google.maps.Map(mapEl, {
+      center: { lat: cLat, lng: cLng }, zoom: 13,
       mapTypeControl: !hideControls, streetViewControl: false, fullscreenControl: false, zoomControl: !hideControls,
       styles: [
         { featureType: "poi", stylers: [{ visibility: "off" }] },
         { featureType: "transit", stylers: [{ visibility: "off" }] },
       ],
-    };
-    let gmap = gridGoogleMapRefs.current[kw];
-    // 再マウントで別のdivになっていたら作り直す（前のdivは破棄済みなので参照ごと捨てる）
-    if (gmap && gmap.getDiv() !== mapEl) gmap = null;
-    if (gmap) {
-      gmap.setOptions(mapOptions);
-    } else {
-      mapEl.innerHTML = ""; // 取りこぼした旧インスタンスのタイルが残っていても確実に消す
-      gmap = new window.google.maps.Map(mapEl, { center: { lat: cLat, lng: cLng }, zoom: 13, ...mapOptions });
-      gridGoogleMapRefs.current[kw] = gmap;
-    }
+    });
+    gridGoogleMapRefs.current[kw] = gmap;
 
     const bounds = new window.google.maps.LatLngBounds();
 
@@ -885,29 +882,31 @@ export default function ReportClient({
     const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "";
     if (!apiKey) return;
 
-    const renderAllMaps = () => {
+    // ★表示中のKWだけ描く。オフスクリーンのスライドで作ると縮尺が合わないまま
+    //   残り、タブを切り替えたときにズレた地図が出る（2026-08-22）
+    const renderActiveMap = () => {
       if (!window.google?.maps) return;
-      gridRanking.keywords.forEach(kw => {
-        if (gridMapRefs.current[kw]) renderGridMapForKw(kw);
-      });
+      const kws = visibleGridRanking?.keywords || [];
+      const kw = kws[Math.min(gridKwIdx, kws.length - 1)];
+      if (kw && gridMapRefs.current[kw]) renderGridMapForKw(kw);
     };
 
     const tryRender = () => {
-      if (window.google?.maps) { renderAllMaps(); return; }
+      if (window.google?.maps) { renderActiveMap(); return; }
       const existing = document.getElementById("google-maps-script");
-      if (existing) { existing.addEventListener("load", renderAllMaps); return; }
+      if (existing) { existing.addEventListener("load", renderActiveMap); return; }
       const script = document.createElement("script");
       script.id = "google-maps-script";
       script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=marker`;
       script.async = true; script.defer = true;
-      script.onload = renderAllMaps;
+      script.onload = renderActiveMap;
       document.head.appendChild(script);
     };
 
-    // DOMにマウントされるまで少し待つ
+    // DOMにマウントされるまで少し待つ。KW・月・表示設定が変わるたびに描き直す
     const timer = setTimeout(tryRender, 300);
     return () => clearTimeout(timer);
-  }, [showGridRanking, gridRanking, renderGridMapForKw]);
+  }, [showGridRanking, gridRanking, visibleGridRanking, gridKwIdx, renderGridMapForKw]);
 
   // AI総評がスライド（固定794px）からはみ出して文末が切れる問題の防止。
   // スライドは overflow:hidden なので、溢れた分は黙って消える＝クライアントには
@@ -945,22 +944,6 @@ export default function ReportClient({
     return () => clearTimeout(t);
     // gridKwIdx: KWスライドは切替で中身が変わるため、表示されたときに測り直す
   }, [mounted, pageComments, trimmedData, sectionVisibility, kwVisibility, gridKwIdx, fitPageComments]);
-
-  // KWタブ切替時に表示中のマップを描き直す。非表示スライドはオフスクリーン配置
-  // （layout.tsx の .grid-kw-hidden）でサイズ自体はあるが、生成タイミングによっては
-  // 縮尺が古いまま出てくるため、表示された時点で必ず合わせ直す
-  useEffect(() => {
-    if (!showGridRanking) return;
-    // 描画側は Math.min(gridKwIdx, 件数-1) で丸めている。ここで生のindexを使うと
-    // 表示設定でKWを隠した直後に undefined になり、肝心の再描画が飛ぶ
-    const kws = visibleGridRanking?.keywords || [];
-    const kw = kws[Math.min(gridKwIdx, kws.length - 1)];
-    if (!kw) return;
-    const timer = setTimeout(() => {
-      if (gridMapRefs.current[kw]) renderGridMapForKw(kw);
-    }, 50);
-    return () => clearTimeout(timer);
-  }, [gridKwIdx, showGridRanking, visibleGridRanking, renderGridMapForKw]);
 
   // ワードクリック: 直近1年の口コミからAPI検索。0件なら分析時に保存した根拠口コミ（word_sources）を表示
   // （分析の「直近1年」は対象月基準・検索APIは今日基準のため、境界の口コミは日が経つと検索で見つからなくなる）
@@ -2815,7 +2798,9 @@ export default function ReportClient({
                           })()}
                         </>
                       ) : (
-                        <div style={{ padding: 40, textAlign: "center" }}>
+                        <div style={{ width: 440, padding: 40, textAlign: "center" }}>
+                          {/* 幅440は地図と同じ。可変にすると計測のある月と無い月で
+                              右の表の位置が横に飛び「ズレた」ように見える（2026-08-22） */}
                           {/* 生成ボタンはクライアントに見える画面のため置かない（生成は表示設定モーダルから） */}
                           <div style={{ color: "#999", fontSize: 16 }}>この月のデータなし</div>
                         </div>
