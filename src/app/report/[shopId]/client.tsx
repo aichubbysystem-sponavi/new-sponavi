@@ -951,7 +951,10 @@ export default function ReportClient({
   // 縮尺が古いまま出てくるため、表示された時点で必ず合わせ直す
   useEffect(() => {
     if (!showGridRanking) return;
-    const kw = visibleGridRanking?.keywords[gridKwIdx];
+    // 描画側は Math.min(gridKwIdx, 件数-1) で丸めている。ここで生のindexを使うと
+    // 表示設定でKWを隠した直後に undefined になり、肝心の再描画が飛ぶ
+    const kws = visibleGridRanking?.keywords || [];
+    const kw = kws[Math.min(gridKwIdx, kws.length - 1)];
     if (!kw) return;
     const timer = setTimeout(() => {
       if (gridMapRefs.current[kw]) renderGridMapForKw(kw);
@@ -1959,8 +1962,9 @@ export default function ReportClient({
                     全月一括生成
                   </button>
                 </div>
-                {/* 7×7 グリッド */}
-                {gridCells.length > 0 ? (
+                {/* 7×7 グリッド。1地点（多地点計測前＝シート順位）は7×7に並べると
+                    左上に1マスだけ値が入り、中心が「-」の壊れた盤面に見えるので出さない */}
+                {gridCells.length > 1 ? (
                   <table style={{ borderCollapse: "collapse", margin: "0 auto" }}>
                     <tbody>
                       {Array.from({ length: 7 }, (_, row) => (
@@ -2002,7 +2006,10 @@ export default function ReportClient({
                   </table>
                 ) : (
                   <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 16, textAlign: "center", padding: 16 }}>
-                    {centerRank > 0 ? "「この月を自動生成」でグリッドを作成してください" : "この月/KWの順位データがありません。中心順位を手入力して「この月を自動生成」を押してください"}
+                    {gridCells.length === 1
+                      ? `この月は多地点計測の開始前です（シートの店舗所在地1地点：${gridCells[0].rank > 0 ? `${gridCells[0].rank}位` : "圏外"}）。7×7にするには「この月を自動生成」を押してください`
+                      : centerRank > 0 ? "「この月を自動生成」でグリッドを作成してください"
+                      : "この月/KWの順位データがありません。中心順位を手入力して「この月を自動生成」を押してください"}
                   </div>
                 )}
               </div>

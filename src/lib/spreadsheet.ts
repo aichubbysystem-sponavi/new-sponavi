@@ -399,16 +399,20 @@ async function fetchGridRankingData(
 
     const keywordSet = new Set<string>();
     const monthMap = new Map<string, import("./report-data").GridRankingSnapshot[]>();
+    // logsのKWは生（全角スペース等）。正規化せずに返すと、シート由来の補完KWと
+    // 同じ言葉が2行に割れて表示される（2026-08-22 レビュー指摘）
+    const { normalizeKw } = await import("./keyword-normalize");
 
     for (const log of logs) {
-      keywordSet.add(log.keyword);
+      const logKw = normalizeKw(log.keyword);
+      keywordSet.add(logKw);
       // 帰属月: report_month列を優先（月初計測=前月分。無い行のみ同一ルールで導出）
       const monthKey = log.report_month || reportMonthFromMeasuredAt(log.measured_at);
       const results: import("./report-data").GridPoint[] = log.results || [];
       const ranked = results.filter(r => r.rank > 0);
       const avg = ranked.length > 0 ? ranked.reduce((s, r) => s + r.rank, 0) / ranked.length : 0;
       const snapshot: import("./report-data").GridRankingSnapshot = {
-        keyword: log.keyword,
+        keyword: logKw,
         gridSize: log.grid_size,
         intervalM: log.interval_m,
         results,

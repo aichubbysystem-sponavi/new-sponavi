@@ -223,10 +223,12 @@ export function supplementGridFromRanking(
     const snapshots: any[] = [];
     for (const ds of rankingHistory.datasets) {
       const sheetRank = ds.ranks[i];
-      // 空欄（未計測）は補完しない。「圏外」と明記されたセルだけ -1 として計測済み扱いにする
+      // 空欄（未計測）は補完しない。「圏外」と明記されたセルだけ rank=0 で計測済み扱いにする
       // （両方をnullのまま落とすと、圏外の月が「未計測」に見えて推移が途切れる）
+      // 0 は実測データ(grid_ranking_logs)の圏外と同じ値。-1 にすると
+      // `rank || 0` 系の判定をすり抜けて他の指標に混ざる（2026-08-22 レビュー指摘）
       const rank = sheetRank !== null && sheetRank > 0 ? sheetRank
-        : ds.outOfRange?.[i] ? -1
+        : ds.outOfRange?.[i] ? 0
         : null;
       if (rank === null) continue;
       const word = normalizeKw(ds.word);

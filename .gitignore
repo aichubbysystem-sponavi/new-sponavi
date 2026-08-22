@@ -54,3 +54,11 @@ get-ads-token.js
 貼り付け用.txt
 
 .vercel
+
+# 一時スクリプト（DB直結・認証情報を含むことがある。tsconfigのexcludeとセットで維持）
+一時スクリプト/
+check-auto-replies.js
+delete-auto-replies.js
+export-auto-replies.js
+write-newsponavi-sheet.js
+NEWSPONAVI_シート用.tsv
