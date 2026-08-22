@@ -913,37 +913,38 @@ export default function ReportClient({
   // スライドは overflow:hidden なので、溢れた分は黙って消える＝クライアントには
   // 「文の途中で終わったレポート」が届く（2026-08-22 指摘）。
   // 収まるまで総評ブロックだけ段階的に縮小する。表や見出しには触らない。
+  const fitPageComments = useCallback(() => {
+    const PC_BASE_FS = 13, PC_MIN_FS = 9;
+    document.querySelectorAll<HTMLElement>(".slide .page-comment").forEach(node => {
+      const slide = node.closest(".slide") as HTMLElement | null;
+      if (!slide) return;
+      node.style.fontSize = "";
+      // 総評とスライドの間で実際に溢れている要素を探す（bodyがoverflow:hiddenのため
+      // slide自身のscrollHeightでは溢れを検知できない）
+      const overflows = () => {
+        let el: HTMLElement | null = node.parentElement;
+        while (el && el !== slide) {
+          if (el.scrollHeight > el.clientHeight + 1) return true;
+          el = el.parentElement;
+        }
+        return false;
+      };
+      if (!overflows()) return;
+      for (let fs = PC_BASE_FS - 0.5; fs >= PC_MIN_FS; fs -= 0.5) {
+        node.style.fontSize = `${fs}px`;
+        if (!overflows()) return;
+      }
+      // 最小サイズでも収まらない場合はそのまま（これ以上小さくすると読めない）
+    });
+  }, []);
+
   useEffect(() => {
     if (!mounted) return;
-    const PC_BASE_FS = 13, PC_MIN_FS = 9;
-    const fitComments = () => {
-      document.querySelectorAll<HTMLElement>(".slide .page-comment").forEach(node => {
-        const slide = node.closest(".slide") as HTMLElement | null;
-        if (!slide) return;
-        node.style.fontSize = "";
-        // 総評とスライドの間で実際に溢れている要素を探す（bodyがoverflow:hiddenのため
-        // slide自身のscrollHeightでは溢れを検知できない）
-        const overflows = () => {
-          let el: HTMLElement | null = node.parentElement;
-          while (el && el !== slide) {
-            if (el.scrollHeight > el.clientHeight + 1) return true;
-            el = el.parentElement;
-          }
-          return false;
-        };
-        if (!overflows()) return;
-        for (let fs = PC_BASE_FS - 0.5; fs >= PC_MIN_FS; fs -= 0.5) {
-          node.style.fontSize = `${fs}px`;
-          if (!overflows()) return;
-        }
-        // 最小サイズでも収まらない場合はそのまま（これ以上小さくすると読めない）
-      });
-    };
     // フォント読み込み・写真到着でレイアウトが動くため、描画が落ち着いてから測る
-    const t = setTimeout(fitComments, 600);
+    const t = setTimeout(fitPageComments, 600);
     return () => clearTimeout(t);
     // gridKwIdx: KWスライドは切替で中身が変わるため、表示されたときに測り直す
-  }, [mounted, pageComments, trimmedData, sectionVisibility, kwVisibility, gridKwIdx]);
+  }, [mounted, pageComments, trimmedData, sectionVisibility, kwVisibility, gridKwIdx, fitPageComments]);
 
   // KWタブ切替時に表示中のマップを描き直す。非表示スライドはオフスクリーン配置
   // （layout.tsx の .grid-kw-hidden）でサイズ自体はあるが、生成タイミングによっては
@@ -1157,6 +1158,9 @@ export default function ReportClient({
   const handlePdfDownload = async () => {
     setPdfGenerating(true);
     await waitForPhotos();
+    // 写真の到着でページの高さが変わる。印刷直前に総評の収まりを測り直さないと、
+    // 読み込み直後にPDFを押した場合だけ文末が切れたPDFが出る
+    fitPageComments();
     const insertedEls: HTMLElement[] = [];
     // メモが空の最終ページはno-printで除外されるため、印刷時の分母から差し引く。
     // 実施内容ページにメモを載せている場合も最終ページは印刷しない（同じ文章が2ページに出るため）
