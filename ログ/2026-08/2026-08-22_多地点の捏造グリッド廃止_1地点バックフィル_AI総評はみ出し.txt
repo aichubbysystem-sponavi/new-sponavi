@@ -133,3 +133,115 @@
 - 画面での目視確認（1地点表示・地図・総評の収まり・PDF）
 - シート順位の100位超29行（最大1129位：エミナルクリニック福岡天神院）の妥当性確認
 - MEOマスタ同期（/admin）はユーザー判断で保留中
+
+===========================================================
+【追記3】セッション終了サマリー（規定フォーマット）
+===========================================================
+
+## 【2026-08-22】
+
+### 決定事項
+- 多地点順位の「捏造7×7」を廃止する。実測が無い月に出していた49地点は、シートの
+  順位1個からハッシュ生成した架空値だった。実在するのはシート順位1つだけなので
+  gridSize=1 の「1地点」として扱う
+- 過去月のシート順位は grid_ranking_overrides にDB保存する（表示時に毎回作らない）。
+  保存範囲は「その店舗の最古の実測月より前の月」だけ。後から実測が入り得る月に
+  overrideを置くと、読み取り優先度が override > logs のため実測を隠す
+- 圏外のセンチネルは rank=0 に統一する。実測ログが圏外を0で持っている（0が55,142件、
+  負は例外12件）ため。report-data.ts のコメント「0=未計測/-1=圏外」は実データと逆
+- 空欄（未計測）は保存しない。「圏外」と明記されたセルだけ計測済みとして保存する
+- グラフとAI総評が競合したらグラフを縮める。文字を小さくするのは最後の保険
+  （ユーザー指示「グラフは小さくても分かる。AI総評の文字が小さい方が具合悪い」）
+- 多地点の地図は「表示中のKWだけ」「毎回作り直す」。使い回しとオフスクリーン生成を
+  やめる
+- MEOマスタ同期（シートB列→解約 / C列に無い店舗→計測対象外）は既存機能
+  （/admin の契約ステータス同期）で実施できる。今回は**ユーザー判断で保留**。DBへの
+  書き込みは行っていない
+- 16件の「マスタにあるがシステムに無い店舗」は一覧提示のみ。登録・名寄せは保留
+
+### 変更内容（具体的に）
+■ src/lib/report-api.ts
+  - supplementGridFromRanking: generateSimpleGrid（49地点をハッシュ生成）を削除し
+    singlePointGrid（1地点）に置換。gridSize=1 / intervalM=null / avgRank=順位
+  - rankingHistory の型に outOfRange?: boolean[] を追加し、「圏外」セルを rank=0 で
+    計測済み扱いに（空欄はスキップ）
+■ src/lib/report-utils.ts
+  - gridLayoutLabel: gridSize===1 または点数1 → 「1地点」を返す（従来は "1×1"）
+■ src/lib/spreadsheet.ts
+  - fetchAllExternalData の overrides経路: keywords / snapshot.keyword を normalizeKw
+  - fetchGridRankingData（フォールバック経路）も log.keyword を normalizeKw
+■ src/app/api/report/analyze/route.ts
+  - AI総評の入力から results.length <= 1 のスナップショットを除外（1点から商圏を
+    語らせない）
+■ src/app/report/[shopId]/chart-options.ts
+  - buildStackedOptions / lineOptions の maintainAspectRatio を true→false、
+    aspectRatio:2.5 を削除
+■ src/app/report/[shopId]/client.tsx
+  - グラフのコンテナを flex:"1 1 0" / minHeight:200 / position:relative に（P3〜P5、P8、P9）
+  - P9のインラインoptionsも maintainAspectRatio:false
+  - renderPageComment: ラッパに className="page-comment" と fontSize:13、内側の
+    p/ul/label を fontSize:"inherit" に
+  - fitPageComments を新設（総評が溢れる場合だけ13px→9pxへ0.5px刻みで縮小）。
+    useEffect（描画600ms後）と handlePdfDownload の両方から呼ぶ
+  - renderGridMapForKw: マーカー消去を「データ無し判定」より前へ移動／マップは
+    毎回 innerHTML="" + new Map() で作り直し／1地点は fitBounds ではなく setZoom(15)
+  - 地図描画のuseEffect: 全KWループ → 表示中KWのみ。deps に visibleGridRanking と
+    gridKwIdx を追加
+  - 多地点サマリーページに「1地点の月は多地点計測を開始する前」の注記を追加
+  - 管理画面のグリッド編集: 盤面を出すのは gridCells.length > 1 のときだけ。
+    1地点の月は順位と「7×7にするには自動生成」の案内に変更
+  - 「この月のデータなし」の枠に width:440 を指定
+■ vitest.config.ts … testTimeout 20000 を追加
+■ tsconfig.json … exclude に "一時スクリプト" を追加
+■ .gitignore … 一時スクリプト/ と一時js・tsvを追加
+■ 本番DB（grid_ranking_overrides）
+  - 1地点データ 14,347行 / 327店舗を投入（後から圏外900行を -1 → 0 に更新）
+
+### 数値・設定値
+- 投入: 14,347行（dry-run 14,387行から重複40件を後勝ちで除外）／327店舗／
+  月範囲 2025/3〜2026/6／順位あり13,470・圏外900
+- グラフ: minHeight 200px、maintainAspectRatio false
+- AI総評の自動縮小: 基準13px → 下限9px、0.5px刻み、描画600ms後に測定
+- 1地点マップのズーム: 15（fitBoundsだと最大ズームに張り付くため）
+- vitest testTimeout: 5000 → 20000ms
+- シート取得: 335店舗を並列5で約6分（gviz CSV・認証不要）
+- 多地点の実測カバレッジ: 6月分 332/335店、**7月分 183/335店**
+  （7月分は8/1に182店。152店が未計測）
+- MEOマスタ同期のdry-run: 契約ステータス変更2件／マスタ未掲載167件／復帰7件／
+  変更比率21.5%（30%超でforce必要）
+
+### 未解決・次回やること
+- 【要判断】7月分の多地点計測が152店舗で未実施。8/1の一括計測が全店に回っていない
+- 【保留中】MEOマスタ同期（/admin の契約ステータス同期）。適用すると
+  解約1・停止中1・マスタ未掲載167件。適用前に SPICE CURRY CEYLON HOUSE と
+  うら山本店 の名前違いを直さないと、稼働中の店舗が計測対象外になる
+- 【保留中】マスタにあってシステムに無い16店舗の登録・名寄せ
+- シート順位の100位超29行（最大1129位：エミナルクリニック福岡天神院「福岡市 脱毛」
+  2026/5）の妥当性確認
+- デプロイ後の目視確認（KWタブ・月タブの往復、特にデータの無い月を経由する操作）
+- 8/16分の残タスクは未着手（sync-activityのオフセット、Batch32件、複数月まとめ検証）
+
+### 注意点・ハマったこと
+- ★オフスクリーン（left:-99999px）で生成したGoogle Mapsは fitBounds が効かず
+  初期zoomのまま固定される。ヘッドレスChromeで実測（オフスクリーン生成 zoom=13 /
+  表示中生成 zoom=12）。非表示スライドで地図を作ってはいけない
+- ★同じdivに new google.maps.Map() を重ねると旧インスタンスのタイル層(.gm-style)が
+  DOMに残る。作り直す前に innerHTML="" が必須
+- ★マーカーの消去は「この月にデータが無い」判定より前に置く。後ろだと早期returnで
+  消し損ね、前の月のピンが残る（「2026/3なのに7×7のピン」の正体）
+- ★圏外センチネルはコメントと実データが逆。-1で入れると analyze/route.ts の
+  `center?.rank || 0` をtruthyですり抜け、シート順位フォールバックが働かない
+- 型が混在するJOIN: shops.id=text / grid_ranking_logs.shop_id=uuid /
+  grid_ranking_overrides.shop_id=text。`s.id = g.shop_id::text` が正しい
+  （逆向きは "operator does not exist: text = uuid"）
+- grid_ranking_overrides には unique index (shop_name, keyword, month) がある。
+  一括投入前に重複除去が必須（シートに同じKWが2行あるケースが40件あった）
+- プロジェクト直下に .ts の一時スクリプトを置くと next build が pg の型解決で落ちる。
+  tsconfig の exclude に入れること
+- JSXの三項演算子の「:」直後に {/* コメント */} を置くと子要素が2つになり構文エラー
+- vitest は全体実行時だけ supabase.test.ts が5秒タイムアウトで落ちる。単体では通る。
+  変更前のツリーでも落ちることを git stash で確認してから timeout を伸ばした
+- 検証に本番画面を開けない（Chrome拡張が未接続・Playwrightは他セッションが専有）。
+  代替として「同じ構造のテストHTMLをヘッドレスChromeで描画→スクショ/計測値を読む」
+  が有効だった。Google Maps APIキーは本番バンドルから取得できる（NEXT_PUBLIC_）
+- 「解約」はDB側で既に35/37件反映済みだった。シートとDBの差分は思ったより小さい
