@@ -5,9 +5,10 @@
 
 export function buildStackedOptions() {
   return {
-    // aspectRatio: 各ページ末尾にAI総評スニペットを追加したため、
-    // グラフの縦幅を少し詰めて確保する（2.2→2.5）
-    responsive: true, maintainAspectRatio: true, aspectRatio: 2.5,
+    // maintainAspectRatio:false — グラフは「AI総評と表を置いた残り」の高さに収まる。
+    // 縦横比を保つと横幅からグラフ高が決まり、総評が長い月にスライドから溢れて
+    // 文末が切れていた（2026-08-22）。高さの主導権を総評側に渡している
+    responsive: true, maintainAspectRatio: false,
     plugins: {
       title: { display: false },
       legend: { position: "top" as const, labels: { font: { family: "Noto Sans JP", size: 11 } } },
@@ -23,7 +24,8 @@ export function buildStackedOptions() {
 }
 
 export const lineOptions = {
-  responsive: true, maintainAspectRatio: true,
+  // maintainAspectRatio:false の理由は buildStackedOptions と同じ（総評の場所を優先）
+  responsive: true, maintainAspectRatio: false,
   plugins: { legend: { display: false } },
   scales: {
     x: { grid: { display: false } },

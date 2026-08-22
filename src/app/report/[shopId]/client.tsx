@@ -942,11 +942,12 @@ export default function ReportClient({
     // フォント読み込み・写真到着でレイアウトが動くため、描画が落ち着いてから測る
     const t = setTimeout(fitComments, 600);
     return () => clearTimeout(t);
-    // gridKwIdx: 非表示のKWスライドは高さ0で測れないため、表示されたときに測り直す
+    // gridKwIdx: KWスライドは切替で中身が変わるため、表示されたときに測り直す
   }, [mounted, pageComments, trimmedData, sectionVisibility, kwVisibility, gridKwIdx]);
 
-  // KWタブ切替: 非表示スライドのマップは幅0で初期化されており、そのまま表示すると
-  // 縮尺も中心も合わない。表示された時点で必ず描き直す
+  // KWタブ切替時に表示中のマップを描き直す。非表示スライドはオフスクリーン配置
+  // （layout.tsx の .grid-kw-hidden）でサイズ自体はあるが、生成タイミングによっては
+  // 縮尺が古いまま出てくるため、表示された時点で必ず合わせ直す
   useEffect(() => {
     if (!showGridRanking) return;
     const kw = visibleGridRanking?.keywords[gridKwIdx];
@@ -2348,7 +2349,7 @@ export default function ReportClient({
       <div style={slideStyle} className="slide">
         <div style={slideBarStyle}><span>{shop.name} — Googleマップ表示数推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
-          <div style={{ width: "95%", margin: "0 auto" }}>
+          <div style={{ width: "95%", margin: "0 auto", flex: "1 1 0", minHeight: 200, position: "relative" }}>
             <Bar data={{ labels: dispLabels, datasets: [
               { label: "モバイル", data: dispCharts.mapMobile, backgroundColor: "rgba(129,199,132,.75)" },
               { label: "PC", data: dispCharts.mapPC, backgroundColor: "rgba(56,142,60,.75)" },
@@ -2378,7 +2379,7 @@ export default function ReportClient({
       <div style={slideStyle} className="slide">
         <div style={slideBarStyle}><span>{shop.name} — Google検索数推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
-          <div style={{ width: "95%", margin: "0 auto" }}>
+          <div style={{ width: "95%", margin: "0 auto", flex: "1 1 0", minHeight: 200, position: "relative" }}>
             <Bar data={{ labels: dispLabels, datasets: [
               { label: "モバイル", data: dispCharts.searchMobile, backgroundColor: "rgba(79,195,247,.75)" },
               { label: "PC", data: dispCharts.searchPC, backgroundColor: "rgba(2,136,209,.75)" },
@@ -2408,7 +2409,7 @@ export default function ReportClient({
       <div style={slideStyle} className="slide">
         <div style={slideBarStyle}><span>{shop.name} — ユーザー反応数推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
         <div style={slideBodyStyle}>
-          <div style={{ width: "95%", margin: "0 auto" }}>
+          <div style={{ width: "95%", margin: "0 auto", flex: "1 1 0", minHeight: 200, position: "relative" }}>
             <Bar data={{ labels: dispLabels, datasets: [
               { label: "ウェブサイト", data: dispCharts.websites, backgroundColor: "rgba(255,183,77,.75)" },
               { label: "ルート", data: dispCharts.routes, backgroundColor: "rgba(186,104,200,.75)" },
@@ -3056,7 +3057,7 @@ export default function ReportClient({
         <div style={slideStyle} className="slide">
           <div style={slideBarStyle}><span>{shop.name} — 口コミ件数推移</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={{ ...slideBodyStyle, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ width: "95%", maxHeight: 600 }}>
+            <div style={{ width: "95%", flex: "1 1 0", minHeight: 200, position: "relative" }}>
               <Line data={{ labels: reviewLabels, datasets: [{
                 label: "口コミ件数", data: reviewCounts,
                 borderColor: "#fbc02d", backgroundColor: "rgba(251,192,45,.35)",
@@ -3086,7 +3087,7 @@ export default function ReportClient({
         <div style={slideStyle} className="slide">
           <div style={slideBarStyle}><span>{shop.name} — 月間口コミ増加数</span><span className="pn-label" style={{ fontSize: 16, opacity: 0.45, fontWeight: 400 }}>{pn(pageNum)}</span></div>
           <div style={{ ...slideBodyStyle, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ width: "95%", maxHeight: 600 }}>
+            <div style={{ width: "95%", flex: "1 1 0", minHeight: 200, position: "relative" }}>
               {(() => {
                 const deltaData = reviewDelta.slice(1).map(v => Math.max(v ?? 0, 0));
                 const deltaColors = deltaData.map(v => v >= 20 ? "rgba(39,174,96,.75)" : v >= 10 ? "rgba(251,192,45,.75)" : v > 0 ? "rgba(229,115,115,.75)" : "rgba(200,200,200,.4)");
@@ -3113,7 +3114,7 @@ export default function ReportClient({
                     label: "月間増加数", data: deltaData,
                     backgroundColor: deltaColors,
                     borderRadius: 3,
-                  }]}} plugins={[datalabelPlugin]} options={{ responsive: true, maintainAspectRatio: true, plugins: { legend: { display: false } }, layout: { padding: { top: 24 } }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true, min: 0, grid: { color: "#f0f0f0" }, ticks: { stepSize: 1, maxTicksLimit: 8 } } } }} />
+                  }]}} plugins={[datalabelPlugin]} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, layout: { padding: { top: 24 } }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true, min: 0, grid: { color: "#f0f0f0" }, ticks: { stepSize: 1, maxTicksLimit: 8 } } } }} />
                 );
               })()}
             </div>
