@@ -21,7 +21,7 @@ export const maxDuration = 120;
  *  - review-language  口コミ国別（reviews + detectLanguage）
  *  - pmax             P-MAX広告（pmax_store_data）
  *  - posts            投稿ログ（post_logs）
- *  - review-summary   口コミ点数・件数の月次推移（店舗×月。from/to=YYYY-MM で複数月、省略時はmonthの1か月）
+ *  - review-summary   口コミ点数・件数（実行時点のGoogle掲載値スナップショット。month不要）
  *
  * 月フォーマットはテーブルごとに異なるため内部で変換する:
  *  "2026/7"(insights, search-keywords, review-analysis) / "2026-07"(pmax) / timestamp範囲(その他)
@@ -119,43 +119,6 @@ function parseMonth(month: string): MonthKeys | null {
   };
 }
 
-// review-summary 用の集計関数（sql/2026-08-25_review_monthly_summary.sql と同内容。未作成時に exec_sql で自動作成）
-const REVIEW_MONTHLY_SUMMARY_SQL = `
--- 口コミ点数・件数CSV（/api/export?type=review-summary）用の集計関数
--- 店舗×月（JST）ごとの件数と星合計を返す。累計・平均はアプリ側で計算。
--- 全件をアプリに引き抜くと authenticator の statement_timeout=8s に当たるため DB 側で GROUP BY する。
--- API側は関数が無ければ exec_sql 経由で自動作成を試みるが、失敗する場合は本番 SQL Editor でこのファイルを実行する。
-
-CREATE OR REPLACE FUNCTION public.review_monthly_summary(p_end timestamptz)
-RETURNS TABLE(shop_id text, ym text, cnt bigint, star_sum bigint)
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-SET statement_timeout = '100s'
-AS $$
-  SELECT
-    r.shop_id::text AS shop_id,
-    to_char(r.create_time AT TIME ZONE 'Asia/Tokyo', 'YYYY-MM') AS ym,
-    count(*)::bigint AS cnt,
-    sum(CASE upper(coalesce(r.star_rating, ''))
-          WHEN 'ONE' THEN 1 WHEN 'ONE_STAR' THEN 1
-          WHEN 'TWO' THEN 2 WHEN 'TWO_STARS' THEN 2
-          WHEN 'THREE' THEN 3 WHEN 'THREE_STARS' THEN 3
-          WHEN 'FOUR' THEN 4 WHEN 'FOUR_STARS' THEN 4
-          WHEN 'FIVE' THEN 5 WHEN 'FIVE_STARS' THEN 5
-          ELSE 0 END)::bigint AS star_sum
-  FROM public.reviews r
-  WHERE r.create_time < p_end
-  GROUP BY 1, 2;
-$$;
-
-REVOKE ALL ON FUNCTION public.review_monthly_summary(timestamptz) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.review_monthly_summary(timestamptz) FROM anon;
-REVOKE ALL ON FUNCTION public.review_monthly_summary(timestamptz) FROM authenticated;
-GRANT EXECUTE ON FUNCTION public.review_monthly_summary(timestamptz) TO service_role;
-`;
-
 // 店舗名の照合用正規化（NFKC＋空白除去＋小文字化。verifyShopAccessと同方式）
 function normName(s: string): string {
   return (s || "").normalize("NFKC").replace(/\s+/g, "").toLowerCase();
@@ -168,9 +131,10 @@ export async function GET(request: NextRequest) {
   const ctx = perm.ctx;
 
   const type = request.nextUrl.searchParams.get("type") || "";
-  // review-summary は from/to 指定（month省略可）。それ以外は month 必須
-  const monthParam = request.nextUrl.searchParams.get("month")
-    || (type === "review-summary" ? request.nextUrl.searchParams.get("to") || "" : "");
+  // review-summary は「実行時点のスナップショット」なので month 不要。それ以外は month 必須
+  const now = new Date();
+  const jstNow = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit" }).format(now); // "2026-08"
+  const monthParam = request.nextUrl.searchParams.get("month") || (type === "review-summary" ? jstNow : "");
   const mk = parseMonth(monthParam);
   if (!mk) {
     return NextResponse.json({ error: "month=YYYY-MM 形式で指定してください" }, { status: 400 });
@@ -479,88 +443,28 @@ export async function GET(request: NextRequest) {
         return await finish(csv, `投稿ログ_${mk.hyphen}.csv`, out.length);
       }
 
-      // ── 口コミ点数・件数の月次推移（口コミ(RPA)シートと同じ横持ち形式） ──
-      // 行=店舗、列=月ごとに「点数」「件数」。各月末時点の累計（DBの口コミから算出）。
-      // 点数はDB内口コミの単純平均（小数1桁）。Googleマップ掲載値は独自の重み付けのため
-      // 過去月の掲載値はどこにも残っておらず再現できない。件数は同期済み口コミの累計。
+      // ── 口コミ点数・件数（実行時点のスナップショット。口コミ(RPA)シートと同じ形式） ──
+      // 値は口コミ同期時に GBP API から保存している Googleマップ掲載値（shops.rating / shops.review_count）。
+      // DB内口コミの単純平均ではない（Googleの表示値は独自の重み付けで単純平均と一致しないため、シートもレポートも掲載値を使っている）。
       case "review-summary": {
-        const fromParam = request.nextUrl.searchParams.get("from") || monthParam;
-        const toParam = request.nextUrl.searchParams.get("to") || monthParam;
-        const fromK = parseMonth(fromParam);
-        const toK = parseMonth(toParam);
-        if (!fromK || !toK || fromParam > toParam) {
-          return NextResponse.json({ error: "from/to は YYYY-MM 形式で from<=to にしてください" }, { status: 400 });
-        }
-        // 対象月リスト（from〜to）
-        const months: MonthKeys[] = [];
-        for (let cur = fromParam; cur <= toParam; ) {
-          const k = parseMonth(cur)!;
-          months.push(k);
-          const [y, m] = cur.split("-").map(Number);
-          cur = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
-          if (months.length > 60) {
-            return NextResponse.json({ error: "期間は最大60か月までです" }, { status: 400 });
-          }
-        }
-        // 店舗×月（JST）の件数・星合計を DB 側で集計（review_monthly_summary）。
-        // 全件をアプリへ引き抜く方式は authenticator の statement_timeout=8s に当たるため不可。
-        type SumRow = { shop_id: string; ym: string; cnt: number; star_sum: number };
-        let sumRows: SumRow[] | null = null;
-        {
-          const call = () => sb.rpc("review_monthly_summary", { p_end: toK.endIso });
-          let { data, error } = await call();
-          if (error && /could not find the function|does not exist/i.test(error.message || "")) {
-            // 関数未作成 → exec_sql で自動作成を試みる（sql/2026-08-25_review_monthly_summary.sql と同内容）
-            const { error: mkErr } = await sb.rpc("exec_sql", { sql: REVIEW_MONTHLY_SUMMARY_SQL });
-            if (!mkErr) ({ data, error } = await call());
-          }
-          if (error) {
-            throw new Error(`集計関数 review_monthly_summary の実行に失敗しました（${error.message}）。sql/2026-08-25_review_monthly_summary.sql を本番SQL Editorで実行してください`);
-          }
-          sumRows = (data || []) as SumRow[];
-        }
-        const targetShops = allShops
+        const shopRows = await fetchAll<{ id: string; name: string; rating: number | null; review_count: number | null; cancelled_at: string | null; synced_at: string | null }>((f, t) =>
+          sb.from("shops").select("id, name, rating, review_count, cancelled_at, synced_at").order("id").range(f, t)
+        );
+        const out = shopRows
           .filter((s) => !s.cancelled_at)
-          .sort((a, b) => a.name.localeCompare(b.name, "ja"));
-        // 店舗ごとに月順の累計を作る
-        type Acc = { count: number; sum: number };
-        const byShop = new Map<string, SumRow[]>();
-        for (const r of sumRows) {
-          const arr = byShop.get(r.shop_id) || [];
-          arr.push(r);
-          byShop.set(r.shop_id, arr);
-        }
-        const perShop = new Map<string, Acc[]>(); // 対象月インデックス順の累計
-        byShop.forEach((arr, sid) => {
-          arr.sort((a: SumRow, b: SumRow) => (a.ym < b.ym ? -1 : a.ym > b.ym ? 1 : 0));
-          const accs: Acc[] = [];
-          let c = 0, sum = 0, k = 0;
-          for (const m of months) {
-            while (k < arr.length && arr[k].ym <= m.hyphen) { c += Number(arr[k].cnt); sum += Number(arr[k].star_sum); k++; }
-            accs.push({ count: c, sum });
-          }
-          perShop.set(sid, accs);
-        });
-        const out = targetShops.map((s) => {
-          const accs = perShop.get(s.id);
-          const cells: unknown[] = [s.name.normalize("NFC")];
-          for (let i = 0; i < months.length; i++) {
-            const a = accs?.[i];
-            if (!a || a.count === 0) { cells.push("", ""); continue; }
-            cells.push((a.sum / a.count).toFixed(1), a.count);
-          }
-          return cells;
-        });
-        // 2段ヘッダー: 1行目=店舗名,月ラベル,(空) / 2行目=(空),点数,件数
-        const monthLabel = (m: MonthKeys) => {
-          const [y, mo] = m.hyphen.split("-").map(Number);
-          return `${y}年${mo}月`;
-        };
-        const header1 = ["店舗名", ...months.flatMap((m) => [monthLabel(m), ""])];
-        const header2 = ["", ...months.flatMap(() => ["点数", "件数"])];
+          .sort((a, b) => a.name.localeCompare(b.name, "ja"))
+          .map((s) => [
+            s.name.normalize("NFC"),
+            s.rating && s.rating > 0 ? Number(s.rating).toFixed(1) : "",
+            s.review_count ?? "",
+          ]);
+        // 2段ヘッダー: 1行目=店舗名,YYYY年M月,(空) / 2行目=(空),点数,件数（シートと同じ横持ち）
+        const [y, mo] = mk.hyphen.split("-").map(Number);
+        const header1 = ["店舗名", `${y}年${mo}月`, ""];
+        const header2 = ["", "点数", "件数"];
         const csv = "\uFEFF" + [header1, header2, ...out].map((r) => r.map(esc).join(",")).join("\r\n");
-        const range = fromParam === toParam ? fromK.hyphen : `${fromK.hyphen}〜${toK.hyphen}`;
-        return await finish(csv, `口コミ点数件数_${range}.csv`, out.length);
+        const stamp = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+        return await finish(csv, `口コミ点数件数_${stamp}.csv`, out.length);
       }
 
       default:
