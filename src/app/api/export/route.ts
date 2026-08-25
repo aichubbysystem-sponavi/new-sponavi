@@ -119,6 +119,43 @@ function parseMonth(month: string): MonthKeys | null {
   };
 }
 
+// review-summary 用の集計関数（sql/2026-08-25_review_monthly_summary.sql と同内容。未作成時に exec_sql で自動作成）
+const REVIEW_MONTHLY_SUMMARY_SQL = `
+-- 口コミ点数・件数CSV（/api/export?type=review-summary）用の集計関数
+-- 店舗×月（JST）ごとの件数と星合計を返す。累計・平均はアプリ側で計算。
+-- 全件をアプリに引き抜くと authenticator の statement_timeout=8s に当たるため DB 側で GROUP BY する。
+-- API側は関数が無ければ exec_sql 経由で自動作成を試みるが、失敗する場合は本番 SQL Editor でこのファイルを実行する。
+
+CREATE OR REPLACE FUNCTION public.review_monthly_summary(p_end timestamptz)
+RETURNS TABLE(shop_id text, ym text, cnt bigint, star_sum bigint)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+SET statement_timeout = '100s'
+AS $$
+  SELECT
+    r.shop_id::text AS shop_id,
+    to_char(r.create_time AT TIME ZONE 'Asia/Tokyo', 'YYYY-MM') AS ym,
+    count(*)::bigint AS cnt,
+    sum(CASE upper(coalesce(r.star_rating, ''))
+          WHEN 'ONE' THEN 1 WHEN 'ONE_STAR' THEN 1
+          WHEN 'TWO' THEN 2 WHEN 'TWO_STARS' THEN 2
+          WHEN 'THREE' THEN 3 WHEN 'THREE_STARS' THEN 3
+          WHEN 'FOUR' THEN 4 WHEN 'FOUR_STARS' THEN 4
+          WHEN 'FIVE' THEN 5 WHEN 'FIVE_STARS' THEN 5
+          ELSE 0 END)::bigint AS star_sum
+  FROM public.reviews r
+  WHERE r.create_time < p_end
+  GROUP BY 1, 2;
+$$;
+
+REVOKE ALL ON FUNCTION public.review_monthly_summary(timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.review_monthly_summary(timestamptz) FROM anon;
+REVOKE ALL ON FUNCTION public.review_monthly_summary(timestamptz) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.review_monthly_summary(timestamptz) TO service_role;
+`;
+
 // 店舗名の照合用正規化（NFKC＋空白除去＋小文字化。verifyShopAccessと同方式）
 function normName(s: string): string {
   return (s || "").normalize("NFKC").replace(/\s+/g, "").toLowerCase();
@@ -465,41 +502,45 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: "期間は最大60か月までです" }, { status: 400 });
           }
         }
+        // 店舗×月（JST）の件数・星合計を DB 側で集計（review_monthly_summary）。
+        // 全件をアプリへ引き抜く方式は authenticator の statement_timeout=8s に当たるため不可。
+        type SumRow = { shop_id: string; ym: string; cnt: number; star_sum: number };
+        let sumRows: SumRow[] | null = null;
+        {
+          const call = () => sb.rpc("review_monthly_summary", { p_end: toK.endIso });
+          let { data, error } = await call();
+          if (error && /could not find the function|does not exist/i.test(error.message || "")) {
+            // 関数未作成 → exec_sql で自動作成を試みる（sql/2026-08-25_review_monthly_summary.sql と同内容）
+            const { error: mkErr } = await sb.rpc("exec_sql", { sql: REVIEW_MONTHLY_SUMMARY_SQL });
+            if (!mkErr) ({ data, error } = await call());
+          }
+          if (error) {
+            throw new Error(`集計関数 review_monthly_summary の実行に失敗しました（${error.message}）。sql/2026-08-25_review_monthly_summary.sql を本番SQL Editorで実行してください`);
+          }
+          sumRows = (data || []) as SumRow[];
+        }
         const targetShops = allShops
           .filter((s) => !s.cancelled_at)
           .sort((a, b) => a.name.localeCompare(b.name, "ja"));
-        // 店舗×月末ごとの累計（件数・星合計）
-        // 全件を1本のクエリで深いOFFSETページングすると reviews の statement timeout に当たるため、
-        // 店舗ごとに shop_id で絞って取得（単店舗画面と同じ経路・インデックスあり）し、並列数を絞って回す
+        // 店舗ごとに月順の累計を作る
         type Acc = { count: number; sum: number };
-        const perShop = new Map<string, Acc[]>(); // 月インデックス順の累計
-        const monthEnds = months.map((m) => new Date(m.endIso).getTime());
-        const CONCURRENCY = 8;
-        let cursor = 0;
-        const worker = async () => {
-          while (cursor < targetShops.length) {
-            const s = targetShops[cursor++];
-            const rows = await fetchAll<{ star_rating: string | null; create_time: string }>((f, t) =>
-              sb.from("reviews")
-                .select("star_rating, create_time")
-                .eq("shop_id", s.id)
-                .lt("create_time", toK.endIso)
-                .order("create_time", { ascending: true })
-                .range(f, t)
-            );
-            if (rows.length === 0) continue;
-            const accs = months.map(() => ({ count: 0, sum: 0 }));
-            for (const r of rows) {
-              const stars = ratingNum(r.star_rating);
-              const t = new Date(r.create_time).getTime();
-              for (let i = 0; i < months.length; i++) {
-                if (t < monthEnds[i]) { accs[i].count += 1; accs[i].sum += stars; }
-              }
-            }
-            perShop.set(s.id, accs);
+        const byShop = new Map<string, SumRow[]>();
+        for (const r of sumRows) {
+          const arr = byShop.get(r.shop_id) || [];
+          arr.push(r);
+          byShop.set(r.shop_id, arr);
+        }
+        const perShop = new Map<string, Acc[]>(); // 対象月インデックス順の累計
+        byShop.forEach((arr, sid) => {
+          arr.sort((a: SumRow, b: SumRow) => (a.ym < b.ym ? -1 : a.ym > b.ym ? 1 : 0));
+          const accs: Acc[] = [];
+          let c = 0, sum = 0, k = 0;
+          for (const m of months) {
+            while (k < arr.length && arr[k].ym <= m.hyphen) { c += Number(arr[k].cnt); sum += Number(arr[k].star_sum); k++; }
+            accs.push({ count: c, sum });
           }
-        };
-        await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+          perShop.set(sid, accs);
+        });
         const out = targetShops.map((s) => {
           const accs = perShop.get(s.id);
           const cells: unknown[] = [s.name.normalize("NFC")];

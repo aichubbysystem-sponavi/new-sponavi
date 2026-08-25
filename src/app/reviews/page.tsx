@@ -76,6 +76,8 @@ export default function ReviewsPage() {
   const [noReviewShops, setNoReviewShops] = useState<{ id: string; name: string }[]>([]);
   const [loadingNoReview, setLoadingNoReview] = useState(false);
   const [csvDownloading, setCsvDownloading] = useState(false);
+  // 全店舗CSV（点数・件数）の対象月ダイアログ。from/to は "YYYY-MM"
+  const [csvDialog, setCsvDialog] = useState<{ from: string; to: string } | null>(null);
   const [selectedNoReview, setSelectedNoReview] = useState<Set<string>>(new Set());
   const [lastClickedIdx, setLastClickedIdx] = useState<number | null>(null);
   const [shopSyncStatus, setShopSyncStatus] = useState<Map<string, string>>(new Map());
@@ -881,24 +883,13 @@ export default function ReviewsPage() {
               {loadingNoReview ? "検索中..." : "口コミなし店舗"}
             </button>
             <button onClick={async () => {
-              // 全店舗表示: 店舗×月の点数・件数（口コミ(RPA)シート形式）をサーバーで生成
+              // 全店舗表示: 対象月を選ぶダイアログを開く（点数・件数CSV）
               if (isAllMode) {
                 if (csvDownloading) return;
-                if (!drStart || !drEnd) { alert("期間が未設定です"); return; }
                 const toYM = (v: string) => { const [y, m] = v.split("/").map(Number); return `${y}-${String(m).padStart(2, "0")}`; };
-                const from = toYM(drStart), to = toYM(drEnd);
-                setCsvDownloading(true);
-                try {
-                  const res = await api.get(`/api/export?type=review-summary&from=${from}&to=${to}`, { responseType: "blob", timeout: 180000 });
-                  const url = URL.createObjectURL(res.data);
-                  const a = document.createElement("a");
-                  a.href = url; a.download = `口コミ点数件数_${from === to ? from : `${from}〜${to}`}.csv`; a.click();
-                  URL.revokeObjectURL(url);
-                } catch (e: any) {
-                  let msg = "ダウンロードに失敗しました";
-                  try { const text = await e?.response?.data?.text?.(); if (text) msg = JSON.parse(text)?.error || msg; } catch {}
-                  alert(msg);
-                } finally { setCsvDownloading(false); }
+                const now = new Date();
+                const cur = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+                setCsvDialog({ from: drStart ? toYM(drStart) : cur, to: drEnd ? toYM(drEnd) : cur });
                 return;
               }
               if (!selectedShopId) return;
@@ -926,10 +917,10 @@ export default function ReviewsPage() {
               a.href = url; a.download = `${shopName}_口コミ一覧.csv`; a.click();
               URL.revokeObjectURL(url);
             }} disabled={isAllMode ? csvDownloading : !selectedShopId}
-              title={isAllMode ? "期間内の各月末時点の点数・件数を店舗ごとに出力（口コミ(RPA)シート形式）" : undefined}
+              title={isAllMode ? "店舗ごとの点数・件数を月を選んでCSV出力" : undefined}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${(isAllMode ? csvDownloading : !selectedShopId) ? "bg-slate-200 text-slate-400" : "bg-teal-600 hover:bg-teal-700"}`}
               style={{ color: (isAllMode ? !csvDownloading : !!selectedShopId) ? "#fff" : undefined }}>
-              {csvDownloading ? "生成中..." : "CSVダウンロード"}
+              CSVダウンロード
             </button>
           </div>
         </div>
@@ -1512,6 +1503,76 @@ export default function ReviewsPage() {
         </>
       )}
       {/* キーワード口コミモーダル（Portalでbody直下に描画） */}
+      {csvDialog && createPortal(
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={() => !csvDownloading && setCsvDialog(null)}>
+          <div style={{ background: "#fff", borderRadius: 16, padding: "24px 28px", width: 420, maxWidth: "92%", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}
+            onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: "#0f172a" }}>口コミ点数・件数CSV（全店舗）</h3>
+              <button onClick={() => !csvDownloading && setCsvDialog(null)}
+                style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: "#999", padding: "0 4px" }}>×</button>
+            </div>
+            <p style={{ margin: "0 0 14px", fontSize: 12, color: "#64748b", lineHeight: 1.6 }}>
+              店舗名／点数（★）／クチコミ件数を、選んだ月ごとの列で出力します。<br />
+              各月の値はその月末時点の累計（点数は同期済み口コミの平均・小数1桁）です。
+            </p>
+            {(() => {
+              const opts: string[] = [];
+              const d = new Date(); d.setDate(1);
+              for (let i = 0; i < 36; i++) {
+                opts.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+                d.setMonth(d.getMonth() - 1);
+              }
+              const label = (ym: string) => { const [y, m] = ym.split("-").map(Number); return `${y}年${m}月`; };
+              const sel = (v: string, onChange: (v: string) => void) => (
+                <select value={v} onChange={(e) => onChange(e.target.value)} disabled={csvDownloading}
+                  className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm" style={{ minWidth: 130 }}>
+                  {opts.map((o) => <option key={o} value={o}>{label(o)}</option>)}
+                </select>
+              );
+              const invalid = csvDialog.from > csvDialog.to;
+              return (
+                <>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                    {sel(csvDialog.from, (v) => setCsvDialog({ ...csvDialog, from: v }))}
+                    <span style={{ color: "#64748b" }}>〜</span>
+                    {sel(csvDialog.to, (v) => setCsvDialog({ ...csvDialog, to: v }))}
+                  </div>
+                  <div style={{ fontSize: 11, color: invalid ? "#dc2626" : "#94a3b8", marginBottom: 16 }}>
+                    {invalid ? "開始月が終了月より後になっています" : "1か月だけ出す場合は同じ月を選んでください"}
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                    <button onClick={() => setCsvDialog(null)} disabled={csvDownloading}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200">キャンセル</button>
+                    <button disabled={csvDownloading || invalid}
+                      onClick={async () => {
+                        const { from, to } = csvDialog;
+                        setCsvDownloading(true);
+                        try {
+                          const res = await api.get(`/api/export?type=review-summary&from=${from}&to=${to}`, { responseType: "blob", timeout: 180000 });
+                          const url = URL.createObjectURL(res.data);
+                          const a = document.createElement("a");
+                          a.href = url; a.download = `口コミ点数件数_${from === to ? from : `${from}〜${to}`}.csv`; a.click();
+                          URL.revokeObjectURL(url);
+                          setCsvDialog(null);
+                        } catch (e: any) {
+                          let msg = "ダウンロードに失敗しました";
+                          try { const text = await e?.response?.data?.text?.(); if (text) msg = JSON.parse(text)?.error || msg; } catch {}
+                          alert(msg);
+                        } finally { setCsvDownloading(false); }
+                      }}
+                      className={`px-4 py-1.5 rounded-lg text-xs font-semibold ${csvDownloading || invalid ? "bg-slate-200 text-slate-400" : "bg-teal-600 hover:bg-teal-700 text-white"}`}>
+                      {csvDownloading ? "生成中..." : "ダウンロード"}
+                    </button>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </div>,
+        document.body
+      )}
       {keywordModal && createPortal(
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}
           onClick={() => setKeywordModal(null)}>
