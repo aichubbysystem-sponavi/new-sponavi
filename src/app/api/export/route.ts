@@ -131,7 +131,9 @@ export async function GET(request: NextRequest) {
   const ctx = perm.ctx;
 
   const type = request.nextUrl.searchParams.get("type") || "";
-  const monthParam = request.nextUrl.searchParams.get("month") || "";
+  // review-summary は from/to 指定（month省略可）。それ以外は month 必須
+  const monthParam = request.nextUrl.searchParams.get("month")
+    || (type === "review-summary" ? request.nextUrl.searchParams.get("to") || "" : "");
   const mk = parseMonth(monthParam);
   if (!mk) {
     return NextResponse.json({ error: "month=YYYY-MM 形式で指定してください" }, { status: 400 });
