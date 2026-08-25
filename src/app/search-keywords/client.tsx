@@ -78,6 +78,12 @@ export default function SearchKeywordsClient() {
       const res = await api.get(`/api/export?type=search-keywords-wide&month=${month}`, { responseType: "blob", timeout: 180000 });
       const shopsN = res.headers?.["x-row-count"];
       if (shopsN !== undefined && Number(shopsN) === 0) { alert(`${y}年${m}月の検索語句データがありません（先に同期してください）`); return; }
+      // 同期済み店舗数が少なければ明示（CSVは同期済み分しか含まない）
+      const total = shops.filter((s) => s.gbp_location_name).length;
+      if (shopsN !== undefined && total > 0 && Number(shopsN) < total) {
+        alert(`${y}年${m}月の検索語句が同期済みなのは ${Number(shopsN)} / ${total} 店舗です。
+CSVには同期済みの店舗だけが含まれます。全店舗分が必要な場合は「未同期を一括同期」を実行してから再度ダウンロードしてください。`);
+      }
       const url = URL.createObjectURL(res.data);
       const a = document.createElement("a");
       a.href = url; a.download = `【RPA】MEOレポート用 - ${y}${String(m).padStart(2, "0")}.csv`; a.click();
