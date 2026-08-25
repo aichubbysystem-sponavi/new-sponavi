@@ -8,6 +8,9 @@ import { useRole } from "@/components/role-provider";
 import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
 import { normalizeKw } from "@/lib/keyword-normalize";
 
+/** 「先月の実施内容」＋「公開した写真一覧」ページ。2026-08-25 機能保留につき全店非表示（再開時は true に戻す） */
+const SHOW_ACTIVITY_PAGE = false;
+
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
@@ -1014,7 +1017,7 @@ export default function ReportClient({
   // 2段階で取る。1段階目(fast=1)はDBの件数だけで即返るので、
   // 写真の取得（GBPを叩くので数秒かかる）を待たずに数字を出せる。
   useEffect(() => {
-    if (!shop.name || !curLabel) return;
+    if (!SHOW_ACTIVITY_PAGE || !shop.name || !curLabel) return;
     let cancelled = false;
     const url = (fast: boolean) =>
       `/api/report/activity?shopId=${encodeURIComponent(shop.name)}&month=${encodeURIComponent(curLabel)}${fast ? "&fast=1" : ""}`;
@@ -1099,7 +1102,7 @@ export default function ReportClient({
 
   // 全部0の店舗にページを出しても「何もしていない」証明にしかならないので、
   // 実績が1件でもある月だけページを作る（表示設定でも店舗ごとにOFFにできる）
-  const hasActivityData = !!activity && (
+  const hasActivityData = SHOW_ACTIVITY_PAGE && !!activity && (
     activity.posts + activity.photos + activity.replies +
     activity.postsPrev + activity.photosPrev + activity.repliesPrev
   ) > 0;
@@ -1753,7 +1756,7 @@ export default function ReportClient({
               <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 16, fontWeight: 600, display: "block", marginBottom: 10 }}>スライド表示ON/OFF</span>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {[
-                  { key: "activity", label: "先月の実施内容", hasData: hasActivityData },
+                  ...(SHOW_ACTIVITY_PAGE ? [{ key: "activity", label: "先月の実施内容", hasData: hasActivityData }] : []),
                   { key: "keywords", label: "キーワード順位", hasData: hasKeywords },
                   { key: "rankingHistory", label: "順位推移テーブル", hasData: unifiedRankingHistory.labels.length > 0 },
                   { key: "gridRanking", label: "多地点順位", hasData: hasGridRanking },
