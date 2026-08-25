@@ -22,6 +22,7 @@ export const maxDuration = 120;
  *  - pmax             P-MAX広告（pmax_store_data）
  *  - posts            投稿ログ（post_logs）
  *  - review-summary   口コミ点数・件数（実行時点のGoogle掲載値スナップショット。month不要）
+ *  - insights-gbp     レポート数値をGBP管理画面のCSVエクスポートと同じ列構成で（ビジネス名,Google 検索 - モバイル,…,ホテルの予約,）
  *  - search-keywords-wide  検索語句 横持ち（【RPA】MEOレポート用シート形式: 順位×店舗ごとの「キーワード/検索数」列、上位100位）
  *
  * 月フォーマットはテーブルごとに異なるため内部で変換する:
@@ -309,6 +310,42 @@ export async function GET(request: NextRequest) {
           ]);
         const csv = toCsv(["店舗名", "投稿日時", "投稿者", "評価", "口コミ", "返信状態", "返信内容"], out);
         return await finish(csv, `口コミ一覧_${mk.hyphen}.csv`, out.length);
+      }
+
+      // ── レポート数値（GBP管理画面の「インサイト」CSVエクスポートと同じ列） ──
+      // ビジネス名,Google 検索 - モバイル,Google 検索 - パソコン,Google マップ - モバイル,Google マップ - パソコン,
+      // 通話,メッセージ,予約,ルート,ウェブサイトのクリック,料理の注文,フードメニューのクリック,ホテルの予約,（末尾に空列）
+      // ※ ホテルの予約はGBP Performance APIで同期していないため常に0
+      case "insights-gbp": {
+        const rows = await fetchAll<any>((f, t) =>
+          sb.from("performance_metrics_cache")
+            .select("shop_name, month, metrics, updated_at")
+            .eq("month", mk.slashNoPad)
+            .order("updated_at", { ascending: false })
+            .order("shop_id", { ascending: true })
+            .range(f, t)
+        );
+        const seen = new Set<string>();
+        const out: unknown[][] = [];
+        for (const r of rows) {
+          const name = (r.shop_name || "").normalize("NFC");
+          if (!name || seen.has(name) || isCancelled(name)) continue;
+          seen.add(name);
+          const m = r.metrics || {};
+          out.push([
+            name,
+            m.searchMobile || 0, m.searchPC || 0, m.mapMobile || 0, m.mapPC || 0,
+            m.calls || 0, m.messages || 0, m.bookings || 0, m.routes || 0, m.websites || 0,
+            m.foodOrders || 0, m.foodMenus || 0, m.hotelBookings || 0, "",
+          ]);
+        }
+        out.sort((a, b) => String(a[0]).localeCompare(String(b[0]), "ja"));
+        const csv = toCsv(
+          ["ビジネス名", "Google 検索 - モバイル", "Google 検索 - パソコン", "Google マップ - モバイル", "Google マップ - パソコン",
+           "通話", "メッセージ", "予約", "ルート", "ウェブサイトのクリック", "料理の注文", "フードメニューのクリック", "ホテルの予約", ""],
+          out,
+        );
+        return await finish(csv, `インサイト_${mk.hyphen}.csv`, out.length);
       }
 
       // ── 検索語句 横持ち（【RPA】MEOレポート用シート形式） ─────────────
