@@ -465,31 +465,41 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: "期間は最大60か月までです" }, { status: 400 });
           }
         }
-        // to月末までの全口コミ（累計計算に必要なので from より前も含む）
-        const rows = await fetchAll<{ shop_id: string; star_rating: string | null; create_time: string }>((f, t) =>
-          sb.from("reviews")
-            .select("shop_id, star_rating, create_time")
-            .lt("create_time", toK.endIso)
-            .order("create_time", { ascending: true })
-            .order("id", { ascending: true })
-            .range(f, t)
-        );
-        // 店舗×月末ごとの累計（件数・星合計）を1パスで作る
-        type Acc = { count: number; sum: number };
-        const perShop = new Map<string, Acc[]>(); // 月インデックス順の累計
-        const monthEnds = months.map((m) => new Date(m.endIso).getTime());
-        for (const r of rows) {
-          const stars = ratingNum(r.star_rating);
-          const t = new Date(r.create_time).getTime();
-          let accs = perShop.get(r.shop_id);
-          if (!accs) { accs = months.map(() => ({ count: 0, sum: 0 })); perShop.set(r.shop_id, accs); }
-          for (let i = 0; i < months.length; i++) {
-            if (t < monthEnds[i]) { accs[i].count += 1; accs[i].sum += stars; }
-          }
-        }
         const targetShops = allShops
           .filter((s) => !s.cancelled_at)
           .sort((a, b) => a.name.localeCompare(b.name, "ja"));
+        // 店舗×月末ごとの累計（件数・星合計）
+        // 全件を1本のクエリで深いOFFSETページングすると reviews の statement timeout に当たるため、
+        // 店舗ごとに shop_id で絞って取得（単店舗画面と同じ経路・インデックスあり）し、並列数を絞って回す
+        type Acc = { count: number; sum: number };
+        const perShop = new Map<string, Acc[]>(); // 月インデックス順の累計
+        const monthEnds = months.map((m) => new Date(m.endIso).getTime());
+        const CONCURRENCY = 8;
+        let cursor = 0;
+        const worker = async () => {
+          while (cursor < targetShops.length) {
+            const s = targetShops[cursor++];
+            const rows = await fetchAll<{ star_rating: string | null; create_time: string }>((f, t) =>
+              sb.from("reviews")
+                .select("star_rating, create_time")
+                .eq("shop_id", s.id)
+                .lt("create_time", toK.endIso)
+                .order("create_time", { ascending: true })
+                .range(f, t)
+            );
+            if (rows.length === 0) continue;
+            const accs = months.map(() => ({ count: 0, sum: 0 }));
+            for (const r of rows) {
+              const stars = ratingNum(r.star_rating);
+              const t = new Date(r.create_time).getTime();
+              for (let i = 0; i < months.length; i++) {
+                if (t < monthEnds[i]) { accs[i].count += 1; accs[i].sum += stars; }
+              }
+            }
+            perShop.set(s.id, accs);
+          }
+        };
+        await Promise.all(Array.from({ length: CONCURRENCY }, worker));
         const out = targetShops.map((s) => {
           const accs = perShop.get(s.id);
           const cells: unknown[] = [s.name.normalize("NFC")];
