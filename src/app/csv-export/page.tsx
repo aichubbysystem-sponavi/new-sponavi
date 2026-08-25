@@ -25,6 +25,11 @@ const ITEMS: ExportItem[] = [
     desc: "店舗ごとの検索語句と表示回数（表示回数順）",
   },
   {
+    type: "search-keywords-wide",
+    label: "検索語句（横持ち・RPAシート形式）",
+    desc: "順位1〜100 × 店舗ごとの「キーワード／検索数」列（【RPA】MEOレポート用シートにそのまま貼れる形）",
+  },
+  {
     type: "grid-ranking",
     label: "多地点順位",
     desc: "中心順位・平均順位・TOP3/TOP10/圏外地点数（店舗×キーワード、同月内は最新計測）",

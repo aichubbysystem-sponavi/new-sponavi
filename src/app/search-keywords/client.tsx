@@ -6,6 +6,7 @@ import { useShop } from "@/components/shop-provider";
 import { useRole } from "@/components/role-provider";
 import { can, PERMISSION_DENIED_HINT } from "@/lib/permissions";
 import { supabase } from "@/lib/supabase";
+import api from "@/lib/api";
 
 interface ShopKeywordStatus {
   id: string;
@@ -65,6 +66,28 @@ export default function SearchKeywordsClient() {
 
   // Sync state
   const [syncing, setSyncing] = useState(false);
+  const [csvDownloading, setCsvDownloading] = useState(false);
+  // 【RPA】MEOレポート用シート形式（順位×店舗の横持ち）でCSV出力。対象月は期間セレクタの終了月
+  const downloadWideCsv = async () => {
+    if (csvDownloading) return;
+    const src = skEnd || expectedMonth; // "2026/7"
+    const [y, m] = src.split("/").map(Number);
+    const month = `${y}-${String(m).padStart(2, "0")}`;
+    setCsvDownloading(true);
+    try {
+      const res = await api.get(`/api/export?type=search-keywords-wide&month=${month}`, { responseType: "blob", timeout: 180000 });
+      const shopsN = res.headers?.["x-row-count"];
+      if (shopsN !== undefined && Number(shopsN) === 0) { alert(`${y}年${m}月の検索語句データがありません（先に同期してください）`); return; }
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url; a.download = `【RPA】MEOレポート用 - ${y}${String(m).padStart(2, "0")}.csv`; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      let msg = "ダウンロードに失敗しました";
+      try { const text = await e?.response?.data?.text?.(); if (text) msg = JSON.parse(text)?.error || msg; } catch {}
+      alert(msg);
+    } finally { setCsvDownloading(false); }
+  };
   const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0, shopName: "" });
   const [syncResults, setSyncResults] = useState<SyncResult[]>([]);
   const [showResults, setShowResults] = useState(false);
@@ -363,6 +386,14 @@ export default function SearchKeywordsClient() {
             className="px-4 py-2 rounded-lg text-sm font-semibold bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
           >
             {syncing ? "同期中..." : `パフォーマンス一括同期 (${shops.filter((s) => s.gbp_location_name).length})`}
+          </button>
+          <button
+            onClick={downloadWideCsv}
+            disabled={csvDownloading}
+            title="期間セレクタの終了月の検索語句を、順位×店舗の横持ち（【RPA】MEOレポート用シート形式）でCSV出力"
+            className="px-4 py-2 rounded-lg text-sm font-semibold bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+          >
+            {csvDownloading ? "生成中..." : "CSVダウンロード"}
           </button>
         </div>
       </div>

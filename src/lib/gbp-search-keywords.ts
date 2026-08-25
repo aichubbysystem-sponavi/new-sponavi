@@ -60,7 +60,10 @@ async function fetchOneMonth(
 
     for (const item of data.searchKeywordsCounts || []) {
       const word = item.searchKeyword || "";
-      const raw = item.insightsValue?.value;
+      // insightsValue は value(実数) か threshold(下位語句の上限値、例15) のどちらか一方。
+      // threshold を捨てると小規模店が数語しか残らず「データなし」に見えるため、
+      // 【RPA】MEOレポート用シートと同様に threshold の値をそのまま件数として採用する。
+      const raw = item.insightsValue?.value ?? item.insightsValue?.threshold;
       const count = typeof raw === "string" ? parseInt(raw, 10) || 0 : raw || 0;
       if (word && count > 0) {
         keywords.push({ word, count });

@@ -22,6 +22,7 @@ export const maxDuration = 120;
  *  - pmax             P-MAX広告（pmax_store_data）
  *  - posts            投稿ログ（post_logs）
  *  - review-summary   口コミ点数・件数（実行時点のGoogle掲載値スナップショット。month不要）
+ *  - search-keywords-wide  検索語句 横持ち（【RPA】MEOレポート用シート形式: 順位×店舗ごとの「キーワード/検索数」列、上位100位）
  *
  * 月フォーマットはテーブルごとに異なるため内部で変換する:
  *  "2026/7"(insights, search-keywords, review-analysis) / "2026-07"(pmax) / timestamp範囲(その他)
@@ -308,6 +309,45 @@ export async function GET(request: NextRequest) {
           ]);
         const csv = toCsv(["店舗名", "投稿日時", "投稿者", "評価", "口コミ", "返信状態", "返信内容"], out);
         return await finish(csv, `口コミ一覧_${mk.hyphen}.csv`, out.length);
+      }
+
+      // ── 検索語句 横持ち（【RPA】MEOレポート用シート形式） ─────────────
+      // row1: 順位, キーワード <店舗名>, 検索数 <店舗名>, ...（店舗名順）
+      // row2〜101: 順位1〜100。語句が100未満の店舗は空欄。
+      case "search-keywords-wide": {
+        const rows = await fetchAll<any>((f, t) =>
+          sb.from("search_query_cache")
+            .select("shop_name, month, keywords, updated_at")
+            .eq("month", mk.slashNoPad)
+            .order("updated_at", { ascending: false })
+            .order("shop_id", { ascending: true })
+            .range(f, t)
+        );
+        const TOP = 100;
+        const seen = new Set<string>();
+        const shopsKw: { name: string; kws: { word: string; count: number }[] }[] = [];
+        for (const r of rows) {
+          const name = (r.shop_name || "").normalize("NFC");
+          if (!name || seen.has(name) || isCancelled(name)) continue;
+          seen.add(name);
+          const kws: { word: string; count: number }[] = Array.isArray(r.keywords) ? r.keywords : [];
+          shopsKw.push({ name, kws: [...kws].sort((a, b) => (b.count || 0) - (a.count || 0)).slice(0, TOP) });
+        }
+        shopsKw.sort((a, b) => a.name.localeCompare(b.name, "ja"));
+        const header: string[] = ["順位"];
+        for (const s of shopsKw) header.push(`キーワード ${s.name}`, `検索数 ${s.name}`);
+        const out: unknown[][] = [];
+        for (let i = 0; i < TOP; i++) {
+          const row: unknown[] = [i + 1];
+          for (const s of shopsKw) {
+            const k = s.kws[i];
+            row.push(k ? k.word || "" : "", k ? k.count || 0 : "");
+          }
+          out.push(row);
+        }
+        const csv = toCsv(header, out);
+        // 行数は店舗数を返す（100行固定のため）
+        return await finish(csv, `検索語句_横持ち_${mk.hyphen}.csv`, shopsKw.length);
       }
 
       // ── 口コミ分析AI ──────────────────────────────────────────
