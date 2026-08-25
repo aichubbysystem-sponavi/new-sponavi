@@ -76,6 +76,7 @@ export default function ReviewsPage() {
   const [noReviewShops, setNoReviewShops] = useState<{ id: string; name: string }[]>([]);
   const [loadingNoReview, setLoadingNoReview] = useState(false);
   const [csvDownloading, setCsvDownloading] = useState(false);
+  const canStaffView = can(role, "STAFF_VIEW"); // /api/export は社長・幹部・社員のみ
   const [selectedNoReview, setSelectedNoReview] = useState<Set<string>>(new Set());
   const [lastClickedIdx, setLastClickedIdx] = useState<number | null>(null);
   const [shopSyncStatus, setShopSyncStatus] = useState<Map<string, string>>(new Map());
@@ -924,10 +925,10 @@ export default function ReviewsPage() {
               const a = document.createElement("a");
               a.href = url; a.download = `${shopName}_口コミ一覧.csv`; a.click();
               URL.revokeObjectURL(url);
-            }} disabled={isAllMode ? csvDownloading : !selectedShopId}
-              title={isAllMode ? "実行時点の全店舗の点数・口コミ件数（Googleマップ掲載値）をCSV出力" : undefined}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${(isAllMode ? csvDownloading : !selectedShopId) ? "bg-slate-200 text-slate-400" : "bg-teal-600 hover:bg-teal-700"}`}
-              style={{ color: (isAllMode ? !csvDownloading : !!selectedShopId) ? "#fff" : undefined }}>
+            }} disabled={isAllMode ? (csvDownloading || !canStaffView) : !selectedShopId}
+              title={isAllMode ? (canStaffView ? "実行時点の全店舗の点数・口コミ件数（Googleマップ掲載値）をCSV出力" : PERMISSION_DENIED_HINT.STAFF_VIEW) : undefined}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${(isAllMode ? (csvDownloading || !canStaffView) : !selectedShopId) ? "bg-slate-200 text-slate-400" : "bg-teal-600 hover:bg-teal-700"}`}
+              style={{ color: (isAllMode ? (!csvDownloading && canStaffView) : !!selectedShopId) ? "#fff" : undefined }}>
               {isAllMode && csvDownloading ? "生成中..." : "CSVダウンロード"}
             </button>
           </div>

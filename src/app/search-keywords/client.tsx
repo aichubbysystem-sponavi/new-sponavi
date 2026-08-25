@@ -86,7 +86,8 @@ CSVには同期済みの店舗だけが含まれます。全店舗分が必要�
       }
       const url = URL.createObjectURL(res.data);
       const a = document.createElement("a");
-      a.href = url; a.download = `【RPA】MEOレポート用 - ${y}${String(m).padStart(2, "0")}.csv`; a.click();
+      // 参考シートのエクスポート名（【RPA】MEOレポート用 - YYYYMM.csv）と同名にすると Downloads で上書きされるため別名にする
+      a.href = url; a.download = `検索語句_横持ち_${y}${String(m).padStart(2, "0")}.csv`; a.click();
       URL.revokeObjectURL(url);
     } catch (e: any) {
       let msg = "ダウンロードに失敗しました";

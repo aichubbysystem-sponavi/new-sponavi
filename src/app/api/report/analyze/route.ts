@@ -927,7 +927,8 @@ export const POST = withAudit("AI口コミ分析", "PAID_OP", async (request, ct
             const top10 = sq.latest.slice(0, 10);
             // 全キーワード合計を使用（sq.latestは上位30件のみ、historyの対象月エントリが全件）
             const targetMonthEntry = sq.history?.find((h: any) => h.month === (curMonth || sq.latestMonth));
-            const allKeywords = targetMonthEntry?.keywords || sq.latest;
+            // threshold=true（GBPが上限値しか返さない下位語句）は実測ではないので合計・比率から除外
+            const allKeywords = (targetMonthEntry?.keywords || sq.latest).filter((q: any) => !q.threshold);
             const totalCount = allKeywords.reduce((s: number, q: any) => s + (q.count || 0), 0);
             // 指名検索の判定（店舗名の一部を含む）
             const shopWords = shop.name.toLowerCase().split(/[\s　]+/).filter((w: string) => w.length >= 2);

@@ -14,7 +14,8 @@ import { getOAuthToken } from "@/lib/gbp-token";
 
 export interface MonthlyKeywords {
   month: string; // "2026/5"
-  keywords: { word: string; count: number }[];
+  /** threshold=true は GBP が実数を返さず「上限値」だけ返した下位語句（count は上限値であって実測ではない） */
+  keywords: { word: string; count: number; threshold?: boolean }[];
 }
 
 // 月比較の実装は month-utils.ts が単一情報源（localeCompareでは10月以降が壊れる）
@@ -56,17 +57,19 @@ async function fetchOneMonth(
     }
 
     const data = await res.json();
-    const keywords: { word: string; count: number }[] = [];
+    const keywords: { word: string; count: number; threshold?: boolean }[] = [];
 
     for (const item of data.searchKeywordsCounts || []) {
       const word = item.searchKeyword || "";
       // insightsValue は value(実数) か threshold(下位語句の上限値、例15) のどちらか一方。
       // threshold を捨てると小規模店が数語しか残らず「データなし」に見えるため、
       // 【RPA】MEOレポート用シートと同様に threshold の値をそのまま件数として採用する。
-      const raw = item.insightsValue?.value ?? item.insightsValue?.threshold;
+      const hasValue = item.insightsValue?.value !== undefined && item.insightsValue?.value !== null;
+      const raw = hasValue ? item.insightsValue.value : item.insightsValue?.threshold;
       const count = typeof raw === "string" ? parseInt(raw, 10) || 0 : raw || 0;
       if (word && count > 0) {
-        keywords.push({ word, count });
+        // threshold 由来は合計・比率の計算から除外できるようフラグを残す（AI分析の総検索数が膨らむため）
+        keywords.push(hasValue ? { word, count } : { word, count, threshold: true });
       }
     }
 
