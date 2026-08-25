@@ -447,17 +447,48 @@ export async function GET(request: NextRequest) {
       // 値は口コミ同期時に GBP API から保存している Googleマップ掲載値（shops.rating / shops.review_count）。
       // DB内口コミの単純平均ではない（Googleの表示値は独自の重み付けで単純平均と一致しないため、シートもレポートも掲載値を使っている）。
       case "review-summary": {
-        const shopRows = await fetchAll<{ id: string; name: string; rating: number | null; review_count: number | null; cancelled_at: string | null; synced_at: string | null }>((f, t) =>
-          sb.from("shops").select("id, name, rating, review_count, cancelled_at, synced_at").order("id").range(f, t)
+        // shops.rating / review_count は sql/2026-08-25_shops_rating_columns.sql 適用後に同期で埋まる。
+        // 列が無い・未同期の店舗は report_shop_list（レポート店舗一覧キャッシュの掲載値）で補う。
+        type Snap = { rating: number | null; count: number | null };
+        const snap = new Map<string, Snap>(); // 正規化店舗名 → 値
+        let shopsHasColumns = true;
+        try {
+          const rows = await fetchAll<{ name: string; rating: number | null; review_count: number | null }>((f, t) =>
+            sb.from("shops").select("name, rating, review_count").order("id").range(f, t)
+          );
+          for (const r of rows) {
+            if ((r.rating && r.rating > 0) || (r.review_count && r.review_count > 0)) {
+              snap.set(normName(r.name), { rating: r.rating, count: r.review_count });
+            }
+          }
+        } catch (e: any) {
+          if (!/does not exist/i.test(e?.message || "")) throw e;
+          shopsHasColumns = false;
+        }
+        const listRows = await fetchAll<{ name: string; rating: number | null; total_reviews: number | null }>((f, t) =>
+          sb.from("report_shop_list").select("name, rating, total_reviews").order("id").range(f, t)
         );
-        const out = shopRows
+        for (const r of listRows) {
+          const k = normName(r.name);
+          if (snap.has(k)) continue;
+          if ((r.rating && r.rating > 0) || (r.total_reviews && r.total_reviews > 0)) {
+            snap.set(k, { rating: r.rating, count: r.total_reviews });
+          }
+        }
+        if (!shopsHasColumns) {
+          console.warn("[export] shops.rating/review_count 列が未作成。sql/2026-08-25_shops_rating_columns.sql を本番で実行すると同期値が使われる");
+        }
+        const out = allShops
           .filter((s) => !s.cancelled_at)
           .sort((a, b) => a.name.localeCompare(b.name, "ja"))
-          .map((s) => [
-            s.name.normalize("NFC"),
-            s.rating && s.rating > 0 ? Number(s.rating).toFixed(1) : "",
-            s.review_count ?? "",
-          ]);
+          .map((s) => {
+            const v = snap.get(normName(s.name));
+            return [
+              s.name.normalize("NFC"),
+              v?.rating && v.rating > 0 ? Number(v.rating).toFixed(1) : "",
+              v?.count ?? "",
+            ];
+          });
         // 2段ヘッダー: 1行目=店舗名,YYYY年M月,(空) / 2行目=(空),点数,件数（シートと同じ横持ち）
         const [y, mo] = mk.hyphen.split("-").map(Number);
         const header1 = ["店舗名", `${y}年${mo}月`, ""];
