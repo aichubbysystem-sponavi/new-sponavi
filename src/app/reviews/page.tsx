@@ -75,6 +75,7 @@ export default function ReviewsPage() {
   const [showNoReviewShops, setShowNoReviewShops] = useState(false);
   const [noReviewShops, setNoReviewShops] = useState<{ id: string; name: string }[]>([]);
   const [loadingNoReview, setLoadingNoReview] = useState(false);
+  const [csvDownloading, setCsvDownloading] = useState(false);
   const [selectedNoReview, setSelectedNoReview] = useState<Set<string>>(new Set());
   const [lastClickedIdx, setLastClickedIdx] = useState<number | null>(null);
   const [shopSyncStatus, setShopSyncStatus] = useState<Map<string, string>>(new Map());
@@ -880,6 +881,26 @@ export default function ReviewsPage() {
               {loadingNoReview ? "検索中..." : "口コミなし店舗"}
             </button>
             <button onClick={async () => {
+              // 全店舗表示: 店舗×月の点数・件数（口コミ(RPA)シート形式）をサーバーで生成
+              if (isAllMode) {
+                if (csvDownloading) return;
+                if (!drStart || !drEnd) { alert("期間が未設定です"); return; }
+                const toYM = (v: string) => { const [y, m] = v.split("/").map(Number); return `${y}-${String(m).padStart(2, "0")}`; };
+                const from = toYM(drStart), to = toYM(drEnd);
+                setCsvDownloading(true);
+                try {
+                  const res = await api.get(`/api/export?type=review-summary&from=${from}&to=${to}`, { responseType: "blob", timeout: 180000 });
+                  const url = URL.createObjectURL(res.data);
+                  const a = document.createElement("a");
+                  a.href = url; a.download = `口コミ点数件数_${from === to ? from : `${from}〜${to}`}.csv`; a.click();
+                  URL.revokeObjectURL(url);
+                } catch (e: any) {
+                  let msg = "ダウンロードに失敗しました";
+                  try { const text = await e?.response?.data?.text?.(); if (text) msg = JSON.parse(text)?.error || msg; } catch {}
+                  alert(msg);
+                } finally { setCsvDownloading(false); }
+                return;
+              }
               if (!selectedShopId) return;
               const shopName = selectedShop?.name || shops?.find((s: any) => s.id === selectedShopId)?.name || "店舗";
               const { data } = await supabase
@@ -904,10 +925,11 @@ export default function ReviewsPage() {
               const a = document.createElement("a");
               a.href = url; a.download = `${shopName}_口コミ一覧.csv`; a.click();
               URL.revokeObjectURL(url);
-            }} disabled={!selectedShopId}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${!selectedShopId ? "bg-slate-200 text-slate-400" : "bg-teal-600 hover:bg-teal-700"}`}
-              style={{ color: selectedShopId ? "#fff" : undefined }}>
-              CSVダウンロード
+            }} disabled={isAllMode ? csvDownloading : !selectedShopId}
+              title={isAllMode ? "期間内の各月末時点の点数・件数を店舗ごとに出力（口コミ(RPA)シート形式）" : undefined}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${(isAllMode ? csvDownloading : !selectedShopId) ? "bg-slate-200 text-slate-400" : "bg-teal-600 hover:bg-teal-700"}`}
+              style={{ color: (isAllMode ? !csvDownloading : !!selectedShopId) ? "#fff" : undefined }}>
+              {csvDownloading ? "生成中..." : "CSVダウンロード"}
             </button>
           </div>
         </div>

@@ -21,6 +21,7 @@ export const maxDuration = 120;
  *  - review-language  口コミ国別（reviews + detectLanguage）
  *  - pmax             P-MAX広告（pmax_store_data）
  *  - posts            投稿ログ（post_logs）
+ *  - review-summary   口コミ点数・件数の月次推移（店舗×月。from/to=YYYY-MM で複数月、省略時はmonthの1か月）
  *
  * 月フォーマットはテーブルごとに異なるため内部で変換する:
  *  "2026/7"(insights, search-keywords, review-analysis) / "2026-07"(pmax) / timestamp範囲(その他)
@@ -437,6 +438,76 @@ export async function GET(request: NextRequest) {
           ]);
         const csv = toCsv(["店舗名", "投稿日時", "種別", "本文", "写真URL"], out);
         return await finish(csv, `投稿ログ_${mk.hyphen}.csv`, out.length);
+      }
+
+      // ── 口コミ点数・件数の月次推移（口コミ(RPA)シートと同じ横持ち形式） ──
+      // 行=店舗、列=月ごとに「点数」「件数」。各月末時点の累計（DBの口コミから算出）。
+      // 点数はDB内口コミの単純平均（小数1桁）。Googleマップ掲載値は独自の重み付けのため
+      // 過去月の掲載値はどこにも残っておらず再現できない。件数は同期済み口コミの累計。
+      case "review-summary": {
+        const fromParam = request.nextUrl.searchParams.get("from") || monthParam;
+        const toParam = request.nextUrl.searchParams.get("to") || monthParam;
+        const fromK = parseMonth(fromParam);
+        const toK = parseMonth(toParam);
+        if (!fromK || !toK || fromParam > toParam) {
+          return NextResponse.json({ error: "from/to は YYYY-MM 形式で from<=to にしてください" }, { status: 400 });
+        }
+        // 対象月リスト（from〜to）
+        const months: MonthKeys[] = [];
+        for (let cur = fromParam; cur <= toParam; ) {
+          const k = parseMonth(cur)!;
+          months.push(k);
+          const [y, m] = cur.split("-").map(Number);
+          cur = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
+          if (months.length > 60) {
+            return NextResponse.json({ error: "期間は最大60か月までです" }, { status: 400 });
+          }
+        }
+        // to月末までの全口コミ（累計計算に必要なので from より前も含む）
+        const rows = await fetchAll<{ shop_id: string; star_rating: string | null; create_time: string }>((f, t) =>
+          sb.from("reviews")
+            .select("shop_id, star_rating, create_time")
+            .lt("create_time", toK.endIso)
+            .order("create_time", { ascending: true })
+            .order("id", { ascending: true })
+            .range(f, t)
+        );
+        // 店舗×月末ごとの累計（件数・星合計）を1パスで作る
+        type Acc = { count: number; sum: number };
+        const perShop = new Map<string, Acc[]>(); // 月インデックス順の累計
+        const monthEnds = months.map((m) => new Date(m.endIso).getTime());
+        for (const r of rows) {
+          const stars = ratingNum(r.star_rating);
+          const t = new Date(r.create_time).getTime();
+          let accs = perShop.get(r.shop_id);
+          if (!accs) { accs = months.map(() => ({ count: 0, sum: 0 })); perShop.set(r.shop_id, accs); }
+          for (let i = 0; i < months.length; i++) {
+            if (t < monthEnds[i]) { accs[i].count += 1; accs[i].sum += stars; }
+          }
+        }
+        const targetShops = allShops
+          .filter((s) => !s.cancelled_at)
+          .sort((a, b) => a.name.localeCompare(b.name, "ja"));
+        const out = targetShops.map((s) => {
+          const accs = perShop.get(s.id);
+          const cells: unknown[] = [s.name.normalize("NFC")];
+          for (let i = 0; i < months.length; i++) {
+            const a = accs?.[i];
+            if (!a || a.count === 0) { cells.push("", ""); continue; }
+            cells.push((a.sum / a.count).toFixed(1), a.count);
+          }
+          return cells;
+        });
+        // 2段ヘッダー: 1行目=店舗名,月ラベル,(空) / 2行目=(空),点数,件数
+        const monthLabel = (m: MonthKeys) => {
+          const [y, mo] = m.hyphen.split("-").map(Number);
+          return `${y}年${mo}月`;
+        };
+        const header1 = ["店舗名", ...months.flatMap((m) => [monthLabel(m), ""])];
+        const header2 = ["", ...months.flatMap(() => ["点数", "件数"])];
+        const csv = "\uFEFF" + [header1, header2, ...out].map((r) => r.map(esc).join(",")).join("\r\n");
+        const range = fromParam === toParam ? fromK.hyphen : `${fromK.hyphen}〜${toK.hyphen}`;
+        return await finish(csv, `口コミ点数件数_${range}.csv`, out.length);
       }
 
       default:
