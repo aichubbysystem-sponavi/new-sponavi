@@ -47,10 +47,17 @@ function knownCauseJa(text: string, httpStatus: number, isMedia: boolean): strin
     return "GBPのロケーションが見つかりません（店舗が別アカウント配下・削除・ロケーションIDの不一致）";
   if (httpStatus === 429 || /quota|rate ?limit|resource_exhausted/.test(t))
     return "GoogleのAPI利用上限に達しました（時間をおいて再実行）";
+  // sourceUrl 方式の取得上限。Google は "Media fetch response bytes too large (max: 26214400B)" を返す（2026-08-28 羊座 40MB/38MB）
+  if (/bytes too large|26214400/.test(t)) {
+    const mb = /(\d+(?:\.\d+)?)\s*mb/i.exec(text)?.[1];
+    return `ファイルが大きすぎてGoogleが取得できません（URL経由の上限25MB${mb ? `・このファイルは${mb}MB` : ""}）。動画は25MB以下に圧縮（解像度720p・ビットレート下げ・30秒以内）してから入れ直してください`;
+  }
+  if (/fetching (image|media|video) failed|fetch.*failed/.test(t))
+    return "Googleがファイルの取得に失敗しました（取得に時間がかかりすぎた／ファイルが大きい／URLが失効）。動画は25MB以下・30秒以内に圧縮すると通りやすくなります";
   if (/duration|too long|seconds/.test(t) && /video|media|duration/.test(t))
     return "動画の長さがGBPの上限（30秒）を超えています。30秒以内に切り出して書き出し直してください";
   if (/too large|file size|exceeds.*size|size.*exceed/.test(t))
-    return "ファイルサイズがGBPの上限（写真5MB／動画75MB）を超えています";
+    return "ファイルサイズが上限を超えています（写真5MB／動画はURL経由の取得上限25MB）";
   if (/resolution|dimension|too small|pixel/.test(t))
     return "解像度が足りません（写真は250×250px以上、動画は720p以上）";
   if (/could not fetch|fetch|download|unreachable|url.*(invalid|inaccessible)/.test(t))
@@ -66,7 +73,7 @@ function knownCauseJa(text: string, httpStatus: number, isMedia: boolean): strin
   if (/phone|url.*not allowed|link/.test(t) && !isMedia)
     return "本文中の電話番号・URLがGoogleに拒否されました（本文から外してCTAボタンに移す）";
   if (httpStatus === 400 && isMedia && /invalid argument/.test(t))
-    return "Googleが写真・動画の内容を受け付けませんでした（動画は「30秒以内・75MB以下・720p以上」、写真は「5MB以下・250×250px以上・JPG/PNG」を確認。同じ店舗へ動画を連続投稿すると2本目以降が拒否される場合もあります）";
+    return "Googleが写真・動画の内容を受け付けませんでした（動画は「25MB以下・30秒以内・720p以上」、写真は「5MB以下・250×250px以上・JPG/PNG」を確認）";
   if (httpStatus === 400 && /invalid argument/.test(t))
     return "Googleがリクエスト内容を受け付けませんでした（本文・CTAリンク・特典期間のいずれかが不正）";
   if (httpStatus >= 500)

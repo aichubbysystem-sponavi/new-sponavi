@@ -7,14 +7,16 @@ import { extFromContentType } from "@/lib/media-format";
 
 
 const BUCKET = "post-images";
-// GBPの動画上限（75MB）。写真はこれよりずっと小さいので共通の上限として使う
-const MAX_BYTES = 75 * 1024 * 1024;
+// GBPの動画上限は仕様上75MBだが、このシステムは sourceUrl（URLをGoogleに取りに来させる）方式のため
+// Google側の取得上限 25MB（26,214,400B）が実際の壁。超えると
+// 「Media fetch response bytes too large (max: 26214400B)」で400になる（2026-08-28 羊座 40MB/38MBで実証）。
+// 75MBまで通したい場合は media:startUpload（バイト直送）への切替が必要
+const MAX_BYTES = 25 * 1024 * 1024;
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024; // GBP写真上限
 
-// GBPの動画要件: 75MB以下 / 30秒以内 / 720p以上。サイズ超過は必ず30秒以内に収める作業も伴う
 function sizeOverMessage(bytes: number): string {
-  return `ファイルが大きすぎます（${Math.round(bytes / 1024 / 1024)}MB > GBPの上限75MB）。`
-    + `GBPの動画は「75MB以下・30秒以内・720p以上」が条件です。30秒以内に切り出して書き出し直してください`;
+  return `動画が大きすぎます（${(bytes / 1024 / 1024).toFixed(1)}MB > Googleが取得できる上限25MB）。`
+    + `解像度720p・30秒以内に圧縮して25MB以下にしてから入れ直してください`;
 }
 
 
@@ -83,7 +85,7 @@ export async function resolveMediaUrl(
       console.error(`[image-proxy] ${msg}`);
       return { url: null, error: msg };
     }
-    // Content-Lengthが無いDropboxリンク用の保険（GBPの動画上限は75MB）
+    // Content-Lengthが無いDropboxリンク用の保険（Google取得上限25MB）
     if (buffer.length > MAX_BYTES) {
       const msg = sizeOverMessage(buffer.length);
       console.error(`[image-proxy] ${msg}: ${sourceName || imageUrl.slice(0, 60)}`);

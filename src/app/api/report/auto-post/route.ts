@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { withAudit } from "@/lib/audit";
 import { detectMediaFormat, isSupportedMediaFile, type GbpMediaFormat } from "@/lib/media-format";
+import { explainGbpError } from "@/lib/gbp-error-ja";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -461,10 +462,34 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
   const subfolders = await getRootSubfolders(dbxToken);
   if (subfolders.length === 0) return { items: [], debug: "おおもとフォルダのサブフォルダ0件" };
 
-  // 店舗名でフォルダを検索（正規化完全一致のみ）
-  const matched = subfolders.find(f => matchShopName(f.name, shopName));
+  // 店舗名でフォルダを検索。
+  // おおもとフォルダの店舗フォルダは「202 札幌ジンギスカン 羊座 札幌」のように先頭に管理番号が付く運用
+  // （dropbox-chubby-system の新構成、2026-08-26 全216店舗移行）。以前は正規化完全一致だけだったため、
+  // F列にURLが無い店舗は番号付きフォルダと一致せず「写真なし」で17店舗が抜けた（2026-08-28）。
+  // 1) 完全一致 → 2) 先頭番号を除いて完全一致 → 3) 片方がもう片方を含む（候補が1件のときだけ）の順で探す
+  const stripNo = (n: string) => n.replace(/^\d+[\s\u3000_\-.．]*/, "");
+  const target = normName(shopName);
+  let matched = subfolders.find(f => matchShopName(f.name, shopName))
+    || subfolders.find(f => normName(stripNo(f.name)) === target);
+  if (!matched && target.length >= 3) {
+    const contains = subfolders.filter(f => {
+      const n = normName(stripNo(f.name));
+      return n.length >= 3 && (n.includes(target) || target.includes(n));
+    });
+    if (contains.length === 1) matched = contains[0];
+  }
   if (!matched) {
-    return { items: [], debug: `おおもとフォルダ${subfolders.length}件中「${shopName}」一致なし` };
+    // 近い名前を出して「フォルダ名の何が違うか」を画面で分かるようにする（3文字の共通部分で近さを数える）
+    const grams = (n: string) => { const g = new Set<string>(); for (let i = 0; i + 3 <= n.length; i++) g.add(n.slice(i, i + 3)); return g; };
+    const tg = grams(target);
+    const near = subfolders
+      .map(f => { const fg = grams(normName(stripNo(f.name))); let c = 0; tg.forEach(x => { if (fg.has(x)) c++; }); return { name: f.name, c }; })
+      .filter(x => x.c > 0).sort((a, b) => b.c - a.c).slice(0, 3).map(x => `「${x.name}」`);
+    return {
+      items: [],
+      debug: `Dropboxのおおもとフォルダ（${subfolders.length}件）に店舗名「${shopName}」と同じ名前のフォルダがありません`
+        + (near.length > 0 ? `。近い名前: ${near.join(" ")}（店舗名と一致するようフォルダ名かシートB列を直してください）` : "。フォルダ名の先頭の番号は無視して照合しています"),
+    };
   }
 
   // マッチしたサブフォルダを、おおもとフォルダの共有リンク経由でlist_folder
@@ -1321,9 +1346,9 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
         } else {
           // GBPの400は message が "Request contains an invalid argument." だけで、本当の理由は details 側に入る。
           // ファイル名・サイズも併記しないと「同じ店の1枚目は成功、2枚目は失敗」の原因が追えない（2026-08-21 ワイロ）
-          const gbpDetails = mediaBody?.error?.details ? JSON.stringify(mediaBody.error.details).slice(0, 300) : "";
-          const sizeNote = resolvedBytes ? ` / ${(resolvedBytes / 1024 / 1024).toFixed(2)}MB` : "";
-          const errDetail = `${mediaBody?.error?.message || JSON.stringify(mediaBody).slice(0, 200)}${gbpDetails ? ` | ${gbpDetails}` : ""} / ファイル: ${match.mediaFileName || "?"}${sizeNote}`;
+          // 日本語の原因を先頭に、Googleの原文は後ろに残す（画面は「｜」の先頭だけ強調表示）
+          const sizeNote = resolvedBytes ? `（${(resolvedBytes / 1024 / 1024).toFixed(2)}MB）` : "";
+          const errDetail = `${explainGbpError("GBP Media API", mediaRes.status, JSON.stringify(mediaBody), { isMedia: true })}｜ファイル: ${match.mediaFileName || "?"}${sizeNote}`;
           results.push({ shopName: match.shopName, status: `写真エラー(${mediaRes.status})`, detail: errDetail, summary: match.photoDebug, sourceUrl: stableUrl });
           errors++;
         }

@@ -14,7 +14,19 @@ describe("explainGbpError", () => {
   it("details が無い 400 の写真投稿は仕様の確認項目を案内する", () => {
     const raw = '{ "error": { "code": 400, "message": "Request contains an invalid argument.", "status": "INVALID_ARGUMENT" } }';
     const s = explainGbpError("GBP Media API", 400, raw, { isMedia: true });
-    expect(s).toContain("30秒以内・75MB以下・720p以上");
+    expect(s).toContain("25MB以下・30秒以内・720p以上");
+  });
+
+  it("25MB超（bytes too large）は日本語でサイズ超過と説明し、実サイズも拾う", () => {
+    const raw = '{"error":{"code":400,"message":"Request contains an invalid argument.","status":"INVALID_ARGUMENT","details":[{"@type":"type.googleapis.com/google.mybusiness.v4.ValidationError","errorDetails":[{"code":10,"message":"Media fetch response bytes too large (max: 26214400B).","value":"https://x/y.mov"}]}]}}';
+    const s = explainGbpError("GBP Media API", 400, raw, { isMedia: true });
+    expect(s).toContain("上限25MB");
+    expect(s).toContain("Google: Media fetch response bytes too large");
+  });
+
+  it("Fetching image failed は取得失敗と説明する", () => {
+    const raw = '{"error":{"code":400,"message":"Request contains an invalid argument.","details":[{"errorDetails":[{"code":1000,"message":"Fetching image failed."}]}]}}';
+    expect(explainGbpError("GBP Media API", 400, raw, { isMedia: true })).toContain("取得に失敗");
   });
 
   it("JSONでない本文でも落ちない", () => {

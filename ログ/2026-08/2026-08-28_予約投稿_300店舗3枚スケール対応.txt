@@ -42,3 +42,17 @@
   posts UI: 「事前チェック（登録しない）」ボタン＋結果（登録可能/保留/登録不可を理由別に集計＋対処のヒント）
             エラー投稿一覧は日本語の原因を先頭に、原文は折りたたみ
   ※既存4件のエラー行は旧形式のまま。「再実行」すると新形式（日本語＋Google原文）で記録される
+
+■ 追加（同日・3回目）: 真因判明と対処
+  実行結果画面のGoogle原文で真因が判明:
+   - 動画400 = "Media fetch response bytes too large (max: 26214400B)" → sourceUrl方式の取得上限は25MB
+     （(2).mov 40.42MB / (3).mov 37.93MB）。75MBはGBPの動画仕様上限であってURL取得方式では通らない
+     (1).mov 19.38MB は "Fetching image failed"（Google側取得失敗。cronの12:00回では同店の1本目が成功しており再現性は不明）
+   - 写真なし = 「おおもとフォルダ224件中『店舗名』一致なし」。店舗フォルダは「202 札幌ジンギスカン 羊座 札幌」のように
+     先頭に管理番号が付く運用（dropbox-chubby-system 8/26新構成）なのに、照合が正規化完全一致のみだった
+  変更:
+   lib/image-proxy: MAX_BYTES 75MB→25MB（登録時点で日本語理由付きで弾く。75MBまで通すなら media:startUpload への切替が必要）
+   lib/gbp-error-ja: "bytes too large/26214400"・"Fetching image failed" のパターン追加、文言を25MB基準に
+   auto-post 即時投稿の写真エラーも explainGbpError 経由（英語JSONの羅列をやめる）
+   auto-post searchDropboxByShopName: 完全一致→番号除去で完全一致→包含（候補1件のみ）の順。不一致時は近い名前3件を提示
+  ※Dropboxトークンはローカルに無く、フォルダ名照合の改善はコード上の対処。事前チェックで17店舗を再確認して実証すること
