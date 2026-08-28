@@ -4,6 +4,7 @@ import { getOAuthToken, getAllOAuthTokens } from "@/lib/gbp-token";
 import { resolveLocationName } from "@/lib/gbp-location";
 import { resolveImageUrl, cleanupImage } from "@/lib/image-proxy";
 import { detectMediaFormat } from "@/lib/media-format";
+import { explainGbpError, ERROR_DETAIL_MAX } from "@/lib/gbp-error-ja";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -48,7 +49,7 @@ async function postViaGoApi(
       return { ok: false, error: "Go API: 投稿名なし（GBP未接続の可能性）" };
     }
     const errText = await res.text().catch(() => "");
-    return { ok: false, error: `Go API ${res.status}: ${errText.slice(0, 200)}` };
+    return { ok: false, error: explainGbpError("Go API", res.status, errText) };
   } catch (e: any) {
     return { ok: false, error: `Go API通信エラー: ${e?.message}` };
   }
@@ -123,7 +124,7 @@ async function postDirectGbpApi(
       return { ok: true, name: result?.name || "unknown" };
     }
     const errText = await res.text().catch(() => "");
-    return { ok: false, error: `GBP API ${res.status}: ${errText.slice(0, 200)}` };
+    return { ok: false, error: explainGbpError("GBP API", res.status, errText) };
   } catch (e: any) {
     return { ok: false, error: e?.message || "通信エラー" };
   }
@@ -153,7 +154,7 @@ async function uploadPhotoViaGoApi(
       return { ok: true, name: result?.name || "media-uploaded" };
     }
     const errText = await res.text().catch(() => "");
-    return { ok: false, error: `Go API media_direct ${res.status}: ${errText.slice(0, 200)}` };
+    return { ok: false, error: explainGbpError("Go API media_direct", res.status, errText, { isMedia: true }) };
   } catch (e: any) {
     return { ok: false, error: `Go API通信エラー: ${e?.message}` };
   }
@@ -179,7 +180,7 @@ async function uploadPhotoDirectMediaApi(
       return { ok: true, name: result?.name || "media-uploaded" };
     }
     const errText = await res.text().catch(() => "");
-    return { ok: false, error: `GBP Media API ${res.status}: ${errText.slice(0, 200)}` };
+    return { ok: false, error: explainGbpError("GBP Media API", res.status, errText, { isMedia: true }) };
   } catch (e: any) {
     return { ok: false, error: e?.message || "通信エラー" };
   }
@@ -308,14 +309,14 @@ export async function GET(request: NextRequest) {
         posted++;
       } else {
         await supabase.from("scheduled_posts").update({
-          status: "error", error_detail: result.error?.slice(0, 300),
+          status: "error", error_detail: result.error?.slice(0, ERROR_DETAIL_MAX),
         }).eq("id", post.id);
         errors++;
       }
     } catch (e: any) {
       try {
         await supabase.from("scheduled_posts").update({
-          status: "error", error_detail: (e?.message || "不明な例外").slice(0, 300),
+          status: "error", error_detail: (e?.message || "不明な例外").slice(0, ERROR_DETAIL_MAX),
         }).eq("id", post.id);
       } catch (dbErr: any) {
         // DB更新自体が失敗した場合、ログ出力して次回のstaleリカバリに委ねる

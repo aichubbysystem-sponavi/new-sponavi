@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, verifyAuth, requireShopAccessById, getUserAllowedShops, safeEqual } from "@/lib/supabase";
 import { withAudit, requireCtxShopAccess, requireCtxShopAccessById, type AuditContext } from "@/lib/audit";
 import { getAllOAuthTokens } from "@/lib/gbp-token";
+import { explainGbpError, ERROR_DETAIL_MAX } from "@/lib/gbp-error-ja";
+import { detectMediaFormat } from "@/lib/media-format";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -276,7 +278,7 @@ async function executeScheduledPosts(
             const r = await mdRes.json().catch(() => ({}));
             postOk = true; postName = r?.name || "media-uploaded";
           } else {
-            postError = await mdRes.text().catch(() => "");
+            postError = explainGbpError("Go API media_direct", mdRes.status, await mdRes.text().catch(() => ""), { isMedia: true });
           }
         } catch (e: any) { postError = e?.message || "通信エラー"; }
 
@@ -288,21 +290,28 @@ async function executeScheduledPosts(
           const locName = shop?.gbp_location_name ? await resolveLocationName(shop.gbp_location_name) : null;
           if (locName) {
             const allTokens = await getAllOAuthTokens();
+            // 動画は mediaFormat: "VIDEO" で送る必要がある。以前は PHOTO 固定だったため
+            // 「再実行」「今すぐ実行」から動画を投げると必ず 400 になっていた（cron側は対応済みだった）
+            const mediaFormat = detectMediaFormat(post.photo_url || "") || "PHOTO";
+            let lastMediaErr = "";
             for (const token of allTokens) {
               try {
                 const mediaRes = await fetch(`${GBP_API_BASE}/${locName}/media`, {
                   method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-                  body: JSON.stringify({ mediaFormat: "PHOTO", sourceUrl: post.photo_url, locationAssociation: { category: "ADDITIONAL" } }),
-                  signal: AbortSignal.timeout(30000),
+                  body: JSON.stringify({ mediaFormat, sourceUrl: post.photo_url, locationAssociation: { category: "ADDITIONAL" } }),
+                  signal: AbortSignal.timeout(mediaFormat === "VIDEO" ? 60000 : 30000),
                 });
                 if (mediaRes.ok) {
                   const r = await mediaRes.json().catch(() => ({}));
                   postOk = true; postName = r?.name || "media-uploaded";
                   break;
                 }
-              } catch {}
+                lastMediaErr = explainGbpError("GBP Media API", mediaRes.status, await mediaRes.text().catch(() => ""), { isMedia: true });
+                // 400 はトークンを変えても同じ（内容の問題）なので打ち切る
+                if (mediaRes.status === 400) break;
+              } catch (e: any) { lastMediaErr = `通信エラー: ${e?.message || ""}`; }
             }
-            if (!postOk) postError = `全トークン(${allTokens.length}件)でMedia API失敗`;
+            if (!postOk) postError = lastMediaErr || `全トークン(${allTokens.length}件)でMedia API失敗`;
           } else {
             postError = "ロケーション解決失敗";
           }
@@ -339,7 +348,7 @@ async function executeScheduledPosts(
             const result = await res.json().catch(() => ({}));
             postOk = true; postName = result?.name || "unknown";
           } else {
-            postError = `Go API ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`;
+            postError = explainGbpError("Go API", res.status, await res.text().catch(() => ""));
           }
         } catch (e: any) { postError = e?.message || "通信エラー"; }
       }
@@ -356,12 +365,12 @@ async function executeScheduledPosts(
         executed++;
       } else {
         await supabase.from("scheduled_posts").update({
-          status: "error", error_detail: postError.slice(0, 300),
+          status: "error", error_detail: postError.slice(0, ERROR_DETAIL_MAX),
         }).eq("id", post.id);
         errors++;
       }
     } catch (e: any) {
-      await supabase.from("scheduled_posts").update({ status: "error", error_detail: (e?.message || "不明な例外").slice(0, 300) }).eq("id", post.id);
+      await supabase.from("scheduled_posts").update({ status: "error", error_detail: (e?.message || "不明な例外").slice(0, ERROR_DETAIL_MAX) }).eq("id", post.id);
       errors++;
     }
   }

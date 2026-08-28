@@ -706,7 +706,7 @@ function parseCSV(text: string): string[][] {
  */
 export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (request, ctx) => {
   const body = await request.json();
-  const { sheetId, targetDate, dryRun, topicType, batchOffset, batchSize, filterShopName, filterShopNames, scheduleMode, scheduleAt } = body as {
+  const { sheetId, targetDate, dryRun, topicType, batchOffset, batchSize, filterShopName, filterShopNames, scheduleMode, scheduleAt, checkOnly } = body as {
     sheetId: string;
     targetDate: string; // "2026-04-11"
     dryRun?: boolean;
@@ -717,11 +717,13 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
     filterShopNames?: string[]; // 特定店舗リストに絞り込み（再実行用）
     scheduleMode?: boolean; // true: 即時投稿ではなく予約投稿として保存
     scheduleAt?: string; // 予約日時 "2026-04-12T09:00:00"（scheduleMode時）
+    checkOnly?: boolean; // scheduleMode時: 事前チェックのみ（Dropbox検索・店舗照合・警告判定まで行い、Storage保存とDB登録はしない）
   };
   const isPhotoOnly = topicType === "PHOTO";
 
   // 監査ログ: プレビュー / 予約登録 / 即時実行を操作名で区別
   if (dryRun) ctx.actionOverride = "シート自動投稿プレビュー";
+  else if (scheduleMode && checkOnly) ctx.actionOverride = "シート自動投稿事前チェック";
   else if (scheduleMode) ctx.actionOverride = "シート自動投稿予約登録";
 
   // リクエストごとにDropboxサブフォルダキャッシュをリセット
@@ -1065,7 +1067,7 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
       // 0. Dropbox一時URL（get_temporary_link・有効期限4時間）を安定URLに変換してから保存
       //    実行は予約時刻（翌日以降もあり得る）のため、一時URLのままだと実行時に失効している
       //    ※Storage上の画像は実行完了まで必要なので、ここではcleanupImageを呼ばないこと
-      if (match.photoUrl && match.photoUrl.includes("dropbox")) {
+      if (match.photoUrl && match.photoUrl.includes("dropbox") && !checkOnly) {
         const { resolveMediaUrl } = await import("@/lib/image-proxy");
         // ファイル名を渡して拡張子を保つ。実行時はこのURLの拡張子で PHOTO / VIDEO を判定する
         const resolved = await resolveMediaUrl(
@@ -1115,6 +1117,32 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
       settled.forEach((r, idx) => {
         if (r.status === "fulfilled") prepared.push(r.value);
         else prepared.push({ match: chunk[idx], shop: null, warnings: [], skip: { reason: `エラー: ${r.reason?.message || "不明"}` } });
+      });
+    }
+
+    // --- 事前チェックのみ: 登録せずに「登録できる／できない理由」を返す ---
+    // 300店舗を予約する前に、写真が見つからない店舗・未登録店舗を洗い出すため。
+    // 以前は本登録して初めてスキップが分かり、しかも理由が残らなかった
+    if (checkOnly) {
+      for (const { match, shop, warnings, skip } of prepared) {
+        if (skip || !shop) {
+          schedResults.push({ shopName: match.shopName, status: skip?.reason || "エラー: 店舗解決不能", detail: skip?.detail, check: "ng" });
+          schedErrors++;
+        } else if (warnings.length > 0) {
+          schedResults.push({ shopName: match.shopName, status: "登録可能（保留になります）", warnings, detail: match.photoDebug, check: "hold" });
+          scheduled++;
+        } else {
+          schedResults.push({ shopName: match.shopName, status: "登録可能", detail: match.photoDebug, check: "ok" });
+          scheduled++;
+        }
+      }
+      ctx.detail = `${targetDate}: 事前チェック 登録可能${scheduled}件/不可${schedErrors}件（マッチ${allMatches.length}件）`;
+      return NextResponse.json({
+        matches: allMatches.length, failedTabs,
+        posted: scheduled, errors: schedErrors, results: schedResults,
+        batchOffset: offset, batchSize: size, batchProcessed: batchMatches.length,
+        hasMore: offset + size < rowCount, nextOffset: offset + size,
+        scheduleMode: true, checkOnly: true, scheduledAt: scheduledTime,
       });
     }
 

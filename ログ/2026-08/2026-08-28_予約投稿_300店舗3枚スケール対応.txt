@@ -31,3 +31,14 @@
     （成功→タイミング起因、再び400→尺30秒/75MB/解像度の仕様起因）
   - GBP API のメディア投稿クォータは未確認。cron 10並列は据え置き（増やすなら quota 確認後）
   - 予約登録は依然ブラウザ主導（300店舗=30バッチ・目安30〜45分、タブを閉じると停止。重複チェックがあるので再開は同条件で再登録すればよい）
+
+■ 追加（同日）: エラー原因の日本語化・事前チェック
+  src/lib/gbp-error-ja.ts（+test）: explainGbpError() = 「日本語の原因｜Google: errorDetails原文｜経路 HTTP: 全文(600字)」
+   - 以前はAPI応答を200文字で切ってから保存していたため、Googleの本当の理由（errorDetails[].message）が消えていた
+   - error_detail の保存上限 300→1500（ERROR_DETAIL_MAX）
+  cron/execute-posts, scheduled-posts PUT: 全エラー箇所を explainGbpError 経由に
+  scheduled-posts PUT（再実行/今すぐ実行）: Media API直叩きが mediaFormat: "PHOTO" 固定だった → 動画は必ず400。detectMediaFormat で VIDEO を送る
+  auto-post: checkOnly（scheduleMode）= Dropbox検索・店舗照合・警告判定のみ。Storage保存もDB登録もしない
+  posts UI: 「事前チェック（登録しない）」ボタン＋結果（登録可能/保留/登録不可を理由別に集計＋対処のヒント）
+            エラー投稿一覧は日本語の原因を先頭に、原文は折りたたみ
+  ※既存4件のエラー行は旧形式のまま。「再実行」すると新形式（日本語＋Google原文）で記録される

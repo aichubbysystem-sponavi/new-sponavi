@@ -1220,6 +1220,48 @@ export default function PostsPage() {
                     className="px-4 py-2 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed" style={{ color: "#fff" }}>
                     {autoPosting ? "予約中..." : "予約投稿として登録"}
                   </button>
+                  {/* 事前チェック: Dropbox写真検索・店舗照合・警告判定だけ行い、Storage保存もDB登録もしない。
+                      300店舗を登録する前に「写真が無い店舗」「未登録店舗」をここで潰す */}
+                  <button onClick={async () => {
+                    setAutoPosting(true); setAutoPostResult(null);
+                    const sc = buildAutoPostFilter(autoPostAttempt > 1 ? autoPostFailedShops : undefined);
+                    if (!sc.ok) { setAutoPostResult({ error: sc.error }); setAutoPosting(false); return; }
+                    const scheduledAt = `${scheduleDate || autoPostDate}T${scheduleHour.padStart(2, "0")}:00:00+09:00`;
+                    try {
+                      const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, ...sc.filter }, { timeout: 120000 });
+                      const total = previewRes.data.matches || 0;
+                      if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません`, zeroDebug: previewRes.data.debug, failedTabs: previewRes.data.failedTabs }); setAutoPosting(false); return; }
+                      const bs = 10;
+                      const totalBatches = Math.ceil(total / bs);
+                      const allResults: any[] = [];
+                      let off = 0, hasMore = true, batchNum = 0;
+                      while (hasMore) {
+                        batchNum++;
+                        setMsg(`事前チェック中... バッチ${batchNum}/${totalBatches}`);
+                        try {
+                          const res = await api.post("/api/report/auto-post", {
+                            sheetId: autoPostSheet, targetDate: autoPostDate, topicType: postSelectedType || newPost.topicType,
+                            batchOffset: off, batchSize: bs, ...sc.filter,
+                            scheduleMode: true, checkOnly: true, scheduleAt: scheduledAt,
+                          }, { timeout: 290000 });
+                          if (res.data.results) allResults.push(...res.data.results);
+                          hasMore = res.data.hasMore === true;
+                          off = res.data.nextOffset || (off + bs);
+                        } catch (e: any) {
+                          allResults.push({ shopName: `バッチ${batchNum}`, status: `通信エラー（行${off + 1}〜${Math.min(off + bs, total)}は未チェック）: ${e?.message}`, check: "ng" });
+                          off += bs; hasMore = off < total;
+                        }
+                      }
+                      const ng = allResults.filter((r: any) => r.check === "ng").length;
+                      setAutoPostResult({ mode: "check", results: allResults, matches: total, failedTabs: previewRes.data.failedTabs });
+                      setMsg(`事前チェック完了: 登録可能${allResults.length - ng}件 / 登録不可${ng}件`);
+                    } catch (e: any) { setAutoPostResult({ error: e?.response?.data?.error || e?.message }); }
+                    finally { setAutoPosting(false); }
+                  }} disabled={!can(role, "EXTERNAL_OP") || autoPosting}
+                    className="px-4 py-2 rounded-lg text-xs font-semibold bg-white border border-blue-300 text-blue-700 hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="登録せずに、写真が見つかるか・店舗が登録済みかを全店舗分チェックします">
+                    {autoPosting ? "チェック中..." : "事前チェック（登録しない）"}
+                  </button>
                 </div>
                 {/* 「絞り込んだつもりで全店舗に投稿していた」を防ぐため、実行前に投稿先を常に表示する */}
                 {(() => {
@@ -1247,7 +1289,7 @@ export default function PostsPage() {
                   </div>
                 )}
                 {autoPostResult && (
-                  <div className={`rounded-lg p-3 text-sm ${autoPostResult.error ? "bg-red-50 text-red-700 border border-red-200" : autoPostResult.mode === "preview" ? "bg-blue-50 text-blue-700 border border-blue-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}>
+                  <div className={`rounded-lg p-3 text-sm ${autoPostResult.error ? "bg-red-50 text-red-700 border border-red-200" : (autoPostResult.mode === "preview" || autoPostResult.mode === "check") ? "bg-blue-50 text-blue-700 border border-blue-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}>
                     {autoPostResult.error ? (
                       <>
                         <p>エラー: {autoPostResult.error}</p>
@@ -1271,7 +1313,67 @@ export default function PostsPage() {
                           </details>
                         )}
                       </>
-                    ) : autoPostResult.mode === "preview" ? (
+                    ) : autoPostResult.mode === "check" ? (() => {
+                      const results: any[] = autoPostResult.results || [];
+                      const ok = results.filter((r) => r.check === "ok");
+                      const hold = results.filter((r) => r.check === "hold");
+                      const ng = results.filter((r) => r.check === "ng");
+                      const byReason = new Map<string, any[]>();
+                      for (const r of ng) { const k = r.status || "不明"; byReason.set(k, [...(byReason.get(k) || []), r]); }
+                      return (
+                        <>
+                          <div className="flex items-center gap-3 mb-3 flex-wrap">
+                            <p className="font-semibold">事前チェック結果（{autoPostResult.matches}店舗）:</p>
+                            <span className="text-xs px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-semibold">{ok.length}件 登録可能</span>
+                            {hold.length > 0 && <span className="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-semibold">{hold.length}件 保留扱い（警告）</span>}
+                            {ng.length > 0 && <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-700 font-semibold">{ng.length}件 登録不可</span>}
+                          </div>
+                          {ng.length > 0 && (
+                            <div className="mb-3 bg-red-50 border border-red-200 rounded-lg p-3">
+                              <p className="text-xs font-semibold text-red-700 mb-2">登録不可（{ng.length}件）— このまま予約すると予約行が作られずスキップされます</p>
+                              {Array.from(byReason.entries()).map(([reason, items]) => (
+                                <div key={reason} className="mb-2">
+                                  <p className="text-[11px] font-semibold text-red-700">{reason}（{items.length}件）
+                                    <span className="font-normal text-red-500 ml-2">
+                                      {reason.includes("写真なし") ? "→ Dropboxの店舗フォルダに「写真投稿YY-M-N (1).jpg」形式のファイルがあるか確認" :
+                                       reason.includes("店舗未登録") ? "→ シートB列の店舗名を、店舗情報管理の店舗名（またはGBP店名）と完全一致させる。GBP未連携の店舗は対象外" :
+                                       reason.includes("本文なし") ? "→ シートC列に本文を入れる" : ""}
+                                    </span>
+                                  </p>
+                                  {items.map((r: any, i: number) => (
+                                    <div key={i} className="py-1 border-t border-red-100 first:border-t-0 flex items-start gap-2">
+                                      <span className="text-xs font-medium text-red-800 min-w-[180px]">{r.shopName}</span>
+                                      {r.detail && <span className="text-[10px] text-red-500 break-all">{r.detail}</span>}
+                                    </div>
+                                  ))}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {hold.length > 0 && (
+                            <div className="mb-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                              <p className="text-xs font-semibold text-amber-700 mb-2">保留扱い（{hold.length}件）— 登録はされますが警告があり自動実行されません</p>
+                              {hold.map((r: any, i: number) => (
+                                <div key={i} className="py-1 border-t border-amber-100 first:border-t-0">
+                                  <span className="text-xs font-medium text-amber-800">{r.shopName}</span>
+                                  {r.warnings?.map((w: string, wi: number) => <p key={wi} className="text-[10px] text-amber-600 ml-2">⚠ {w}</p>)}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {ok.length > 0 && (
+                            <details>
+                              <summary className="text-xs font-semibold text-emerald-700 cursor-pointer">登録可能（{ok.length}件）を表示</summary>
+                              <div className="mt-1 grid grid-cols-1 md:grid-cols-2 gap-x-4">
+                                {ok.map((r: any, i: number) => (
+                                  <p key={i} className="text-[11px] text-emerald-800 py-0.5">{r.shopName} <span className="text-emerald-500">{r.detail}</span></p>
+                                ))}
+                              </div>
+                            </details>
+                          )}
+                        </>
+                      );
+                    })() : autoPostResult.mode === "preview" ? (
                       <>
                         <p className="font-semibold mb-2">プレビュー: {autoPostResult.matches}件マッチ</p>
                         {autoPostResult.data?.map((d: any, i: number) => (
@@ -1919,10 +2021,25 @@ export default function PostsPage() {
                     <div className="flex items-center justify-between">
                       <div className="flex-1 min-w-0">
                         <p className="text-sm text-slate-700 truncate">{sp.summary}</p>
-                        <p className="text-xs text-red-500 mt-0.5">
-                          {sp.error_detail || "不明なエラー"}
-                          {sp.shop_name && ` — ${sp.shop_name}`}
-                        </p>
+                        {/* error_detail は「日本語の原因｜Google: 原文｜経路 HTTP: 全文」の順。先頭だけ見せて残りは折りたたむ */}
+                        {(() => {
+                          const parts = String(sp.error_detail || "不明なエラー").split("｜");
+                          return (
+                            <div className="mt-0.5">
+                              <p className="text-xs text-red-600 font-semibold">
+                                {parts[0]}
+                                {sp.shop_name && <span className="font-normal text-red-500"> — {sp.shop_name}</span>}
+                                {sp.photo_url && <span className="font-normal text-slate-400 ml-2">{/\.(mov|mp4)(\?|$)/i.test(sp.photo_url) ? "動画" : "写真"}</span>}
+                              </p>
+                              {parts.length > 1 && (
+                                <details className="mt-0.5">
+                                  <summary className="text-[10px] text-red-400 cursor-pointer">Googleの応答原文を表示</summary>
+                                  {parts.slice(1).map((t: string, i: number) => <p key={i} className="text-[10px] text-slate-500 break-all">{t}</p>)}
+                                </details>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                       <div className="flex items-center gap-1.5 ml-3 flex-shrink-0">
                         <button onClick={() => handleRetry(sp.id)} disabled={!can(role, "DATA_OP") || retrying === sp.id}

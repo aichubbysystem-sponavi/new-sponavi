@@ -1,0 +1,48 @@
+## 【2026-08-25】
+### 決定事項
+- レポート「先月の実施内容」＋「公開した写真一覧」ページは機能保留 → 全店非表示（フラグで再開可。cron sync-activity・APIは生かしたまま）
+- 口コミ管理の全店舗CSVは「月別累計」ではなく**実行時点のスナップショット**（店舗名／点数／件数、Googleマップ掲載値）。月選択ダイアログ・DB集計関数案は撤去
+- 検索語句CSVは【RPA】MEOレポート用シート形式（順位×店舗の「キーワード／検索数」横持ち・上位100位）。店舗の列順はシートのA列順ではなく店舗名順で妥協
+- インサイトCSVはGBP管理画面のエクスポートと同じ列構成（ビジネス名,Google 検索 - モバイル,…,ホテルの予約,末尾空列）
+- 検索語句同期は threshold 語句も保存する（シートと同じ扱い）。ただし threshold:true フラグを付け、AI分析の集計からは除外
+- 参考シートの1位の値（10000/30000）はGBP画面の概算表示の丸め。CSVはAPI実数のまま出す（丸めない）
+- 残課題4件はいずれも追加修正不要と判断（再同期は次回の月次作業で自然解消／alertは現状維持／ホテル予約0は放置）
+
+### 変更内容（具体的に）
+- src/app/report/[shopId]/client.tsx: 先頭に `SHOW_ACTIVITY_PAGE = false`。activityフェッチ・hasActivityData・表示設定トグルをすべてこのフラグで停止
+- src/app/api/export/route.ts:
+  - `type=review-summary` 追加（month不要・JST当月を自動補完）。shops.rating/review_count を読み、列未作成 or 未同期店舗は report_shop_list.rating/total_reviews でフォールバック。2段ヘッダー（店舗名,YYYY年M月,／,点数,件数）。ファイル名 口コミ点数件数_YYYY-MM-DD.csv
+  - `type=search-keywords-wide` 追加（search_query_cache→順位1〜100×店舗別2列、X-Row-Count=店舗数）
+  - `type=insights-gbp` 追加（performance_metrics_cache→GBP形式14列、店舗名順、hotelBookingsは常に0）
+- src/app/reviews/page.tsx: 全店舗表示時のCSVボタンを review-summary 呼び出しに。STAFF_VIEW 権限が無ければ無効化（csvDownloading / canStaffView 追加）
+- src/app/search-keywords/client.tsx: 「CSVダウンロード」ボタン追加（期間セレクタの終了月が対象）。同期済み店舗数 < GBP紐付き店舗数なら「N / M 店舗のみ」alert。ファイル名 検索語句_横持ち_YYYYMM.csv
+- src/app/csv-export/page.tsx: 「口コミ点数・件数」「検索語句（横持ち・RPAシート形式）」「インサイト（GBP形式）」の3項目を追加
+- src/lib/gbp-search-keywords.ts: insightsValue.value が無い語句は threshold を count として保存し `threshold: true` を付与（MonthlyKeywords型にも追加）
+- src/app/api/report/analyze/route.ts: 検索語句分析の総検索数・指名検索比率の計算から threshold 語句を除外
+- sql/2026-08-25_shops_rating_columns.sql: `ALTER TABLE shops ADD COLUMN IF NOT EXISTS rating numeric(3,1), review_count integer`（本番SQL Editorで実行済み・ユーザー実施）
+- コミット: 0b7f464 → 025d4ac → eb2a912 → 8abbc9d → 75e5bfb → d40e155 → 04bb8bd → ebaa0b4 → a2e7465 → 21c129f → d4e61e5（すべて origin/main）
+
+### 数値・設定値
+- SHOW_ACTIVITY_PAGE = false（再開は true）
+- 検索語句横持ち: TOP = 100行固定
+- shops.rating: numeric(3,1)（GBP averageRating は小数1桁に丸めて保存）／review_count: integer
+- /api/export の maxDuration = 120（既存）。authenticator ロールの statement_timeout = 8s（既存・sql/2026-07-15 に記録）
+- CSVタイムアウト（クライアント）: review-summary 120s／search-keywords-wide 180s
+- 権限: /api/export は STAFF_VIEW（president/executive/manager）のみ
+
+### 未解決・次回やること
+- インサイト（GBP形式）CSVは本番データとの突合が未実施。7月分を落としてレポートの数字（Queency: マップ11,104／検索2,607／サイト603／ルート1,177／通話332／予約4／フード693）と照合する
+- 今日より前に同期した店舗の検索語句キャッシュは value 語句のみ（threshold欠落）。正確な100位が要る月は該当店舗を再同期してからCSV。8月分以降は通常の一括同期で自動的に新ロジック
+- 西口酒場ホームランは2026/7の検索語句が未取得（同期失敗・GBP未紐付け・解約のいずれか）。検索語句管理で状態確認
+- shops.rating/review_count は次回の口コミ同期（毎時cron or 全店舗同期）まで空。それまでの点数・件数CSVは report_shop_list のキャッシュ値
+- 実施内容ページの正式な廃止/再開の判断（保留のまま）
+
+### 注意点・ハマったこと
+- **本番 shops に rating/review_count 列が存在しなかった**。sync-reviews は以前から `shops.update({rating, review_count, gbp_full_path, gbp_location_name})` を投げており、列が無いため update が**まるごと黙って失敗**していた（= gbp_full_path の永続化も効いていなかった）。analyze/route.ts に「shopsにrating列は無い」というコメントが残っていたのが手掛かり。shop-ratings / rpa-sheet-check API も同じ理由で動いていなかったはず
+- 16万件超の reviews を「全件OFFSETページング」「店舗ごと8並列」のどちらで引き抜いても statement timeout。authenticator の 8s 制限はクエリ単位なので合計で超えるとダメ。結局、実行時点の掲載値（shops）を使う要件に変わったため回避
+- /api/export は先頭で `month=YYYY-MM` を全typeに強制検証していた。新typeを足す時は month の扱いを最初に見ること
+- Vercel CLI（.vercel/）は死んだ重複プロジェクトを指しており `vercel ls` の Error 一覧は本番と無関係。反映確認は本番URLのJSバンドルに新文言が含まれるかで判定
+- **CSVのファイル名を参考ファイルと同名（【RPA】MEOレポート用 - 202607.csv）にしたため、ユーザーの参考ファイルが Downloads で上書きされて消えた**。見本と同名は絶対に避ける
+- threshold 語句を count に含める変更は、count を合計する消費側（AI分析の総検索数・指名検索比率）を壊す回帰だった。同期データの意味を変えたら必ず消費側を grep する
+- Python heredoc で `\uFEFF` `\r\n` をTS文字列に書き込むと Bash 側で実エスケープに化ける。chr(92) で組み立てるか、ファイルのCRLF/LF を確認してから byte 置換する
+- 参考CSV突合: 8店舗×上位7位で語順・件数一致。差は1位の大きい値のみ（シートが概算丸め）
