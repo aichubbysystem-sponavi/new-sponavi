@@ -173,6 +173,41 @@ async function getDropboxAccessToken(): Promise<string | null> {
   }
 }
 
+
+/**
+ * 「店舗未登録」の理由を具体化する。
+ * 2026-08-28 ガールズバーPICASSO: shops に4月から登録・GBP連携済みなのに「見つからない」になり、
+ * B列のどこが違うのか画面から分からなかった。不可視文字と近い店舗名を出す。
+ */
+function explainShopMismatch(sheetName: string, shops: { name: string; gbp_shop_name?: string | null }[]): string {
+  const parts: string[] = [];
+  // 1. 不可視文字・紛らわしい文字の指摘（ゼロ幅スペース/NBSP/BOM/改行/全角英数）
+  const hidden: string[] = [];
+  for (const ch of Array.from(sheetName)) {
+    const cp = ch.codePointAt(0) || 0;
+    if ([0x200b, 0x200c, 0x200d, 0x2060, 0xfeff].includes(cp)) hidden.push(`ゼロ幅文字(U+${cp.toString(16).toUpperCase()})`);
+    else if (cp === 0x00a0) hidden.push("ノーブレークスペース(U+00A0)");
+    else if (cp === 0x0a || cp === 0x0d) hidden.push("改行");
+    else if (cp === 0x09) hidden.push("タブ");
+  }
+  if (hidden.length > 0) parts.push(`B列に見えない文字が含まれています: ${Array.from(new Set(hidden)).join("・")}（セルを入力し直してください）`);
+  if (/[Ａ-Ｚａ-ｚ０-９]/.test(sheetName)) parts.push("B列に全角英数字が含まれています（照合は半角に揃えて比較しますが念のため確認）");
+  // 2. 近い店舗名（3文字の共通部分で近さを数える）
+  const grams = (n: string) => { const g = new Set<string>(); for (let i = 0; i + 3 <= n.length; i++) g.add(n.slice(i, i + 3)); return g; };
+  const target = normName(sheetName);
+  const tg = grams(target);
+  const near = shops
+    .map(sh => { const fg = grams(normName(sh.name)); let c = 0; tg.forEach(x => { if (fg.has(x)) c++; }); return { name: sh.name, gbp: sh.gbp_shop_name || "", c }; })
+    .filter(x => x.c > 0).sort((a, b) => b.c - a.c).slice(0, 3);
+  if (near.length > 0) {
+    parts.push(`登録済みで近い店舗名: ${near.map(x => `「${x.name}」${x.gbp && x.gbp !== x.name ? `（GBP名: ${x.gbp}）` : ""}`).join(" ")}。B列をこの表記に完全一致させてください`);
+  } else {
+    parts.push("GBP連携済みの店舗に近い名前がありません。店舗が未登録か、GBP未連携（店舗情報管理で確認）");
+  }
+  parts.push(`B列の値: 「${sheetName}」（${Array.from(sheetName).length}文字）`);
+  return parts.join("。");
+}
+
 /**
  * Dropbox API呼び出し（429対策）。
  * 300店舗×3枚規模では list_folder / get_temporary_link を数百回叩くため、
@@ -1123,7 +1158,7 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
         matchShopName(s.name, match.shopName) || matchShopName(s.gbp_shop_name || "", match.shopName)
       );
       if (!shop) {
-        return { match, shop: null, warnings: [], skip: { reason: "店舗未登録（スキップ）", detail: "shops.name / gbp_shop_name のどちらともシートB列が一致しない（GBP連携済み店舗のみ対象）" } };
+        return { match, shop: null, warnings: [], skip: { reason: "店舗未登録（スキップ）", detail: explainShopMismatch(match.shopName, shops || []) } };
       }
 
       // 差し込み文字列を投稿文に結合（shop_idまたはshop_nameでマッチ）
