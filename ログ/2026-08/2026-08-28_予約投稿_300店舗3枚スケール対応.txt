@@ -82,3 +82,9 @@
   - 復元は UPDATE shops SET deleted_at=NULL WHERE id='ccf1da74-b3cd-48b2-8b97-cdbcf71997c6'（ユーザー判断・未実行）
   - 穴: auto-post の shops 取得が gbp_location_name の有無だけで、解約72件・削除4件も投稿対象になり得た
     → .is("cancelled_at",null).is("deleted_at",null) を追加（画面一覧と同条件）
+
+■ 追加（同日・8回目）: PICASSO復元済み（ユーザーがUPDATE実行→貼り付けチェック一致1件）
+  「MEO用 Chubby」= 自社GBPアカウントグループ（meo@japanselect / chubby.yamada / chubby.co.ltd.1204 が権限保持）。
+  business_groups 登録に accounts/ID が必要だが画面にラベルしか出なかった
+  → gbp-shop-sync に unknownAccounts（accountId/label/count/examples）を追加し、同期結果画面にID付きで表示。要確認一覧は全件展開可
+  残: business_groups のスキーマ確認（q_bg.py）→ 登録SQL or 登録API → 再同期で104件を取り込み（閾値ガードの確認フロー経由）
