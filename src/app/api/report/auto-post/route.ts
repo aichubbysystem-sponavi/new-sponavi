@@ -10,7 +10,21 @@ export const maxDuration = 300;
 const GBP_API_BASE = "https://mybusiness.googleapis.com/v4";
 
 /** Dropboxから取り出したメディア。動画対応のためURLとファイル名を対で持つ */
-type MediaItem = { url: string; name: string };
+type MediaItem = { url: string; name: string; webUrl?: string };
+
+/**
+ * DropboxのWeb画面でそのファイルを直接開くURL。
+ * エラー・スキップの詳細に「どのファイルか」をリンクで示すため（サイズ超過・非対応形式のときに探す手間をなくす）。
+ * @param rootPathLower 共有フォルダの絶対パス（get_shared_link_metadata の path_lower）。Dropboxのパスは大文字小文字を区別しない
+ * @param relPath 共有フォルダからの相対パス（list_folder の path_display）
+ */
+function dropboxWebUrl(rootPathLower: string, relPath: string): string {
+  if (!rootPathLower || !relPath) return "";
+  const full = `${rootPathLower.replace(/\/$/, "")}${relPath.startsWith("/") ? relPath : `/${relPath}`}`;
+  const dir = full.slice(0, full.lastIndexOf("/"));
+  const file = full.slice(full.lastIndexOf("/") + 1);
+  return `https://www.dropbox.com/home${dir.split("/").map(encodeURIComponent).join("/")}?preview=${encodeURIComponent(file)}`;
+}
 
 /**
  * 投稿するメディアの形式。ファイル名から判定した結果を最優先し、
@@ -183,17 +197,18 @@ async function dropboxFetch(url: string, init: RequestInit): Promise<Response> {
  * 日付は一致するのに対応形式でないファイル（.arw/.heic/.webp 等）を拾って、「マッチ0件」の理由を具体的に返す。
  * 2026-08-28 羊八札幌本店: 写真投稿26-8-4 (1)〜(3).arw（SonyのRAW）で「マッチ0件・例: スクリーンショット…」としか出ず原因が分からなかった
  */
-function explainNoDateMatch(where: string, files: { name: string }[], dateCompact: string): string {
+function explainNoDateMatch(where: string, files: { name: string; path: string }[], dateCompact: string, rootPathLower = ""): string {
+  const link = (f: { name: string; path: string }) => { const u = dropboxWebUrl(rootPathLower, f.path); return u ? `${f.name} ${u}` : f.name; };
   const hasDate = (n: string) => { const i = n.indexOf(dateCompact); if (i === -1) return false; const c = n[i + dateCompact.length]; return !(c && /\d/.test(c)); };
   const unsupported = files.filter(f => hasDate(f.name) && !isSupportedMediaFile(f.name));
   if (unsupported.length > 0) {
     const exts = Array.from(new Set(unsupported.map(f => (f.name.match(/\.[^.]+$/)?.[0] || "(拡張子なし)").toLowerCase())));
     return `${where}に「${dateCompact}」のファイルは${unsupported.length}件ありますが、形式が ${exts.join(" ")} でGBPに投稿できません`
-      + `（対応: 写真 JPG/PNG、動画 MP4/MOV）。JPGに書き出し直してください。該当: ${unsupported.slice(0, 3).map(f => f.name).join(", ")}`;
+      + `（対応: 写真 JPG/PNG、動画 MP4/MOV）。JPGに書き出し直してください。該当: ${unsupported.slice(0, 3).map(link).join(" , ")}`;
   }
   const dated = files.filter(f => f.name.includes(dateCompact));
   if (dated.length > 0) {
-    return `${where}に「${dateCompact}」を含むファイルはありますが投稿対象になりません（例: ${dated.slice(0, 3).map(f => f.name).join(", ")}）。「写真投稿${dateCompact} (1).jpg」の形式にしてください`;
+    return `${where}に「${dateCompact}」を含むファイルはありますが投稿対象になりません（例: ${dated.slice(0, 3).map(link).join(" , ")}）。「写真投稿${dateCompact} (1).jpg」の形式にしてください`;
   }
   return `${where}（${files.length}件）に「写真投稿${dateCompact} (1).jpg」のような「${dateCompact}」付きファイルがありません。例: ${files.slice(0, 5).map(f => f.name).join(", ")}`;
 }
@@ -294,27 +309,6 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
 
     if (files.length === 0) return { items: [], debug: `フォルダ内にファイルが0件 [${debugSteps.join(" → ")}] URL: ${shareUrl.slice(0, 80)}` };
 
-    // ファイル名にdateCompactを含む画像をフィルタ
-    // "26-5-1"が"26-5-10"等にマッチしないよう、後続文字が数字でないことを確認
-    const dateMatches = files.filter(f => {
-      if (!isSupportedMediaFile(f.name)) return false;
-      const idx = f.name.indexOf(dateCompact);
-      if (idx === -1) return false;
-      // dateCompactの直後の文字が数字ならfalse（"26-5-1"が"26-5-10"にマッチしないように）
-      const nextChar = f.name[idx + dateCompact.length];
-      if (nextChar && /\d/.test(nextChar)) return false;
-      return true;
-    });
-
-    if (dateMatches.length === 0) {
-      return { items: [], debug: explainNoDateMatch("F列のフォルダ", files, dateCompact) };
-    }
-
-    // 全マッチファイルのDLリンクを取得
-    // 動画混在に対応するためURLとファイル名を対で持つ（Dropbox一時リンクは拡張子を含まない）
-    const items: { url: string; name: string }[] = [];
-    let dlDebug: string[] = [];
-
     // 共有フォルダのルート絶対パスを取得（get_temporary_link用）
     let sharedRootPath = "";
     try {
@@ -328,9 +322,31 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
       if (metaRes.ok) {
         const meta = await metaRes.json();
         sharedRootPath = meta.path_lower || "";
-        dlDebug.push(`共有ルート: ${sharedRootPath}`);
       }
     } catch (e: any) { console.error("[auto-post] shared link metadata error:", e?.message); }
+
+    // ファイル名にdateCompactを含む画像をフィルタ
+    // "26-5-1"が"26-5-10"等にマッチしないよう、後続文字が数字でないことを確認
+    const dateMatches = files.filter(f => {
+      if (!isSupportedMediaFile(f.name)) return false;
+      const idx = f.name.indexOf(dateCompact);
+      if (idx === -1) return false;
+      // dateCompactの直後の文字が数字ならfalse（"26-5-1"が"26-5-10"にマッチしないように）
+      const nextChar = f.name[idx + dateCompact.length];
+      if (nextChar && /\d/.test(nextChar)) return false;
+      return true;
+    });
+
+    if (dateMatches.length === 0) {
+      return { items: [], debug: explainNoDateMatch("F列のフォルダ", files, dateCompact, sharedRootPath) };
+    }
+
+    // 全マッチファイルのDLリンクを取得
+    // 動画混在に対応するためURLとファイル名を対で持つ（Dropbox一時リンクは拡張子を含まない）
+    const items: MediaItem[] = [];
+    let dlDebug: string[] = [];
+
+
 
     for (const file of dateMatches.slice(0, 10)) {
       let got = false;
@@ -346,7 +362,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
         });
         if (linkRes.ok) {
           const linkData = await linkRes.json();
-          if (linkData.link) { items.push({ url: linkData.link, name: file.name }); got = true; }
+          if (linkData.link) { items.push({ url: linkData.link, name: file.name, webUrl: dropboxWebUrl(sharedRootPath, file.path) }); got = true; }
         }
       } catch (e: any) { console.error("[auto-post] temp_link method1 error:", file.name, e?.message); }
 
@@ -365,7 +381,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
           });
           if (linkRes2.ok) {
             const linkData2 = await linkRes2.json();
-            if (linkData2.link) { items.push({ url: linkData2.link, name: file.name }); got = true; }
+            if (linkData2.link) { items.push({ url: linkData2.link, name: file.name, webUrl: dropboxWebUrl(sharedRootPath, file.path) }); got = true; }
           }
         } catch (e: any) { console.error("[auto-post] temp_link method2 error:", file.name, e?.message); }
       }
@@ -386,7 +402,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
           const shareBody = await shareRes.json();
           const fileShareUrl = shareBody?.url || shareBody?.error?.shared_link_already_exists?.metadata?.url;
           if (fileShareUrl) {
-            items.push({ url: fileShareUrl.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace(/\?dl=0/, "?dl=1"), name: file.name });
+            items.push({ url: fileShareUrl.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace(/\?dl=0/, "?dl=1"), name: file.name, webUrl: dropboxWebUrl(sharedRootPath, file.path) });
             got = true;
           }
         } catch (e: any) { console.error("[auto-post] share_link method3 error:", file.name, e?.message); }
@@ -597,20 +613,6 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
       } catch (e: any) { console.error("[auto-post] subfolder list error:", e?.message); }
     }
 
-    // 日付マッチする画像ファイルをフィルタ
-    const dateMatches = files.filter(f => {
-      if (!isSupportedMediaFile(f.name)) return false;
-      const idx = f.name.indexOf(dateCompact);
-      if (idx === -1) return false;
-      const nextChar = f.name[idx + dateCompact.length];
-      if (nextChar && /\d/.test(nextChar)) return false;
-      return true;
-    });
-
-    if (dateMatches.length === 0) {
-      return { items: [], debug: explainNoDateMatch(`フォルダ「${matched.name}」`, files, dateCompact) };
-    }
-
     // get_shared_link_metadata でルートパスを取得
     let sharedRootPath = "";
     try {
@@ -627,8 +629,24 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
       }
     } catch (e: any) { console.error("[auto-post] shop shared link metadata error:", e?.message); }
 
+    // 日付マッチする画像ファイルをフィルタ
+    const dateMatches = files.filter(f => {
+      if (!isSupportedMediaFile(f.name)) return false;
+      const idx = f.name.indexOf(dateCompact);
+      if (idx === -1) return false;
+      const nextChar = f.name[idx + dateCompact.length];
+      if (nextChar && /\d/.test(nextChar)) return false;
+      return true;
+    });
+
+    if (dateMatches.length === 0) {
+      return { items: [], debug: explainNoDateMatch(`フォルダ「${matched.name}」`, files, dateCompact, sharedRootPath) };
+    }
+
+
+
     // DLリンク取得（方法1-3を既存ロジックと同様に）
-    const items: { url: string; name: string }[] = [];
+    const items: MediaItem[] = [];
     const dlDebug: string[] = [];
 
     for (const file of dateMatches.slice(0, 10)) {
@@ -645,7 +663,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
         });
         if (linkRes.ok) {
           const d = await linkRes.json();
-          if (d.link) { items.push({ url: d.link, name: file.name }); got = true; }
+          if (d.link) { items.push({ url: d.link, name: file.name, webUrl: dropboxWebUrl(sharedRootPath, file.path) }); got = true; }
         }
       } catch (e: any) { console.error("[auto-post] shop temp_link method1 error:", file.name, e?.message); }
 
@@ -662,7 +680,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
           });
           if (linkRes2.ok) {
             const d2 = await linkRes2.json();
-            if (d2.link) { items.push({ url: d2.link, name: file.name }); got = true; }
+            if (d2.link) { items.push({ url: d2.link, name: file.name, webUrl: dropboxWebUrl(sharedRootPath, file.path) }); got = true; }
           }
         } catch (e: any) { console.error("[auto-post] shop temp_link method2 error:", file.name, e?.message); }
       }
@@ -681,7 +699,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
           const shareBody = await shareRes.json();
           const fileShareUrl = shareBody?.url || shareBody?.error?.shared_link_already_exists?.metadata?.url;
           if (fileShareUrl) {
-            items.push({ url: fileShareUrl.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace(/\?dl=0/, "?dl=1"), name: file.name });
+            items.push({ url: fileShareUrl.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace(/\?dl=0/, "?dl=1"), name: file.name, webUrl: dropboxWebUrl(sharedRootPath, file.path) });
             got = true;
           }
         } catch (e: any) { console.error("[auto-post] shop share_link method3 error:", file.name, e?.message); }
@@ -806,7 +824,7 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
 
   // 対象タブを読み込み
   const tabs = ["投稿用シート", "報告必須店舗 投稿用シート", "WHITE 系列 投稿用シート"];
-  const allMatches: { shopName: string; summary: string; photoUrl: string; ctaUrl: string; tab: string; rawPhotoCell: string; rawDateCell: string; photoDebug: string; topicType: string; offerTitle: string; offerStartDate: any; offerEndDate: any; photoIndex?: number; mediaFileName?: string; mediaFormat?: GbpMediaFormat }[] = [];
+  const allMatches: { shopName: string; summary: string; photoUrl: string; ctaUrl: string; tab: string; rawPhotoCell: string; rawDateCell: string; photoDebug: string; topicType: string; offerTitle: string; offerStartDate: any; offerEndDate: any; photoIndex?: number; mediaFileName?: string; mediaFormat?: GbpMediaFormat; mediaWebUrl?: string }[] = [];
   const pendingPhotoSearch: { index: number; photoCell: string; shopName: string }[] = [];
 
   // タブのCSV取得は並列（3タブ直列だとクライアントの待ち時間に乗ってしまう）。
@@ -948,6 +966,7 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
       const applyItem = (target: any, i: number) => {
         target.photoUrl = mediaItems[i].url;
         target.mediaFileName = mediaItems[i].name;
+        target.mediaWebUrl = mediaItems[i].webUrl || "";
         target.mediaFormat = detectMediaFormat(mediaItems[i].name) || undefined;
         target.photoDebug = label(i);
       };
@@ -1132,7 +1151,7 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
         } else if (isPhotoOnly) {
           return {
             match, shop, warnings,
-            skip: { reason: "写真URL変換失敗（スキップ）", detail: `${resolved.error || "原因不明"}${match.mediaFileName ? ` / ファイル: ${match.mediaFileName}` : ""}` },
+            skip: { reason: /大きすぎ/.test(resolved.error || "") ? "動画サイズ超過（スキップ）" : "写真URL変換失敗（スキップ）", detail: `${resolved.error || "原因不明"}${match.mediaFileName ? ` / ファイル: ${match.mediaFileName}` : ""}${match.mediaWebUrl ? ` ${match.mediaWebUrl}` : ""}` },
           };
         } else {
           warnings.push(`写真URL変換失敗（写真なしで保存されます）: ${resolved.error || "原因不明"}`);
@@ -1339,7 +1358,7 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
             results.push({
               shopName: match.shopName,
               status: "写真URL変換失敗",
-              detail: `${resolved.error || "原因不明"}${match.mediaFileName ? ` / ファイル: ${match.mediaFileName}` : ""}`,
+              detail: `${resolved.error || "原因不明"}${match.mediaFileName ? ` / ファイル: ${match.mediaFileName}` : ""}${match.mediaWebUrl ? ` ${match.mediaWebUrl}` : ""}`,
               summary: match.photoDebug,
             });
             errors++;
@@ -1375,7 +1394,7 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
           // ファイル名・サイズも併記しないと「同じ店の1枚目は成功、2枚目は失敗」の原因が追えない（2026-08-21 ワイロ）
           // 日本語の原因を先頭に、Googleの原文は後ろに残す（画面は「｜」の先頭だけ強調表示）
           const sizeNote = resolvedBytes ? `（${(resolvedBytes / 1024 / 1024).toFixed(2)}MB）` : "";
-          const errDetail = `${explainGbpError("GBP Media API", mediaRes.status, JSON.stringify(mediaBody), { isMedia: true })}｜ファイル: ${match.mediaFileName || "?"}${sizeNote}`;
+          const errDetail = `${explainGbpError("GBP Media API", mediaRes.status, JSON.stringify(mediaBody), { isMedia: true })}｜ファイル: ${match.mediaFileName || "?"}${sizeNote}${match.mediaWebUrl ? ` ${match.mediaWebUrl}` : ""}`;
           results.push({ shopName: match.shopName, status: `写真エラー(${mediaRes.status})`, detail: errDetail, summary: match.photoDebug, sourceUrl: stableUrl });
           errors++;
         }

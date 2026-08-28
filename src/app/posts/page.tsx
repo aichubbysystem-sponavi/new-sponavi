@@ -116,6 +116,18 @@ function diagnosePostError(error: any): { cause: string; fix: string } {
   return { cause: "不明なエラー", fix: "エラー詳細を確認し、管理者に連絡してください。" };
 }
 
+/** 詳細文中の URL をリンクにする（Dropboxのファイルを直接開けるように） */
+function Linkify({ text }: { text: string }) {
+  const parts = String(text || "").split(/(https?:\/\/[^\s,)）]+)/g);
+  return (
+    <>
+      {parts.map((t, i) => /^https?:\/\//.test(t)
+        ? <a key={i} href={t} target="_blank" rel="noopener noreferrer" className="underline text-blue-600 hover:text-blue-800 break-all">{/dropbox\.com\/home/.test(t) ? "Dropboxで開く" : t}</a>
+        : <span key={i}>{t}</span>)}
+    </>
+  );
+}
+
 // 予約投稿一覧に表示する status。published は post_logs 側（投稿履歴）で見るため一覧には出さない
 const SCHEDULED_VISIBLE_STATUSES = ["pending", "on_hold", "processing", "error"];
 
@@ -1346,7 +1358,7 @@ export default function PostsPage() {
                                   {items.map((r: any, i: number) => (
                                     <div key={i} className="py-1 border-t border-red-100 first:border-t-0 flex items-start gap-2">
                                       <span className="text-xs font-medium text-red-800 min-w-[180px]">{r.shopName}</span>
-                                      {r.detail && <span className="text-[10px] text-red-500 break-all">{r.detail}</span>}
+                                      {r.detail && <span className="text-[10px] text-red-500 break-all"><Linkify text={r.detail} /></span>}
                                     </div>
                                   ))}
                                 </div>
@@ -1439,7 +1451,7 @@ export default function PostsPage() {
                                   <span className="text-xs font-medium text-red-800 min-w-[140px]">{r.shopName}</span>
                                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 whitespace-nowrap">{r.status}</span>
                                 </div>
-                                {r.detail && <p className="text-[9px] text-red-500 mt-0.5 break-all ml-[140px]">{r.detail}</p>}
+                                {r.detail && <p className="text-[9px] text-red-500 mt-0.5 break-all ml-[140px]"><Linkify text={r.detail} /></p>}
                               </div>
                             ))}
                           </div>
@@ -2092,7 +2104,7 @@ export default function PostsPage() {
                     <div key={k.id} className="bg-white rounded px-3 py-1.5 border border-orange-100 text-xs flex flex-wrap gap-x-3">
                       <span className="font-semibold text-slate-700">{k.shop_name}</span>
                       <span className="text-orange-700">{k.reason}</span>
-                      {k.detail && <span className="text-slate-500 break-all">{k.detail}</span>}
+                      {k.detail && <span className="text-slate-500 break-all"><Linkify text={k.detail} /></span>}
                       {skipsExpanded && <span className="text-slate-400">{new Date(k.scheduled_at).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>}
                     </div>
                   ))}

@@ -60,3 +60,11 @@
 ■ 追加（同日・4回目）: 羊八札幌本店の「写真なし」= .arw（Sony RAW）だった
   フォルダ照合は修正後に一致（「182 ジンギスカン 羊八 札幌本店」）。中の写真投稿26-8-4 (1)〜(3) は .arw で非対応形式。
   → explainNoDateMatch(): 日付一致だが非対応形式なら「形式が .arw でGBPに投稿できません…JPGに書き出し直して」と具体的に返す
+
+■ 追加（同日・5回目）: エラー/スキップ詳細に「そのファイルをDropboxで開くリンク」
+  - dropboxWebUrl(rootPathLower, relPath) = https://www.dropbox.com/home/<絶対パス>?preview=<ファイル名>
+    絶対パスは get_shared_link_metadata の path_lower（取得を日付フィルタの前に移動）＋ list_folder の path_display
+  - MediaItem.webUrl → match.mediaWebUrl。非対応形式・サイズ超過・GBP400 の詳細にURLを付与
+  - 画面: Linkify で URL を「Dropboxで開く」リンクに（事前チェック/実行結果/登録時スキップの3箇所）
+  - 写真URL変換失敗のうちサイズ超過は「動画サイズ超過（スキップ）」ラベルに分離
+  ※Dropboxにログイン済みのブラウザでないとリンクは開けない（共有リンクではなくWeb画面のURL）
