@@ -214,8 +214,16 @@ async function executeScheduledPosts(
 
   let executed = 0;
   let errors = 0;
+  // 「今すぐ実行」は直列処理。300店舗×3枚（900行）を一度に押すと Vercel の300秒で関数ごとkillされ、
+  // 処理中の1件が processing のまま残る（GBPには載ったのにDBはエラー扱い→再送）。
+  // 210秒で打ち切って残件数を返し、画面側で「もう一度押す」案内を出す。
+  // 残りは5分ごとの cron/execute-posts が scheduled_at<=now の pending を拾うので、放置しても自動で消化される
+  const startedAt = Date.now();
+  const TIME_BUDGET_MS = 210_000;
+  let remaining = 0;
 
   for (const post of posts) {
+    if (Date.now() - startedAt > TIME_BUDGET_MS) { remaining++; continue; }
     try {
       // 二重投稿防止: 現在のstatusからprocessingにクレーム。競合実行が先に取っていたらスキップ
       const { data: claimed } = await supabase
@@ -358,6 +366,6 @@ async function executeScheduledPosts(
     }
   }
 
-  if (ctx) ctx.detail = `${force ? "今すぐ実行: " : ""}実行${executed}件/エラー${errors}件（対象${posts.length}件）`;
-  return NextResponse.json({ executed, errors, total: posts.length });
+  if (ctx) ctx.detail = `${force ? "今すぐ実行: " : ""}実行${executed}件/エラー${errors}件（対象${posts.length}件${remaining > 0 ? `・時間切れ持ち越し${remaining}件` : ""}）`;
+  return NextResponse.json({ executed, errors, total: posts.length, remaining });
 }

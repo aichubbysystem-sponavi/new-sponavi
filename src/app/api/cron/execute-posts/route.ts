@@ -210,7 +210,8 @@ export async function GET(request: NextRequest) {
     .eq("status", "pending")
     .lte("scheduled_at", now)
     .order("scheduled_at", { ascending: true })
-    .limit(500);
+    // 300店舗×3枚=900行/回の運用。1分ずらしの2〜3枚目が同じcron回に600行まとまるため500では足りない
+    .limit(1000);
 
   // 差戻し済み（approval_status=rejected）は実行対象から除外
   // ※NULL比較の罠を避けるためDBフィルタではなくJS側で除外（approval_statusはNULLの行が多い）
@@ -325,7 +326,9 @@ export async function GET(request: NextRequest) {
   }
 
   for (let i = 0; i < posts.length; i += CONCURRENCY) {
-    if (Date.now() - startTime > 270_000) {
+    // 打ち切りは210秒。Vercelの上限300秒に対し、走らせ始めた1バッチ（Media API直叩き最大60秒×フォールバック）が
+    // 収まる余裕を残す。270秒だと関数ごとkillされて processing のまま固着→次回のstaleリカバリで再送（二重投稿の温床）になる
+    if (Date.now() - startTime > 210_000) {
       console.log(`[cron] タイムアウト: ${posts.length - i}件を次回に持ち越し`);
       break;
     }

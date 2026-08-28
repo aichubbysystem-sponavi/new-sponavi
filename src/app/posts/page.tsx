@@ -116,6 +116,9 @@ function diagnosePostError(error: any): { cause: string; fix: string } {
   return { cause: "不明なエラー", fix: "エラー詳細を確認し、管理者に連絡してください。" };
 }
 
+// 予約投稿一覧に表示する status。published は post_logs 側（投稿履歴）で見るため一覧には出さない
+const SCHEDULED_VISIBLE_STATUSES = ["pending", "on_hold", "processing", "error"];
+
 export default function PostsPage() {
   const { selectedShopId, selectedShop, apiConnected, shops, shopFilterMode } = useShop();
   const { gate, PasswordGateModal } = usePasswordGate();
@@ -136,6 +139,8 @@ export default function PostsPage() {
   const [postSelectedType, setPostSelectedType] = useState("");
   const [newPost, setNewPost] = useState({ summary: "", topicType: "STANDARD", actionType: "", actionUrl: "", photoUrl: "", scheduledAt: "", mediaType: "PHOTO" as "PHOTO" | "VIDEO" });
   const [scheduledPosts, setScheduledPosts] = useState<any[]>([]);
+  const [autoPostSkips, setAutoPostSkips] = useState<any[]>([]); // 予約登録時にスキップされた行（auto_post_skips・直近）
+  const [skipsExpanded, setSkipsExpanded] = useState(false);
   const [autoPostSheet, setAutoPostSheet] = useState(() => {
     if (typeof window !== "undefined") return localStorage.getItem("auto-post-sheet") || "1bF-gXP05a3yoi1ZRnBTH6bnKCZRfStOBEucMKYY2eNA";
     return "1bF-gXP05a3yoi1ZRnBTH6bnKCZRfStOBEucMKYY2eNA";
@@ -574,13 +579,26 @@ export default function PostsPage() {
   useEffect(() => {
     (async () => {
       try {
-        let query = supabase.from("scheduled_posts").select("*").order("scheduled_at", { ascending: true }).limit(200);
+        // published は一覧に出さない（表示は pending / on_hold / error のみ）。
+        // 以前は全statusを scheduled_at 昇順・上限200で読んでいたため、300店舗×3枚（900行/回）の運用では
+        // 古い published 行で枠が埋まり、最新のエラーが画面から消えていた（2026-08-28: DB4件/画面3件）
+        let query = supabase.from("scheduled_posts").select("*")
+          .in("status", SCHEDULED_VISIBLE_STATUSES)
+          .order("scheduled_at", { ascending: true }).limit(3000);
         if (!isAllMode && selectedShop) {
           query = query.eq("shop_name", selectedShop.name);
         }
         const { data } = await query;
         setScheduledPosts(data || []);
       } catch { setScheduledPosts([]); }
+      // 登録時スキップ（直近14日）。テーブル未作成なら空のまま
+      try {
+        const since = new Date(Date.now() - 14 * 24 * 3600 * 1000).toISOString();
+        let sq = supabase.from("auto_post_skips").select("*").gte("created_at", since).order("created_at", { ascending: false }).limit(2000);
+        if (!isAllMode && selectedShop) sq = sq.eq("shop_name", selectedShop.name);
+        const { data: sk } = await sq;
+        setAutoPostSkips(sk || []);
+      } catch { setAutoPostSkips([]); }
     })();
   }, [selectedShop, isAllMode]);
 
@@ -1137,34 +1155,52 @@ export default function PostsPage() {
                       const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, ...schedFilter }, { timeout: 120000 });
                       const total = previewRes.data.matches || 0;
                       if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません`, zeroDebug: previewRes.data.debug, failedTabs: previewRes.data.failedTabs }); setAutoPosting(false); return; }
-                      if (!confirm(`${scheduleDate} ${scheduleHour}時 に予約投稿しますか？\n\n投稿先: ${sc.label}\n${total}件を予約登録します`)) { setAutoPosting(false); return; }
-
                       const bs = 10;
+                      const totalBatches = Math.ceil(total / bs);
+                      const isPhotoMode = (postSelectedType || newPost.topicType) === "PHOTO";
+                      if (!confirm(`${scheduleDate} ${scheduleHour}時 に予約投稿しますか？\n\n投稿先: ${sc.label}\n対象 ${total}店舗（${totalBatches}バッチ・目安${Math.ceil(totalBatches * 1.5)}分）`
+                        + (isPhotoMode ? `\n※写真投稿は1店舗に複数枚あれば枚数分（3枚なら3件）が登録されます` : "")
+                        + `\n登録中はこのタブを閉じないでください`)) { setAutoPosting(false); return; }
+
                       let totalPosted = 0, totalErrors = 0;
                       const allResults: any[] = [];
                       let off = 0;
                       let hasMore = true;
                       let batchNum = 0;
+                      // バッチが通信エラー（タイムアウト等）でも全体を止めない。
+                      // 以前は1バッチ失敗で while を抜けていたため、300店舗の途中で落ちると残り全店舗が未登録のまま
+                      // 「完了」表示になっていた。1回だけ再試行し、それでもダメなら記録して次のバッチへ進む
+                      // （再試行で二重登録にならないのはAPI側の同一店舗・同一時刻の重複チェックによる）
                       while (hasMore) {
                         batchNum++;
-                        setMsg(`予約登録中... バッチ${batchNum}（${totalPosted}件登録済み）`);
-                        try {
-                          const res = await api.post("/api/report/auto-post", {
-                            sheetId: autoPostSheet, targetDate: autoPostDate,
-                            topicType: postSelectedType || newPost.topicType,
-                            batchOffset: off, batchSize: bs,
-                            ...schedFilter,
-                            scheduleMode: true, scheduleAt: scheduledAt,
-                          }, { timeout: 180000 });
-                          totalPosted += res.data.posted || 0;
-                          totalErrors += res.data.errors || 0;
-                          if (res.data.results) allResults.push(...res.data.results);
-                          hasMore = res.data.hasMore === true;
-                          off = res.data.nextOffset || (off + bs);
-                        } catch (e: any) {
-                          totalErrors++;
-                          allResults.push({ shopName: `バッチ${batchNum}`, status: `エラー: ${e?.message}` });
-                          hasMore = false;
+                        setMsg(`予約登録中... バッチ${batchNum}/${totalBatches}（${totalPosted}件登録済み・${totalErrors}件スキップ）`);
+                        let done = false;
+                        for (let attempt = 1; attempt <= 2 && !done; attempt++) {
+                          try {
+                            const res = await api.post("/api/report/auto-post", {
+                              sheetId: autoPostSheet, targetDate: autoPostDate,
+                              topicType: postSelectedType || newPost.topicType,
+                              batchOffset: off, batchSize: bs,
+                              ...schedFilter,
+                              scheduleMode: true, scheduleAt: scheduledAt,
+                            }, { timeout: 290000 });
+                            totalPosted += res.data.posted || 0;
+                            totalErrors += res.data.errors || 0;
+                            if (res.data.results) allResults.push(...res.data.results);
+                            hasMore = res.data.hasMore === true;
+                            off = res.data.nextOffset || (off + bs);
+                            done = true;
+                          } catch (e: any) {
+                            if (attempt === 1) {
+                              setMsg(`バッチ${batchNum}/${totalBatches} が失敗（${e?.message}）。5秒後に再試行します`);
+                              await new Promise((r) => setTimeout(r, 5000));
+                              continue;
+                            }
+                            totalErrors++;
+                            allResults.push({ shopName: `バッチ${batchNum}`, status: `通信エラー（行${off + 1}〜${Math.min(off + bs, total)}は未登録）: ${e?.message}` });
+                            off += bs;
+                            hasMore = off < total;
+                          }
                         }
                       }
                       // 再実行対象 = 成功でも保留でもない実店舗のみ。
@@ -1792,10 +1828,12 @@ export default function PostsPage() {
                   if (!(await gate(`予約投稿 ${pendingCount}件 の一括実行（GBPに公開されます）`))) return;
                   setExecuteLoading(true);
                   try {
-                    const res = await api.put("/api/report/scheduled-posts", { force: true }, { timeout: 120000 });
-                    setMsg(`${res.data.executed}件の予約投稿を実行しました${res.data.errors > 0 ? `（エラー${res.data.errors}件）` : ""}`);
+                    const res = await api.put("/api/report/scheduled-posts", { force: true }, { timeout: 290000 });
+                    setMsg(`${res.data.executed}件の予約投稿を実行しました${res.data.errors > 0 ? `（エラー${res.data.errors}件）` : ""}`
+                      + (res.data.remaining > 0 ? `／時間切れで${res.data.remaining}件が未実行です。もう一度「今すぐ実行」を押すか、予約時刻を過ぎていれば5分ごとの自動実行に任せてください` : ""));
                     const { data: refreshed } = await supabase.from("scheduled_posts").select("*")
-                      .order("scheduled_at", { ascending: true }).limit(200);
+                      .in("status", SCHEDULED_VISIBLE_STATUSES)
+                      .order("scheduled_at", { ascending: true }).limit(3000);
                     setScheduledPosts(refreshed || []);
                     await fetchData();
                   } catch (e: any) { setMsg(`実行失敗: ${e?.message}`); }
@@ -1907,6 +1945,41 @@ export default function PostsPage() {
               </div>
             </div>
           )}
+
+          {/* 予約登録時にスキップされた行（auto_post_skips・直近14日）。予約行が作られていないので上の一覧には出ない */}
+          {autoPostSkips.length > 0 && (() => {
+            const latestKey = autoPostSkips[0]?.scheduled_at;
+            const latest = autoPostSkips.filter((k) => k.scheduled_at === latestKey);
+            const shown = skipsExpanded ? autoPostSkips : latest;
+            const byReason = new Map<string, number>();
+            for (const k of latest) byReason.set(k.reason, (byReason.get(k.reason) || 0) + 1);
+            return (
+              <div className="bg-orange-50 rounded-xl shadow-sm border border-orange-200 p-4 mb-4">
+                <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+                  <h3 className="text-sm font-semibold text-orange-700">
+                    登録時スキップ（直近の予約 {latestKey ? new Date(latestKey).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}: {latest.length}件）
+                    <span className="font-normal text-xs text-orange-600 ml-2">— 予約行が作られていないため自動実行されません。原因を直して同じ店舗を再登録してください</span>
+                  </h3>
+                  <button onClick={() => setSkipsExpanded(!skipsExpanded)} className="text-[10px] font-semibold text-orange-700 bg-white border border-orange-200 px-2 py-0.5 rounded">
+                    {skipsExpanded ? "直近の回だけ表示" : `過去14日を全て表示（${autoPostSkips.length}件）`}
+                  </button>
+                </div>
+                <p className="text-xs text-orange-700 mb-2">
+                  {Array.from(byReason.entries()).map(([r, n]) => `${r} ${n}件`).join(" / ")}
+                </p>
+                <div className="space-y-1 max-h-72 overflow-y-auto">
+                  {shown.map((k) => (
+                    <div key={k.id} className="bg-white rounded px-3 py-1.5 border border-orange-100 text-xs flex flex-wrap gap-x-3">
+                      <span className="font-semibold text-slate-700">{k.shop_name}</span>
+                      <span className="text-orange-700">{k.reason}</span>
+                      {k.detail && <span className="text-slate-500 break-all">{k.detail}</span>}
+                      {skipsExpanded && <span className="text-slate-400">{new Date(k.scheduled_at).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
 
           {loading ? (
             <div className="bg-white rounded-xl p-12 shadow-sm border border-slate-100 text-center"><p className="text-slate-400 text-sm">読み込み中...</p></div>

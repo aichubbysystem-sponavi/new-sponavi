@@ -1,0 +1,33 @@
+2026-08-28 予約投稿（シート自動投稿）を300店舗×3枚（約900行/回）規模に耐える構成へ
+
+■ 発端: 08-28 12:00 バッチ（40店舗）で17店舗が未投稿・動画400・エラー表示が1件足りない
+  DB実データ（scheduled_posts）で判明:
+  - 登録は店舗数ではなく写真1枚=1行。39店舗→66行（22店舗）。published 62 / error 4 / pending 0
+  - 未投稿17店舗はDBに行が無い＝予約登録時にスキップ（理由はレスポンスにしか無く後追い不能）
+  - 羊座/弥平は「12:00の1本目のみ成功、12:01/12:02の動画が GBP Media API 400」
+  - 画面のエラーが3件なのは一覧が scheduled_at昇順・limit(200) で最新行が切れていたため
+
+■ 変更
+  src/app/api/report/auto-post/route.ts
+   - dropboxFetch(): Dropbox API 429 を Retry-After で最大3回再試行（16箇所を置換）
+   - 予約登録: フェーズ1（店舗解決・写真URL変換・警告）を4並列、フェーズ2（重複チェック→insert）は直列
+   - スキップ理由を auto_post_skips に永続化（テーブル未作成時は console.error のみで登録は成立）
+   - レスポンスに skipped 件数を追加
+  src/app/api/cron/execute-posts/route.ts
+   - 取得上限 500→1000（1分ずらしの2〜3枚目が同じ回に600行まとまる）
+   - 打ち切り 270秒→210秒（Vercel 300秒killで processing 固着→stale再送＝二重投稿の温床を防ぐ）
+  src/app/api/report/scheduled-posts/route.ts（PUT「今すぐ実行」）
+   - 210秒の時間予算。残件数 remaining を返す
+  src/app/posts/page.tsx
+   - 予約一覧: status in (pending,on_hold,processing,error) のみ・limit 3000（published除外）
+   - 予約登録ループ: バッチ失敗で全体を止めない（5秒後に1回再試行→記録して次へ）、進捗「バッチN/総数」、
+     クライアントtimeout 180s→290s、確認ダイアログに「店舗数」「写真枚数分が登録される」旨を明記
+   - 「登録時スキップ」セクション（auto_post_skips 直近14日・直近回を既定表示・理由別集計）
+   - 今すぐ実行: timeout 290s、時間切れ残件の案内
+  sql/2026-08-28_auto_post_skips.sql（本番SQL Editorで要適用）
+
+■ 未着手 / 要確認
+  - 動画 400 INVALID_ARGUMENT: 1本目成功・2〜3本目失敗の並び。エラー行の「再実行」1本で切り分け
+    （成功→タイミング起因、再び400→尺30秒/75MB/解像度の仕様起因）
+  - GBP API のメディア投稿クォータは未確認。cron 10並列は据え置き（増やすなら quota 確認後）
+  - 予約登録は依然ブラウザ主導（300店舗=30バッチ・目安30〜45分、タブを閉じると停止。重複チェックがあるので再開は同条件で再登録すればよい）

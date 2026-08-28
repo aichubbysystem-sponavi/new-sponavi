@@ -159,6 +159,25 @@ async function getDropboxAccessToken(): Promise<string | null> {
 }
 
 /**
+ * Dropbox API呼び出し（429対策）。
+ * 300店舗×3枚規模では list_folder / get_temporary_link を数百回叩くため、
+ * Dropboxのレート制限（429 too_many_requests / Retry-After）に確実に当たる。
+ * 以前は429をそのまま「写真なし」扱いにしていたので、店舗が黙って予約から抜け落ちていた。
+ * Retry-After（無ければ2秒→4秒）待って最大3回まで再試行する。
+ */
+async function dropboxFetch(url: string, init: RequestInit): Promise<Response> {
+  let res = await fetch(url, { cache: "no-store" as const, ...init });
+  for (let attempt = 1; attempt <= 3 && res.status === 429; attempt++) {
+    const retryAfter = Number(res.headers.get("Retry-After") || "");
+    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 2000 * attempt;
+    console.warn(`[Dropbox] 429 rate limit: ${Math.round(waitMs / 1000)}秒待って再試行 (${attempt}/3) ${url.split("/").slice(-2).join("/")}`);
+    await new Promise((r) => setTimeout(r, Math.min(waitMs, 15000)));
+    res = await fetch(url, { cache: "no-store" as const, ...init });
+  }
+  return res;
+}
+
+/**
  * Dropbox共有リンクからフォルダ内のファイルをリストし、日付マッチする全写真のDLリンクを取得
  */
 async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: string, shopName: string): Promise<{ items: MediaItem[]; debug: string }> {
@@ -177,7 +196,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
     // 共有リンク経由でフォルダ内ファイル一覧（サブフォルダも手動で再帰展開）
     // shared_linkではrecursive非対応のため、サブフォルダを個別にlist_folder
     const listSharedFolder = async (relativePath: string): Promise<{ files: any[]; folders: any[] }> => {
-      const res = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
+      const res = await dropboxFetch("https://api.dropboxapi.com/2/files/list_folder", {
         cache: "no-store" as const,
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
@@ -196,7 +215,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
       let cursor = data.cursor;
       while (hasMore && cursor) {
         try {
-          const contRes = await fetch("https://api.dropboxapi.com/2/files/list_folder/continue", {
+          const contRes = await dropboxFetch("https://api.dropboxapi.com/2/files/list_folder/continue", {
             cache: "no-store" as const,
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
@@ -278,7 +297,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
     // 共有フォルダのルート絶対パスを取得（get_temporary_link用）
     let sharedRootPath = "";
     try {
-      const metaRes = await fetch("https://api.dropboxapi.com/2/sharing/get_shared_link_metadata", {
+      const metaRes = await dropboxFetch("https://api.dropboxapi.com/2/sharing/get_shared_link_metadata", {
         cache: "no-store" as const,
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
@@ -297,7 +316,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
 
       // 方法1: get_temporary_link（パスをそのまま試行）
       try {
-        const linkRes = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
+        const linkRes = await dropboxFetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
           cache: "no-store" as const,
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
@@ -316,7 +335,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
           ? file.path
           : `${sharedRootPath}${file.path.startsWith("/") ? "" : "/"}${file.path}`;
         try {
-          const linkRes2 = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
+          const linkRes2 = await dropboxFetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
             cache: "no-store" as const,
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
@@ -336,7 +355,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
           ? `${sharedRootPath}${file.path.startsWith("/") ? "" : "/"}${file.path}`
           : file.path;
         try {
-          const shareRes = await fetch("https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings", {
+          const shareRes = await dropboxFetch("https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings", {
             cache: "no-store" as const,
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
@@ -385,7 +404,7 @@ async function getRootSubfolders(dbxToken: string): Promise<{ name: string; url:
 
   try {
     let allEntries: any[] = [];
-    const res = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
+    const res = await dropboxFetch("https://api.dropboxapi.com/2/files/list_folder", {
       cache: "no-store" as const,
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
@@ -402,7 +421,7 @@ async function getRootSubfolders(dbxToken: string): Promise<{ name: string; url:
     let cursor = data.cursor;
     while (hasMore && cursor) {
       try {
-        const contRes = await fetch("https://api.dropboxapi.com/2/files/list_folder/continue", {
+        const contRes = await dropboxFetch("https://api.dropboxapi.com/2/files/list_folder/continue", {
           cache: "no-store" as const,
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
@@ -454,7 +473,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
 
   try {
     let files: { name: string; path: string }[] = [];
-    const res = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
+    const res = await dropboxFetch("https://api.dropboxapi.com/2/files/list_folder", {
       cache: "no-store" as const,
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
@@ -471,7 +490,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
     let cursor = data.cursor;
     while (hasMore && cursor) {
       try {
-        const contRes = await fetch("https://api.dropboxapi.com/2/files/list_folder/continue", {
+        const contRes = await dropboxFetch("https://api.dropboxapi.com/2/files/list_folder/continue", {
           cache: "no-store" as const,
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
@@ -500,7 +519,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
       if (sf.depth > DROPBOX_MAX_DEPTH) continue;
       if (++visitedFolders > DROPBOX_MAX_FOLDERS) { console.warn(`[auto-post] フォルダ数上限${DROPBOX_MAX_FOLDERS}到達: ${matched.name}`); break; }
       try {
-        const subRes = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
+        const subRes = await dropboxFetch("https://api.dropboxapi.com/2/files/list_folder", {
           cache: "no-store" as const,
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
@@ -513,7 +532,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
         let subMore = subData.has_more;
         let subCursor = subData.cursor;
         while (subMore && subCursor) {
-          const contRes = await fetch("https://api.dropboxapi.com/2/files/list_folder/continue", {
+          const contRes = await dropboxFetch("https://api.dropboxapi.com/2/files/list_folder/continue", {
             cache: "no-store" as const,
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
@@ -550,7 +569,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
     // get_shared_link_metadata でルートパスを取得
     let sharedRootPath = "";
     try {
-      const metaRes = await fetch("https://api.dropboxapi.com/2/sharing/get_shared_link_metadata", {
+      const metaRes = await dropboxFetch("https://api.dropboxapi.com/2/sharing/get_shared_link_metadata", {
         cache: "no-store" as const,
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
@@ -572,7 +591,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
 
       // 方法1: get_temporary_link（path_displayそのまま）
       try {
-        const linkRes = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
+        const linkRes = await dropboxFetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
           cache: "no-store" as const,
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
@@ -589,7 +608,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
       if (!got && sharedRootPath) {
         const absPath = file.path.startsWith(sharedRootPath) ? file.path : `${sharedRootPath}${file.path.startsWith("/") ? "" : "/"}${file.path}`;
         try {
-          const linkRes2 = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
+          const linkRes2 = await dropboxFetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
             cache: "no-store" as const,
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
@@ -607,7 +626,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
       if (!got) {
         const tryPath = sharedRootPath ? `${sharedRootPath}${file.path.startsWith("/") ? "" : "/"}${file.path}` : file.path;
         try {
-          const shareRes = await fetch("https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings", {
+          const shareRes = await dropboxFetch("https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings", {
             cache: "no-store" as const,
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${dbxToken}` },
@@ -1007,25 +1026,31 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
     let scheduled = 0;
     let schedErrors = 0;
     const schedResults: any[] = [];
+    // 登録できなかった行の理由。以前はレスポンスにしか残らず、画面を閉じると
+    // 「なぜこの店舗が予約されなかったか」を後から追えなかった（2026-08-28: 17店舗が消えたが理由不明）
+    const skips: { shop_name: string; reason: string; detail: string | null }[] = [];
+    const recordSkip = (shopName: string, reason: string, detail?: string) => {
+      schedResults.push({ shopName, status: reason, detail: detail || undefined });
+      skips.push({ shop_name: shopName, reason, detail: detail || null });
+      schedErrors++;
+    };
 
-    for (const match of batchMatches) {
+    // --- フェーズ1: 店舗解決・写真URL変換・警告判定（並列） ---
+    // 300店舗×3枚規模では写真URL変換（Dropbox DL→Storage UP、動画は数十MB）が直列だと
+    // 1バッチ（10店舗=30ファイル）で2分近くかかり、300秒上限に近づく。4並列で走らせる
+    type Prepared = { match: (typeof batchMatches)[number]; shop: { id: string; name: string } | null; warnings: string[]; skip?: { reason: string; detail?: string } };
+    const prepare = async (match: (typeof batchMatches)[number]): Promise<Prepared> => {
       if (isPhotoOnly && !match.photoUrl) {
-        schedResults.push({ shopName: match.shopName, status: "写真なし（スキップ）", detail: match.photoDebug });
-        schedErrors++;
-        continue;
+        return { match, shop: null, warnings: [], skip: { reason: "写真なし（スキップ）", detail: match.photoDebug } };
       }
       if (!isPhotoOnly && !match.summary) {
-        schedResults.push({ shopName: match.shopName, status: "本文なし（スキップ）" });
-        schedErrors++;
-        continue;
+        return { match, shop: null, warnings: [], skip: { reason: "本文なし（スキップ）" } };
       }
       const shop = (shops || []).find((s) =>
         matchShopName(s.name, match.shopName) || matchShopName(s.gbp_shop_name || "", match.shopName)
       );
       if (!shop) {
-        schedResults.push({ shopName: match.shopName, status: "店舗未登録（スキップ）" });
-        schedErrors++;
-        continue;
+        return { match, shop: null, warnings: [], skip: { reason: "店舗未登録（スキップ）", detail: "shops.name / gbp_shop_name のどちらともシートB列が一致しない（GBP連携済み店舗のみ対象）" } };
       }
 
       // 差し込み文字列を投稿文に結合（shop_idまたはshop_nameでマッチ）
@@ -1051,13 +1076,10 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
         if (resolved.url) {
           match.photoUrl = resolved.url;
         } else if (isPhotoOnly) {
-          schedResults.push({
-            shopName: match.shopName,
-            status: "写真URL変換失敗（スキップ）",
-            detail: `${resolved.error || "原因不明"}${match.mediaFileName ? ` / ファイル: ${match.mediaFileName}` : ""}`,
-          });
-          schedErrors++;
-          continue;
+          return {
+            match, shop, warnings,
+            skip: { reason: "写真URL変換失敗（スキップ）", detail: `${resolved.error || "原因不明"}${match.mediaFileName ? ` / ファイル: ${match.mediaFileName}` : ""}` },
+          };
         } else {
           warnings.push(`写真URL変換失敗（写真なしで保存されます）: ${resolved.error || "原因不明"}`);
           match.photoUrl = "";
@@ -1081,6 +1103,26 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
         const shopNameForCount = shop.name;
         const nameCount = (match.summary.split(shopNameForCount).length - 1);
         if (nameCount < 3) warnings.push(`店舗名「${shopNameForCount}」が本文中に${nameCount}回（3回以上推奨）`);
+      }
+      return { match, shop, warnings };
+    };
+
+    const PREPARE_CONCURRENCY = 4;
+    const prepared: Prepared[] = [];
+    for (let i = 0; i < batchMatches.length; i += PREPARE_CONCURRENCY) {
+      const chunk = batchMatches.slice(i, i + PREPARE_CONCURRENCY);
+      const settled = await Promise.allSettled(chunk.map(prepare));
+      settled.forEach((r, idx) => {
+        if (r.status === "fulfilled") prepared.push(r.value);
+        else prepared.push({ match: chunk[idx], shop: null, warnings: [], skip: { reason: `エラー: ${r.reason?.message || "不明"}` } });
+      });
+    }
+
+    // --- フェーズ2: DB登録（直列。重複チェック→insertの順序を守る） ---
+    for (const { match, shop, warnings, skip } of prepared) {
+      if (skip || !shop) {
+        recordSkip(match.shopName, skip?.reason || "エラー: 店舗解決不能", skip?.detail);
+        continue;
       }
 
       // 警告ありなら保留（on_hold）、なしなら予約（pending）
@@ -1120,8 +1162,7 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
           offer_end_date: match.offerEndDate || null,
         });
         if (insertErr) {
-          schedResults.push({ shopName: match.shopName, status: `DB保存エラー: ${insertErr.message}` });
-          schedErrors++;
+          recordSkip(match.shopName, `DB保存エラー: ${insertErr.message}`);
         } else if (warnings.length > 0) {
           schedResults.push({ shopName: match.shopName, status: `保留（要確認）`, warnings, savedSummary: isPhotoOnly ? "" : (match.summary || "").slice(0, 80), savedCtaUrl: match.ctaUrl || "" });
           schedErrors++;
@@ -1130,8 +1171,25 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
           scheduled++;
         }
       } catch (e: any) {
-        schedResults.push({ shopName: match.shopName, status: `エラー: ${e?.message}` });
-        schedErrors++;
+        recordSkip(match.shopName, `エラー: ${e?.message}`);
+      }
+    }
+
+    // スキップ理由を永続化（auto_post_skips）。失敗しても予約登録自体は成立しているので落とさない
+    if (skips.length > 0) {
+      try {
+        const { error: skipErr } = await supabase.from("auto_post_skips").insert(skips.map((k) => ({
+          id: crypto.randomUUID(),
+          scheduled_at: scheduledTime,
+          target_date: targetDate,
+          topic_type: topicType || "STANDARD",
+          shop_name: k.shop_name,
+          reason: k.reason,
+          detail: k.detail,
+        })));
+        if (skipErr) console.error("[auto-post] auto_post_skips 保存失敗:", skipErr.message);
+      } catch (e: any) {
+        console.error("[auto-post] auto_post_skips 保存例外:", e?.message);
       }
     }
 
@@ -1140,6 +1198,7 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
       matches: allMatches.length,
       failedTabs,
       posted: scheduled, errors: schedErrors, results: schedResults,
+      skipped: skips.length,
       batchOffset: offset, batchSize: size, batchProcessed: batchMatches.length,
       hasMore: offset + size < rowCount, nextOffset: offset + size,
       scheduleMode: true, scheduledAt: scheduledTime,
