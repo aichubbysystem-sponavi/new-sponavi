@@ -11,12 +11,16 @@ const BUCKET = "post-images";
 // Google側の取得上限 25MB（26,214,400B）が実際の壁。超えると
 // 「Media fetch response bytes too large (max: 26214400B)」で400になる（2026-08-28 羊座 40MB/38MBで実証）。
 // 75MBまで通したい場合は media:startUpload（バイト直送）への切替が必要
-const MAX_BYTES = 25 * 1024 * 1024;
+export const MAX_VIDEO_BYTES = 25 * 1024 * 1024;
+// 写真は後段で JPEG 化・縮小して 5MB 以下に落とすので、DL前の上限は元の 75MB のまま（30MBのカメラJPEGは縮小して通す）
+const MAX_PHOTO_SOURCE_BYTES = 75 * 1024 * 1024;
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024; // GBP写真上限
 
-function sizeOverMessage(bytes: number): string {
-  return `動画が大きすぎます（${(bytes / 1024 / 1024).toFixed(1)}MB > Googleが取得できる上限25MB）。`
-    + `解像度720p・30秒以内に圧縮して25MB以下にしてから入れ直してください`;
+function sizeOverMessage(bytes: number, isVideo: boolean): string {
+  const mb = (bytes / 1024 / 1024).toFixed(1);
+  return isVideo
+    ? `動画が大きすぎます（${mb}MB > Googleが取得できる上限25MB）。解像度720p・30秒以内に圧縮して25MB以下にしてから入れ直してください`
+    : `写真が大きすぎます（${mb}MB > 取り込み上限75MB）。長辺2000px程度に縮小して入れ直してください`;
 }
 
 
@@ -72,8 +76,11 @@ export async function resolveMediaUrl(
     // 本体を読む前にサイズを見る。167MBの動画をVercel関数のメモリに載せてから捨てるのは
     // 無駄なうえ、90秒のダウンロード待ちも丸ごと無駄になる（2026-08-15 実例）
     const declared = Number(res.headers.get("content-length") || 0);
+    // 種別はDL前にファイル名/URLの拡張子で判定（Content-Type は octet-stream のことがある）
+    const looksVideo = /\.(mov|mp4|m4v|avi|mpeg|mpg|webm|3gp)(\?|$)/i.test(sourceName || imageUrl) || /^video\//.test(contentType);
+    const MAX_BYTES = looksVideo ? MAX_VIDEO_BYTES : MAX_PHOTO_SOURCE_BYTES;
     if (declared > MAX_BYTES) {
-      const msg = sizeOverMessage(declared);
+      const msg = sizeOverMessage(declared, looksVideo);
       console.error(`[image-proxy] ${msg}: ${sourceName || imageUrl.slice(0, 60)}`);
       return { url: null, error: msg };
     }
@@ -87,7 +94,7 @@ export async function resolveMediaUrl(
     }
     // Content-Lengthが無いDropboxリンク用の保険（Google取得上限25MB）
     if (buffer.length > MAX_BYTES) {
-      const msg = sizeOverMessage(buffer.length);
+      const msg = sizeOverMessage(buffer.length, looksVideo);
       console.error(`[image-proxy] ${msg}: ${sourceName || imageUrl.slice(0, 60)}`);
       return { url: null, error: msg };
     }

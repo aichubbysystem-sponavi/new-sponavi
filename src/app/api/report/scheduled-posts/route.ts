@@ -187,7 +187,8 @@ async function executeScheduledPosts(
   try { body = await request.json(); } catch {}
   const force = body?.force === true;
 
-  let query = supabase.from("scheduled_posts").select("*");
+  // 時間予算で持ち越すとき、毎回同じ行が後回しにならないよう予約時刻順に固定する
+  let query = supabase.from("scheduled_posts").select("*").order("scheduled_at", { ascending: true });
   if (force) {
     // UI上「保留（on_hold）は自動実行されません」と案内しているため、
     // 「今すぐ実行」でもpendingのみ対象。保留は「承認→予約」でpendingにしてから実行する

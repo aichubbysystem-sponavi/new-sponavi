@@ -1208,8 +1208,18 @@ export default function PostsPage() {
                               await new Promise((r) => setTimeout(r, 5000));
                               continue;
                             }
-                            totalErrors++;
-                            allResults.push({ shopName: `バッチ${batchNum}`, status: `通信エラー（行${off + 1}〜${Math.min(off + bs, total)}は未登録）: ${e?.message}` });
+                            // このバッチの店舗を1店舗ずつ「未登録」として記録する。
+                            // 以前は「バッチN」の擬似行だけで、再実行対象（failedShops）からも漏れて黙って未登録になっていた
+                            const rowsInBatch: any[] = (previewRes.data.data || []).slice(off, off + bs);
+                            if (rowsInBatch.length > 0) {
+                              for (const row of rowsInBatch) {
+                                totalErrors++;
+                                allResults.push({ shopName: row.shopName, status: "通信エラー（未登録・再実行対象）", detail: String(e?.message || "") });
+                              }
+                            } else {
+                              totalErrors++;
+                              allResults.push({ shopName: `バッチ${batchNum}`, status: `通信エラー（行${off + 1}〜${Math.min(off + bs, total)}は未登録）: ${e?.message}` });
+                            }
                             off += bs;
                             hasMore = off < total;
                           }
@@ -1236,7 +1246,8 @@ export default function PostsPage() {
                       300店舗を登録する前に「写真が無い店舗」「未登録店舗」をここで潰す */}
                   <button onClick={async () => {
                     setAutoPosting(true); setAutoPostResult(null);
-                    const sc = buildAutoPostFilter(autoPostAttempt > 1 ? autoPostFailedShops : undefined);
+                    // 事前チェックは「前回失敗店舗のみ」の絞り込みを引き継がず、常に Step1 の投稿先すべてを見る
+                    const sc = buildAutoPostFilter(undefined);
                     if (!sc.ok) { setAutoPostResult({ error: sc.error }); setAutoPosting(false); return; }
                     const scheduledAt = `${scheduleDate || autoPostDate}T${scheduleHour.padStart(2, "0")}:00:00+09:00`;
                     try {

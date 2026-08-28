@@ -105,3 +105,16 @@
   スクリプト: ログ/2026-08/2026-08-28_重複店舗統合/merge_dup_shops.py（git管理）
   書き換え前バックアップ: 同フォルダ merge_backup_20260828_183416.json（口コミ本文・投稿者名を含むため git には入れない・ローカルのみ）
   戻す場合はバックアップJSON（loser_id→テーブル→行）から shop_id/shop_name を元に戻す
+
+■ 追加（同日・11回目）: /code-review high（d4e61e5..HEAD）10件の指摘を全対応
+  1 二重登録競合 → 部分一意インデックス uq_scheduled_posts_active_shop_time（sql/2026-08-28_scheduled_posts_unique_and_skips_rls.sql・要適用）
+    ＋ API は 23505 を「重複スキップ」扱い、auto_post_skips は同一回・同一店舗を delete→insert
+  2 dropboxFetch の再試行は新しい AbortSignal.timeout(20000)
+  3 2回失敗したバッチはプレビュー行一覧から店舗ごとに「通信エラー（未登録・再実行対象）」を記録
+  4 dropboxWebUrl は ( ) を %28 %29 にエンコード（Linkify が ) で終端するため）
+  5 Dropbox list_folder の size を MediaItem.bytes → match.mediaBytes に持ち、動画25MB超はDL前・事前チェックでもスキップ
+  6 事前チェックは buildAutoPostFilter(undefined)（前回失敗店舗フィルタを引き継がない）
+  7 フォルダ照合の包含一致を廃止（完全一致→番号除去一致のみ）
+  8 image-proxy: 動画25MB／写真75MB（縮小前）に分離、文言も分ける。MAX_VIDEO_BYTES を export
+  9 auto_post_skips の RLS に TO authenticated（同SQLファイル・要適用）
+  10 scheduled-posts PUT は scheduled_at 昇順で処理
