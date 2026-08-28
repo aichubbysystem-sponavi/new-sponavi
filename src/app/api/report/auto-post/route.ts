@@ -178,6 +178,26 @@ async function dropboxFetch(url: string, init: RequestInit): Promise<Response> {
   return res;
 }
 
+
+/**
+ * 日付は一致するのに対応形式でないファイル（.arw/.heic/.webp 等）を拾って、「マッチ0件」の理由を具体的に返す。
+ * 2026-08-28 羊八札幌本店: 写真投稿26-8-4 (1)〜(3).arw（SonyのRAW）で「マッチ0件・例: スクリーンショット…」としか出ず原因が分からなかった
+ */
+function explainNoDateMatch(where: string, files: { name: string }[], dateCompact: string): string {
+  const hasDate = (n: string) => { const i = n.indexOf(dateCompact); if (i === -1) return false; const c = n[i + dateCompact.length]; return !(c && /\d/.test(c)); };
+  const unsupported = files.filter(f => hasDate(f.name) && !isSupportedMediaFile(f.name));
+  if (unsupported.length > 0) {
+    const exts = Array.from(new Set(unsupported.map(f => (f.name.match(/\.[^.]+$/)?.[0] || "(拡張子なし)").toLowerCase())));
+    return `${where}に「${dateCompact}」のファイルは${unsupported.length}件ありますが、形式が ${exts.join(" ")} でGBPに投稿できません`
+      + `（対応: 写真 JPG/PNG、動画 MP4/MOV）。JPGに書き出し直してください。該当: ${unsupported.slice(0, 3).map(f => f.name).join(", ")}`;
+  }
+  const dated = files.filter(f => f.name.includes(dateCompact));
+  if (dated.length > 0) {
+    return `${where}に「${dateCompact}」を含むファイルはありますが投稿対象になりません（例: ${dated.slice(0, 3).map(f => f.name).join(", ")}）。「写真投稿${dateCompact} (1).jpg」の形式にしてください`;
+  }
+  return `${where}（${files.length}件）に「写真投稿${dateCompact} (1).jpg」のような「${dateCompact}」付きファイルがありません。例: ${files.slice(0, 5).map(f => f.name).join(", ")}`;
+}
+
 /**
  * Dropbox共有リンクからフォルダ内のファイルをリストし、日付マッチする全写真のDLリンクを取得
  */
@@ -287,7 +307,7 @@ async function searchDropboxPhotosMultiple(folderUrl: string, dateCompact: strin
     });
 
     if (dateMatches.length === 0) {
-      return { items: [], debug: `フォルダ内${files.length}件中「${dateCompact}」マッチ0件。ファイル例: ${files.slice(0, 5).map(f => f.name).join(", ")}` };
+      return { items: [], debug: explainNoDateMatch("F列のフォルダ", files, dateCompact) };
     }
 
     // 全マッチファイルのDLリンクを取得
@@ -588,7 +608,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
     });
 
     if (dateMatches.length === 0) {
-      return { items: [], debug: `フォルダ「${matched.name}」内${files.length}件中「${dateCompact}」マッチ0件。例: ${files.slice(0, 5).map(f => f.name).join(", ")}` };
+      return { items: [], debug: explainNoDateMatch(`フォルダ「${matched.name}」`, files, dateCompact) };
     }
 
     // get_shared_link_metadata でルートパスを取得
