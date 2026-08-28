@@ -69,6 +69,12 @@ export interface SyncSummary {
   insertThreshold: number;
   /** 取得エラー。空でなければ「GBPを全件見えていない」状態 */
   errors: string[];
+  /**
+   * business_groups に未登録のGBPアカウント（配下の未登録店舗を自動登録しなかった）。
+   * 自社アカウントなら business_groups に gbp_account_name=accountId で登録すると次回同期で取り込める。
+   * 画面にIDを出さないと登録のしようがない（2026-08-28「MEO用 Chubby」104件）
+   */
+  unknownAccounts: { accountId: string; label: string; count: number; examples: string[] }[];
 }
 
 /**
@@ -186,6 +192,7 @@ export async function syncShopsFromGbp(
     insertBlockedReason: null,
     insertThreshold: BULK_INSERT_THRESHOLD,
     errors: [...scan.errors],
+    unknownAccounts: [],
   };
 
   if (scan.locations.size === 0) {
@@ -359,6 +366,9 @@ export async function syncShopsFromGbp(
       continue;
     }
     if (!knownAccounts.has(loc.accountId)) {
+      const ua = summary.unknownAccounts.find(u => u.accountId === loc.accountId);
+      if (ua) { ua.count++; if (ua.examples.length < 5) ua.examples.push(title); }
+      else summary.unknownAccounts.push({ accountId: loc.accountId, label: loc.accountLabel, count: 1, examples: [title] });
       summary.conflicts.push({
         locationId: loc.locationId, title,
         reason: `未登録のGBPアカウント「${loc.accountLabel}」の店舗です。`

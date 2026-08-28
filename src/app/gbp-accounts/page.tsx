@@ -24,6 +24,7 @@ interface SyncResult {
   updated: number;
   renamed: { shopId: string; shopName: string; locationId: string; oldGbpName: string; newGbpName: string }[];
   conflicts: { locationId: string; title: string; reason: string }[];
+  unknownAccounts?: { accountId: string; label: string; count: number; examples: string[] }[];
   pendingInserts: { title: string; locationId: string; accountId: string; accountLabel: string }[];
   insertBlockedReason: "cron" | "threshold" | null;
   insertThreshold: number;
@@ -341,14 +342,30 @@ export default function GbpAccountsPage() {
             </div>
           )}
 
-          {result.conflicts.length > 0 && (
-            <div className="mt-3 bg-white rounded-lg p-3 border border-amber-100">
-              <p className="text-xs font-semibold text-amber-700 mb-1">自動処理を見送った店舗（要確認）</p>
-              {result.conflicts.slice(0, 20).map((c, i) => (
-                <p key={i} className="text-[10px] text-slate-600">{c.title}: {c.reason}</p>
+          {(result.unknownAccounts?.length ?? 0) > 0 && (
+            <div className="mt-3 bg-white rounded-lg p-3 border border-amber-200">
+              <p className="text-xs font-semibold text-amber-700 mb-1">未登録のGBPアカウント（配下の店舗は自動登録していません）</p>
+              <p className="text-[10px] text-slate-500 mb-2">自社で管理しているアカウントなら、下のIDを business_groups（gbp_account_name）に登録すると次回の同期で配下の店舗が登録候補になります。個人のGBPなら放置で問題ありません。</p>
+              {(result.unknownAccounts || []).map((u) => (
+                <div key={u.accountId} className="text-[11px] text-slate-700 py-1 border-t border-amber-50 first:border-t-0">
+                  <span className="font-semibold">{u.label || "(名称なし)"}</span>
+                  <span className="ml-2 font-mono text-[10px] bg-slate-100 px-1 rounded select-all">{u.accountId}</span>
+                  <span className="ml-2 text-amber-700">{u.count}店舗</span>
+                  <p className="text-[10px] text-slate-400">例: {u.examples.join(" / ")}</p>
+                </div>
               ))}
-              {result.conflicts.length > 20 && <p className="text-[10px] text-slate-400 mt-1">...他{result.conflicts.length - 20}件</p>}
             </div>
+          )}
+
+          {result.conflicts.length > 0 && (
+            <details className="mt-3 bg-white rounded-lg p-3 border border-amber-100" open={result.conflicts.length <= 20}>
+              <summary className="text-xs font-semibold text-amber-700 cursor-pointer">自動処理を見送った店舗（要確認）{result.conflicts.length}件 — クリックで全件表示</summary>
+              <div className="mt-1 max-h-80 overflow-y-auto">
+                {result.conflicts.map((c, i) => (
+                  <p key={i} className="text-[10px] text-slate-600">{c.title}: {c.reason}</p>
+                ))}
+              </div>
+            </details>
           )}
 
           {result.errors.length > 0 && (
