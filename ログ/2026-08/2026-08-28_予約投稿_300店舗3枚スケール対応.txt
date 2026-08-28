@@ -74,3 +74,11 @@
     → 12:00時点で存在していたのに未一致。B列側の表記差が濃厚だがシート未確認のため未確定
   - 同名の文字化け重複行 id=19c8858f-…（U+FFFD + Shift-JISの英数バイト残骸、04-14 16:48作成、参照0件）→ 削除SQLを提示（ユーザー判断）
   - explainShopMismatch(): 店舗未登録時にB列の不可視文字（ゼロ幅/NBSP/改行）・全角英数の指摘と、登録済みの近い店舗名3件を表示
+
+■ 追加（同日・7回目）: PICASSO の真因 = deleted_at（論理削除）
+  - shops「ガールズバーPICASSO」(ccf1da74-…) は 2026-04-14 19:24 JST に deleted_at が立っている。GBP連携は残存。
+    Go API /api/shop は削除済みを返さないため Step1一覧・貼り付けチェック・全店舗表示(719)から消えていた
+    723(795-解約72)→719 の差4件 = 株式会社Chubby／エミナルクリニック山口院／文字化けPICASSO／PICASSO
+  - 復元は UPDATE shops SET deleted_at=NULL WHERE id='ccf1da74-b3cd-48b2-8b97-cdbcf71997c6'（ユーザー判断・未実行）
+  - 穴: auto-post の shops 取得が gbp_location_name の有無だけで、解約72件・削除4件も投稿対象になり得た
+    → .is("cancelled_at",null).is("deleted_at",null) を追加（画面一覧と同条件）

@@ -202,7 +202,7 @@ function explainShopMismatch(sheetName: string, shops: { name: string; gbp_shop_
   if (near.length > 0) {
     parts.push(`登録済みで近い店舗名: ${near.map(x => `「${x.name}」${x.gbp && x.gbp !== x.name ? `（GBP名: ${x.gbp}）` : ""}`).join(" ")}。B列をこの表記に完全一致させてください`);
   } else {
-    parts.push("GBP連携済みの店舗に近い名前がありません。店舗が未登録か、GBP未連携（店舗情報管理で確認）");
+    parts.push("投稿対象の店舗に近い名前がありません。未登録・GBP未連携・解約済み・削除済みのいずれか（店舗情報管理／契約状態ページで確認）");
   }
   parts.push(`B列の値: 「${sheetName}」（${Array.from(sheetName).length}文字）`);
   return parts.join("。");
@@ -1077,9 +1077,14 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
   }
 
   const supabase = getSupabase();
+  // 解約済み（cancelled_at）・削除済み（deleted_at）は投稿対象から外す。
+  // 以前は gbp_location_name の有無だけで引いていたため、「全店舗」で走らせると解約店舗のGBPにも投稿し得た
+  // （2026-08-28 時点で解約72件・削除4件）。画面の店舗一覧（Go API）と同じ条件に揃える
   const { data: shops } = await supabase.from("shops")
     .select("id, name, gbp_location_name, gbp_shop_name")
-    .not("gbp_location_name", "is", null);
+    .not("gbp_location_name", "is", null)
+    .is("cancelled_at", null)
+    .is("deleted_at", null);
 
   // 差し込み文字列を一括取得（shop_idとshop_name両方でマッチできるように）
   const fixedMsgByShopId: Record<string, string> = {};
