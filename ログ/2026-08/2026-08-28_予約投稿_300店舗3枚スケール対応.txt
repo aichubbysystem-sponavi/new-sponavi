@@ -88,3 +88,10 @@
   business_groups 登録に accounts/ID が必要だが画面にラベルしか出なかった
   → gbp-shop-sync に unknownAccounts（accountId/label/count/examples）を追加し、同期結果画面にID付きで表示。要確認一覧は全件展開可
   残: business_groups のスキーマ確認（q_bg.py）→ 登録SQL or 登録API → 再同期で104件を取り込み（閾値ガードの確認フロー経由）
+
+■ 追加（同日・9回目）: 「MEO用 Chubby」「株式会社ジョージーズ」を business_groups に登録 → 99店舗を新規追加
+  - business_groups: id text(uuid既定)/owner_id NOT NULL/name/gbp_account_name。owner_id は既存と同じ f8e6fc8a-…
+    追加行: 'MEO用 Chubby' accounts/113763883174026708669（90店舗）／'株式会社ジョージーズ' accounts/103627062235899273680（9店舗）
+    ※新規店舗の business_group_id は常に既定グループ（株式会社Chubby 25498501-…）。追加行は「自動登録を許すアカウント」の目印のみ
+  - 手順: プレースホルダー行をDELETE → 2件INSERT → 同期（登録保留99）→「99件をすべて登録する」→ 新規追加99件（shops 約819件）
+  - 残: 重複警告5件（NOBLE／Four Seasons／SEASIDE CLUB／熱塩温泉 山形屋／Red Shoes = 同一ロケーションに店舗2件）の統合判断
