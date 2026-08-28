@@ -95,3 +95,13 @@
     ※新規店舗の business_group_id は常に既定グループ（株式会社Chubby 25498501-…）。追加行は「自動登録を許すアカウント」の目印のみ
   - 手順: プレースホルダー行をDELETE → 2件INSERT → 同期（登録保留99）→「99件をすべて登録する」→ 新規追加99件（shops 約819件）
   - 残: 重複警告5件（NOBLE／Four Seasons／SEASIDE CLUB／熱塩温泉 山形屋／Red Shoes = 同一ロケーションに店舗2件）の統合判断
+
+■ 追加（同日・10回目）: 同一ロケーション重複5組を統合（18:34 COMMIT）
+  残す=4/14の投稿シート表記の行 / 消す=GBP同期が正式名で作った行（deleted_at, gbp_location_name=NULL, name末尾【統合済→…】）
+   山形屋 b962a760←cfd7cbb8 / Four Seasons a6c0c91b←931f2ce6 / SEASIDE 25552c16←cbbdbad1 / Red Shoes fa8be973←2818881b / NOBLE 10220198←5b6597e0
+  付け替え: 口コミ 508/2/177/243/5、gbp_posts/media/grid_ranking_logs/pmax_*(NOBLE 92日) 等。残す側 gbp_shop_name にGBP正式名を補完
+  grid_ranking_overrides の衝突は「順位が入っている側」を採用（SEASIDE/NOBLE 3月・5月、Red Shoes 5月は残す側が0だったので消す側の実測で差替）
+  キャッシュ系（performance_metrics_cache/search_query_cache/report_analysis/report_data_cache）の衝突は残す側優先で消す側を破棄
+  スクリプト: ログ/2026-08/2026-08-28_重複店舗統合/merge_dup_shops.py（git管理）
+  書き換え前バックアップ: 同フォルダ merge_backup_20260828_183416.json（口コミ本文・投稿者名を含むため git には入れない・ローカルのみ）
+  戻す場合はバックアップJSON（loser_id→テーブル→行）から shop_id/shop_name を元に戻す
