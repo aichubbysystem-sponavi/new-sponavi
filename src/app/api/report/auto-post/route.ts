@@ -1088,7 +1088,14 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
     type Prepared = { match: (typeof batchMatches)[number]; shop: { id: string; name: string } | null; warnings: string[]; skip?: { reason: string; detail?: string } };
     const prepare = async (match: (typeof batchMatches)[number]): Promise<Prepared> => {
       if (isPhotoOnly && !match.photoUrl) {
-        return { match, shop: null, warnings: [], skip: { reason: "写真なし（スキップ）", detail: match.photoDebug } };
+        // スキップ理由を原因別のラベルにする（一覧で理由別に集計され、対処が分かる）
+        const d = match.photoDebug || "";
+        const reason = d.includes("GBPに投稿できません") ? "写真の形式が非対応（スキップ）"
+          : d.includes("同じ名前のフォルダがありません") ? "Dropboxに店舗フォルダなし（スキップ）"
+          : d.includes("付きファイルがありません") || d.includes("投稿対象になりません") ? "対象日の写真ファイルなし（スキップ）"
+          : d.includes("Dropboxトークン") || d.includes("list失敗") ? "Dropbox接続エラー（スキップ）"
+          : "写真なし（スキップ）";
+        return { match, shop: null, warnings: [], skip: { reason, detail: d } };
       }
       if (!isPhotoOnly && !match.summary) {
         return { match, shop: null, warnings: [], skip: { reason: "本文なし（スキップ）" } };

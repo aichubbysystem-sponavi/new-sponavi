@@ -1335,7 +1335,10 @@ export default function PostsPage() {
                                 <div key={reason} className="mb-2">
                                   <p className="text-[11px] font-semibold text-red-700">{reason}（{items.length}件）
                                     <span className="font-normal text-red-500 ml-2">
-                                      {reason.includes("写真なし") ? "→ Dropboxの店舗フォルダに「写真投稿YY-M-N (1).jpg」形式のファイルがあるか確認" :
+                                      {reason.includes("形式が非対応") ? "→ RAW(.arw)・HEIC・WebP等はGBPに投稿できません。JPGに書き出し直して同じ名前で置く" :
+                                       reason.includes("店舗フォルダなし") ? "→ Dropboxのおおもとフォルダに店舗名と同じ名前（先頭の番号は可）のフォルダを作る、またはB列を合わせる" :
+                                       reason.includes("対象日の写真ファイルなし") || reason.includes("写真なし") ? "→ 店舗フォルダ内に「写真投稿YY-M-N (1).jpg」形式のファイルがあるか確認（N=投稿番号）" :
+                                       reason.includes("Dropbox接続エラー") ? "→ 一時的なDropboxエラー。少し待って再チェック" :
                                        reason.includes("店舗未登録") ? "→ シートB列の店舗名を、店舗情報管理の店舗名（またはGBP店名）と完全一致させる。GBP未連携の店舗は対象外" :
                                        reason.includes("本文なし") ? "→ シートC列に本文を入れる" : ""}
                                     </span>
