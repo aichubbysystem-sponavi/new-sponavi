@@ -126,3 +126,85 @@
         一意インデックスの他の書き込み経路: 手動予約POSTは 23505→409「同じ店舗・同じ予約時刻の予約が既にあります」、bulk-generate はログに記録
   却下: 包含一致廃止で「211 ラーメン太郎様」が一致しない → 意図どおり（近い名前の候補で提示）
   ※レビュー本体エージェントはサブ検証の通知待ちで停止したため、検証3本の出力ファイルから結果を直接回収した
+
+============================================================
+## 【2026-08-28〜29】セッション総括（予約投稿の300店舗×3枚対応／原因可視化／データ整備）
+============================================================
+
+### 決定事項
+- 予約投稿は「300店舗×3枚＝約900行/回」を前提に構築する（写真1枚=1行、2〜3枚目は+1分/+2分ずらし）
+- 動画の実効上限は 25MB（GBPの sourceUrl 取得上限 26,214,400B）。75MBまで通すなら media:startUpload（バイト直送）への切替が必要＝未着手
+- 重複店舗（同一GBPロケーションに2行）は「4/14 投稿シート表記の行」を残し、GBP同期が正式名で作った行を論理削除して統合する
+- 順位データ（grid_ranking_overrides）の衝突は「順位が入っている側」を採用
+- Dropbox店舗フォルダ照合は「完全一致 → 先頭番号を除いた完全一致」まで。包含一致はしない（支店→本店の誤投稿防止）
+- 未登録GBPアカウントの取り込みは business_groups に accounts/ID を INSERT → 再同期 →「N件をすべて登録する」の運用
+- 書き換え前バックアップ（口コミ本文・投稿者名を含む）は git に入れない（.gitignore 済・ローカルのみ）
+
+### 変更内容（具体的に）
+- src/app/api/report/auto-post/route.ts
+  - dropboxFetch(): 429 を Retry-After で最大3回再試行（再試行ごとに新しい AbortSignal.timeout(20000)）。16箇所を置換
+  - 予約登録: フェーズ1（店舗解決・写真URL変換・警告）を4並列、フェーズ2（重複チェック→insert）は直列
+  - スキップ理由を auto_post_skips に永続化（同一回・同一店舗は delete→insert）。理由ラベルを原因別に分離
+    （写真の形式が非対応／Dropboxに店舗フォルダなし／対象日の写真ファイルなし／Dropbox接続エラー／動画サイズ超過／店舗未登録）
+  - checkOnly（事前チェック）: Dropbox検索・店舗照合・警告判定・サイズ判定のみ、Storage保存とDB登録はしない
+  - explainNoDateMatch(): 日付一致だが非対応形式(.arw等)なら拡張子と該当ファイル名を返す
+  - explainShopMismatch(): B列の不可視文字（ゼロ幅/NBSP/改行）・全角英数の指摘＋登録済みの近い店舗名3件
+  - searchDropboxByShopName(): 先頭番号を除いた照合／不一致時は3-gramで近いフォルダ名3件を提示
+  - dropboxWebUrl(): https://www.dropbox.com/home/<絶対パス>?preview=<ファイル名>（( ) は %28 %29）。MediaItem.webUrl/bytes → match.mediaWebUrl/mediaBytes
+  - 動画は list_folder の size で DL前に 25MB超を弾く（事前チェックでも検出）
+  - 即時投稿の写真エラーも explainGbpError で日本語化
+  - shops 取得に .is("cancelled_at",null).is("deleted_at",null)（解約72件・削除4件が投稿対象になり得た穴）
+  - insert の 23505（部分一意インデックス）は「重複スキップ」扱い
+- src/app/api/cron/execute-posts/route.ts: limit 500→1000、打ち切り 270→210秒、全エラーを explainGbpError 経由、error_detail 上限 300→1500
+- src/app/api/report/scheduled-posts/route.ts: PUT に210秒予算＋remaining、scheduled_at 昇順固定、Media API直叩きの mediaFormat を PHOTO固定→detectMediaFormat（動画の再実行が必ず400だったバグ）、400はトークン切替せず打ち切り、POST の 23505 は 409
+- src/app/api/report/bulk-generate/route.ts: insert 失敗（23505含む）をログに記録
+- src/lib/gbp-error-ja.ts（新規・test付き）: errorDetails を解釈し「日本語の原因｜Google: 原文｜経路 HTTP: 全文600字」。25MB超過/Fetching failed/権限/404/quota/形式/ポリシー等のパターン
+- src/lib/image-proxy.ts: 動画 MAX_VIDEO_BYTES=25MB（export）／写真は DL前 75MB→後段で 5MB に縮小。動画判定は media-format の isVideoFile に統一
+- src/lib/gbp-shop-sync.ts: summary.unknownAccounts（accountId/label/count/examples）
+- src/app/gbp-accounts/page.tsx: 未登録GBPアカウントをID付きで表示、要確認一覧を全件展開可
+- src/app/posts/page.tsx
+  - 予約一覧: status in (pending,on_hold,processing,error)・limit 3000（published除外。旧: 昇順limit200で最新エラーが消えていた）
+  - 予約登録ループ: バッチ失敗は5秒後1回再試行→それでも失敗なら店舗ごとに「通信エラー（未登録・再実行対象）」を記録して次へ。timeout 180s→290s。進捗「バッチN/総数」。確認ダイアログに店舗数と「枚数分が登録される」旨
+  - 「事前チェック（登録しない）」ボタン＋結果（登録可能/保留/登録不可を理由別集計＋対処ヒント）。常に buildAutoPostFilter()（前回失敗店舗フィルタを引き継がない）
+  - 「登録時スキップ」セクション（auto_post_skips 直近14日・直近回既定・理由別集計）
+  - Linkify: 詳細文中URLを「Dropboxで開く」リンクに（事前チェック/実行結果/登録時スキップ）
+  - エラー投稿一覧: 日本語原因を先頭、原文は折りたたみ、写真/動画の種別表示
+  - 再実行対象の抽出から「重複スキップ」を除外（2箇所）
+  - 今すぐ実行: timeout 290s、時間切れ残件の案内
+- sql/2026-08-28_auto_post_skips.sql（適用済）、sql/2026-08-28_scheduled_posts_unique_and_skips_rls.sql（適用済: 部分一意インデックス uq_scheduled_posts_active_shop_time、RLS TO authenticated）
+- ログ/2026-08/2026-08-28_重複店舗統合/merge_dup_shops.py（統合スクリプト、dry-run既定・--apply・--keep-newer）。merge_backup_*.json はローカルのみ
+- .gitignore: ログ/2026-08/2026-08-28_重複店舗統合/*.json
+
+### 数値・設定値
+- execute-posts: 取得上限 1000行、打ち切り 210秒、10並列（据え置き）、stale復旧 5分（据え置き）
+- scheduled-posts PUT: 時間予算 210秒
+- 予約登録: バッチ 10店舗、写真URL変換 4並列、クライアント timeout 290秒、再試行1回（5秒後）
+- Dropbox: 429再試行 最大3回（Retry-After 上限15秒待ち）、再試行の timeout 20秒、写真検索 5並列
+- 動画上限 25MB（26,214,400B）／写真 DL前75MB→投稿5MB／error_detail 1500文字
+- 予約一覧 limit 3000、登録時スキップ 直近14日 limit 2000
+- 一意インデックス: scheduled_posts(shop_id, scheduled_at) WHERE status IN ('pending','on_hold','processing')
+- business_groups: 株式会社Chubby accounts/111148362910776147900 ／ MEO用 Chubby accounts/113763883174026708669（90店舗）／ 株式会社ジョージーズ accounts/103627062235899273680（9店舗）。owner_id f8e6fc8a-0019-43cd-b60a-391420c4d460
+- shops: 894件（有効819）。PICASSO ccf1da74-… 復元済（deleted_at=NULL）。重複5組の loser: cfd7cbb8/931f2ce6/cbbdbad1/2818881b/5b6597e0（論理削除）
+
+### 未解決・次回やること
+- 本番での実物確認（未実施）: ①16店舗で事前チェック→理由ラベルと「Dropboxで開く」リンク（括弧付きファイル名） ②羊座エラー1本を再実行→日本語原因で記録 ③顧客マスタ画面（business_groups 3行化の副作用）
+- 運用作業: 羊八札幌本店 写真投稿26-8-4 (1)〜(3).arw → JPG 同名保存／羊座札幌 (2).mov 40MB・(3).mov 38MB → 25MB以下に圧縮
+- 既存エラー4件（弥平×2・羊座×2）は旧形式の英語のまま（再実行で新形式に置き換わる）
+- 300店舗初回実行時: cron 2回（12:00/12:05）で捌けるか・所要時間・Dropbox 429 実発生を観測 → 並列数の判断
+- 動画75MB対応（media:startUpload バイト直送）は未着手
+- 予約登録はブラウザ主導のまま（タブを閉じると停止。同条件で再登録すれば重複チェックで安全に再開）
+- 事前チェックは WebP/HEIC 変換失敗・Dropbox DL失敗までは検出しない（形式・存在・サイズのみ）
+- 新規99店舗の口コミは毎時 cron で順次同期（初回は時間がかかる）
+
+### 注意点・ハマったこと
+- 本番DBへの直結は自動モードでブロックされる。読み取りは scratchpad の q.py をユーザーが `!` で実行する運用。ローカル .env.local は別プロジェクト（rtqvyuscibswachlewks・DNS不可）で本番ではない
+- 「店舗が見つからない」の真因は deleted_at（論理削除）。Go API /api/shop は削除済みを返さず、GBP連携は残るので「連携済みなのに一覧に居ない」状態になる。削除・解約の店舗数は 795−72−4=719 のように画面件数から逆算できる
+- 「写真なし」の真因: (1) 店舗フォルダ名の先頭管理番号「202 …」で完全一致に失敗 (2) .arw（Sony RAW）等の非対応形式 — 以前のメッセージは「マッチ0件・例: スクリーンショット…」で判別不能だった
+- GBPの400はAPI応答を200文字で切って保存していたため errorDetails（本当の理由）が消えていた。全文を持って日本語化すること
+- 再実行/今すぐ実行経路は Media API に mediaFormat:"PHOTO" 固定で送っていた（動画は必ず400）。cron経路だけ正しかった
+- クライアント290秒タイムアウト後の再送と、まだ走る旧リクエストで同一予約が2本できる → select→insert では防げず、DB制約が必要
+- 「重複スキップ」を再実行対象に含めると永久に未完了になる（1回目レビュー対応で自分が作った副作用）
+- /code-review の本体エージェントはサブ検証の通知待ちで止まることがある。tasks/*.output から最終テキストを直接回収すれば結果は取れる（cp932 で落ちるので PYTHONIOENCODING=utf-8）
+- Shift-JIS CSV を UTF-8 として取り込むと名前が U+FFFD+英数バイト残骸になる（04-14 の PICASSO 文字化け行）。hex で見れば判別できる
+- 4月に GBP同期が店名照合に失敗して正式名で別行を作っていた（8/8 の gbp_shop_name 追従以前）。同じロケーションに2行できたら統合スクリプトで寄せる
+- Vercel は origin main への push で自動デプロイ。Deployments に新コミットが出なければ未push
