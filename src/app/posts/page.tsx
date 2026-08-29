@@ -1128,7 +1128,8 @@ export default function PostsPage() {
                         // 再実行対象 = 成功でも保留でもない実店舗のみ。
                       // 保留はDB登録済み（再実行しても重複スキップになるだけ）、「バッチN」は通信エラーの擬似行で店舗ではない
                       const failed = allResults
-                        .filter((r: any) => !r.status?.includes("成功") && !r.status?.includes("保留") && !/^バッチ\d+$/.test(r.shopName || ""))
+                        // 「重複スキップ」= 同一時刻の予約が既にDBにある＝登録済み。再実行対象に入れると毎回同じ店舗を送り続けて永久に未完了になる
+                        .filter((r: any) => !r.status?.includes("成功") && !r.status?.includes("保留") && !r.status?.includes("重複スキップ") && !/^バッチ\d+$/.test(r.shopName || ""))
                         .map((r: any) => r.shopName);
                         const uniqueFailed = Array.from(new Set(failed));
                         setAutoPostFailedShops(uniqueFailed);
@@ -1211,15 +1212,11 @@ export default function PostsPage() {
                             // このバッチの店舗を1店舗ずつ「未登録」として記録する。
                             // 以前は「バッチN」の擬似行だけで、再実行対象（failedShops）からも漏れて黙って未登録になっていた
                             const rowsInBatch: any[] = (previewRes.data.data || []).slice(off, off + bs);
-                            if (rowsInBatch.length > 0) {
-                              for (const row of rowsInBatch) {
-                                totalErrors++;
-                                allResults.push({ shopName: row.shopName, status: "通信エラー（未登録・再実行対象）", detail: String(e?.message || "") });
-                              }
-                            } else {
+                            for (const row of rowsInBatch) {
                               totalErrors++;
-                              allResults.push({ shopName: `バッチ${batchNum}`, status: `通信エラー（行${off + 1}〜${Math.min(off + bs, total)}は未登録）: ${e?.message}` });
+                              allResults.push({ shopName: row.shopName, status: "通信エラー（未登録・再実行対象）", detail: String(e?.message || "") });
                             }
+                            if (rowsInBatch.length === 0) console.error(`[予約登録] バッチ${batchNum}: プレビュー行が無く店舗を特定できません`, e?.message);
                             off += bs;
                             hasMore = off < total;
                           }
@@ -1228,7 +1225,8 @@ export default function PostsPage() {
                       // 再実行対象 = 成功でも保留でもない実店舗のみ。
                       // 保留はDB登録済み（再実行しても重複スキップになるだけ）、「バッチN」は通信エラーの擬似行で店舗ではない
                       const failed = allResults
-                        .filter((r: any) => !r.status?.includes("成功") && !r.status?.includes("保留") && !/^バッチ\d+$/.test(r.shopName || ""))
+                        // 「重複スキップ」= 同一時刻の予約が既にDBにある＝登録済み。再実行対象に入れると毎回同じ店舗を送り続けて永久に未完了になる
+                        .filter((r: any) => !r.status?.includes("成功") && !r.status?.includes("保留") && !r.status?.includes("重複スキップ") && !/^バッチ\d+$/.test(r.shopName || ""))
                         .map((r: any) => r.shopName);
                       const uniqueFailed = Array.from(new Set(failed));
                       setAutoPostFailedShops(uniqueFailed);
@@ -1247,7 +1245,7 @@ export default function PostsPage() {
                   <button onClick={async () => {
                     setAutoPosting(true); setAutoPostResult(null);
                     // 事前チェックは「前回失敗店舗のみ」の絞り込みを引き継がず、常に Step1 の投稿先すべてを見る
-                    const sc = buildAutoPostFilter(undefined);
+                    const sc = buildAutoPostFilter();
                     if (!sc.ok) { setAutoPostResult({ error: sc.error }); setAutoPosting(false); return; }
                     const scheduledAt = `${scheduleDate || autoPostDate}T${scheduleHour.padStart(2, "0")}:00:00+09:00`;
                     try {

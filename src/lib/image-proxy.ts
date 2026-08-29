@@ -3,7 +3,7 @@
  * GBP APIは sourceUrl から画像をfetchするため、安定した公開URLが必要
  */
 import { getSupabase } from "@/lib/supabase";
-import { extFromContentType } from "@/lib/media-format";
+import { extFromContentType, isVideoFile } from "@/lib/media-format";
 
 
 const BUCKET = "post-images";
@@ -77,7 +77,8 @@ export async function resolveMediaUrl(
     // 無駄なうえ、90秒のダウンロード待ちも丸ごと無駄になる（2026-08-15 実例）
     const declared = Number(res.headers.get("content-length") || 0);
     // 種別はDL前にファイル名/URLの拡張子で判定（Content-Type は octet-stream のことがある）
-    const looksVideo = /\.(mov|mp4|m4v|avi|mpeg|mpg|webm|3gp)(\?|$)/i.test(sourceName || imageUrl) || /^video\//.test(contentType);
+    // 動画判定は media-format（GBPが受け付ける mp4/mov/m4v）に統一。auto-post の事前チェックと同じ基準にする
+    const looksVideo = isVideoFile(sourceName || imageUrl.split("?")[0]) || /^video\//.test(contentType);
     const MAX_BYTES = looksVideo ? MAX_VIDEO_BYTES : MAX_PHOTO_SOURCE_BYTES;
     if (declared > MAX_BYTES) {
       const msg = sizeOverMessage(declared, looksVideo);
@@ -100,7 +101,7 @@ export async function resolveMediaUrl(
     }
     // 写真はGBPの上限が5MB（10KB〜5MB・250px以上）。超過分をGBPに投げると
     // 「400 Request contains an invalid argument」としか返らず原因が画面から分からないため、ここで弾く
-    const isPhoto = !/^video\//.test(contentType) && !/\.(mov|mp4|m4v|avi|mpeg|mpg|webm|3gp)$/i.test(sourceName);
+    const isPhoto = !looksVideo;
     let ext = extFromContentType(contentType, sourceName);
 
     if (isPhoto) {

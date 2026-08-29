@@ -544,7 +544,7 @@ async function searchDropboxByShopName(shopName: string, dateCompact: string): P
   // おおもとフォルダの店舗フォルダは「202 札幌ジンギスカン 羊座 札幌」のように先頭に管理番号が付く運用
   // （dropbox-chubby-system の新構成、2026-08-26 全216店舗移行）。以前は正規化完全一致だけだったため、
   // F列にURLが無い店舗は番号付きフォルダと一致せず「写真なし」で17店舗が抜けた（2026-08-28）。
-  // 1) 完全一致 → 2) 先頭番号を除いて完全一致 → 3) 片方がもう片方を含む（候補が1件のときだけ）の順で探す
+  // 1) 完全一致 → 2) 先頭番号を除いて完全一致 の順で探す（包含一致はしない。理由は下のコメント）
   const stripNo = (n: string) => n.replace(/^\d+[\s\u3000_\-.．]*/, "");
   const target = normName(shopName);
   // 包含一致はしない: 「ラーメン太郎」が「211 ラーメン太郎 支店」に一致して支店の写真を本店に投稿する事故になる。
@@ -1180,8 +1180,7 @@ export const POST = withAudit("シート自動投稿", "EXTERNAL_OP", async (req
 
       // 0-a. 動画はGoogleのURL取得上限25MBを超えると必ず400になる。Dropboxのメタデータ(size)で
       //      ダウンロード前に弾く（事前チェックでも検出できるように。以前はStorage保存時にしか分からなかった）
-      if (match.photoUrl && match.mediaBytes && match.mediaBytes > MAX_VIDEO_BYTES
-          && (match.mediaFormat === "VIDEO" || detectMediaFormat(match.mediaFileName || "") === "VIDEO")) {
+      if (match.photoUrl && match.mediaBytes && match.mediaBytes > MAX_VIDEO_BYTES && match.mediaFormat === "VIDEO") {
         const mb = (match.mediaBytes / 1024 / 1024).toFixed(1);
         return {
           match, shop, warnings,

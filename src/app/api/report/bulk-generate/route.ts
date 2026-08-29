@@ -120,6 +120,8 @@ ${hearingInfo ? `【店舗情報】\n${hearingInfo}` : ""}
           status: "pending",
         });
         if (!error) generated++;
+        // 23505 = 同一店舗・同一予約時刻の実行待ちが既にある（部分一意インデックス）。以前は黙って捨てていたのでログに残す
+        else console.error(`[bulk-generate] ${shop.name} ${scheduledDate.toISOString()}: ${(error as any).code === "23505" ? "同一時刻の予約が既にあるためスキップ" : error.message}`);
       }
 
       results.push({ shopName: shop.name, generated });

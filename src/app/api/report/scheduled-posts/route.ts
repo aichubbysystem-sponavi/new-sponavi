@@ -76,7 +76,13 @@ export const POST = withAudit("予約投稿作成", "DATA_OP", async (request, c
     status: "pending",
   });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    // 部分一意インデックス（同一店舗・同一予約時刻の実行待ち）に当たった場合は理由を日本語で返す
+    if ((error as any).code === "23505") {
+      return NextResponse.json({ error: "同じ店舗・同じ予約時刻の予約が既にあります（予約一覧を確認してください）" }, { status: 409 });
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
   ctx.detail = `${shopRes.shopName}: ${scheduledAt}に予約${isPhotoPost ? "（写真投稿）" : `「${String(summary).slice(0, 50)}」`}`;
   return NextResponse.json({ success: true });
 });
