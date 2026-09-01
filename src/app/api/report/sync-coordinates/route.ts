@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { withAudit } from "@/lib/audit";
-import { getOAuthToken } from "@/lib/gbp-token";
+import {
+  getOAuthToken,
+  getFallbackTokens,
+  getAccountToken,
+  setAccountToken,
+  TOKEN_RETRY_STATUSES,
+} from "@/lib/gbp-token";
 import { getLocationMap, resolveLocationName } from "@/lib/gbp-location";
 
 export const dynamic = "force-dynamic";
@@ -140,12 +146,18 @@ export const POST = withAudit("座標一括同期", "PAID_OP", async (request, c
   // Places APIフォールバックがあるのでgbp_location_nameの有無を問わない
   let query = supabase
     .from("shops")
-    .select("id, name, gbp_location_name, gbp_latitude, gbp_longitude, gbp_shop_name, state, city, address, full_address");
+    .select("id, name, gbp_location_name, gbp_latitude, gbp_longitude, gbp_shop_name, state, city, address, full_address, rank_tracking_disabled");
 
   // 一括実行時は順位計測の対象外店舗を除く（座標取得もPlaces APIの課金対象のため）。
   // 個別指定（targetShopId/targetShopName）のときは意図した操作なので除外しない
+  // 例外: 中心1地点プリセット(grid_size=1)登録店舗（エミナル等）は計測に座標が必要なので含める
+  let centerPresetIds = new Set<string>();
   if (!targetShopId && !targetShopName) {
-    query = query.eq("rank_tracking_disabled", false);
+    const { data: centerRows } = await supabase
+      .from("grid_ranking_presets")
+      .select("shop_id")
+      .eq("grid_size", 1);
+    centerPresetIds = new Set((centerRows || []).map((r: any) => String(r.shop_id)));
   }
 
   if (targetShopId) {
@@ -159,6 +171,13 @@ export const POST = withAudit("座標一括同期", "PAID_OP", async (request, c
   }
 
   let { data: shops } = await query.limit(500);
+
+  // 一括実行時: 対象外店舗を除外（中心1地点プリセット登録済みは残す）
+  if (!targetShopId && !targetShopName && shops) {
+    shops = shops.filter(
+      (s: any) => !s.rank_tracking_disabled || centerPresetIds.has(String(s.id))
+    );
+  }
 
   // shopIdで見つからない場合、shopNameでフォールバック検索
   if ((!shops || shops.length === 0) && targetShopId && targetShopName) {
@@ -212,10 +231,25 @@ export const POST = withAudit("座標一括同期", "PAID_OP", async (request, c
         if (fullPath) {
           try {
             const url = `https://mybusinessbusinessinformation.googleapis.com/v1/${fullPath}?readMask=latlng`;
-            const res = await fetch(url, {
-              headers: { Authorization: `Bearer ${accessToken}` },
+            const fetchLatlng = (token: string) => fetch(url, {
+              cache: "no-store",
+              headers: { Authorization: `Bearer ${token}` },
               signal: AbortSignal.timeout(10000),
             });
+            // 1本のトークンでは見えないアカウントがあり401/403/404が返る（重要ナレッジ2026-08-15）。
+            // sync-reviewsと同じく全アカウントのトークンで順に再試行する
+            const firstToken = getAccountToken(fullPath) || accessToken;
+            let res = await fetchLatlng(firstToken);
+            if (res.ok) {
+              setAccountToken(fullPath, firstToken);
+            } else if (TOKEN_RETRY_STATUSES.includes(res.status)) {
+              for (const token of await getFallbackTokens()) {
+                if (token === firstToken) continue;
+                res = await fetchLatlng(token);
+                if (res.ok) { setAccountToken(fullPath, token); break; }
+                if (!TOKEN_RETRY_STATUSES.includes(res.status)) break;
+              }
+            }
             if (res.ok) {
               const data = await res.json();
               lat = data?.latlng?.latitude || null;
