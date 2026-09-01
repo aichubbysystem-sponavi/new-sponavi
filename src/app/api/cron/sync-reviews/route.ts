@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, verifyCron } from "@/lib/supabase";
-import { getOAuthToken } from "@/lib/gbp-token";
+import {
+  getOAuthToken,
+  getFallbackTokens,
+  getAccountToken,
+  setAccountToken,
+  TOKEN_RETRY_STATUSES,
+} from "@/lib/gbp-token";
 import { getLocationMap } from "@/lib/gbp-location";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +33,7 @@ interface FetchResult {
   totalCount: number;
   avgRating: number;
   authError: boolean; // 401/403（トークン失効）を検出。空応答と区別する
+  apiError?: number; // 404含むHTTPエラー。トークンフォールバックの判定に使う
 }
 
 async function fetchReviews(fullPath: string, token: string): Promise<FetchResult> {
@@ -37,6 +44,7 @@ async function fetchReviews(fullPath: string, token: string): Promise<FetchResul
   let totalCount = 0;
   let avgRating = 0;
   let authError = false;
+  let apiError: number | undefined;
   const MAX_429_RETRIES = 3;
   do {
     const params = new URLSearchParams({ orderBy: "updateTime desc", pageSize: "50" });
@@ -54,8 +62,8 @@ async function fetchReviews(fullPath: string, token: string): Promise<FetchResul
       await new Promise(r => setTimeout(r, 10000 * retries429));
       continue;
     }
-    if (res.status === 401 || res.status === 403) { authError = true; break; }
-    if (!res.ok) break;
+    if (res.status === 401 || res.status === 403) { authError = true; apiError = res.status; break; }
+    if (!res.ok) { apiError = res.status; break; }
     retries429 = 0;
     const data = await res.json();
     if (data.reviews) all.push(...data.reviews);
@@ -64,7 +72,38 @@ async function fetchReviews(fullPath: string, token: string): Promise<FetchResul
     nextPage = data.nextPageToken;
     pages++;
   } while (nextPage && pages < 40);
-  return { reviews: all, totalCount, avgRating, authError };
+  return { reviews: all, totalCount, avgRating, authError, apiError };
+}
+
+/**
+ * トークンフォールバック付きの口コミ取得（report/sync-reviewsと同パターン）。
+ * 1本のトークンでは見えないアカウントがあり、v4 APIは権限が無くても404を返す
+ * （重要ナレッジ 2026-08-15）。401/403/404 のときだけ全トークンで順に再試行する。
+ */
+async function fetchReviewsWithTokenFallback(fullPath: string, primaryToken: string): Promise<FetchResult> {
+  const tried = new Set<string>();
+  const attempt = async (t: string) => {
+    tried.add(t);
+    const r = await fetchReviews(fullPath, t);
+    if (!r.apiError) setAccountToken(fullPath, t);
+    return r;
+  };
+  // 1ページ目が通ればトークンからロケーションは見えている＝途中エラーはトークン問題ではない
+  const shouldRetry = (r: FetchResult) =>
+    r.apiError !== undefined && TOKEN_RETRY_STATUSES.includes(r.apiError) && r.reviews.length === 0;
+
+  const firstToken = getAccountToken(fullPath) || primaryToken;
+  let result = await attempt(firstToken);
+  if (!shouldRetry(result)) return result;
+
+  const fallbacks = await getFallbackTokens();
+  for (const t of [primaryToken, ...fallbacks]) {
+    if (tried.has(t)) continue;
+    const r = await attempt(t);
+    if (!shouldRetry(r)) return r;
+    result = r;
+  }
+  return result;
 }
 
 // ── 同期進捗管理（Supabase sync_progress テーブル） ──
@@ -116,7 +155,6 @@ export async function GET(request: NextRequest) {
     console.error("[cron/sync-reviews] No valid token");
     return NextResponse.json({ error: "OAuthトークン取得失敗" }, { status: 500 });
   }
-  const allTokens = [token];
   console.log(`[cron/sync-reviews] Token ready via gbp-token.ts`);
 
   // 2. ロケーションマッピング
@@ -229,14 +267,11 @@ export async function GET(request: NextRequest) {
     }
 
     try {
-      // 全トークンを試す（アカウントごとにアクセス権が異なるため）
-      let result: FetchResult = { reviews: [], totalCount: 0, avgRating: 0, authError: false };
-      for (const t of allTokens) {
-        result = await fetchReviews(fullPath, t);
-        if (result.reviews.length > 0 || result.authError) break;
-      }
+      // 401/403/404は全アカウントのトークンで順に再試行（アカウントごとにアクセス権が異なるため）
+      const result = await fetchReviewsWithTokenFallback(fullPath, token);
 
       // トークン失効（401/403）: 「口コミ0件」と誤認して同期済み扱いにしない。
+      // （フォールバック済みなので、ここに来るのは全トークンで401/403だった場合）
       if (result.authError) {
         console.error(`[cron/sync-reviews] 認証エラー(401/403) for ${shop.name}`);
         errors++;

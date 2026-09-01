@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { withAudit, requireCtxShopAccess } from "@/lib/audit";
-import { getOAuthToken } from "@/lib/gbp-token";
+import {
+  getOAuthToken,
+  getFallbackTokens,
+  getAccountToken,
+  setAccountToken,
+  TOKEN_RETRY_STATUSES,
+} from "@/lib/gbp-token";
 import { getLocationMap, normName } from "@/lib/gbp-location";
 
 export const dynamic = "force-dynamic";
@@ -77,6 +83,47 @@ async function fetchReviews(
   return { reviews: allReviews, totalCount, avgRating, apiError };
 }
 
+/**
+ * トークンフォールバック付きの口コミ取得。
+ * 1本のトークンでは見えないアカウントがあり、v4 APIは権限が無くても404を返す
+ * （重要ナレッジ 2026-08-15。auto-postのgbpFetchWithTokenFallbackと同パターン）。
+ * 401/403/404 のときだけ全アカウントのトークンで順に再試行する。
+ * 429やタイムアウト等トークンと無関係なエラーは再試行しない。
+ */
+async function fetchReviewsWithTokenFallback(
+  fullPath: string,
+  primaryToken: string
+): Promise<{ reviews: GBPReview[]; totalCount: number; avgRating: number; apiError?: number; triedTokens: number }> {
+  const tried = new Set<string>();
+  const attempt = async (token: string) => {
+    tried.add(token);
+    const r = await fetchReviews(fullPath, token);
+    if (!r.apiError) setAccountToken(fullPath, token);
+    return r;
+  };
+  // 1ページ目が通ればトークンからロケーションは見えている＝途中エラーはトークン問題ではない
+  const shouldRetry = (r: { apiError?: number; reviews: GBPReview[] }) =>
+    r.apiError !== undefined && TOKEN_RETRY_STATUSES.includes(r.apiError) && r.reviews.length === 0;
+
+  // 同一アカウントで前回成功したトークンを最優先
+  const firstToken = getAccountToken(fullPath) || primaryToken;
+  let result = await attempt(firstToken);
+  if (!shouldRetry(result)) {
+    return { ...result, triedTokens: tried.size };
+  }
+
+  const fallbacks = await getFallbackTokens();
+  for (const token of [primaryToken, ...fallbacks]) {
+    if (tried.has(token)) continue;
+    const r = await attempt(token);
+    if (!shouldRetry(r)) {
+      return { ...r, triedTokens: tried.size };
+    }
+    result = r;
+  }
+  return { ...result, triedTokens: tried.size };
+}
+
 // ============================================================
 // メインAPI
 // ============================================================
@@ -96,9 +143,8 @@ export const POST = withAudit("口コミ同期", "DATA_OP", async (request, ctx)
       }
     }
 
-    // 1. 全アカウントのOAuthトークン取得
+    // 1. 既定のOAuthトークン取得（見えないロケーションはfetchReviewsWithTokenFallbackが他トークンで再試行）
     const accessToken = await getOAuthToken();
-    const allTokens = accessToken ? [accessToken] : [];
     if (!accessToken) {
       return NextResponse.json({
         error: "OAuthトークンが取得できません。GBPアカウント管理からGoogleアカウントを再認証してください。",
@@ -213,36 +259,25 @@ export const POST = withAudit("口コミ同期", "DATA_OP", async (request, ctx)
       }
 
       try {
-        // 全トークンを順番に試す（アカウントごとにアクセス権が異なるため）
-        let reviews: GBPReview[] = [];
-        let apiError: number | undefined;
-        let googleTotalCount = 0;
-        let googleAvgRating = 0;
-        // 最大2トークンまで試行（全トークン試すと遅すぎるため）
-        const maxTokenTries = Math.min(allTokens.length, 2);
-        for (let ti = 0; ti < maxTokenTries; ti++) {
-          const result = await fetchReviews(fullPath, allTokens[ti]);
-          if (result.reviews.length > 0) {
-            reviews = result.reviews;
-            googleTotalCount = result.totalCount;
-            googleAvgRating = result.avgRating;
-            apiError = undefined;
-            break;
-          }
-          apiError = result.apiError;
-          // 401/403はトークン問題→次トークン、429は即中断
-          if (result.apiError === 429) break;
-        }
+        // 401/403/404は全アカウントのトークンで順に再試行（アカウントごとにアクセス権が異なるため）
+        const result = await fetchReviewsWithTokenFallback(fullPath, accessToken);
+        const reviews = result.reviews;
+        const apiError = result.apiError;
+        const googleTotalCount = result.totalCount;
+        const googleAvgRating = result.avgRating;
 
-        if (reviews.length === 0) {
+        // ページネーション途中のエラーは取得済み分を保存する（reviews.length>0なら続行）
+        if (apiError && reviews.length === 0) {
           if (apiError === 404) {
-            console.log(`[sync-reviews] 404 for "${shop.name}" (path: ${fullPath}, tried ${allTokens.length} tokens)`);
+            console.log(`[sync-reviews] 404 for "${shop.name}" (path: ${fullPath}, tried ${result.triedTokens} tokens)`);
             results.push({ shopName: shop.name, count: 0, status: "api_404" });
-          } else if (apiError) {
-            results.push({ shopName: shop.name, count: 0, status: `api_error_${apiError}` });
           } else {
-            results.push({ shopName: shop.name, count: 0, status: "no_reviews" });
+            results.push({ shopName: shop.name, count: 0, status: `api_error_${apiError}` });
           }
+          continue;
+        }
+        if (reviews.length === 0) {
+          results.push({ shopName: shop.name, count: 0, status: "no_reviews" });
           continue;
         }
 

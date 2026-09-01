@@ -181,6 +181,48 @@ export async function getAllOAuthTokens(): Promise<string[]> {
   return Array.from(tokenSet);
 }
 
+// ============================================================
+// トークンフォールバック支援
+// GBPアカウントは本番15個。1本のトークンでは見えないロケーションがあり、
+// v4 APIは権限が無い場合も404を返す（重要ナレッジ 2026-08-15）。
+// 401/403/404 のときは他アカウントのトークンで順に再試行すること。
+// ============================================================
+
+export const TOKEN_RETRY_STATUSES = [401, 403, 404];
+
+let fallbackTokensCache: { tokens: string[]; at: number } | null = null;
+const FALLBACK_TOKENS_TTL = 5 * 60 * 1000;
+
+/**
+ * getAllOAuthTokens のキャッシュ付き版（5分TTL）
+ * 全アカウントのリフレッシュは重いため、店舗ごと・リクエストごとに叩かない
+ */
+export async function getFallbackTokens(): Promise<string[]> {
+  if (fallbackTokensCache && Date.now() - fallbackTokensCache.at < FALLBACK_TOKENS_TTL) {
+    return fallbackTokensCache.tokens;
+  }
+  const tokens = await getAllOAuthTokens();
+  if (tokens.length > 0) fallbackTokensCache = { tokens, at: Date.now() };
+  return tokens;
+}
+
+/**
+ * accounts/xxx → 最後に成功したトークン
+ * 同一アカウント配下の店舗で毎回全トークンを試し直すのを防ぐ
+ * （トークンが失効していても呼び出し側のフォールバックで自己修復する）
+ */
+const accountTokenCache = new Map<string, string>();
+
+export function getAccountToken(fullPath: string): string | undefined {
+  const acc = fullPath.match(/^accounts\/[^/]+/)?.[0];
+  return acc ? accountTokenCache.get(acc) : undefined;
+}
+
+export function setAccountToken(fullPath: string, token: string): void {
+  const acc = fullPath.match(/^accounts\/[^/]+/)?.[0];
+  if (acc) accountTokenCache.set(acc, token);
+}
+
 /**
  * GBP APIを呼び出す（401時にリトライ）
  */
