@@ -82,11 +82,11 @@ export async function GET(request: NextRequest) {
     (p as any).last_measurement = logMap.get(p.shop_id) || null;
   }
 
-  // 月額コスト見積もり（全KW共通: 中心＋外周4地点の5地点計測）
+  // 月額コスト見積もり（grid_size=1は中心1地点、それ以外は中心＋外周4地点の5地点計測）
   let totalRequests = 0;
   for (const p of (data || [])) {
     const kwCount = Math.max(1, ((p as any).all_keywords || []).length);
-    totalRequests += 5 * kwCount;
+    totalRequests += ((p as any).grid_size === 1 ? 1 : 5) * kwCount;
   }
   const costPerRequest = 0.032;
   const freeCredit = 200;
@@ -127,11 +127,16 @@ export const POST = withAudit("計測プリセット追加", "DATA_OP", async (r
   // 順位計測の対象外に指定された店舗は「いつもの店舗」に入れない。
   // ここで止めないと、一括計測で1店舗あたり5地点×KW数の課金が発生する
   // （エミナル122店舗を誤って追加した場合の被害が大きい）
-  const { data: disabledRows } = await supabase
-    .from("shops")
-    .select("id, name")
-    .eq("rank_tracking_disabled", true)
-    .in("id", shops.map((s) => s.shopId));
+  // 例外: gridSize=1（中心1地点）は費用が1/5でエミナル用の意図的な登録なので通す
+  //       （既存の1地点プリセットのKW更新POSTもここを通るため、弾くと更新が壊れる）
+  const guardTargets = shops.filter((s) => (s.gridSize || 7) !== 1);
+  const { data: disabledRows } = guardTargets.length > 0
+    ? await supabase
+        .from("shops")
+        .select("id, name")
+        .eq("rank_tracking_disabled", true)
+        .in("id", guardTargets.map((s) => s.shopId))
+    : { data: [] as { id: string; name: string }[] };
   if (disabledRows && disabledRows.length > 0) {
     return NextResponse.json(
       {
