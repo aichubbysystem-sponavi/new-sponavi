@@ -183,7 +183,7 @@ export const POST = withAudit("座標一括同期", "PAID_OP", async (request, c
   if ((!shops || shops.length === 0) && targetShopId && targetShopName) {
     const { data: fallback } = await supabase
       .from("shops")
-      .select("id, name, gbp_location_name, gbp_latitude, gbp_longitude, gbp_shop_name, state, city, address, full_address")
+      .select("id, name, gbp_location_name, gbp_latitude, gbp_longitude, gbp_shop_name, state, city, address, full_address, rank_tracking_disabled")
       .eq("name", targetShopName)
       .limit(1);
     if (fallback && fallback.length > 0) shops = fallback;
