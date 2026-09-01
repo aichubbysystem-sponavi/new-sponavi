@@ -144,9 +144,12 @@ export const POST = withAudit("座標一括同期", "PAID_OP", async (request, c
 
   // ── Step 2: 座標取得対象の店舗を取得 ──
   // Places APIフォールバックがあるのでgbp_location_nameの有無を問わない
+  // 注意: shops に full_address 列は存在しない（Go APIの結合結果であってテーブル列ではない）。
+  // 以前selectに含めていたためPostgRESTが400を返し、エラー握りつぶしで
+  // 「座標未設定の店舗なし」と誤応答＝座標一括取得が空振りしていた（2026-09-01発覚）
   let query = supabase
     .from("shops")
-    .select("id, name, gbp_location_name, gbp_latitude, gbp_longitude, gbp_shop_name, state, city, address, full_address, rank_tracking_disabled");
+    .select("id, name, gbp_location_name, gbp_latitude, gbp_longitude, gbp_shop_name, state, city, address, rank_tracking_disabled");
 
   // 一括実行時は順位計測の対象外店舗を除く（座標取得もPlaces APIの課金対象のため）。
   // 個別指定（targetShopId/targetShopName）のときは意図した操作なので除外しない
@@ -170,7 +173,12 @@ export const POST = withAudit("座標一括同期", "PAID_OP", async (request, c
     query = query.or("gbp_latitude.is.null,gbp_latitude.eq.0");
   }
 
-  let { data: shops } = await query.limit(500);
+  let { data: shops, error: shopsError } = await query.limit(500);
+  // エラーを握りつぶすと「座標未設定の店舗なし」と誤応答して原因を隠す。明示的に返す
+  if (shopsError) {
+    console.error("[sync-coordinates] shops query error:", shopsError.message);
+    return NextResponse.json({ error: `店舗取得エラー: ${shopsError.message}` }, { status: 500 });
+  }
 
   // 一括実行時: 対象外店舗を除外（中心1地点プリセット登録済みは残す）
   if (!targetShopId && !targetShopName && shops) {
@@ -183,7 +191,7 @@ export const POST = withAudit("座標一括同期", "PAID_OP", async (request, c
   if ((!shops || shops.length === 0) && targetShopId && targetShopName) {
     const { data: fallback } = await supabase
       .from("shops")
-      .select("id, name, gbp_location_name, gbp_latitude, gbp_longitude, gbp_shop_name, state, city, address, full_address, rank_tracking_disabled")
+      .select("id, name, gbp_location_name, gbp_latitude, gbp_longitude, gbp_shop_name, state, city, address, rank_tracking_disabled")
       .eq("name", targetShopName)
       .limit(1);
     if (fallback && fallback.length > 0) shops = fallback;
@@ -265,11 +273,12 @@ export const POST = withAudit("座標一括同期", "PAID_OP", async (request, c
     if (!lat && GCP_API_KEY) {
       try {
         // DB上の住所情報を組み立て（同名店舗の絞り込みに使用）
-        const shopState = (shop as any).state || "";
-        const shopCity = (shop as any).city || "";
-        const shopAddress = (shop as any).address || "";
-        const shopFullAddress = (shop as any).full_address || "";
-        const addressHint = shopFullAddress || [shopState, shopCity, shopAddress].filter(Boolean).join("");
+        // 「未設定」というプレースホルダー文字列が入っている店舗があるため除外する
+        const cleanAddr = (v: string) => (v && v !== "未設定" ? v : "");
+        const shopState = cleanAddr((shop as any).state || "");
+        const shopCity = cleanAddr((shop as any).city || "");
+        const shopAddress = cleanAddr((shop as any).address || "");
+        const addressHint = [shopState, shopCity, shopAddress].filter(Boolean).join("");
 
         // 住所情報があれば検索クエリに含めて精度向上
         const textQuery = addressHint ? `${shopTitle} ${addressHint}` : shopTitle;
@@ -310,11 +319,6 @@ export const POST = withAudit("座標一括同期", "PAID_OP", async (request, c
               if (shopState && shopCity && fa.includes(shopState) && fa.includes(shopCity)) return true;
               // 市区町村+番地が両方含まれるか
               if (shopCity && shopAddress && fa.includes(shopCity) && fa.includes(shopAddress)) return true;
-              // full_addressしかない場合: 郵便番号を除いた住所部分で比較
-              if (shopFullAddress && !shopState && !shopCity) {
-                const stripped = shopFullAddress.replace(/^〒?\d{3}-?\d{4}\s*/, "");
-                if (stripped.length >= 4 && fa.includes(stripped)) return true;
-              }
               return false;
             });
             if (matched?.location) {
