@@ -209,3 +209,82 @@
 - [ ] 店名の &amp; 混入2件（UNIQUE&SON'S/キング&クイーン）の修正判断
 - [ ] presets GETのlast_measurement 1000行上限の確認（表示のみの問題）
 - [ ] エミナルクリニック神戸院: KWシートでは「終了」扱い・現行は神戸御幸通院の可能性（マスタ整理）
+
+===========================================================
+【セッション総括】指定フォーマット版
+===========================================================
+
+## 【2026-09-01】
+
+### 決定事項
+- 口コミ同期の404「ロケーション不明」328件はトークンフォールバックで解消する（auto-postと同方式）
+- 口コミ0件店舗はVoiceOfMerchant APIで「本当に0件」と「オーナー権限なし」を区別して表示する
+- いつもの店舗プリセット＝MEOマスタB列「契約中」の店舗（359店を照合し217店追加）
+- エミナル系120店は grid_size=1「中心1地点」計測とし、5地点グループとボタンを分離して運用する
+  （rank_tracking_disabled は維持＝5地点系の誤課金ガードは生かす）
+- エミナルKW未設定18院は既存91院と同一ルールでKWを直接投入する
+  （レディース8KW/メンズ9KW、地名は修飾除去。福岡天神院（大名）→「福岡天神」=ユーザー確定）
+- 牛草シート53タブの旧名5店（HELIO/Red Shoes/SEASIDE/エスケープ/蟹座）はタブ名を変えず順位のみ転記
+- 解約済み11店（鮨棗系等）のタブは記入せずそのまま
+
+### 変更内容（具体的に）
+- src/lib/gbp-token.ts: TOKEN_RETRY_STATUSES／getFallbackTokens(5分TTLキャッシュ)／
+  アカウント→成功トークンのキャッシュ getAccountToken/setAccountToken を追加
+- src/app/api/report/sync-reviews/route.ts: fetchReviewsWithTokenFallback新設（401/403/404で全トークン再試行・
+  usedToken返却）。0件時にcheckVoiceOfMerchantを実行し status "no_permission" を新設
+- src/app/api/cron/sync-reviews/route.ts: 同フォールバック適用。FetchResultにapiError追加。
+  VoMチェックはログ+応答JSON集計のみ（noPermissionCount/noPermissionShops）
+- src/app/reviews/page.tsx: no_permission を3箇所で表示（単店舗メッセージ/口コミなし同期バッジ/
+  全店舗同期失敗パネル=紫バッジ「⚠️オーナー権限なし」）
+- src/app/grid-ranking/page.tsx: 一括計測インライン処理を runPresetBatch(centerOnly) に共通化。
+  normalPresets(grid_size≠1)/centerPresets(=1)に分割し2ボタン化（緑=5地点/紫=中心1地点）。
+  一覧に1地点/5地点表示、ヘッダー件数分離
+- src/app/api/report/grid-ranking-presets/route.ts: GET費用見積をgrid_size=1は1地点/KWで計算。
+  POSTガードは gridSize=1 なら rank_tracking_disabled でも許可。
+  GETの最新計測ログ読み込みをrangeページング化（1000行上限対策・最大3ページ・全店舗揃いで打ち切り）
+- src/app/api/report/grid-ranking/route.ts: 「最後の砦」ガードに grid_size=1 プリセット登録済み店舗の例外を追加
+- src/app/api/report/sync-coordinates/route.ts: 存在しないfull_address列をselectから除去（全面空振りの真因）・
+  クエリエラーを500で明示返却・grid_size=1プリセット店舗を一括対象に含める・
+  Business Info APIにトークンフォールバック・住所「未設定」をPlaces検索から除外
+- 本番DB（q.py経由・ユーザー実行）: grid_ranking_presets に217店(grid_size=3)+エミナル120店(grid_size=1)投入、
+  shop_keywords にエミナル18院分投入
+- Googleシート: （新）MEOデータ管理の旧名5タブに2026/08/01行を新規追加し中心順位を転記（検証済み）
+- コミット: 411d167→a87ddb8→60600f7→516ac3a→e8e3fa8(ビルド失敗)→c69e829→edfdecd→6802c39＋ログ4本
+
+### 数値・設定値
+- トークンフォールバック: TOKEN_RETRY_STATUSES=[401,403,404]、getFallbackTokensのTTL=5分
+- VoiceOfMerchantチェック: 0件時のみ・タイムアウト8秒・判定不能(null)はno_reviews扱い（誤検知防止）
+- プリセット: 344件（grid_size 1=120/3=217/7=7）。中心1地点=grid_size 1、5地点=GRID_SIZE_5POINT(3)
+- presets GETのログページング: 1ページ1000行×最大3ページ、全shop_id出現で打ち切り
+- エミナルKW: レディース8KW/院・メンズ9KW/院（半角スペース、source='sheet'）
+- 計測実績: 口コミ同期失敗328→8件。多地点=エミナル120店×891KW＋5地点201店×1054KW＝今月321/344店
+- 本日のAPI実費概算: 約¥9,500（エミナル≒¥1,500＋5地点≒¥8,000）。エミナル月次ランニング≒¥1,300
+- 9/1〜3計測は前月(8月)分帰属（report_monthルール）
+
+### 未解決・次回やること
+- [ ] 残KW未設定23店（5地点グループ）: 順位シートにKW追記 or 直接投入
+- [ ] 計測対象化の判断待ち25店: C=プリセット済KWなし8店 / D=対象外フラグ+未登録16店 / E=CEYLON HOUSE1店
+- [ ] 店名の&amp;混入2件（UNIQUE&SON'S/キング&クイーン）の修正
+- [ ] 口コミ同期失敗の残8件（East End祇園等）の切り分け
+- [ ] オーナー権限なし5店舗の権限取得（永田屋414件が取れていない。権限リクエスト運用へ）
+- [ ] 全店舗同期をもう一度回すとVoM未判定352店の権限なしリストが確定する
+- [ ] スポナビ未登録店: 契約中なら鶴橋白雲台/L LOTA/トラットリアエム/ウォレコ香川/ガレージボーイ手稲＋
+      アカオニ/尽膳口福/鮨玄/WHITE NAIL高崎/とびこ(居酒屋?)等のインポート
+- [ ] エミナル神戸院はKWシート上「終了」（現行=神戸御幸通院の可能性）。マスタ整理
+- [ ] 牛草53タブの「ほか」数件が未特定（タブ名をもらえれば調査）
+
+### 注意点・ハマったこと
+- GBP v4は権限が無いロケーションにも200+口コミ空を返す（404にならない）。「0件」表示を信じるな。
+  判別はVoiceOfMerchantState（無料）。実例=永田屋（公開側414件がAPIでは0件）
+- 計測を止めるガードは2段構え（presets POSTと grid-ranking POSTの最後の砦）。
+  片方だけ緩めると「0KW計測完了・787KW未保存」になる（課金前拒否なので実害は無かった）
+- shopsに full_address 列は無い。selectに書くとPostgREST 400→エラー握りつぶしで
+  「対象店舗なし」と誤応答し、座標一括取得が長期間空振りしていた
+- next build を grep で絞ると「✓ Compiled successfully」の後の型チェック失敗を見落とす。
+  e8e3fa8を壊れたままpushした（Vercelビルド失敗で本番影響なし・c69e829で修正）。ビルドは全文/tailで見る
+- PostgREST 1000行上限: 1日1000KW以上計測すると presets GET の最新ログが切られ「未計測」誤表示
+- shop_keywords.keywords は text[]（jsonb関数不可）。shop_id は uuid / shops.id は text（join両側::text）
+- 店名DB値にHTMLエンティティ &amp; が混入している行あり（シート照合失敗の火種）
+- q.py（scratchpad）: SQLファイル引数対応・メモ.txt5行目トークン優先。連続認証失敗で一時ブロックあり→
+  少し待って再実行。パスワード認証失敗のトークンは再試行しない
+- 蟹座タブはR「札幌 蟹」とAE「札幌　蟹」（全角スペース）が同一KW。R列のみ記入した
