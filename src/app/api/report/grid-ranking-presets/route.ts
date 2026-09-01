@@ -49,12 +49,27 @@ export async function GET(request: NextRequest) {
   }
 
   // 最新計測結果を取得（各店舗の最新1件）
-  const { data: latestLogs } = shopIds.length > 0
-    ? await supabase.from("grid_ranking_logs")
+  // PostgRESTは1リクエスト最大1000行。1日で1000KW以上計測すると初期に計測した店舗の
+  // 行が切られ「未計測」に見える（2026-09-01にエミナル120店で発生）ため、rangeでページング。
+  // 全店舗の最新1件が揃ったら打ち切り。上限3ページ（約2ヶ月分相当）
+  const latestLogs: any[] = [];
+  if (shopIds.length > 0) {
+    const PAGE = 1000;
+    const idSet = new Set(shopIds);
+    const seen = new Set<string>();
+    for (let page = 0; page < 3; page++) {
+      const { data: chunk } = await supabase.from("grid_ranking_logs")
         .select("shop_id, keyword, measured_at, results")
         .in("shop_id", shopIds)
         .order("measured_at", { ascending: false })
-    : { data: [] };
+        .range(page * PAGE, page * PAGE + PAGE - 1);
+      if (!chunk || chunk.length === 0) break;
+      latestLogs.push(...chunk);
+      for (const l of chunk) seen.add(l.shop_id);
+      if (seen.size >= idSet.size) break; // 全店舗の最新が揃った
+      if (chunk.length < PAGE) break;
+    }
+  }
   const logMap = new Map<string, { measured_at: string; keyword: string; avg_rank: number | null; in_range: number; top3: number; total: number }>();
   for (const log of (latestLogs || [])) {
     if (!logMap.has(log.shop_id)) {
