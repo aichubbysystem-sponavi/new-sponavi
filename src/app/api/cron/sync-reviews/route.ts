@@ -80,13 +80,13 @@ async function fetchReviews(fullPath: string, token: string): Promise<FetchResul
  * 1本のトークンでは見えないアカウントがあり、v4 APIは権限が無くても404を返す
  * （重要ナレッジ 2026-08-15）。401/403/404 のときだけ全トークンで順に再試行する。
  */
-async function fetchReviewsWithTokenFallback(fullPath: string, primaryToken: string): Promise<FetchResult> {
+async function fetchReviewsWithTokenFallback(fullPath: string, primaryToken: string): Promise<FetchResult & { usedToken: string }> {
   const tried = new Set<string>();
   const attempt = async (t: string) => {
     tried.add(t);
     const r = await fetchReviews(fullPath, t);
     if (!r.apiError) setAccountToken(fullPath, t);
-    return r;
+    return { ...r, usedToken: t };
   };
   // 1ページ目が通ればトークンからロケーションは見えている＝途中エラーはトークン問題ではない
   const shouldRetry = (r: FetchResult) =>
@@ -104,6 +104,33 @@ async function fetchReviewsWithTokenFallback(fullPath: string, primaryToken: str
     result = r;
   }
   return result;
+}
+
+/**
+ * オーナー権限（VoiceOfMerchant）の確認（report/sync-reviewsと同じ）。
+ * 権限が無いロケーションは200で口コミ空が返り「本当に0件」と区別できないため、
+ * 0件だった店舗だけ確認してログに残す（cronはログ・集計のみ、DBには書かない）。
+ * @returns true=権限あり / false=権限なし / null=判定不能
+ */
+async function checkVoiceOfMerchant(fullPath: string, token: string): Promise<boolean | null> {
+  const locPart = fullPath.match(/locations\/[^/]+/)?.[0];
+  if (!locPart) return null;
+  try {
+    const res = await fetch(
+      `https://mybusinessverifications.googleapis.com/v1/${locPart}/VoiceOfMerchantState`,
+      {
+        cache: "no-store" as const,
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(8000),
+      }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    // proto3ではfalseのbooleanが省略されることがあるため「=== true」で判定
+    return data.hasVoiceOfMerchant === true;
+  } catch {
+    return null;
+  }
 }
 
 // ── 同期進捗管理（Supabase sync_progress テーブル） ──
@@ -228,6 +255,8 @@ export async function GET(request: NextRequest) {
   const TIME_LIMIT = 270_000; // 270秒でループを打ち切り、必ずオフセット保存まで到達させる（maxDuration=300s）
   let synced = 0;
   let errors = 0;
+  let noPermissionCount = 0;
+  const noPermissionShops: string[] = [];
   let consecutiveAuthErrors = 0;
   let lastProcessedIndex = 0; // 最後に処理した店舗のインデックス（offset計算用）
   let stoppedByTime = false;
@@ -288,6 +317,16 @@ export async function GET(request: NextRequest) {
 
       const reviews = result.reviews;
       if (reviews.length === 0) {
+        // 0件のときだけオーナー権限を確認（権限が無いと200で空が返り、0件と区別できないため）
+        // cronではログ・集計のみ（DBには書かない。可視化は手動同期のstatusで行う）
+        if (!result.apiError) {
+          const vom = await checkVoiceOfMerchant(fullPath, result.usedToken);
+          if (vom === false) {
+            noPermissionCount++;
+            noPermissionShops.push(shop.name);
+            console.warn(`[cron/sync-reviews] no VoiceOfMerchant for "${shop.name}" (path: ${fullPath})`);
+          }
+        }
         lastProcessedIndex = i + 1; // 口コミ0件でもスキップとしてカウント
         continue;
       }
@@ -354,6 +393,8 @@ export async function GET(request: NextRequest) {
     batchSize: batch.length,
     synced,
     errors,
+    noPermissionCount,
+    noPermissionShops,
     stoppedByTime,
     processed: lastProcessedIndex,
     nextOffset: nextOffset >= shops.length ? 0 : nextOffset,

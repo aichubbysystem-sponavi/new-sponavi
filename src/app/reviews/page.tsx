@@ -508,6 +508,7 @@ export default function ReviewsPage() {
     let noGbpCount = 0;
     let api404Count = 0;
     let noReviewCount = 0;
+    let noPermCount = 0;
 
     const newStatusMap = new Map(shopSyncStatus);
     for (let i = 0; i < targets.length; i++) {
@@ -521,6 +522,7 @@ export default function ReviewsPage() {
         if (r?.status === "no_gbp_location") { noGbpCount++; newStatusMap.set(shop.id, "GBP未紐付け"); }
         else if (r?.status === "api_404") { api404Count++; newStatusMap.set(shop.id, "ロケーションID無効"); }
         else if (r?.status?.startsWith("api_error_")) { totalErrors++; newStatusMap.set(shop.id, `APIエラー(${r.status.replace("api_error_", "")})`); }
+        else if (r?.status === "no_permission") { noPermCount++; newStatusMap.set(shop.id, "オーナー権限なし"); }
         else if (r?.status === "no_reviews") { noReviewCount++; newStatusMap.set(shop.id, "口コミ0件（API応答なし）"); }
         else if (res.data.totalSynced > 0) { newStatusMap.set(shop.id, `${res.data.totalSynced}件取得`); }
       } catch {
@@ -537,6 +539,7 @@ export default function ReviewsPage() {
       noGbpCount > 0 ? `GBP未紐付け${noGbpCount}店舗` : "",
       api404Count > 0 ? `ロケーションID無効${api404Count}店舗` : "",
       noReviewCount > 0 ? `口コミ0件${noReviewCount}店舗` : "",
+      noPermCount > 0 ? `⚠️オーナー権限なし${noPermCount}店舗` : "",
       totalErrors > 0 ? `エラー${totalErrors}件` : "",
     ].filter(Boolean).join("、");
     setSyncMsg(`✓ 口コミなし${targets.length}店舗の同期完了（${details}）`);
@@ -563,6 +566,8 @@ export default function ReviewsPage() {
         setSyncMsg(`GBP API 404エラー: ロケーションIDが無効です。GBPアカウントから再インポートするか、gbp_location_nameを確認してください。`);
       } else if (r?.status?.startsWith("api_error_")) {
         setSyncMsg(`GBP APIエラー (${r.status.replace("api_error_", "")}): 口コミを取得できませんでした`);
+      } else if (r?.status === "no_permission") {
+        setSyncMsg(`⚠️ オーナー権限がありません: ロケーションは接続アカウントに存在しますが、オーナー確認が完了していないため口コミを取得できません（Google上に口コミがあっても0件になります）。GBPでオーナー確認、またはオーナーからの権限付与が必要です。`);
       } else if (r?.status === "no_reviews" && res.data.totalSynced === 0) {
         setSyncMsg(`GBPから口コミ0件でした（ロケーションは見つかりましたが口コミがありません）`);
       } else {
@@ -979,10 +984,12 @@ export default function ReviewsPage() {
                 <span className="text-slate-700 truncate">{s.shopName}</span>
                 <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
                   s.status === "no_gbp_location" ? "bg-amber-100 text-amber-700"
+                    : s.status === "no_permission" ? "bg-purple-100 text-purple-700"
                     : s.status.includes("404") ? "bg-orange-100 text-orange-700"
                     : "bg-red-100 text-red-700"
                 }`}>
                   {s.status === "no_gbp_location" ? "GBP未連携"
+                    : s.status === "no_permission" ? "⚠️オーナー権限なし"
                     : s.status.includes("404") ? "ロケーション不明"
                     : s.status.includes("401") || s.status.includes("403") ? "認証エラー"
                     : s.status.includes("429") ? "レート制限"
@@ -1096,6 +1103,7 @@ export default function ReviewsPage() {
                       shopSyncStatus.get(shop.id)?.includes("件取得") ? "bg-emerald-100 text-emerald-700" :
                       shopSyncStatus.get(shop.id) === "GBP未紐付け" ? "bg-red-100 text-red-600" :
                       shopSyncStatus.get(shop.id) === "ロケーションID無効" ? "bg-orange-100 text-orange-600" :
+                      shopSyncStatus.get(shop.id) === "オーナー権限なし" ? "bg-purple-100 text-purple-700" :
                       "bg-slate-100 text-slate-500"
                     }`}>{shopSyncStatus.get(shop.id)}</span>
                   )}

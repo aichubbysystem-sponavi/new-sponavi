@@ -93,13 +93,13 @@ async function fetchReviews(
 async function fetchReviewsWithTokenFallback(
   fullPath: string,
   primaryToken: string
-): Promise<{ reviews: GBPReview[]; totalCount: number; avgRating: number; apiError?: number; triedTokens: number }> {
+): Promise<{ reviews: GBPReview[]; totalCount: number; avgRating: number; apiError?: number; triedTokens: number; usedToken: string }> {
   const tried = new Set<string>();
   const attempt = async (token: string) => {
     tried.add(token);
     const r = await fetchReviews(fullPath, token);
     if (!r.apiError) setAccountToken(fullPath, token);
-    return r;
+    return { ...r, usedToken: token };
   };
   // 1ページ目が通ればトークンからロケーションは見えている＝途中エラーはトークン問題ではない
   const shouldRetry = (r: { apiError?: number; reviews: GBPReview[] }) =>
@@ -122,6 +122,35 @@ async function fetchReviewsWithTokenFallback(
     result = r;
   }
   return { ...result, triedTokens: tried.size };
+}
+
+/**
+ * オーナー権限（VoiceOfMerchant）の確認。
+ * GBP APIは権限が無いロケーションにも200で口コミ空を返すため、
+ * 「本当に口コミ0件」と「権限が無くて取れない」を区別できない
+ * （2026-09-01実例: 永田屋は公開側に414件あるのにAPIは0件を返していた）。
+ * 口コミ0件だった店舗だけ、このAPI（無料）で権限有無を確認する。
+ * @returns true=権限あり / false=権限なし / null=判定不能（エラー時。権限なし扱いにしない）
+ */
+async function checkVoiceOfMerchant(fullPath: string, token: string): Promise<boolean | null> {
+  const locPart = fullPath.match(/locations\/[^/]+/)?.[0];
+  if (!locPart) return null;
+  try {
+    const res = await fetch(
+      `https://mybusinessverifications.googleapis.com/v1/${locPart}/VoiceOfMerchantState`,
+      {
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(8000),
+      }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    // proto3ではfalseのbooleanが省略されることがあるため「=== true」で判定
+    return data.hasVoiceOfMerchant === true;
+  } catch {
+    return null;
+  }
 }
 
 // ============================================================
@@ -277,7 +306,14 @@ export const POST = withAudit("口コミ同期", "DATA_OP", async (request, ctx)
           continue;
         }
         if (reviews.length === 0) {
-          results.push({ shopName: shop.name, count: 0, status: "no_reviews" });
+          // 0件のときだけオーナー権限を確認（権限が無いと200で空が返り、0件と区別できないため）
+          const vom = await checkVoiceOfMerchant(fullPath, result.usedToken);
+          if (vom === false) {
+            console.log(`[sync-reviews] no VoiceOfMerchant for "${shop.name}" (path: ${fullPath})`);
+            results.push({ shopName: shop.name, count: 0, status: "no_permission" });
+          } else {
+            results.push({ shopName: shop.name, count: 0, status: "no_reviews" });
+          }
           continue;
         }
 
