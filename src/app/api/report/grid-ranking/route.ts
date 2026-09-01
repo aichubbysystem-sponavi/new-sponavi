@@ -116,11 +116,22 @@ export const POST = withAudit("多地点順位実測", "PAID_OP", async (request
 
   // 課金が発生する直前の最後の砦。プリセット側で弾いていても、
   // 個別計測や古いプリセットから到達しうるためここでも止める
+  // 例外: 中心1地点プリセット(grid_size=1)に人が登録した店舗は許可（エミナル運用 2026-09-01）。
+  //       1地点×KWの少額計測が意図されており、登録はSQL/API(gridSize=1)経由の明示操作のみ。
+  //       （この例外を通った店舗は個別計測の5地点も技術的には可能になるが、
+  //         社長のみ・1店舗ずつの手動操作なので許容する）
   if ((shop as any).rank_tracking_disabled) {
-    return NextResponse.json(
-      { error: `${shop.name} は順位計測の対象外に設定されています` },
-      { status: 400 },
-    );
+    const { data: centerPreset } = await supabase
+      .from("grid_ranking_presets")
+      .select("grid_size")
+      .eq("shop_id", shopId)
+      .maybeSingle();
+    if (!centerPreset || centerPreset.grid_size !== 1) {
+      return NextResponse.json(
+        { error: `${shop.name} は順位計測の対象外に設定されています` },
+        { status: 400 },
+      );
+    }
   }
 
   const targetName = shop.gbp_shop_name || shop.name;
