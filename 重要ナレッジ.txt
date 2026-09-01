@@ -318,3 +318,19 @@ SPOTLIGHT NAVIGATOR 超重要ナレッジ
 ## 写真投稿の「写真なし（スキップ）」はDropbox側の問題
 - おおもとフォルダのサブフォルダ名と shops.name が一致しないと写真が見つからない
 - シートF列にDropbox URLを直接入れれば回避できる。システム側では解決できない
+
+━━━ 2026-09-01 追加（詳細: ログ/2026-09/2026-09-01_口コミ同期404ロケーション不明328件修正.txt）━━━
+■ GBP v4 reviewsは「権限が無いロケーション」にも200+空を返す（404にならない）
+  口コミ0件表示を信じるな。公開側に414件ある店がAPIでは0件だった実例（永田屋）。
+  判別は VoiceOfMerchantState API（無料）。sync-reviewsは0件時に自動判定し
+  status "no_permission"（⚠️オーナー権限なし・紫バッジ）を返す
+■ shops に full_address 列は無い（Go API結合結果）。selectに書くとPostgREST 400→
+  エラー握りつぶしで「対象店舗なし」誤応答。sync-coordinatesがこれで長期間空振りしていた。
+  supabaseクエリは必ず error を確認して表に出すこと
+■ PostgREST 1000行上限の新事例: 1日1000KW以上計測すると presets GET の最新ログが
+  切られ「未計測」誤表示。大量読みは range でページング＋必要件数が揃ったら打ち切り
+■ 多地点プリセットの grid_size=1 =「中心1地点」計測モード（エミナル120店運用中）
+  ボタンは2分離（緑=5地点/紫=1地点）。ガードは2段: presets POST と grid-ranking POST最後の砦。
+  どちらも gridSize=1 プリセット登録済みのみ例外通過。disabled フラグ自体は維持する
+■ next build の結果確認は grep で絞らない。「✓ Compiled successfully」の後に
+  型チェックが失敗する。tail か全文で最終結果を見る（e8e3fa8で壊れたままpushした反省）
