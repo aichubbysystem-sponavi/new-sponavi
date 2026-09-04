@@ -1,0 +1,63 @@
+2026-09-04 シート自動投稿 タイムアウト根本対策（ジョブ方式へ移行）
+=====================================================================
+
+■ 発端
+- 投稿管理・分析 →「シートから自動投稿」→「自動投稿を実行」で 80店舗の写真投稿を即時実行。
+- 画面表示: 「1回目完了: 0件投稿 / 1件エラー」「バッチ1 通信エラー: timeout of 180000ms exceeded」
+  「2回目: 未完了0件を実行」
+- 原因（コード確認済み）
+  1. 即時投稿はブラウザが10店舗ずつ /api/report/auto-post を呼び、1リクエスト上限180秒。
+     10店舗×3枚=30ファイルの Dropbox→Storage 転送＋GBP Media API は直列で3分を超える。
+  2. 通信エラー時はループ中断（hasMore=false）→ 残り70店舗は一切送られない。
+  3. 通信エラーは「バッチ1」という擬似行で記録され、再実行対象（店舗名）が0件になる。
+     0件だと buildAutoPostFilter が Step1 の選択（80店舗全体）に戻るため、
+     「2回目」を押すとバッチ1で成功済みの店舗に同じ写真を二重投稿する状態だった（写真投稿に重複チェックなし）。
+  4. サーバー側（maxDuration 300秒）はクライアント切断後も走り続けるため、バッチ1の投稿は裏で成立している可能性あり。
+- 今後 300店舗を一気に流す予定 → 「ブラウザが長い通信を待つ」構造そのものを廃止。
+
+■ 新方式（ジョブ方式）
+  画面 ──POST /api/report/auto-post-jobs（数秒）──▶ auto_post_jobs に1件登録 ──kick──▶ /api/cron/auto-post-worker
+                                                                                          │ 店舗名リストを5店舗ずつ runAutoPost（予約登録と同じ処理）
+                                                                                          │ 結果を auto_post_job_items、進捗を cursor に保存
+                                                                                          │ 180秒で新規スライスをやめ、残りがあれば自分を再起動
+  画面 ◀──GET ?id=（4秒ごとポーリング）── 進捗バー・結果一覧・中止ボタン。タブを閉じても処理は続き、開き直せば復元
+  保険: vercel.json に auto-post-worker の毎分 cron を追加（queued／lease期限切れの running を拾う）
+
+  mode
+  - check     事前チェック（登録しない）
+  - schedule  予約投稿として登録
+  - immediate 即時投稿 ＝「今」の予約として登録し、cron/execute-posts が数分以内に順次GBPへ公開。
+              以前の「ブラウザの1リクエスト内でGBPへ直接投稿」経路は画面から使わない（engine には残置・互換用）。
+              警告あり（CTAリンク異常等）は予約と同じく保留になる。写真投稿に警告は発生しない。
+  - 同時に1ジョブのみ（2本目は409）。中止は PATCH action=cancel（処理中スライス終了後に停止）。
+
+■ 変更ファイル
+  - src/lib/auto-post/engine.ts            旧 route.ts を移動（git mv）。runAutoPost(body, ctx, opts) としてHTTP層から分離。
+                                            opts.csvCache でワーカーの連続呼び出し時にシートCSVを使い回す。ロジックは同一。
+  - src/app/api/report/auto-post/route.ts  薄いラッパー（プレビュー・互換用）
+  - src/app/api/report/auto-post-jobs/route.ts  POST 作成 / GET 進捗＋結果 / PATCH 中止
+  - src/app/api/cron/auto-post-worker/route.ts  ワーカー本体（lease占有・スライス処理・自己再起動）
+  - src/lib/auto-post/worker-kick.ts       自分自身のcronルートを2.5秒タイムアウトで叩く（Next14にafter/waitUntilが無いため）
+  - src/app/api/cron/execute-posts/route.ts 210秒で持ち越しが出たら5分cronを待たず自分を再起動（900行を数十分で消化）
+  - src/app/posts/page.tsx                 3ボタン（事前チェック／予約登録／即時）をジョブ開始に統一。ポーリング・進捗バー・中止・
+                                            開き直し時の復元（実行中 or 6時間以内の完了ジョブ）。未完了絞り込みの解除リンク追加
+  - vercel.json                            auto-post-worker 毎分cron
+  - sql/2026-09-04_auto_post_jobs.sql      auto_post_jobs / auto_post_job_items（本番SQL Editorで適用要）
+
+■ 検証
+  - tsc --noEmit: OK ／ next lint（変更ファイル）: 新規警告なし ／ vitest 457件: 全パス ／ next build: 下記
+  - 本番の実動作（ジョブ作成→ワーカー→cron投稿）は SQL 適用＋デプロイ後に少数店舗で確認すること。
+
+■ 反映手順（この順で）
+  1. 本番 Supabase SQL Editor で sql/2026-09-04_auto_post_jobs.sql を実行
+     （未適用のままデプロイすると、ボタン押下時に「ジョブテーブルにアクセスできません」と表示され、毎分cronがエラーログを出す）
+  2. commit → push（Vercel デプロイ）。CRON_SECRET は既存cronと同じものを使う（追加設定なし）
+  3. 2〜3店舗で「事前チェック」→「予約投稿として登録」→ 進捗バーが動き完了するか、予約投稿一覧に行が入るかを確認
+  4. 80店舗（今回の続き）を流す前に、9/4 バッチ1で既に投稿された店舗が無いか投稿一覧（PHOTO）で確認し、
+     あれば Step1 の選択から外す
+
+■ 運用メモ
+  - 300店舗×3枚の目安: 登録（ワーカー）約15〜30分、公開（execute-posts）約15〜30分。どちらも画面を閉じてよい。
+  - 途中で止まったように見えたら: auto_post_jobs.status / cursor / lease_until / last_error を q.py で確認。
+    lease_until が過ぎていれば毎分cronが自動で続きを拾う。
+  - 中止しても登録済みの予約は残る（予約投稿一覧から個別削除）。

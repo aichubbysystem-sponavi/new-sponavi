@@ -28,6 +28,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/cron/auto-post-worker",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/pmax-health",
       "schedule": "0 22 * * 0"
     },

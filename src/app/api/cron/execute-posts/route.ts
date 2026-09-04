@@ -5,6 +5,7 @@ import { resolveLocationName } from "@/lib/gbp-location";
 import { resolveImageUrl, cleanupImage } from "@/lib/image-proxy";
 import { detectMediaFormat } from "@/lib/media-format";
 import { explainGbpError, ERROR_DETAIL_MAX } from "@/lib/gbp-error-ja";
+import { kickCron } from "@/lib/auto-post/worker-kick";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -326,11 +327,13 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  let carried = 0; // 時間切れで次回に持ち越した件数
   for (let i = 0; i < posts.length; i += CONCURRENCY) {
     // 打ち切りは210秒。Vercelの上限300秒に対し、走らせ始めた1バッチ（Media API直叩き最大60秒×フォールバック）が
     // 収まる余裕を残す。270秒だと関数ごとkillされて processing のまま固着→次回のstaleリカバリで再送（二重投稿の温床）になる
     if (Date.now() - startTime > 210_000) {
-      console.log(`[cron] タイムアウト: ${posts.length - i}件を次回に持ち越し`);
+      carried = posts.length - i;
+      console.log(`[cron] タイムアウト: ${carried}件を次回に持ち越し`);
       break;
     }
     const batch = posts.slice(i, i + CONCURRENCY);
@@ -340,8 +343,11 @@ export async function GET(request: NextRequest) {
   const elapsed = Math.round((Date.now() - startTime) / 1000);
   const allFailed = posted === 0 && errors > 0;
   console.log(`[cron/execute-posts] posted: ${posted}, errors: ${errors}, elapsed: ${elapsed}s${allFailed ? " [ALL FAILED]" : ""}`);
+  // 持ち越しがあれば5分後のcronを待たずに続きを起動する（300店舗×3枚=900行を数十分で消化するため）。
+  // 各行は pending→processing の条件付き更新で占有するので、5分cronと重なっても二重投稿にはならない
+  if (carried > 0 && !allFailed) await kickCron(request, "/api/cron/execute-posts");
   return NextResponse.json(
-    { success: !allFailed, posted, errors, total: posts.length, elapsed },
+    { success: !allFailed, posted, errors, total: posts.length, carried, elapsed },
     { status: allFailed ? 500 : 200 }
   );
 }

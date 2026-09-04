@@ -162,6 +162,11 @@ export default function PostsPage() {
   const [autoPostResult, setAutoPostResult] = useState<any>(null);
   const [autoPostAttempt, setAutoPostAttempt] = useState(1); // 実行回数
   const [autoPostFailedShops, setAutoPostFailedShops] = useState<string[]>([]); // 失敗店舗名一覧（再実行用）
+  // ジョブ方式（2026-09-04）: 本実行はサーバー側ワーカー（/api/cron/auto-post-worker）が行い、画面はポーリングで進捗を追う。
+  // 以前はブラウザが10店舗ずつ最大300秒のリクエストを繰り返していて、80店舗でバッチ1がタイムアウト→残り70店舗未処理のまま「完了」になった
+  const [autoPostJob, setAutoPostJob] = useState<any>(null); // 追跡中のジョブ（queued/running/done/cancelled/error）
+  const autoPostJobActive = !!autoPostJob && (autoPostJob.status === "queued" || autoPostJob.status === "running");
+  const autoPostJobPrevStatusRef = useRef<string | null>(null); // 「実行中→完了」の遷移検出用（開き直しで復元した完了ジョブでは通知しない）
   const [photoPopup, setPhotoPopup] = useState<string | null>(null); // 写真ポップアップURL
   const [photoPopupError, setPhotoPopupError] = useState(false); // 拡大表示のURLも失効していた場合
   const [gbpUrlMap, setGbpUrlMap] = useState<Record<string, string>>({}); // 店舗名→GBP URL
@@ -579,6 +584,133 @@ export default function PostsPage() {
   }, [selectedShopId, isAllMode]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  /** ジョブの状態＋結果を結果カードに反映する。完了時（実行中→完了の遷移時のみ）は再実行用の未完了店舗を確定する */
+  const onAutoPostJobSnapshot = useCallback((job: any, results: any[], restored = false) => {
+    setAutoPostJob(job);
+    const mode = job.mode === "check" ? "check" : "executed";
+    setAutoPostResult((prev: any) => ({
+      ...(prev?.jobId === job.id ? prev : { attempt: 1 }),
+      jobId: job.id, mode, results, matches: job.total, job,
+    }));
+    const finished = job.status === "done" || job.status === "cancelled" || job.status === "error";
+    const wasActive = autoPostJobPrevStatusRef.current === "queued" || autoPostJobPrevStatusRef.current === "running";
+    autoPostJobPrevStatusRef.current = job.status;
+    if (!finished) return;
+    if (job.mode !== "check") {
+      // 再実行対象 = 成功でも保留でも重複スキップ（=登録済み）でもない店舗。
+      // 「シート上で見つからず」「エラー（未処理）」もここに入るので、同じボタンでそのまま再実行できる
+      const failed = results
+        .filter((r: any) => !/成功|保留|重複スキップ/.test(r.status || ""))
+        .map((r: any) => r.shopName);
+      setAutoPostFailedShops(Array.from(new Set(failed)));
+    }
+    if (wasActive && !restored) {
+      if (job.mode !== "check") setAutoPostAttempt((n) => n + 1);
+      const ng = results.filter((r: any) => !/成功|保留|重複スキップ|登録可能/.test(r.status || "")).length;
+      setMsg(job.status === "cancelled"
+        ? `中止しました（${job.cursor}/${job.total}店舗まで処理）`
+        : job.mode === "check"
+          ? `事前チェック完了: 登録可能${results.length - ng}件 / 登録不可${ng}件`
+          : `完了: ${job.posted}件登録 / ${ng}件スキップ・エラー${job.mode === "immediate" ? "（数分以内に順次GBPへ公開されます）" : ""}`);
+      fetchData();
+    }
+  }, [fetchData]);
+
+  // 実行中ジョブのポーリング（4秒ごと）。タブを閉じてもサーバー側の処理は続き、開き直せば下の復元で追跡を再開する
+  useEffect(() => {
+    if (!autoPostJobActive || !autoPostJob?.id) return;
+    let stopped = false;
+    const tick = async () => {
+      try {
+        const res = await api.get(`/api/report/auto-post-jobs?id=${autoPostJob.id}`, { timeout: 20000 });
+        if (!stopped && res.data?.job) onAutoPostJobSnapshot(res.data.job, res.data.results || []);
+      } catch { /* 一時的な通信エラーは次のtickで回復する */ }
+    };
+    tick();
+    const t = setInterval(tick, 4000);
+    return () => { stopped = true; clearInterval(t); };
+  }, [autoPostJobActive, autoPostJob?.id, onAutoPostJobSnapshot]);
+
+  // 画面を開いたとき: 実行中のジョブがあれば追跡を再開、直近6時間以内に終わったジョブは結果を復元する
+  useEffect(() => {
+    if (!can(role, "EXTERNAL_OP")) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await api.get("/api/report/auto-post-jobs", { timeout: 20000 });
+        const latest = (list.data?.jobs || [])[0];
+        if (!latest || cancelled) return;
+        const active = latest.status === "queued" || latest.status === "running";
+        const recent = latest.finished_at && Date.now() - new Date(latest.finished_at).getTime() < 6 * 60 * 60 * 1000;
+        if (!active && !recent) return;
+        const detail = await api.get(`/api/report/auto-post-jobs?id=${latest.id}`, { timeout: 20000 });
+        if (cancelled || !detail.data?.job) return;
+        autoPostJobPrevStatusRef.current = detail.data.job.status;
+        onAutoPostJobSnapshot(detail.data.job, detail.data.results || [], true);
+        if (active) setShowAutoPost(true);
+      } catch { /* ジョブテーブル未作成などは無視（ボタンを押したときにエラー表示される） */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role]);
+
+  /**
+   * シート自動投稿ジョブを開始する（事前チェック / 予約登録 / 即時投稿）。
+   * 画面はジョブを1件登録するだけで、店舗ごとの処理はサーバー側ワーカーが行う。
+   * 即時投稿は「今すぐ」の予約として登録され、cron/execute-posts が数分以内に順次GBPへ公開する
+   * （以前の「ブラウザの1リクエスト内でGBPに直接投稿」は10店舗×3枚で180秒を超えて落ちた）
+   */
+  const startAutoPostJob = useCallback(async (mode: "check" | "schedule" | "immediate") => {
+    if (autoPostJobActive) { setMsg("実行中のジョブがあります。完了か中止を待ってください"); return; }
+    setAutoPosting(true); setAutoPostResult(null);
+    // 事前チェックは常に Step1 の投稿先すべて。予約登録・即時投稿は前回の未完了店舗があればそれのみ
+    const retry = mode !== "check" && autoPostFailedShops.length > 0 ? autoPostFailedShops : undefined;
+    const sc = buildAutoPostFilter(retry);
+    if (!sc.ok) { setAutoPostResult({ error: sc.error }); setAutoPosting(false); return; }
+    const topic = postSelectedType || newPost.topicType;
+    const isPhotoMode = topic === "PHOTO";
+    if (mode === "schedule" && !scheduleDate) { setAutoPostResult({ error: "予約日付を選んでください" }); setAutoPosting(false); return; }
+    const scheduledAt = `${mode === "check" ? (scheduleDate || autoPostDate) : scheduleDate}T${scheduleHour.padStart(2, "0")}:00:00+09:00`;
+    try {
+      // 件数確認のためのプレビュー（シート読み取りのみ・数秒）。対象店舗の確定はサーバー側でもう一度行う
+      const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: topic, ...sc.filter }, { timeout: 120000 });
+      const total = previewRes.data.matches || 0;
+      if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません`, zeroDebug: previewRes.data.debug, failedTabs: previewRes.data.failedTabs }); setAutoPosting(false); return; }
+      const estMin = Math.max(1, Math.ceil(total / 10)); // 5店舗≒30秒の実測目安
+      const bg = "バックグラウンドで実行され、進捗はこの画面に表示されます（タブを閉じても続きます）";
+      const confirmMsg = mode === "check"
+        ? `${total}店舗を事前チェックしますか？（登録はしません）\n\n投稿先: ${sc.label}\n${bg}`
+        : mode === "schedule"
+          ? `${scheduleDate} ${scheduleHour}時 に予約投稿しますか？\n\n投稿先: ${sc.label}\n対象 ${total}店舗（目安${estMin}分）\n${bg}`
+            + (isPhotoMode ? `\n※写真投稿は1店舗に複数枚あれば枚数分（3枚なら3件）が登録されます` : "")
+          : `【即時投稿】${autoPostDate}の投稿を今すぐ実行しますか？\n\n投稿先: ${sc.label}\n対象 ${total}店舗（登録 目安${estMin}分）\n登録後、数分以内に順次GBPへ公開されます。公開状況は予約投稿一覧で確認できます\n${bg}`;
+      if (!confirm(confirmMsg)) { setAutoPosting(false); return; }
+      // 追加ロック: 一括で公開投稿するためログインパスワードを再確認
+      if (mode === "immediate" && !(await gate(`${total}店舗の一括自動投稿（GBPに公開されます）`))) { setAutoPosting(false); return; }
+
+      const res = await api.post("/api/report/auto-post-jobs", {
+        mode, sheetId: autoPostSheet, targetDate: autoPostDate, topicType: topic, ...sc.filter,
+        scheduleAt: mode === "immediate" ? undefined : scheduledAt, targetLabel: sc.label,
+      }, { timeout: 120000 });
+      const job = { id: res.data.jobId, mode, status: "queued", total: res.data.total, cursor: 0, posted: 0, errors: 0, target_label: sc.label };
+      autoPostJobPrevStatusRef.current = "queued";
+      setAutoPostJob(job);
+      setAutoPostResult({ jobId: job.id, mode: mode === "check" ? "check" : "executed", results: [], matches: job.total, attempt: autoPostAttempt, failedTabs: res.data.failedTabs, job });
+      setMsg(mode === "check" ? "事前チェックを開始しました（バックグラウンド）" : mode === "schedule" ? "予約登録を開始しました（バックグラウンド）" : "即時投稿の登録を開始しました（バックグラウンド）");
+    } catch (e: any) {
+      const data = e?.response?.data;
+      setAutoPostResult({ error: data?.error || e?.message, zeroDebug: data?.debug, failedTabs: data?.failedTabs });
+    } finally { setAutoPosting(false); }
+  }, [autoPostJobActive, autoPostFailedShops, buildAutoPostFilter, postSelectedType, newPost.topicType, scheduleDate, scheduleHour, autoPostDate, autoPostSheet, gate, autoPostAttempt]);
+
+  /** 実行中ジョブの中止（処理中のスライスが終わり次第止まる） */
+  const cancelAutoPostJob = useCallback(async () => {
+    if (!autoPostJob?.id) return;
+    if (!confirm(`ジョブを中止しますか？（${autoPostJob.cursor}/${autoPostJob.total}店舗まで処理済み。登録済みの予約はそのまま残ります）`)) return;
+    try { await api.patch("/api/report/auto-post-jobs", { id: autoPostJob.id, action: "cancel" }, { timeout: 20000 }); setMsg("中止を受け付けました"); }
+    catch (e: any) { setMsg(`中止失敗: ${e?.response?.data?.error || e?.message}`); }
+  }, [autoPostJob]);
 
   // GBP URLマッピングを取得（写真投稿用シートから）
   useEffect(() => {
@@ -1082,67 +1214,10 @@ export default function PostsPage() {
                       className="px-4 py-2 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200">
                       {autoPosting ? "確認中..." : "プレビュー"}
                     </button>
-                    <button onClick={async () => {
-                      setAutoPosting(true); setAutoPostResult(null);
-                      const currentAttempt = autoPostAttempt;
-                      // プレビューボタンと完全に同じフィルタ構築
-                      const ex = buildAutoPostFilter(currentAttempt > 1 ? autoPostFailedShops : undefined);
-                      if (!ex.ok) { setAutoPostResult({ error: ex.error }); setAutoPosting(false); return; }
-                      const execFilter = ex.filter;
-                      try {
-                        const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, ...execFilter }, { timeout: 120000 });
-                        const total = previewRes.data.matches || 0;
-                        if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません`, zeroDebug: previewRes.data.debug, failedTabs: previewRes.data.failedTabs }); setAutoPosting(false); return; }
-                        if (!confirm(`【${currentAttempt}回目実行】${autoPostDate}の投稿を実行しますか？\n\n投稿先: ${ex.label}\n${total}件を10件ずつバッチ処理します（${Math.ceil(total / 10)}回）`)) { setAutoPosting(false); return; }
-                        // 追加ロック: 一括で公開投稿するためログインパスワードを再確認
-                        if (!(await gate(`${total}件の一括自動投稿（GBPに公開されます）`))) { setAutoPosting(false); return; }
-
-                        const bs = 10;
-                        let totalPosted = 0, totalErrors = 0;
-                        const allResults: any[] = [];
-                        let offset = 0;
-                        let hasMore = true;
-                        let batchNum = 0;
-                        while (hasMore) {
-                          batchNum++;
-                          setMsg(`${currentAttempt}回目実行中... バッチ${batchNum}（${totalPosted}件投稿済み）`);
-                          try {
-                            const res = await api.post("/api/report/auto-post", {
-                              sheetId: autoPostSheet, targetDate: autoPostDate,
-                              topicType: postSelectedType || newPost.topicType,
-                              batchOffset: offset, batchSize: bs,
-                              ...execFilter,
-                            }, { timeout: 180000 });
-                            totalPosted += res.data.posted || 0;
-                            totalErrors += res.data.errors || 0;
-                            if (res.data.results) allResults.push(...res.data.results);
-                            hasMore = res.data.hasMore === true;
-                            offset = res.data.nextOffset || (offset + bs);
-                          } catch (e: any) {
-                            totalErrors++;
-                            allResults.push({ shopName: `バッチ${batchNum}`, status: `通信エラー: ${e?.message}` });
-                            hasMore = false; // エラー時はループ中断
-                          }
-                        }
-                        // 失敗店舗を抽出（再実行用）
-                        // 再実行対象 = 成功でも保留でもない実店舗のみ。
-                      // 保留はDB登録済み（再実行しても重複スキップになるだけ）、「バッチN」は通信エラーの擬似行で店舗ではない
-                      const failed = allResults
-                        // 「重複スキップ」= 同一時刻の予約が既にDBにある＝登録済み。再実行対象に入れると毎回同じ店舗を送り続けて永久に未完了になる
-                        .filter((r: any) => !r.status?.includes("成功") && !r.status?.includes("保留") && !r.status?.includes("重複スキップ") && !/^バッチ\d+$/.test(r.shopName || ""))
-                        .map((r: any) => r.shopName);
-                        const uniqueFailed = Array.from(new Set(failed));
-                        setAutoPostFailedShops(uniqueFailed);
-                        setAutoPostResult({ mode: "executed", posted: totalPosted, errors: totalErrors, results: allResults, matches: total, attempt: currentAttempt, failedShops: uniqueFailed, failedTabs: previewRes.data.failedTabs });
-                        setAutoPostAttempt(currentAttempt + 1);
-                        setMsg(`${currentAttempt}回目完了: ${totalPosted}件投稿 / ${totalErrors}件エラー`);
-                        await fetchData();
-                      } catch (e: any) { setAutoPostResult({ error: e?.response?.data?.error || e?.message }); }
-                      finally { setAutoPosting(false); }
-                    }} disabled={!can(role, "EXTERNAL_OP") || autoPosting}
-                      title={!can(role, "EXTERNAL_OP") ? PERMISSION_DENIED_HINT.EXTERNAL_OP : undefined}
+                    <button onClick={() => startAutoPostJob("immediate")} disabled={!can(role, "EXTERNAL_OP") || autoPosting || autoPostJobActive}
+                      title={!can(role, "EXTERNAL_OP") ? PERMISSION_DENIED_HINT.EXTERNAL_OP : "「今すぐ」の予約として登録し、数分以内に順次GBPへ公開します"}
                       className="px-4 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed" style={{ color: "#fff" }}>
-                      {autoPosting ? "投稿中..." : autoPostAttempt > 1 ? `${autoPostAttempt}回目: 未完了${autoPostFailedShops.length}件を実行` : "自動投稿を実行"}
+                      {autoPosting ? "登録中..." : autoPostJobActive ? "実行中..." : autoPostFailedShops.length > 0 ? `${autoPostAttempt}回目: 未完了${autoPostFailedShops.length}件を実行` : "自動投稿を実行"}
                     </button>
                   </div>
                 </div>
@@ -1157,141 +1232,31 @@ export default function PostsPage() {
                       <option key={i} value={String(i)}>{i}時</option>
                     ))}
                   </select>
-                  <button onClick={async () => {
-                    setAutoPosting(true); setAutoPostResult(null);
-                    // プレビュー・実行と同じフィルタ構築
-                    const sc = buildAutoPostFilter(autoPostAttempt > 1 ? autoPostFailedShops : undefined);
-                    if (!sc.ok) { setAutoPostResult({ error: sc.error }); setAutoPosting(false); return; }
-                    const schedFilter = sc.filter;
-                    const scheduledAt = `${scheduleDate}T${scheduleHour.padStart(2, "0")}:00:00+09:00`;
-                    try {
-                      const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, ...schedFilter }, { timeout: 120000 });
-                      const total = previewRes.data.matches || 0;
-                      if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません`, zeroDebug: previewRes.data.debug, failedTabs: previewRes.data.failedTabs }); setAutoPosting(false); return; }
-                      const bs = 10;
-                      const totalBatches = Math.ceil(total / bs);
-                      const isPhotoMode = (postSelectedType || newPost.topicType) === "PHOTO";
-                      if (!confirm(`${scheduleDate} ${scheduleHour}時 に予約投稿しますか？\n\n投稿先: ${sc.label}\n対象 ${total}店舗（${totalBatches}バッチ・目安${Math.ceil(totalBatches * 1.5)}分）`
-                        + (isPhotoMode ? `\n※写真投稿は1店舗に複数枚あれば枚数分（3枚なら3件）が登録されます` : "")
-                        + `\n登録中はこのタブを閉じないでください`)) { setAutoPosting(false); return; }
-
-                      let totalPosted = 0, totalErrors = 0;
-                      const allResults: any[] = [];
-                      let off = 0;
-                      let hasMore = true;
-                      let batchNum = 0;
-                      // バッチが通信エラー（タイムアウト等）でも全体を止めない。
-                      // 以前は1バッチ失敗で while を抜けていたため、300店舗の途中で落ちると残り全店舗が未登録のまま
-                      // 「完了」表示になっていた。1回だけ再試行し、それでもダメなら記録して次のバッチへ進む
-                      // （再試行で二重登録にならないのはAPI側の同一店舗・同一時刻の重複チェックによる）
-                      while (hasMore) {
-                        batchNum++;
-                        setMsg(`予約登録中... バッチ${batchNum}/${totalBatches}（${totalPosted}件登録済み・${totalErrors}件スキップ）`);
-                        let done = false;
-                        for (let attempt = 1; attempt <= 2 && !done; attempt++) {
-                          try {
-                            const res = await api.post("/api/report/auto-post", {
-                              sheetId: autoPostSheet, targetDate: autoPostDate,
-                              topicType: postSelectedType || newPost.topicType,
-                              batchOffset: off, batchSize: bs,
-                              ...schedFilter,
-                              scheduleMode: true, scheduleAt: scheduledAt,
-                            }, { timeout: 290000 });
-                            totalPosted += res.data.posted || 0;
-                            totalErrors += res.data.errors || 0;
-                            if (res.data.results) allResults.push(...res.data.results);
-                            hasMore = res.data.hasMore === true;
-                            off = res.data.nextOffset || (off + bs);
-                            done = true;
-                          } catch (e: any) {
-                            if (attempt === 1) {
-                              setMsg(`バッチ${batchNum}/${totalBatches} が失敗（${e?.message}）。5秒後に再試行します`);
-                              await new Promise((r) => setTimeout(r, 5000));
-                              continue;
-                            }
-                            // このバッチの店舗を1店舗ずつ「未登録」として記録する。
-                            // 以前は「バッチN」の擬似行だけで、再実行対象（failedShops）からも漏れて黙って未登録になっていた
-                            const rowsInBatch: any[] = (previewRes.data.data || []).slice(off, off + bs);
-                            for (const row of rowsInBatch) {
-                              totalErrors++;
-                              allResults.push({ shopName: row.shopName, status: "通信エラー（未登録・再実行対象）", detail: String(e?.message || "") });
-                            }
-                            if (rowsInBatch.length === 0) console.error(`[予約登録] バッチ${batchNum}: プレビュー行が無く店舗を特定できません`, e?.message);
-                            off += bs;
-                            hasMore = off < total;
-                          }
-                        }
-                      }
-                      // 再実行対象 = 成功でも保留でもない実店舗のみ。
-                      // 保留はDB登録済み（再実行しても重複スキップになるだけ）、「バッチN」は通信エラーの擬似行で店舗ではない
-                      const failed = allResults
-                        // 「重複スキップ」= 同一時刻の予約が既にDBにある＝登録済み。再実行対象に入れると毎回同じ店舗を送り続けて永久に未完了になる
-                        .filter((r: any) => !r.status?.includes("成功") && !r.status?.includes("保留") && !r.status?.includes("重複スキップ") && !/^バッチ\d+$/.test(r.shopName || ""))
-                        .map((r: any) => r.shopName);
-                      const uniqueFailed = Array.from(new Set(failed));
-                      setAutoPostFailedShops(uniqueFailed);
-                      setAutoPostResult({ mode: "executed", posted: totalPosted, errors: totalErrors, results: allResults, matches: total, attempt: autoPostAttempt, failedShops: uniqueFailed, failedTabs: previewRes.data.failedTabs });
-                      setAutoPostAttempt(autoPostAttempt + 1);
-                      setMsg(`完了: ${totalPosted}件予約登録 / ${totalErrors}件エラー`);
-                    } catch (e: any) { setAutoPostResult({ error: e?.response?.data?.error || e?.message }); }
-                    finally { setAutoPosting(false); }
-                  }} disabled={!can(role, "EXTERNAL_OP") || autoPosting}
+                  <button onClick={() => startAutoPostJob("schedule")} disabled={!can(role, "EXTERNAL_OP") || autoPosting || autoPostJobActive}
                     title={!can(role, "EXTERNAL_OP") ? PERMISSION_DENIED_HINT.EXTERNAL_OP : undefined}
                     className="px-4 py-2 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed" style={{ color: "#fff" }}>
-                    {autoPosting ? "予約中..." : "予約投稿として登録"}
+                    {autoPosting ? "登録中..." : autoPostJobActive ? "実行中..." : autoPostFailedShops.length > 0 ? `未完了${autoPostFailedShops.length}件を予約登録` : "予約投稿として登録"}
                   </button>
                   {/* 事前チェック: Dropbox写真検索・店舗照合・警告判定だけ行い、Storage保存もDB登録もしない。
                       300店舗を登録する前に「写真が無い店舗」「未登録店舗」をここで潰す */}
-                  <button onClick={async () => {
-                    setAutoPosting(true); setAutoPostResult(null);
-                    // 事前チェックは「前回失敗店舗のみ」の絞り込みを引き継がず、常に Step1 の投稿先すべてを見る
-                    const sc = buildAutoPostFilter();
-                    if (!sc.ok) { setAutoPostResult({ error: sc.error }); setAutoPosting(false); return; }
-                    const scheduledAt = `${scheduleDate || autoPostDate}T${scheduleHour.padStart(2, "0")}:00:00+09:00`;
-                    try {
-                      const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, batchSize: 10, ...sc.filter }, { timeout: 120000 });
-                      const total = previewRes.data.matches || 0;
-                      if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません`, zeroDebug: previewRes.data.debug, failedTabs: previewRes.data.failedTabs }); setAutoPosting(false); return; }
-                      const bs = 10;
-                      const totalBatches = Math.ceil(total / bs);
-                      const allResults: any[] = [];
-                      let off = 0, hasMore = true, batchNum = 0;
-                      while (hasMore) {
-                        batchNum++;
-                        setMsg(`事前チェック中... バッチ${batchNum}/${totalBatches}`);
-                        try {
-                          const res = await api.post("/api/report/auto-post", {
-                            sheetId: autoPostSheet, targetDate: autoPostDate, topicType: postSelectedType || newPost.topicType,
-                            batchOffset: off, batchSize: bs, ...sc.filter,
-                            scheduleMode: true, checkOnly: true, scheduleAt: scheduledAt,
-                          }, { timeout: 290000 });
-                          if (res.data.results) allResults.push(...res.data.results);
-                          hasMore = res.data.hasMore === true;
-                          off = res.data.nextOffset || (off + bs);
-                        } catch (e: any) {
-                          allResults.push({ shopName: `バッチ${batchNum}`, status: `通信エラー（行${off + 1}〜${Math.min(off + bs, total)}は未チェック）: ${e?.message}`, check: "ng" });
-                          off += bs; hasMore = off < total;
-                        }
-                      }
-                      const ng = allResults.filter((r: any) => r.check === "ng").length;
-                      setAutoPostResult({ mode: "check", results: allResults, matches: total, failedTabs: previewRes.data.failedTabs });
-                      setMsg(`事前チェック完了: 登録可能${allResults.length - ng}件 / 登録不可${ng}件`);
-                    } catch (e: any) { setAutoPostResult({ error: e?.response?.data?.error || e?.message }); }
-                    finally { setAutoPosting(false); }
-                  }} disabled={!can(role, "EXTERNAL_OP") || autoPosting}
+                  <button onClick={() => startAutoPostJob("check")} disabled={!can(role, "EXTERNAL_OP") || autoPosting || autoPostJobActive}
                     className="px-4 py-2 rounded-lg text-xs font-semibold bg-white border border-blue-300 text-blue-700 hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed"
-                    title="登録せずに、写真が見つかるか・店舗が登録済みかを全店舗分チェックします">
-                    {autoPosting ? "チェック中..." : "事前チェック（登録しない）"}
+                    title="登録せずに、写真が見つかるか・店舗が登録済みかを全店舗分チェックします（バックグラウンド実行）">
+                    {autoPosting ? "開始中..." : autoPostJobActive ? "実行中..." : "事前チェック（登録しない）"}
                   </button>
                 </div>
                 {/* 「絞り込んだつもりで全店舗に投稿していた」を防ぐため、実行前に投稿先を常に表示する */}
                 {(() => {
-                  const t = buildAutoPostFilter(autoPostAttempt > 1 ? autoPostFailedShops : undefined);
+                  const t = buildAutoPostFilter(autoPostFailedShops.length > 0 ? autoPostFailedShops : undefined);
                   const isAll = t.ok && !t.filter.filterShopNames;
                   return (
                     <p className={`text-xs font-semibold ${!t.ok ? "text-red-600" : isAll ? "text-amber-700" : "text-[#003D6B]"}`}>
                       投稿先: {t.ok ? t.label : t.error}
                       {isAll && <span className="font-normal">　← Step1で「店舗を選んで投稿」を選ぶと絞り込めます</span>}
+                      {autoPostFailedShops.length > 0 && (
+                        <button type="button" onClick={() => { setAutoPostFailedShops([]); setAutoPostAttempt(1); }}
+                          className="ml-2 font-normal underline text-slate-500 hover:text-slate-700">未完了の絞り込みを解除してStep1の投稿先に戻す</button>
+                      )}
                     </p>
                   );
                 })()}
@@ -1311,6 +1276,33 @@ export default function PostsPage() {
                 )}
                 {autoPostResult && (
                   <div className={`rounded-lg p-3 text-sm ${autoPostResult.error ? "bg-red-50 text-red-700 border border-red-200" : (autoPostResult.mode === "preview" || autoPostResult.mode === "check") ? "bg-blue-50 text-blue-700 border border-blue-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}>
+                    {/* ジョブの進捗（バックグラウンド実行）。処理済み店舗数はサーバーの cursor を4秒ごとに反映 */}
+                    {autoPostResult.job && (() => {
+                      const j = autoPostResult.job;
+                      const active = j.status === "queued" || j.status === "running";
+                      const pct = j.total ? Math.min(100, Math.round((j.cursor / j.total) * 100)) : 0;
+                      const stateLabel = j.status === "queued" ? "開始待ち" : j.status === "running" ? "処理中" : j.status === "done" ? "完了" : j.status === "cancelled" ? "中止" : "エラー";
+                      return (
+                        <div className="mb-3 pb-3 border-b border-slate-200/70">
+                          <div className="flex items-center gap-3 flex-wrap text-xs">
+                            <span className="font-semibold">{stateLabel}: {j.cursor}/{j.total}店舗</span>
+                            {j.target_label && <span className="text-slate-500">投稿先: {j.target_label}</span>}
+                            {active && <span className="text-slate-500">バックグラウンド実行中（4秒ごとに更新）。このタブを閉じても続きます</span>}
+                            {active && (
+                              <button type="button" onClick={cancelAutoPostJob}
+                                className="px-2 py-0.5 rounded border border-red-300 text-red-600 bg-white hover:bg-red-50 font-semibold">中止</button>
+                            )}
+                          </div>
+                          <div className="h-2 bg-slate-200 rounded mt-1.5 overflow-hidden">
+                            <div className={`h-2 transition-all ${j.status === "done" ? "bg-emerald-500" : active ? "bg-blue-500" : "bg-slate-400"}`} style={{ width: `${pct}%` }} />
+                          </div>
+                          {j.mode === "immediate" && (
+                            <p className="text-[11px] text-slate-500 mt-1">即時投稿は「今すぐ」の予約として登録され、数分以内に順次GBPへ公開されます。公開の成否は下の予約投稿一覧（published / error）で確認してください</p>
+                          )}
+                          {j.last_error && <p className="text-[11px] text-red-600 mt-1">直近のエラー: {j.last_error}</p>}
+                        </div>
+                      );
+                    })()}
                     {autoPostResult.error ? (
                       <>
                         <p>エラー: {autoPostResult.error}</p>
