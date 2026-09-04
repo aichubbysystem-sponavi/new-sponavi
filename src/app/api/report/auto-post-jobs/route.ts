@@ -86,7 +86,7 @@ export const POST = withAudit("シート自動投稿ジョブ作成", "EXTERNAL_
   // ワーカー起動（失敗しても毎分のcronが拾う）
   await kickCron(request, "/api/cron/auto-post-worker");
 
-  return NextResponse.json({ jobId: id, total: names.length, failedTabs: preview.body?.failedTabs, scheduleAt: schedule_at });
+  return NextResponse.json({ jobId: id, total: names.length, failedTabs: preview.body?.failedTabs, unmatchedFilterNames: preview.body?.unmatchedFilterNames, scheduleAt: schedule_at });
 });
 
 export async function GET(request: NextRequest) {

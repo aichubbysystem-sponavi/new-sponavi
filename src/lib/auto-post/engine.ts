@@ -881,6 +881,10 @@ export async function runAutoPost(body: AutoPostBody, ctx: AutoPostCtx, opts: Au
   const tabs = ["投稿用シート", "報告必須店舗 投稿用シート", "WHITE 系列 投稿用シート"];
   const allMatches: { shopName: string; summary: string; photoUrl: string; ctaUrl: string; tab: string; rawPhotoCell: string; rawDateCell: string; photoDebug: string; topicType: string; offerTitle: string; offerStartDate: any; offerEndDate: any; photoIndex?: number; mediaFileName?: string; mediaFormat?: GbpMediaFormat; mediaWebUrl?: string; mediaBytes?: number }[] = [];
   const pendingPhotoSearch: { index: number; photoCell: string; shopName: string }[] = [];
+  // 絞り込み名（店舗名・GBP店名）のうちシートの行に一致したもの。
+  // 一致しなかった名前は呼び出し側に返し、「Step1で選んだのにシートに無い店舗」を画面に出す。
+  // 以前はプレビューの件数から黙って減るだけで、80店舗中4店舗が結果にもスキップ一覧にも出ず気づけなかった（2026-09-04）
+  const matchedFilterNames = new Set<string>();
 
   // タブのCSV取得は並列（3タブ直列だとクライアントの待ち時間に乗ってしまう）。
   // 行の処理はタブ順のまま行う: 写真投稿の「同一店舗は最初の1行のみ」がタブ順に依存するため。
@@ -950,8 +954,9 @@ export async function runAutoPost(body: AutoPostBody, ctx: AutoPostCtx, opts: Au
 
         // 店舗フィルタ（特定店舗が指定されている場合、その店舗のみ対象）
         if (filterShopNames && filterShopNames.length > 0) {
-          const match = filterShopNames.some(fn => matchShopName(shopName, fn));
-          if (!match) continue;
+          const hit = filterShopNames.find(fn => matchShopName(shopName, fn));
+          if (!hit) continue;
+          matchedFilterNames.add(hit);
         } else if (filterShopName && !matchShopName(shopName, filterShopName)) continue;
 
         // 写真投稿: 同じ店舗が複数行にある場合は最初の1行のみ使用
@@ -979,6 +984,7 @@ export async function runAutoPost(body: AutoPostBody, ctx: AutoPostCtx, opts: Au
   // 「12店舗すべて1枚しか投稿されない」状態になっていた（2026-08-21）。
   // さらに各バッチのリクエストで全店舗分のDropbox検索をやり直していたのがタイムアウトの原因。
   // → 今のバッチ範囲の行だけ写真検索し、2枚目以降は親行の直後に並べて同じリクエスト内で登録する。
+  const unmatchedFilterNames = (filterShopNames || []).filter(fn => !matchedFilterNames.has(fn));
   const rowCount = allMatches.length; // プレビューの件数と一致する安定した母数
   const offset = batchOffset || 0;
   const size = batchSize || rowCount; // 未指定時は全件
@@ -1066,6 +1072,7 @@ export async function runAutoPost(body: AutoPostBody, ctx: AutoPostCtx, opts: Au
       matches: 0,
       message: `${targetDate}に該当する投稿データがありません`,
       failedTabs,
+      unmatchedFilterNames,
       debug: { isPhotoOnly, topicType, dateCompact, photoPostNumber, tabResults, filterShopName, filterShopNames, failedTabs },
     });
   }
@@ -1081,6 +1088,7 @@ export async function runAutoPost(body: AutoPostBody, ctx: AutoPostCtx, opts: Au
     return json({
       matches: allMatches.length,
       failedTabs,
+      unmatchedFilterNames,
       data: allMatches,
       totalBatches,
       batchSize: bs,

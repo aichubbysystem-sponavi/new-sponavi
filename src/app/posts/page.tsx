@@ -183,6 +183,8 @@ export default function PostsPage() {
    */
   const buildAutoPostFilter = useCallback((retryNames?: string[]): {
     ok: boolean; filter: { filterShopNames?: string[] }; label: string; error?: string;
+    /** 絞り込みの元になった店舗（「シートに見つからない店舗」の判定用） */
+    shops?: { id: string; name: string }[];
   } => {
     if (retryNames && retryNames.length > 0) {
       return { ok: true, filter: { filterShopNames: retryNames }, label: `未完了の${retryNames.length}店舗のみ` };
@@ -193,14 +195,27 @@ export default function PostsPage() {
       if (names.length === 0) {
         return { ok: false, filter: {}, label: "", error: "選択した店舗を特定できませんでした。Step1で店舗を選び直してください（このまま実行すると全店舗が対象になります）" };
       }
-      return { ok: true, filter: { filterShopNames: names }, label: `選択した${targets.length}店舗のみ` };
+      return { ok: true, filter: { filterShopNames: names }, label: `選択した${targets.length}店舗のみ`, shops: targets };
     }
     if (postTargetMode === "current" && selectedShop) {
-      return { ok: true, filter: { filterShopNames: expandShopNames([selectedShop], gbpAliases) }, label: `${selectedShop.name} のみ` };
+      return { ok: true, filter: { filterShopNames: expandShopNames([selectedShop], gbpAliases) }, label: `${selectedShop.name} のみ`, shops: [selectedShop] };
     }
     // 「全店舗」を選んだ場合と、全店舗表示ヘッダー(isAllMode)で店舗未選択の場合は絞り込みなし
     return { ok: true, filter: {}, label: "シート内の全店舗（絞り込みなし）" };
   }, [postTargetMode, postTargetShopIds, shops, gbpAliases, selectedShop]);
+
+  /**
+   * プレビューで一致しなかった絞り込み名から「Step1で選んだのにシートに無い店舗」を求める。
+   * 店舗名・GBP店名のどちらもシートB列に一致しなかった店舗だけを返す（片方が一致していれば対象に入っている）。
+   * 以前はプレビューの母数から黙って減るだけで、80店舗中4店舗が結果にもスキップ一覧にも出ず気づけなかった（2026-09-04）
+   */
+  const unmatchedShopsOf = useCallback((sc: { shops?: { id: string; name: string }[] }, unmatched: string[] | undefined): string[] => {
+    if (!sc.shops?.length || !unmatched?.length) return [];
+    const un = new Set(unmatched);
+    return sc.shops
+      .filter((s) => { const alias = gbpAliases?.[s.id]; return un.has(s.name) && (!alias || alias === s.name || un.has(alias)); })
+      .map((s) => s.name);
+  }, [gbpAliases]);
 
   const [creating, setCreating] = useState(false);
   const [msg, setMsg] = useState("");
@@ -676,9 +691,11 @@ export default function PostsPage() {
       // 件数確認のためのプレビュー（シート読み取りのみ・数秒）。対象店舗の確定はサーバー側でもう一度行う
       const previewRes = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: topic, ...sc.filter }, { timeout: 120000 });
       const total = previewRes.data.matches || 0;
-      if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません`, zeroDebug: previewRes.data.debug, failedTabs: previewRes.data.failedTabs }); setAutoPosting(false); return; }
+      const unmatchedShops = unmatchedShopsOf(sc, previewRes.data.unmatchedFilterNames);
+      if (total === 0) { setAutoPostResult({ error: `${autoPostDate}に該当する投稿がありません`, zeroDebug: previewRes.data.debug, failedTabs: previewRes.data.failedTabs, unmatchedShops }); setAutoPosting(false); return; }
       const estMin = Math.max(1, Math.ceil(total / 10)); // 5店舗≒30秒の実測目安
-      const bg = "バックグラウンドで実行され、進捗はこの画面に表示されます（タブを閉じても続きます）";
+      const bg = "バックグラウンドで実行され、進捗はこの画面に表示されます（タブを閉じても続きます）"
+        + (unmatchedShops.length > 0 ? `\n\n※シートに見つからず対象外: ${unmatchedShops.length}店舗（${unmatchedShops.slice(0, 5).join("、")}${unmatchedShops.length > 5 ? " ほか" : ""}）` : "");
       const confirmMsg = mode === "check"
         ? `${total}店舗を事前チェックしますか？（登録はしません）\n\n投稿先: ${sc.label}\n${bg}`
         : mode === "schedule"
@@ -696,13 +713,13 @@ export default function PostsPage() {
       const job = { id: res.data.jobId, mode, status: "queued", total: res.data.total, cursor: 0, posted: 0, errors: 0, target_label: sc.label };
       autoPostJobPrevStatusRef.current = "queued";
       setAutoPostJob(job);
-      setAutoPostResult({ jobId: job.id, mode: mode === "check" ? "check" : "executed", results: [], matches: job.total, attempt: autoPostAttempt, failedTabs: res.data.failedTabs, job });
+      setAutoPostResult({ jobId: job.id, mode: mode === "check" ? "check" : "executed", results: [], matches: job.total, attempt: autoPostAttempt, failedTabs: res.data.failedTabs, unmatchedShops, job });
       setMsg(mode === "check" ? "事前チェックを開始しました（バックグラウンド）" : mode === "schedule" ? "予約登録を開始しました（バックグラウンド）" : "即時投稿の登録を開始しました（バックグラウンド）");
     } catch (e: any) {
       const data = e?.response?.data;
       setAutoPostResult({ error: data?.error || e?.message, zeroDebug: data?.debug, failedTabs: data?.failedTabs });
     } finally { setAutoPosting(false); }
-  }, [autoPostJobActive, autoPostFailedShops, buildAutoPostFilter, postSelectedType, newPost.topicType, scheduleDate, scheduleHour, autoPostDate, autoPostSheet, gate, autoPostAttempt]);
+  }, [autoPostJobActive, autoPostFailedShops, buildAutoPostFilter, unmatchedShopsOf, postSelectedType, newPost.topicType, scheduleDate, scheduleHour, autoPostDate, autoPostSheet, gate, autoPostAttempt]);
 
   /** 実行中ジョブの中止（処理中のスライスが終わり次第止まる） */
   const cancelAutoPostJob = useCallback(async () => {
@@ -1197,9 +1214,10 @@ export default function PostsPage() {
                       try {
                         const res = await api.post("/api/report/auto-post", { sheetId: autoPostSheet, targetDate: autoPostDate, dryRun: true, topicType: postSelectedType || newPost.topicType, ...pv.filter }, { timeout: 120000 });
                         // 0件のときはエラー表示に寄せて、原因（店舗名の食い違い）を追えるようにする
+                        const unmatchedShops = unmatchedShopsOf(pv, res.data?.unmatchedFilterNames);
                         setAutoPostResult((res.data?.matches || 0) === 0
-                          ? { error: `${autoPostDate}に該当する投稿がありません`, zeroDebug: res.data?.debug, failedTabs: res.data?.failedTabs }
-                          : { ...res.data, mode: "preview", targetLabel: pv.label });
+                          ? { error: `${autoPostDate}に該当する投稿がありません`, zeroDebug: res.data?.debug, failedTabs: res.data?.failedTabs, unmatchedShops }
+                          : { ...res.data, mode: "preview", targetLabel: pv.label, unmatchedShops });
                       } catch (e: any) {
                         // プレビューは読み取りだけなので、タイムアウトしても投稿は発生していない
                         const timedOut = e?.code === "ECONNABORTED" || /timeout/i.test(e?.message || "");
@@ -1262,6 +1280,21 @@ export default function PostsPage() {
                 })()}
                 <p className="text-[10px] text-slate-400">タブ「投稿用シート」「報告必須店舗 投稿用シート」「WHITE 系列 投稿用シート」のB列=店舗名、C列=投稿本文、E列=日付、F列=写真URL、J列=CTAボタンURL</p>
 
+                {/* Step1で選んだのにシートB列に一致しなかった店舗。プレビューの母数から黙って減るだけだと気づけない */}
+                {autoPostResult?.unmatchedShops?.length > 0 && (
+                  <div className="rounded-lg p-3 text-sm bg-amber-50 text-amber-800 border border-amber-300 mb-2">
+                    <p className="font-semibold">
+                      Step1で選んだのにシートに見つからない店舗（{autoPostResult.unmatchedShops.length}件）— 今回の対象に入っていません
+                    </p>
+                    <p className="text-[11px] mt-0.5">
+                      シートB列の表記が店舗名・GBP店名のどちらとも一致しないか、通常投稿では対象日（E列）の行が無い店舗です。
+                      B列を店舗情報管理の店舗名に合わせるか、店舗情報管理でGBP店名を確認してください
+                    </p>
+                    <ul className="mt-1 text-[11px] list-disc pl-4">
+                      {autoPostResult.unmatchedShops.map((n: string) => <li key={n}>{n}</li>)}
+                    </ul>
+                  </div>
+                )}
                 {/* シートのタブが読めなかった場合、そのタブの店舗は丸ごと処理対象外になる。
                     黙って「0件」「一部だけ投稿」にならないよう必ず出す */}
                 {autoPostResult?.failedTabs?.length > 0 && (
