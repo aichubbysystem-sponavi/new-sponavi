@@ -9,6 +9,7 @@
  * の両方から呼べるようにした。ロジック自体は移動前と同一。
  */
 import { getSupabase } from "@/lib/supabase";
+import { normName, matchShopName, buildShopResolver } from "@/lib/auto-post/shop-match";
 import { detectMediaFormat, isSupportedMediaFile, type GbpMediaFormat } from "@/lib/media-format";
 import { explainGbpError } from "@/lib/gbp-error-ja";
 
@@ -47,13 +48,7 @@ function mediaFormatOf(match: { mediaFormat?: GbpMediaFormat; mediaFileName?: st
     || "PHOTO";
 }
 
-/** 店舗名の正規化比較（全角半角・スペースの揺れを吸収、部分一致は排除） */
-function normName(s: string): string {
-  return s.normalize("NFKC").replace(/[\s\u3000]+/g, "").toLowerCase();
-}
-function matchShopName(a: string, b: string): boolean {
-  return normName(a) === normName(b);
-}
+// 店舗名の照合（完全一致＋末尾英語名の吸収）は shop-match.ts に集約（2026-09-04）
 
 /**
  * GBP APIを叩く。401/403/404 は「そのトークンからそのロケーションが見えない」だけのことがあるため、
@@ -877,6 +872,19 @@ export async function runAutoPost(body: AutoPostBody, ctx: AutoPostCtx, opts: Au
   // スプレッドシート読み取り用のOAuthトークンを取得
   const sheetAccessToken = await getOAuthToken();
 
+  const supabase = getSupabase();
+  // 解約済み（cancelled_at）・削除済み（deleted_at）は投稿対象から外す。
+  // 以前は gbp_location_name の有無だけで引いていたため、「全店舗」で走らせると解約店舗のGBPにも投稿し得た
+  // （2026-08-28 時点で解約72件・削除4件）。画面の店舗一覧（Go API）と同じ条件に揃える
+  const { data: shops } = await supabase.from("shops")
+    .select("id, name, gbp_location_name, gbp_shop_name")
+    .not("gbp_location_name", "is", null)
+    .is("cancelled_at", null)
+    .is("deleted_at", null);
+  // シートB列 → 店舗。完全一致に加え、末尾の英語名だけが違う場合（「カネマス弥平とうふ店 KANEMASU YAHEI TOFU」⇔
+  // 「カネマス弥平とうふ店」）も候補が1店舗だけなら一致させる。行の絞り込み・予約登録・即時投稿の全てでこれを使う
+  const resolveShop = buildShopResolver(shops || []);
+
   // 対象タブを読み込み
   const tabs = ["投稿用シート", "報告必須店舗 投稿用シート", "WHITE 系列 投稿用シート"];
   const allMatches: { shopName: string; summary: string; photoUrl: string; ctaUrl: string; tab: string; rawPhotoCell: string; rawDateCell: string; photoDebug: string; topicType: string; offerTitle: string; offerStartDate: any; offerEndDate: any; photoIndex?: number; mediaFileName?: string; mediaFormat?: GbpMediaFormat; mediaWebUrl?: string; mediaBytes?: number }[] = [];
@@ -953,11 +961,16 @@ export async function runAutoPost(body: AutoPostBody, ctx: AutoPostCtx, opts: Au
         }
 
         // 店舗フィルタ（特定店舗が指定されている場合、その店舗のみ対象）
+        // 絞り込み名（Step1の店舗名・GBP店名）との照合。B列が店舗名と完全一致しなくても、
+        // B列から解決できる店舗の名前が絞り込みに含まれていれば対象にする
+        const resolvedForFilter = (filterShopNames && filterShopNames.length > 0) || filterShopName ? resolveShop(shopName) : null;
+        const nameHits = (fn: string) => matchShopName(shopName, fn)
+          || (!!resolvedForFilter && (matchShopName(resolvedForFilter.name, fn) || matchShopName(resolvedForFilter.gbp_shop_name || "", fn)));
         if (filterShopNames && filterShopNames.length > 0) {
-          const hit = filterShopNames.find(fn => matchShopName(shopName, fn));
+          const hit = filterShopNames.find(nameHits);
           if (!hit) continue;
           matchedFilterNames.add(hit);
-        } else if (filterShopName && !matchShopName(shopName, filterShopName)) continue;
+        } else if (filterShopName && !nameHits(filterShopName)) continue;
 
         // 写真投稿: 同じ店舗が複数行にある場合は最初の1行のみ使用
         if (isPhotoOnly && allMatches.some(m => m.shopName === shopName)) continue;
@@ -1109,15 +1122,7 @@ export async function runAutoPost(body: AutoPostBody, ctx: AutoPostCtx, opts: Au
     for (const extra of extrasByRow.get(ri) || []) batchMatches.push(extra);
   }
 
-  const supabase = getSupabase();
-  // 解約済み（cancelled_at）・削除済み（deleted_at）は投稿対象から外す。
-  // 以前は gbp_location_name の有無だけで引いていたため、「全店舗」で走らせると解約店舗のGBPにも投稿し得た
-  // （2026-08-28 時点で解約72件・削除4件）。画面の店舗一覧（Go API）と同じ条件に揃える
-  const { data: shops } = await supabase.from("shops")
-    .select("id, name, gbp_location_name, gbp_shop_name")
-    .not("gbp_location_name", "is", null)
-    .is("cancelled_at", null)
-    .is("deleted_at", null);
+  // shops はシート読み込みの前に取得済み（店舗名の照合に使う）
 
   // 差し込み文字列を一括取得（shop_idとshop_name両方でマッチできるように）
   const fixedMsgByShopId: Record<string, string> = {};
@@ -1192,9 +1197,7 @@ export async function runAutoPost(body: AutoPostBody, ctx: AutoPostCtx, opts: Au
       if (!isPhotoOnly && !match.summary) {
         return { match, shop: null, warnings: [], skip: { reason: "本文なし（スキップ）" } };
       }
-      const shop = (shops || []).find((s) =>
-        matchShopName(s.name, match.shopName) || matchShopName(s.gbp_shop_name || "", match.shopName)
-      );
+      const shop = resolveShop(match.shopName);
       if (!shop) {
         return { match, shop: null, warnings: [], skip: { reason: "店舗未登録（スキップ）", detail: explainShopMismatch(match.shopName, shops || []) } };
       }
@@ -1409,9 +1412,7 @@ export async function runAutoPost(body: AutoPostBody, ctx: AutoPostCtx, opts: Au
   for (const match of batchMatches) {
    try {
     // 店舗名でマッチ
-    const shop = (shops || []).find((s) =>
-      matchShopName(s.name, match.shopName) || matchShopName(s.gbp_shop_name || "", match.shopName)
-    );
+    const shop = resolveShop(match.shopName);
 
     if (!shop) {
       results.push({ shopName: match.shopName, status: "店舗未登録", summary: match.summary.slice(0, 30) });

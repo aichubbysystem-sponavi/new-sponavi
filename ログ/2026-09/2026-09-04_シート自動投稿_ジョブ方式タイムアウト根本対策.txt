@@ -73,3 +73,12 @@
     → 対処（7884392）: engine が unmatchedFilterNames を返し、画面に「Step1で選んだのにシートに見つからない店舗」を
       一覧表示＋確認ダイアログに件数。4店舗の具体的な原因（B列表記ゆれ or 日付行なし）はデプロイ後にこの一覧で確認する
   - シート本体はローカルのGoogleトークン・Playwrightとも403で読めない（アプリはGBP用OAuthトークンで読んでいる）
+
+■ 店舗名照合: 末尾英語名の吸収（同日・ユーザー要望「カネマス弥平とうふ店 KANEMASU YAHEI TOFU ＝ カネマス弥平とうふ店 はできない？」）
+  - 4店舗のうち2店舗（WHITE EYE 小倉／iBROW.浜松駅前店）は未一致表示の対応後に正常登録（各3枚）。
+    残り: カネマス弥平とうふ店（マスタ名に英語名付き・シートB列は日本語のみ）／栃木佐野店（B列表記がマスタと不一致・原因未確認）
+  - src/lib/auto-post/shop-match.ts を新設（normName / matchShopName / looseKey / buildShopResolver）。engine の照合3箇所
+    （行の絞り込み・予約登録の店舗解決・即時投稿の店舗解決）を resolveShop に統一。shops の取得をシート読み込み前に移動
+  - ルール: 完全一致を最優先。無ければ「空白＋英数字3文字以上の末尾」を落とした名前で照合し、候補がマスタに1店舗だけのときのみ一致。
+    2店舗以上（店A TOKYO / 店A OSAKA）は不一致。空白なしの英字（個室シーシャLuxia）・全部英字（KYOTO SAMURAI WALK）は対象外
+  - テスト shop-match.test.ts 10件追加（vitest 467件全パス）
