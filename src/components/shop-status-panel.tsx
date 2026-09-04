@@ -27,11 +27,12 @@ type SyncResult = {
   changes?: Change[];
   rankChanges?: RankChange[];
   unmatched?: { shopName: string; status: string }[];
+  blankStatus?: string[];
   duplicatedInDb?: string[];
   duplicatedInMaster?: string[];
   failed?: { shopName: string; error: string }[];
 };
-type Counts = { total: number; active: number; cancelled: number; paused: number; rankDisabled: number };
+type Counts = { total: number; active: number; cancelled: number; paused: number; rankDisabled: number; unlisted?: number };
 type Shop = { id: string; name: string; rank_tracking_reason?: string | null };
 type RankChange = { shopId: string; shopName: string; disable: boolean; detail: string };
 
@@ -66,6 +67,7 @@ function ResultBox({ applied, title, children }: { applied: boolean; title: stri
 export default function ShopStatusPanel() {
   const [busy, setBusy] = useState<string | null>(null);
   const [counts, setCounts] = useState<Counts | null>(null);
+  const [masterSheetUrl, setMasterSheetUrl] = useState<string>("");
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
   const [syncAt, setSyncAt] = useState<string>("");
   const [rankResult, setRankResult] = useState<{ applied: boolean; count: number; shops?: Shop[]; label: string; keyword?: string } | null>(null);
@@ -85,6 +87,7 @@ export default function ShopStatusPanel() {
         api.get("/api/report/rank-tracking"),
       ]);
       setCounts(c.data?.counts || null);
+      if (c.data?.masterSheetUrl) setMasterSheetUrl(c.data.masterSheetUrl);
       setDisabledShops(d.data?.shops || []);
     } catch {
       /* 表示だけなので失敗しても操作は続けられる */
@@ -190,13 +193,14 @@ export default function ShopStatusPanel() {
         {!counts ? (
           <p className="text-xs text-slate-400">読み込み中...</p>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
             {[
               { label: "全店舗", value: counts.total, cls: "text-slate-700" },
               { label: "契約中", value: counts.active, cls: "text-emerald-600" },
               { label: "解約", value: counts.cancelled, cls: "text-red-600" },
               { label: "停止中", value: counts.paused, cls: "text-orange-600" },
               { label: "計測対象外", value: counts.rankDisabled, cls: "text-slate-500" },
+              { label: "マスタ記載なし", value: counts.unlisted ?? 0, cls: "text-slate-500" },
             ].map((m) => (
               <div key={m.label} className="border border-slate-100 rounded-lg p-3 text-center">
                 <p className="text-[10px] text-slate-400 mb-0.5">{m.label}</p>
@@ -209,9 +213,14 @@ export default function ShopStatusPanel() {
 
       {/* MEOマスタ同期 */}
       <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-        <h3 className="text-sm font-semibold text-slate-500 mb-1">MEOマスタ同期（契約中 / 解約 / 停止中）</h3>
+        <h3 className="text-sm font-semibold text-slate-500 mb-1">MEOマスタ同期（契約中 / 解約 / 停止中 / 記載なし）</h3>
+        <p className="text-xs text-slate-400 mb-1">
+          「MEO顧客管理」シート（
+          <a href={masterSheetUrl || "#"} target="_blank" rel="noreferrer" className="underline hover:text-slate-600">Chubbyシートまとめ「元データ」タブ</a>
+          ）のステータス列を店舗に反映します。解約・停止中の店舗は、口コミ同期・パフォーマンス同期・月次AI分析の対象外になります。
+        </p>
         <p className="text-xs text-slate-400 mb-4">
-          スプレッドシートのB列を店舗に反映します。解約・停止中の店舗は、口コミ同期・パフォーマンス同期・月次AI分析の対象外になります。
+          シートに載っていない店舗は「MEOマスタ記載なし」として順位計測の対象外になり、顧客マスタで振り分けて確認できます。ステータス空欄の行は無視（現状維持）します。
         </p>
         <div className="flex gap-2 mb-4">
           <button onClick={() => runSync(false)} disabled={!!busy}
@@ -254,6 +263,10 @@ export default function ShopStatusPanel() {
               <span className="px-2 py-1 bg-white border border-slate-200 rounded">解約 {s.cancelled}</span>
               <span className="px-2 py-1 bg-white border border-slate-200 rounded">停止 {s.paused}</span>
               <span className="px-2 py-1 bg-white border border-slate-200 rounded">契約中に戻す {s.reactivated}</span>
+              <span className="px-2 py-1 bg-white border border-slate-200 rounded">記載なし→対象外 {s.unlistedDisable ?? 0}</span>
+              {(s.blankStatus ?? 0) > 0 && (
+                <span className="px-2 py-1 bg-white border border-slate-200 rounded" title={(syncResult.blankStatus || []).join(" / ")}>空欄（無視） {s.blankStatus}</span>
+              )}
             </div>
 
             {(syncResult.changes?.length ?? 0) > 0 ? (

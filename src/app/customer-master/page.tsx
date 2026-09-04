@@ -29,10 +29,16 @@ interface MasterRow {
   reviewCount: number;
   status: "active" | "paused" | "churned";
   cancelledAt: string | null;
+  pausedAt: string | null;
+  /**
+   * MEOマスタ（MEO顧客管理シート）に載っていない店舗。
+   * 契約ステータス同期が rank_tracking_reason='master' で対象外にしたもののうち、解約・停止中でないもの
+   */
+  masterUnlisted: boolean;
 }
 
 type FilterService = "all" | "meo" | "pmax" | "both" | "none";
-type FilterStatus = "all" | "active" | "cancelled";
+type FilterStatus = "all" | "active" | "cancelled" | "unlisted";
 
 export default function CustomerMasterPage() {
   const [shops, setShops] = useState<MasterRow[]>([]);
@@ -87,6 +93,7 @@ export default function CustomerMasterPage() {
       const gbpInfoById = new Map<string, {
         gbp_shop_name: string | null; gbp_location_name: string | null; gbp_full_path: string | null;
         state: string | null; city: string | null; phone: string | null;
+        paused_at?: string | null; rank_tracking_disabled?: boolean | null; rank_tracking_reason?: string | null;
       }>();
       for (const g of (Array.isArray(gbpInfoRes) ? gbpInfoRes : [])) {
         if (g?.id) gbpInfoById.set(g.id, g);
@@ -146,6 +153,10 @@ export default function CustomerMasterPage() {
         // GBP名が空（未同期）の場合は「変更あり」と判定しない。
         // 判定は lib/normalize.ts の isSameShopName を使う（同期側の検出基準と共有）
         const nameChanged = !!gbpShopName && !isSameShopName(gbpShopName, shopName);
+        const cancelledAt = cancelledMap.get(s.id) || null;
+        const pausedAt = info?.paused_at || null;
+        const masterUnlisted = !cancelledAt && !pausedAt
+          && info?.rank_tracking_disabled === true && info?.rank_tracking_reason === "master";
 
         return {
           shopId: s.id,
@@ -162,7 +173,9 @@ export default function CustomerMasterPage() {
           service,
           reviewCount: 0,
           status: "active" as const,
-          cancelledAt: cancelledMap.get(s.id) || null,
+          cancelledAt,
+          pausedAt,
+          masterUnlisted,
         };
       }));
     } catch { setError("API接続エラー"); } finally { setLoading(false); }
@@ -284,8 +297,10 @@ export default function CustomerMasterPage() {
       // （GBPで改名された店舗を新しい名前で検索しても0件にならないため）
       if (searchQuery && !fuzzyMatch(searchQuery, row.shopId, row.shopName, row.gbpShopName, row.ownerName, row.agentName, row.city, row.state, row.phone)) return false;
       if (filterService !== "all" && row.service !== filterService) return false;
-      if (filterStatus === "active" && row.cancelledAt) return false;
+      // 「全店舗」= 解約でもマスタ記載なしでもない店舗（解約と同じく別カードに振り分ける）
+      if (filterStatus === "active" && (row.cancelledAt || row.masterUnlisted)) return false;
       if (filterStatus === "cancelled" && !row.cancelledAt) return false;
+      if (filterStatus === "unlisted" && !row.masterUnlisted) return false;
       if (filterGbp === "connected" && !row.gbpConnected) return false;
       if (filterGbp === "disconnected" && row.gbpConnected) return false;
       if (filterRenamed && !row.nameChanged) return false;
@@ -299,8 +314,9 @@ export default function CustomerMasterPage() {
   const si = (k: keyof MasterRow) => sortKey !== k ? "↕" : sortAsc ? "↑" : "↓";
 
   // サマリー計算
-  const activeShops = shops.filter(s => !s.cancelledAt);
+  const activeShops = shops.filter(s => !s.cancelledAt && !s.masterUnlisted);
   const cancelledCount = shops.filter(s => !!s.cancelledAt).length;
+  const unlistedCount = shops.filter(s => s.masterUnlisted).length;
   const meoCount = activeShops.filter(s => s.service === "meo" || s.service === "both").length;
   const pmaxCount = activeShops.filter(s => s.service === "pmax" || s.service === "both").length;
   const bothCount = activeShops.filter(s => s.service === "both").length;
@@ -336,7 +352,7 @@ export default function CustomerMasterPage() {
     </div>
 
     {/* ── サマリーカード ── */}
-    <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 mb-6">
+    <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-9 gap-3 mb-6">
       <button onClick={() => { setFilterService("all"); setFilterStatus("active"); setFilterGbp("all"); setFilterRenamed(false); }} className={`bg-white rounded-xl p-4 border shadow-sm text-left transition hover:shadow-md ${filterStatus === "active" && filterService === "all" && !filterRenamed ? "border-[#003D6B] ring-2 ring-[#003D6B]/20" : "border-slate-200"}`}>
         <p className="text-[10px] text-slate-400 font-medium">全店舗</p>
         <p className="text-2xl font-black text-[#003D6B] mt-1">{activeShops.length}</p>
@@ -364,6 +380,14 @@ export default function CustomerMasterPage() {
       <button onClick={() => { setFilterStatus("cancelled"); setFilterService("all"); setFilterGbp("all"); setFilterRenamed(false); }} className={`bg-white rounded-xl p-4 border shadow-sm text-left transition hover:shadow-md ${filterStatus === "cancelled" ? "border-red-500 ring-2 ring-red-500/20" : "border-slate-200"}`}>
         <p className="text-[10px] text-red-500 font-medium">解約店舗</p>
         <p className="text-2xl font-black text-red-600 mt-1">{cancelledCount}</p>
+      </button>
+      <button
+        onClick={() => { setFilterStatus("unlisted"); setFilterService("all"); setFilterGbp("all"); setFilterRenamed(false); }}
+        title="MEO顧客管理シートに載っていない店舗（契約ステータス同期で振り分け。順位計測の対象外）"
+        className={`bg-white rounded-xl p-4 border shadow-sm text-left transition hover:shadow-md ${filterStatus === "unlisted" ? "border-slate-500 ring-2 ring-slate-500/20" : "border-slate-200"}`}
+      >
+        <p className="text-[10px] text-slate-500 font-medium">MEOマスタ記載なし</p>
+        <p className="text-2xl font-black text-slate-600 mt-1">{unlistedCount}</p>
       </button>
       <button
         onClick={() => { setFilterRenamed(!filterRenamed); setFilterStatus("active"); setFilterService("all"); setFilterGbp("all"); }}
@@ -416,7 +440,8 @@ export default function CustomerMasterPage() {
         <div className="flex items-center gap-2 mt-2 flex-wrap">
           <span className="text-xs text-slate-500">{filtered.length}件表示</span>
           {filterRenamed && <button onClick={() => setFilterRenamed(false)} className="text-[10px] px-2 py-0.5 rounded-full bg-orange-50 text-orange-600 hover:bg-orange-100">店名変更ありのみ ×</button>}
-          {filterStatus !== "active" && <button onClick={() => setFilterStatus("active")} className="text-[10px] px-2 py-0.5 rounded-full bg-red-50 text-red-600 hover:bg-red-100">解約店舗のみ ×</button>}
+          {filterStatus === "cancelled" && <button onClick={() => setFilterStatus("active")} className="text-[10px] px-2 py-0.5 rounded-full bg-red-50 text-red-600 hover:bg-red-100">解約店舗のみ ×</button>}
+          {filterStatus === "unlisted" && <button onClick={() => setFilterStatus("active")} className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200">MEOマスタ記載なしのみ ×</button>}
           {filterService !== "all" && <button onClick={() => setFilterService("all")} className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200">契約: {filterService === "meo" ? "MEO" : filterService === "pmax" ? "P-MAX" : filterService === "both" ? "両方" : "未登録"} ×</button>}
           {filterGbp !== "all" && <button onClick={() => setFilterGbp("all")} className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200">GBP: {filterGbp === "connected" ? "接続済" : "未接続"} ×</button>}
         </div>
@@ -598,11 +623,13 @@ export default function CustomerMasterPage() {
             {filtered.length === 0 ? (
               <tr><td colSpan={8} className="py-12 text-center text-slate-400">{shops.length === 0 ? "店舗が登録されていません" : "該当なし"}</td></tr>
             ) : filtered.map((row) => (
-              <tr key={row.shopId} className={`border-b border-slate-50 transition ${row.cancelledAt ? "bg-red-50/40 hover:bg-red-50/60" : "hover:bg-blue-50/30"}`}>
+              <tr key={row.shopId} className={`border-b border-slate-50 transition ${row.cancelledAt ? "bg-red-50/40 hover:bg-red-50/60" : row.masterUnlisted ? "bg-slate-50/60 hover:bg-slate-100/60" : "hover:bg-blue-50/30"}`}>
                 <td className="py-2.5 px-3">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className={`font-medium text-[13px] ${row.cancelledAt ? "text-slate-400 line-through" : "text-slate-800"}`}>{row.shopName}</span>
                     {row.cancelledAt && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-100 text-red-600">解約</span>}
+                    {!row.cancelledAt && row.pausedAt && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-orange-100 text-orange-700">停止中</span>}
+                    {row.masterUnlisted && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-200 text-slate-600" title="MEO顧客管理シートに載っていません">マスタ記載なし</span>}
                     {row.nameChanged && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-orange-100 text-orange-700">GBP改名</span>}
                   </div>
                   {row.nameChanged && (

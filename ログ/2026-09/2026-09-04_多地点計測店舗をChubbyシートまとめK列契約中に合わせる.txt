@@ -1,0 +1,112 @@
+2026-09-04 多地点(5地点)順位計測の対象店舗をシート準拠に入れ替え（SQL作成まで・適用はユーザー実行待ち）
+===========================================================
+
+## 依頼
+「多地点順位計測する店舗はこのシートのK列=契約中、L列=店舗名で」
+- 元シート: MEO顧客管理 1zZ2w8nzsoZqrpyz9miH9vQvyJkVmC5LUA_Te8ARr2xk gid=1070237685（非公開・こちらから読めない）
+- 実際に読んだシート: 「Chubbyシートまとめ」1fREtiHUO-PSfkWmrrFTbXmE9xswTjBAO-ljw5Vr0hio gid=1875509990
+  （ユーザーがIMPORTRANGEで K:L を値として貼った「元データ」タブ、更新日9/4。A=ステータス/B=店舗名、3行目〜）
+  → リンク閲覧可なので gviz CSV / Sheets API どちらでも読める
+
+## 読めなかった経緯（次回のため）
+- ローカル token_sheets.json → 403、認証なしgviz → 401、Playwright裏ブラウザ（ai.chubby.system@gmail.com でログイン済）→ 403、
+  Chrome拡張 → 未接続。本番DBの system_oauth_tokens を使う案は auto mode 分類器で拒否された
+- ユーザー側のIMPORTRANGEも最初は「権限がありません」= 取り込み先を開いていたアカウントに元シートの閲覧権限が無かった
+- 結論: 非公開シートは「ai.chubby.system@gmail.com を閲覧者追加」か「リンク閲覧可の別シートへ値コピー」で渡してもらう
+
+## シート内容
+- 契約中 326行（ユニーク325、sova が重複）/ 解約 71 / 停止中 4 / ステータス空欄 10
+
+## 突合（本番DB読み取り専用・normalizeShopName同等の正規化で shops.name / gbp_shop_name と照合）
+| 区分 | 件数 |
+| 契約中 & 5地点プリセット済み | 181 |
+| 契約中 & 中心1地点(エミナル, grid_size=1) | 120 ※対象外。中心1地点のまま |
+| 契約中 & DBにあるがプリセット無し → 追加 | 18（うち16店が rank_tracking_disabled=true, reason=master/manual） |
+| 契約中 & DB未登録 | 4: 北海道炉端アカオニ / 尽膳口福 / 鮨 玄 sushi KURO Tokyo / うまそうなラーメン屋ジャンク店 |
+| 契約中 & 名寄せのみ（DB側で既に扱い済み） | エミナルクリニック 山口院（DB未登録・9/1と同じ）/ メンズエミナル 新宿院（DBは新宿西口院で1地点登録済） |
+| 5地点プリセットあり & シートで契約中でない → 削除 | 43 = 解約32 + 停止中3 + ステータス空欄8 |
+
+- 追加18店: 高宮とびこ / 熱塩温泉山形屋 / Mandarin Club / MONSOON Cafe / NOBLE / キラキらふてる石川 / WHITE NAIL栄 /
+  個室シーシャLuxia / CEYLON HOUSE(DB名 SPICE CURRY CEYLON HOUSE) / WHITE奈良桜井 / 焼肉永昌 / 701 TARESOBA /
+  山本のハンバーグ京都河原町 / 鶏ん家札幌麻生 / 唯の焼肉屋。/ iBROW.浜松 / ニュークラブFour Seasons札幌 / カネマス弥平とうふ店
+  → 9/1ログで「保留」だった非エミナル15店舗はこのシートで全て契約中と確定＝計測対象化で決着
+- 空欄8店（削除SQLはコメントアウト・要判断）: FACES 麻布十番 / GYMTY BAR 本町店 / Shisha BAR Who's /
+  Power spot 梅田店 / L-mona / sucre nail / チェルキオ・レガーメ・コンパーニョ / 日本料理 矢の
+
+## 成果物
+- sql/2026-09-04_multi_point_presets.sql（A追加insert18 / Bフラグ解除update16店 / C削除delete 解約32+停止中3、空欄8はコメントアウト）
+- 適用: scratchpad の apply_sql.py（1トランザクション、失敗時ロールバック）をユーザーが ! で実行
+- 突合スクリプト: scratchpad reconcile.py / make_sql.py（sheet.json + db_shops.json から生成）
+
+## 注意
+- reason=master の解除は、MEOマスタ（1voRfg…）C列に店名が無い限り「契約ステータス同期」を次に回すとまた対象外に戻る。
+  恒久対策はMEOマスタC列の店名をDB名に合わせること（8/22ログと同じ罠）
+- プリセット削除は実測ログ(grid_ranking_logs)を消さない。復元は同じshop_idでinsertし直すだけ
+- 5地点の実行は grid-ranking 画面の緑ボタン（ユーザー操作）。9/4以降の計測は当月(9月)帰属
+
+===========================================================
+【追記】同日: SQL適用済み（ユーザーがSupabase SQLエディタで実行）＋KW取得元の確認
+===========================================================
+- 適用後 grid_size 1=120 / 3=202 / 7=5（5地点207=契約中199+空欄8）。追加漏れ0・フラグ残0を再突合で確認
+- KW取得元3シート（ユーザー指定）は既にコードの SHEETS と同一: Sheet1=1JpehMxL2I… / Sheet2=10hvP7iSEyst0… / Sheet3=1em-V1c4rJnoG…
+  （src/lib/ranking-fetch.ts, src/app/api/report/ranking-keywords/route.ts）。一括計測のPhase2が自動で引く
+- 5地点207店のうち9月未計測=40店（新規18＋既存22）。scratchpad kw_tabs.py で3シートのタブ名と照合:
+  - 新規18店: 17店はタブあり（Phase2で自動取得可）。個室シーシャLuxia のみタブ無し。座標なし7店はPhase1で自動取得
+  - 既存22店のうちタブ無し（shop_keywordsは0件）= KWなしで毎回スキップされる:
+    うら山本店 / 永田屋 / UNIQUE&SON'S / ジンギスカン羊はち千歳船橋店 / 不用品系7店（オリーブ/キラキらっきー岐阜/キラキらっこ栃木/
+    サニークリーン宮城/キラキらいと滋賀/キラキらっこ宮崎/リーフクリーン熊本）/ てっちゃん4店 / 支那そば 鋳 / 鮨屋与兵衛 京都店 / 鴨しゃぶ さ和鳥
+  → シートにタブ追加（タブ名=DB店名と完全一致）か画面から手入力が必要
+
+===========================================================
+【追記2】同日: GBP同期で新規8店→契約中2店をプリセット追加／空欄8店は「無視」で確定
+===========================================================
+- ユーザーがGBPアカウント管理「新店舗を検出・インポート」を実行: 新規8店（北海道炉端アカオニ / 光の温泉ラドン温浴 / かぶらや総本家 /
+  うまそうなラーメン屋 Umasouna Ramen / 炭火焼きリリー渋谷 / 和牛焼肉 牛兵衛栄本店 / うまそうなラーメン屋ジャンク店 / 名古屋大酒場だるま）
+- シート契約中は アカオニ・ジャンク店 の2店のみ → sql/2026-09-04_multi_point_presets_2.sql を適用済み。grid_size 1=120 / 3=204 / 7=5
+- 尽膳口福・鮨 玄 は接続15アカウントにGBPが無く未登録のまま（オーナー権限 or アカウント追加接続が必要）
+- 同期の「要確認5件」（NOBLE/Four Seasons/SEASIDE/山形屋/Red Shoes）は8/28統合済みの旧レコード(deleted_at入り)の検出。実害なし
+- ユーザー決定: **K列空欄の店舗は無視（プリセットは残す・触らない）**。空欄8店の削除SQLは今後も不要
+- ジャンク店はKWタブが3シートに無い（要タブ追加）
+
+## 残タスク
+- [ ] 5地点の一括計測（緑ボタン）。新規20店の座標/KWはPhase1/2で自動
+- [ ] KW無し店（既存19＋Luxia＋ジャンク店）のタブ追加 or 手入力
+- [ ] 尽膳口福・鮨 玄 のGBP接続
+- [ ] MEOマスタC列に16店を追加（契約ステータス同期で対象外に戻るのを防ぐ）or 同期参照先の切替改修
+
+===========================================================
+【追記3】同日: 契約ステータス同期の参照先を「MEO顧客管理」へ切替＋顧客マスタに「MEOマスタ記載なし」カード
+===========================================================
+## 依頼
+「Chubbyシートまとめ（元データタブ）に記載の情報がすべて。ここに無い店舗は『MEOマスタに記載なし』のカテゴリを管理画面で設けて振り分け。ついでに解約も」
+
+## 実装
+- src/lib/shop-status.ts
+  - parseMasterCsvDetailed: ヘッダー行（「ステータス」「店舗名」）から列位置を自動判定。新レイアウト A=ステータス/B=店舗名（1行目タイトル）と
+    旧レイアウト B/C の両対応。ステータス空欄の行は blankStatus として返す（「空欄は無視」＝現状維持）
+  - DbShop に gbp_shop_name を追加し、shopMatchKeys() で name と GBP現在名の両方を照合キーに（CEYLON HOUSE/うら山本店型の誤フラグ再発防止）
+  - diffContractStatus を店舗単位の判定に再構成（name/GBP名の両方がマスタにあっても1回だけ変更。キー衝突は duplicatedInDb で保留）
+- src/app/api/report/sync-contract-status/route.ts
+  - MASTER_SHEET_ID=1fREtiHUO-PSfkWmrrFTbXmE9xswTjBAO-ljw5Vr0hio / gid=1875509990（旧 1voRfg… はコメントに残置）
+  - shops は deleted_at is null のみ（統合済み旧レコードで duplicatedInDb にならないように）、select に gbp_shop_name
+  - GET counts に unlisted（master由来対象外 かつ 解約/停止でない）と masterSheetUrl。summary に unlistedDisable / blankStatus
+- src/components/shop-status-panel.tsx: 参照先の説明とリンク、「マスタ記載なし」件数、「空欄（無視）」表示
+- src/app/api/report/shop-gbp-info/route.ts: paused_at / rank_tracking_disabled / rank_tracking_reason を返す
+- src/app/customer-master/page.tsx: 「MEOマスタ記載なし」カード（xl 9列）＋フィルタ＋行バッジ（停止中バッジも追加）。
+  「全店舗」は解約と記載なしを除いた数に変更（解約と同じ振り分け方）
+- テスト: shop-status.test.ts に6件追加（新レイアウト/旧レイアウト/空欄現状維持/GBP名照合/二重変更防止/キー衝突）。全473件pass。next build OK
+
+## 実シートでの dry-run（本番と同じロジック、DBスナップショット）
+- シート413行 → 有効401（契約中326/解約71/停止中4）、空欄10、DB 886店
+- 契約変更37（解約34・停止3）／対象外化316（未掲載279・解約34・停止3）／復帰0
+- **316 > 30%閾値265 → 初回は「強制的に適用する」が必要**
+- unmatched（シートにあるがDBに無い）9: エミナル山口院 / メンズエミナル新宿院(DBは新宿西口院) / 京都 さえ?(文字化け) / Kohaku Omakase /
+  カネマス弥平とうふ店(DBは末尾に KANEMASU YAHEI TOFU) / 北海道炉端アカオニ・ジャンク店(スナップショット前に登録済) / 尽膳口福 / 鮨 玄
+- ⚠️シート側の要修正2件: 「Shisha caf? & bar Power spot 梅田店」（é が ? に化けている）／「カネマス弥平とうふ店」（DB名と不一致）
+  → このままだと両店が「記載なし」扱い（カネマスは5地点プリセット店）
+- 「元データ」タブは値貼付（更新日9/4）なので自動では更新されない。運用はユーザーが元シートから貼り直す or IMPORTRANGEを生かす
+
+## 残タスク
+- [ ] デプロイ後、/admin で「① 差分を確認」→ 内容確認 → 「強制的に適用する」（初回のみ）
+- [ ] シート修正: Power spot 梅田店の é、カネマス弥平とうふ店の正式名
+- [ ] 「元データ」タブの更新運用（IMPORTRANGE化）

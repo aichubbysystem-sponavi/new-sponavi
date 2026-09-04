@@ -316,3 +316,87 @@ describe("計測が黙って止まる経路を塞ぐ（2026-08-01 レビュー�
     expect(changes[0].detail).toBe("マスタ未掲載");
   });
 });
+
+describe("MEO顧客管理シートへの切替（2026-09-04）", () => {
+  it("A=ステータス / B=店舗名 の新レイアウトをヘッダーから自動判定して読む", () => {
+    const { rows, blankStatus } = parseMasterCsvDetailed([
+      ["元データ", "更新日　：　9/4", ""],
+      ["ステータス", "店舗名", ""],
+      ["契約中", "焼肉こてつ 川口道合店", ""],
+      ["解約", "鮨棗 本店", ""],
+      ["停止中", "和牛EN yasaka.arakawa", ""],
+      ["", "ステータス空欄の店", ""],
+      ["", "", ""],
+    ]);
+    expect(rows).toEqual([
+      { shopName: "焼肉こてつ 川口道合店", status: "active" },
+      { shopName: "鮨棗 本店", status: "cancelled" },
+      { shopName: "和牛EN yasaka.arakawa", status: "paused" },
+    ]);
+    // 空欄は「無視」＝呼び出し側が現状維持にできるよう名前だけ返す
+    expect(blankStatus).toEqual(["ステータス空欄の店"]);
+  });
+
+  it("旧レイアウト（A=顧客ID/B=ステータス/C=店舗名）も引き続き読める", () => {
+    const { rows } = parseMasterCsvDetailed([
+      ["顧客ID", "ステータス管理", "店舗名🥛"],
+      ["MJS001", "契約中", "焼肉こてつ 川口道合店"],
+    ]);
+    expect(rows).toEqual([{ shopName: "焼肉こてつ 川口道合店", status: "active" }]);
+  });
+
+  it("空欄の店舗を unknownNames に渡せば、マスタ未掲載として計測を止めない", () => {
+    const blank = new Set([normalizeShopName("空欄の店")]);
+    const changes = diffRankTracking(
+      [{ shopName: "契約中の店", status: "active" }],
+      [
+        { id: "a", name: "契約中の店", cancelled_at: null, rank_tracking_disabled: false },
+        { id: "b", name: "空欄の店", cancelled_at: null, rank_tracking_disabled: false },
+        { id: "c", name: "本当に未掲載の店", cancelled_at: null, rank_tracking_disabled: false },
+      ],
+      blank,
+    );
+    expect(changes.map((c) => c.shopName)).toEqual(["本当に未掲載の店"]);
+  });
+
+  it("シートがGBP現在名で書かれていても gbp_shop_name で照合する（CEYLON HOUSE / うら山本店の再発防止）", () => {
+    const master = [
+      { shopName: "CEYLON HOUSE スリランカ・ロゼカレー", status: "active" as const },
+      { shopName: "うら山本店", status: "cancelled" as const },
+    ];
+    const shops = [
+      { id: "1", name: "SPICE CURRY CEYLON HOUSE", gbp_shop_name: "CEYLON HOUSE スリランカ・ロゼカレー", cancelled_at: null, rank_tracking_disabled: true, rank_tracking_reason: "master" },
+      { id: "2", name: "うら山 本店", gbp_shop_name: "うら山本店", cancelled_at: null, rank_tracking_disabled: false },
+    ];
+    const rank = diffRankTracking(master, shops);
+    expect(rank).toEqual([
+      expect.objectContaining({ shopId: "1", disable: false }),
+      expect.objectContaining({ shopId: "2", disable: true, detail: "マスタで解約" }),
+    ]);
+    const diff = diffContractStatus(master, shops);
+    expect(diff.unmatched).toEqual([]);
+    expect(diff.changes).toEqual([{ shopId: "2", shopName: "うら山 本店", from: "active", to: "cancelled" }]);
+  });
+
+  it("name と GBP現在名の両方がマスタに載っていても、店舗ごとに1回だけ変更する", () => {
+    const master = [
+      { shopName: "旧名の店", status: "cancelled" as const },
+      { shopName: "新名の店", status: "cancelled" as const },
+    ];
+    const shops = [{ id: "1", name: "旧名の店", gbp_shop_name: "新名の店", cancelled_at: null }];
+    const diff = diffContractStatus(master, shops);
+    expect(diff.changes).toHaveLength(1);
+    expect(diff.duplicatedInDb).toEqual([]);
+  });
+
+  it("GBP現在名が別の店舗の name と衝突する場合は触らない", () => {
+    const master = [{ shopName: "渋谷店", status: "cancelled" as const }];
+    const shops = [
+      { id: "1", name: "渋谷店", cancelled_at: null },
+      { id: "2", name: "旧渋谷店", gbp_shop_name: "渋谷店", cancelled_at: null },
+    ];
+    const diff = diffContractStatus(master, shops);
+    expect(diff.changes).toEqual([]);
+    expect(diff.duplicatedInDb).toEqual(["渋谷店"]);
+  });
+});

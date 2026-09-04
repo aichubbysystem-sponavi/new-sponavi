@@ -46,11 +46,30 @@ export interface MasterRow {
 export interface DbShop {
   id: string;
   name: string;
+  /**
+   * GBP上の現在名。shops.name は結合キーなので改名されず、マスタ側が
+   * GBPの現在名で書かれていると name だけでは照合できない（CEYLON HOUSE / うら山本店 の実例）。
+   * name と併せて照合キーにする
+   */
+  gbp_shop_name?: string | null;
   cancelled_at: string | null;
   paused_at?: string | null;
   rank_tracking_disabled?: boolean | null;
   /** 'manual' = 人が指定（同期で触らない） / 'master' = マスタ由来（同期が管理） */
   rank_tracking_reason?: string | null;
+}
+
+/**
+ * 店舗の照合キー（正規化済み・重複除去）。name を先頭に、GBP現在名が別名なら続ける。
+ * 部分一致は使わない（「渋谷店」が「渋谷本店」に当たる誤マッチを避ける）
+ */
+export function shopMatchKeys(shop: DbShop): string[] {
+  const keys: string[] = [];
+  for (const raw of [shop.name, shop.gbp_shop_name]) {
+    const k = normalizeShopName(raw);
+    if (k && !keys.includes(k)) keys.push(k);
+  }
+  return keys;
 }
 
 /** 順位計測の対象外にする理由 */
@@ -105,13 +124,13 @@ export function diffContractStatus(master: MasterRow[], shops: DbShop[]): Status
     masterByNorm.get(key)!.push(row);
   }
 
-  // DB側の重複検出
+  // DB側の重複検出（name と GBP現在名の両方をキーにする）
   const dbByNorm = new Map<string, DbShop[]>();
   for (const s of shops) {
-    const key = normalizeShopName(s.name);
-    if (!key) continue;
-    if (!dbByNorm.has(key)) dbByNorm.set(key, []);
-    dbByNorm.get(key)!.push(s);
+    for (const key of shopMatchKeys(s)) {
+      if (!dbByNorm.has(key)) dbByNorm.set(key, []);
+      dbByNorm.get(key)!.push(s);
+    }
   }
 
   const changes: StatusChange[] = [];
@@ -119,6 +138,8 @@ export function diffContractStatus(master: MasterRow[], shops: DbShop[]): Status
   const duplicatedInMaster: string[] = [];
   const duplicatedInDb: string[] = [];
 
+  // マスタ側キー → 採用するステータス（判断できないキーは undefined のまま＝触らない）
+  const resolved = new Map<string, ContractStatus>();
   for (const [key, rows] of Array.from(masterByNorm.entries())) {
     // 同じ名前が複数ステータスで載っている場合は判断できないので触らない
     const statuses = new Set(rows.map((r) => r.status));
@@ -133,16 +154,25 @@ export function diffContractStatus(master: MasterRow[], shops: DbShop[]): Status
       unmatched.push({ shopName: target.shopName, status: target.status });
       continue;
     }
-    if (candidates.length > 1) {
+    if (new Set(candidates.map((c) => c.id)).size > 1) {
       // どの店舗を更新すべきか決められない。誤った店舗を解約にしないため保留
       duplicatedInDb.push(target.shopName);
       continue;
     }
+    resolved.set(key, target.status);
+  }
 
-    const shop = candidates[0];
+  // 店舗ごとに1回だけ判定する。name と GBP現在名の両方がマスタに載っていても二重に変更しない
+  // （name のキーを優先し、無ければ GBP現在名のキーで引く）
+  for (const shop of shops) {
+    let target: ContractStatus | undefined;
+    for (const key of shopMatchKeys(shop)) {
+      if (resolved.has(key)) { target = resolved.get(key); break; }
+    }
+    if (!target) continue;
     const from = currentStatus(shop);
-    if (from !== target.status) {
-      changes.push({ shopId: shop.id, shopName: shop.name, from, to: target.status });
+    if (from !== target) {
+      changes.push({ shopId: shop.id, shopName: shop.name, from, to: target });
     }
   }
 
@@ -188,11 +218,15 @@ export function diffRankTracking(
     // 素通りして再び対象外にされ、reason も master で上書きされて手動の意思が消える
     if (reason === "manual") continue;
 
-    const key = normalizeShopName(shop.name);
-    // ステータスを解釈できなかった店舗は現状維持（表記ゆれで計測を止めない）
-    if (unknownNames?.has(key)) continue;
+    const keys = shopMatchKeys(shop);
+    // ステータスを解釈できなかった店舗（空欄含む）は現状維持（表記ゆれで計測を止めない）
+    if (unknownNames && keys.some((k) => unknownNames.has(k))) continue;
 
-    const status = masterStatus.get(key);
+    // name を優先し、無ければ GBP現在名でマスタを引く
+    let status: ContractStatus | undefined;
+    for (const k of keys) {
+      if (masterStatus.has(k)) { status = masterStatus.get(k); break; }
+    }
     const shouldExclude = status !== "active"; // 未掲載(undefined)も対象外
 
     if (shouldExclude && !disabled) {
@@ -221,11 +255,29 @@ export function statusToColumns(status: ContractStatus, now: string): {
 
 /**
  * MEOマスタのCSVを解析する。
- * A列=顧客ID / B列=ステータス管理 / C列=店舗名
+ * 列位置はヘッダー行（「ステータス」「店舗名」を含む行）から自動判定する。
+ *   旧MEOマスタ: A列=顧客ID / B列=ステータス管理 / C列=店舗名
+ *   MEO顧客管理（2026-09-04〜の正）: A列=ステータス / B列=店舗名（1行目はタイトル行）
+ * ヘッダーが見つからない場合は旧レイアウト（B/C列）として読む。
  * ヘッダー行と、ステータスまたは店舗名が空の行は落とす。
  */
 export function parseMasterCsv(rows: string[][]): MasterRow[] {
   return parseMasterCsvDetailed(rows).rows;
+}
+
+/** ヘッダー行から（ステータス列, 店舗名列, データ開始行）を求める。見つからなければ旧レイアウト */
+function detectMasterLayout(rows: string[][]): { statusCol: number; nameCol: number; dataFrom: number } {
+  const isStatusHeader = (c: string) => /^ステータス/.test(c.trim());
+  const isNameHeader = (c: string) => /^店舗名/.test(c.trim());
+  for (let i = 0; i < Math.min(rows.length, 10); i++) {
+    const r = rows[i] || [];
+    const statusCol = r.findIndex((c) => isStatusHeader(c || ""));
+    const nameCol = r.findIndex((c) => isNameHeader(c || ""));
+    if (statusCol >= 0 && nameCol >= 0 && statusCol !== nameCol) {
+      return { statusCol, nameCol, dataFrom: i + 1 };
+    }
+  }
+  return { statusCol: 1, nameCol: 2, dataFrom: 0 };
 }
 
 /**
@@ -243,21 +295,31 @@ export function parseMasterCsvDetailed(rows: string[][]): {
   rows: MasterRow[];
   /** ステータスを解釈できず除外した行（店舗名と元の表記） */
   unknownStatus: { shopName: string; raw: string }[];
+  /**
+   * 店舗名はあるがステータスが空欄の行の店舗名。
+   * 「空欄は無視する」（2026-09-04 ユーザー決定）ため、呼び出し側は
+   * これらを現状維持にする（マスタ未掲載として計測を止めない）
+   */
+  blankStatus: string[];
 } {
   const out: MasterRow[] = [];
   const unknownStatus: { shopName: string; raw: string }[] = [];
-  for (const r of rows) {
-    if (!r || r.length < 3) continue;
-    const raw = (r[1] || "").trim();
-    const shopName = (r[2] || "").trim();
+  const blankStatus: string[] = [];
+  const { statusCol, nameCol, dataFrom } = detectMasterLayout(rows);
+  for (let i = dataFrom; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r || r.length <= Math.max(statusCol, nameCol)) continue;
+    const raw = (r[statusCol] || "").trim();
+    const shopName = (r[nameCol] || "").trim();
     if (!shopName) continue;
     if (shopName === "店舗名" || shopName.startsWith("店舗名")) continue; // ヘッダー
     const status = parseContractStatus(raw);
     if (!status) {
       if (raw) unknownStatus.push({ shopName, raw });
+      else blankStatus.push(shopName);
       continue;
     }
     out.push({ shopName, status });
   }
-  return { rows: out, unknownStatus };
+  return { rows: out, unknownStatus, blankStatus };
 }

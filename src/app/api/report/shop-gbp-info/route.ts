@@ -21,6 +21,10 @@ interface Row {
   city: string | null;
   phone: string | null;
   cancelled_at: string | null;
+  paused_at: string | null;
+  /** 順位計測の対象外フラグと理由。'master' かつ解約/停止でない = 「MEOマスタ記載なし」 */
+  rank_tracking_disabled: boolean | null;
+  rank_tracking_reason: string | null;
 }
 
 export async function GET(request: NextRequest) {
@@ -34,7 +38,7 @@ export async function GET(request: NextRequest) {
   for (let from = 0; ; from += 1000) {
     const { data, error: qErr } = await sb
       .from("shops")
-      .select("id, name, gbp_shop_name, gbp_location_name, gbp_full_path, gbp_main_category, state, city, phone, cancelled_at")
+      .select("id, name, gbp_shop_name, gbp_location_name, gbp_full_path, gbp_main_category, state, city, phone, cancelled_at, paused_at, rank_tracking_disabled, rank_tracking_reason")
       .order("id")
       .range(from, from + 999);
     if (qErr) {
