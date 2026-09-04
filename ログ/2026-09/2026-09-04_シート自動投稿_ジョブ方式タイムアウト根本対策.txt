@@ -82,3 +82,62 @@
   - ルール: 完全一致を最優先。無ければ「空白＋英数字3文字以上の末尾」を落とした名前で照合し、候補がマスタに1店舗だけのときのみ一致。
     2店舗以上（店A TOKYO / 店A OSAKA）は不一致。空白なしの英字（個室シーシャLuxia）・全部英字（KYOTO SAMURAI WALK）は対象外
   - テスト shop-match.test.ts 10件追加（vitest 467件全パス）
+
+=====================================================================
+## 【2026-09-04】セッション総括
+### 決定事項
+- シート自動投稿の本実行（事前チェック／予約登録／即時投稿）は「ジョブ方式」に全面移行。ブラウザが長い通信を待つ構造は廃止し、
+  画面はジョブ登録＋4秒ポーリングのみ。300店舗×3枚を1回で流す前提
+- 即時投稿＝「今」の予約として登録し cron/execute-posts が公開する。ブラウザからGBPへ直接投稿する経路は画面から使わない
+  （engine に残置・互換用）。警告あり行は予約と同じく保留になる
+- 同時に走るジョブは1本のみ（2本目は409）
+- Step1で選んだのにシートに一致しない店舗は必ず画面に出す（黙って母数から減らさない）
+- 店舗名照合に「末尾英語名の吸収」を追加。候補がマスタに1店舗だけのときのみ一致、2店舗以上は不一致で止める
+
+### 変更内容（具体的に）
+- src/lib/auto-post/engine.ts（新規・旧 src/app/api/report/auto-post/route.ts を git mv）
+  runAutoPost(body, ctx, opts) としてHTTP層から分離。opts.csvCache でシートCSVを使い回し。
+  unmatchedFilterNames（絞り込み名のうちシートに一致しなかったもの）を dryRun/0件レスポンスに追加。
+  shops 取得をシート読み込み前へ移動し、行絞り込み・予約登録・即時投稿の店舗解決を resolveShop に統一
+- src/lib/auto-post/shop-match.ts（新規）normName / matchShopName / looseKey / buildShopResolver。テスト shop-match.test.ts 10件
+- src/lib/auto-post/worker-kick.ts（新規）selfOrigin / kickCron（自分のcronルートを2.5秒タイムアウトで叩く）
+- src/app/api/report/auto-post/route.ts 薄いラッパー（プレビュー・互換用）
+- src/app/api/report/auto-post-jobs/route.ts（新規）POST ジョブ作成（サーバー側プレビューで店舗名を確定・実行中ジョブがあれば409・
+  ワーカー起動）／GET 一覧・詳細＋結果／PATCH 中止
+- src/app/api/cron/auto-post-worker/route.ts（新規）ジョブ占有（lease）→スライス処理→items/cursor 保存→時間切れで自己再起動→
+  完了時 immediate なら execute-posts を即起動
+- src/app/api/cron/execute-posts/route.ts 210秒で持ち越しがあれば kickCron で自分を再起動（レスポンスに carried 追加）
+- src/app/posts/page.tsx 3ボタンを startAutoPostJob(mode) に統一。onAutoPostJobSnapshot／ポーリングeffect／開き直し復元effect／
+  cancelAutoPostJob。進捗バー・中止ボタン・即時投稿の注記。「未完了の絞り込みを解除」リンク。
+  buildAutoPostFilter に shops を追加し unmatchedShopsOf で「シートに見つからない店舗」を算出→黄色い枠で一覧＋確認ダイアログに件数
+- vercel.json /api/cron/auto-post-worker を毎分（* * * * *）
+- sql/2026-09-04_auto_post_jobs.sql auto_post_jobs / auto_post_job_items（本番適用済）
+- コミット: 71b6a40（ジョブ方式）→ 7884392（未一致店舗の表示）→ ef62909（ログ）→ da1b58d（照合ルール）。全て push・本番反映済
+
+### 数値・設定値
+- ワーカー: BUDGET_MS=180秒（新規スライス開始上限）／LEASE_MS=5分／SLICE_SIZE check=10・schedule=5・immediate=5店舗
+- kickCron タイムアウト 2.5秒／画面ポーリング 4秒／開き直し復元は「実行中 or 完了から6時間以内」の最新ジョブ
+- auto-post-jobs route maxDuration=120／worker maxDuration=300
+- execute-posts: 既存の CONCURRENCY=10・210秒予算・limit 1000 は変更なし（持ち越し時の自己再起動のみ追加）
+- looseKey: 「空白＋英数字で始まる3文字以上の末尾」を英語名として除去。除去後に非ASCIIが残る場合のみ有効
+- 実測: 事前チェック72店舗≒10分（10店舗/約1分）。即時投稿72店舗→131枚登録/28店舗スキップ
+
+### 未解決・次回やること
+- 栃木佐野店（歯のセルフホワイトニング専門店 ホワイトニングショップ栃木佐野店）: 照合ルール追加後も通らない可能性。
+  シートB列の表記をマスタ名と突き合わせて確認（シート本体は Claude 側から403で読めない）
+- カネマス弥平とうふ店: da1b58d デプロイ後にプレビューで一致を確認→登録
+- 今朝のバッチ1（旧方式で180秒タイムアウトした先頭10店舗）が裏で投稿済みでないか投稿一覧（PHOTO）で確認
+- 登録不可28店舗（写真ファイルなし17・Dropboxフォルダなし11）はデータ側の対応待ち。フォルダなし11件は
+  「B列の先頭部分とフォルダ名が一致する候補が1つだけなら採用」の照合追加で減らせる（未実装・提案のみ）
+- 300店舗本番の実測（登録15〜30分・公開15〜30分の見込み）と GBP API のレート制限確認
+
+### 注意点・ハマったこと
+- Next.js 14 には after()/waitUntil が無い。fire-and-forget は「短いタイムアウト付き fetch を await」で代用し、
+  毎分cronを保険にする（Vercel の関数は呼び出し元が切っても maxDuration まで走る）
+- Next の route ファイルは HTTPメソッド以外を export できない → 処理本体を lib に移してから共用する
+- ローカルの Google トークン（.credentials/token_sheets.json）はこの投稿用シートに権限なし。Playwright も未ログインで403。
+  Chrome 拡張は未接続。シートの中身はユーザーのスクショで確認するしかなかった
+- Bash ツールで heredoc に日本語＋バッククォートを含む Python を渡すと解析エラーになることがある → スクリプトはファイルに書いて実行
+- 古い「2回目: 未完了0件を実行」は再実行対象0件＝Step1の全店舗に戻るため二重投稿になる状態だった。新方式では未処理店舗を
+  必ず店舗名で記録するので同じ事故は起きない
+- 写真投稿の結果件数は「枚数」（1枚=1行）。店舗数は進捗バーの cursor/total を見る
