@@ -17,6 +17,8 @@ interface ShopKeywordStatus {
   topKeywords: string[];
   lastSynced: string | null;
   status: "synced" | "stale" | "never" | "no_gbp";
+  /** 直近の同期失敗（サーバー保持）。成功すると null に戻る */
+  syncError?: { message: string; httpStatus: number; at: string } | null;
 }
 
 interface SyncResult {
@@ -133,7 +135,8 @@ CSVには同期済みの店舗だけが含まれます。全店舗分が必要�
     }
     if (statusFilter === "failed") {
       const failedIds = new Set(syncResults.filter((r) => !r.success && r.error !== "API returned 0 months of data").map((r) => r.shopId));
-      list = list.filter((s) => failedIds.has(s.id));
+      // 今回の同期結果が無い店舗は、サーバー保持の直近失敗（403/404等）で判定
+      list = list.filter((s) => failedIds.has(s.id) || (!syncResults.some((r) => r.shopId === s.id) && !!s.syncError));
     } else if (statusFilter === "no_data") {
       const noDataIds = new Set(syncResults.filter((r) => !r.success && r.error === "API returned 0 months of data").map((r) => r.shopId));
       list = list.filter((s) => noDataIds.has(s.id));
@@ -300,9 +303,11 @@ CSVには同期済みの店舗だけが含まれます。全店舗分が必要�
     const stale = shops.filter((s) => s.status === "stale").length;
     const never = shops.filter((s) => s.status === "never").length;
     const noGbp = shops.filter((s) => s.status === "no_gbp").length;
-    const realFailed = syncResults.filter((r) => !r.success && r.error !== "API returned 0 months of data").length;
+    const sessionFailed = syncResults.filter((r) => !r.success && r.error !== "API returned 0 months of data").length;
+    // 今回の同期結果が無い店舗はサーバー保持の直近失敗を数える（再読込しても「同期失敗0」にならない）
+    const persistedFailed = shops.filter((s) => !!s.syncError && !syncResults.some((r) => r.shopId === s.id)).length;
     const noData = syncResults.filter((r) => r.error === "API returned 0 months of data").length;
-    return { total, synced, stale, never, noGbp, failed: realFailed, noData };
+    return { total, synced, stale, never, noGbp, failed: sessionFailed + persistedFailed, noData };
   }, [shops, syncResults]);
 
   if (loading) {
@@ -556,8 +561,10 @@ CSVには同期済みの店舗だけが含まれます。全店舗分が必要�
                 const st = statusLabel(shop.status);
                 const isSelected = selected.has(shop.id);
                 const failResult = syncResults.find((r) => r.shopId === shop.id && !r.success);
+                const hasSessionResult = syncResults.some((r) => r.shopId === shop.id);
+                const persistedError = !hasSessionResult && shop.syncError ? shop.syncError : null;
                 return (
-                  <tr key={shop.id} className={`hover:bg-slate-50/50 transition ${failResult ? "bg-red-50/30" : ""}`}>
+                  <tr key={shop.id} className={`hover:bg-slate-50/50 transition ${failResult || persistedError ? "bg-red-50/30" : ""}`}>
                     <td className="pl-4 pr-2 py-2.5">
                       <input
                         type="checkbox"
@@ -570,6 +577,11 @@ CSVには同期済みの店舗だけが含まれます。全店舗分が必要�
                       <span className="font-medium text-slate-800">{shop.name}</span>
                       {failResult && (
                         <p className={`text-[10px] mt-0.5 truncate max-w-[250px] ${failResult.error === "API returned 0 months of data" ? "text-orange-500" : "text-red-500"}`} title={failResult.error}>{failResult.error}</p>
+                      )}
+                      {persistedError && (
+                        <p className="text-[10px] mt-0.5 truncate max-w-[250px] text-red-500" title={`${persistedError.message}（${new Date(persistedError.at).toLocaleString("ja-JP")}）`}>
+                          前回失敗: {persistedError.message}
+                        </p>
                       )}
                     </td>
                     <td className="px-3 py-2.5 text-center">

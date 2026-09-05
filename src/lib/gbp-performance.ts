@@ -2,11 +2,12 @@
  * GBP Business Profile Performance API — パフォーマンスメトリクス取得
  *
  * fetchMultiDailyMetricsTimeSeries で日次データ取得 → 月別集計 → Supabaseキャッシュ
- * トークン: 検索語句と同じ RPAchubby の OAuthトークン（無料API）
+ * トークン: 主トークン→401/403/404 なら全アカウントのトークンで再試行（無料API）
  */
 
 import { getSupabase } from "@/lib/supabase";
-import { getOAuthToken } from "@/lib/gbp-token";
+import { getOAuthToken, fetchGbpWithFallback } from "@/lib/gbp-token";
+import { recordGbpSyncError, clearGbpSyncError, describeGbpFailure } from "@/lib/gbp-sync-errors";
 import { getExpectedMonthJST, compareMonths } from "./gbp-search-keywords";
 
 
@@ -61,18 +62,24 @@ function emptyMonth(month: string): MonthlyPerformance {
   return { month, searchMobile: 0, searchPC: 0, mapMobile: 0, mapPC: 0, calls: 0, messages: 0, bookings: 0, routes: 0, websites: 0, foodOrders: 0, foodMenus: 0 };
 }
 
+/** 取得結果。months が空で failure があれば取得自体の失敗 */
+export interface PerformanceFetchOutcome {
+  months: MonthlyPerformance[];
+  failure?: { status: number; errorText: string };
+}
+
 /**
- * GBP Performance API からパフォーマンスメトリクスを取得（過去13ヶ月）
+ * GBP Performance API からパフォーマンスメトリクスを取得（過去13ヶ月、失敗理由付き）
  * fetchMultiDailyMetricsTimeSeries で日次データを取得し、月別に集計
  */
-export async function fetchPerformanceFromGBP(
+export async function fetchPerformanceFromGBPDetailed(
   locationPath: string,
   months: number = 13
-): Promise<MonthlyPerformance[]> {
+): Promise<PerformanceFetchOutcome> {
   const token = await getOAuthToken();
   if (!token) {
     console.error("[gbp-perf] Failed to get OAuth token");
-    return [];
+    return { months: [], failure: { status: 0, errorText: "OAuthトークンなし" } };
   }
 
   const locPart = locationPath.includes("/")
@@ -97,51 +104,49 @@ export async function fetchPerformanceFromGBP(
 
   const url = `https://businessprofileperformance.googleapis.com/v1/${locPart}:fetchMultiDailyMetricsTimeSeries?${params.toString()}`;
 
-  try {
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: "no-store",
-      signal: AbortSignal.timeout(30000),
-    });
+  // 401/403/404 は全アカウントのトークンで再試行（検索語句と同じキー locPart で成功トークンを共有）
+  const res = await fetchGbpWithFallback(url, locPart, { timeoutMs: 30000, primaryToken: token });
+  if (!res.ok) {
+    console.error(`[gbp-perf] API ${res.status} for ${locPart}: ${res.errorText}`);
+    return { months: [], failure: { status: res.status, errorText: res.errorText } };
+  }
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      console.error(`[gbp-perf] API ${res.status}: ${errText.slice(0, 500)}`);
-      return [];
-    }
+  const data = res.data || {};
 
-    const data = await res.json();
+  // 日次データを月別に集計
+  const monthMap = new Map<string, MonthlyPerformance>();
 
-    // 日次データを月別に集計
-    const monthMap = new Map<string, MonthlyPerformance>();
+  const series = data.multiDailyMetricTimeSeries || [];
+  for (const multi of series) {
+    for (const ts of multi.dailyMetricTimeSeries || []) {
+      const metricName = ts.dailyMetric as string;
+      const fieldKey = METRIC_MAP[metricName];
+      if (!fieldKey) continue;
 
-    const series = data.multiDailyMetricTimeSeries || [];
-    for (const multi of series) {
-      for (const ts of multi.dailyMetricTimeSeries || []) {
-        const metricName = ts.dailyMetric as string;
-        const fieldKey = METRIC_MAP[metricName];
-        if (!fieldKey) continue;
-
-        for (const dv of ts.timeSeries?.datedValues || []) {
-          const d = dv.date;
-          if (!d) continue;
-          const monthKey = `${d.year}/${d.month}`;
-          if (!monthMap.has(monthKey)) {
-            monthMap.set(monthKey, emptyMonth(monthKey));
-          }
-          const val = typeof dv.value === "string" ? parseInt(dv.value, 10) || 0 : dv.value || 0;
-          (monthMap.get(monthKey)! as any)[fieldKey] += val;
+      for (const dv of ts.timeSeries?.datedValues || []) {
+        const d = dv.date;
+        if (!d) continue;
+        const monthKey = `${d.year}/${d.month}`;
+        if (!monthMap.has(monthKey)) {
+          monthMap.set(monthKey, emptyMonth(monthKey));
         }
+        const val = typeof dv.value === "string" ? parseInt(dv.value, 10) || 0 : dv.value || 0;
+        (monthMap.get(monthKey)! as any)[fieldKey] += val;
       }
     }
-
-    const results = Array.from(monthMap.values()).sort((a, b) => compareMonths(a.month, b.month));
-    console.log(`[gbp-perf] Fetched ${results.length} months for ${locPart}`);
-    return results;
-  } catch (e) {
-    console.error(`[gbp-perf] Fetch error:`, e);
-    return [];
   }
+
+  const results = Array.from(monthMap.values()).sort((a, b) => compareMonths(a.month, b.month));
+  console.log(`[gbp-perf] Fetched ${results.length} months for ${locPart}`);
+  return { months: results };
+}
+
+/** 後方互換: 月配列のみ返す */
+export async function fetchPerformanceFromGBP(
+  locationPath: string,
+  months: number = 13
+): Promise<MonthlyPerformance[]> {
+  return (await fetchPerformanceFromGBPDetailed(locationPath, months)).months;
 }
 
 /** Supabaseキャッシュに保存 */
@@ -213,12 +218,20 @@ export async function syncShopPerformance(
   gbpLocationName: string,
   months: number = 13
 ): Promise<{ success: boolean; totalMonths?: number; error?: string }> {
-  const apiData = await fetchPerformanceFromGBP(gbpLocationName, months);
+  const outcome = await fetchPerformanceFromGBPDetailed(gbpLocationName, months);
+  const apiData = outcome.months;
   if (apiData.length === 0) {
+    if (outcome.failure) {
+      const msg = describeGbpFailure(outcome.failure.status, outcome.failure.errorText);
+      await recordGbpSyncError(shopId, shopName, "performance", outcome.failure.status, msg);
+      return { success: false, error: msg };
+    }
+    await clearGbpSyncError(shopId, "performance");
     return { success: false, error: "API returned 0 months of data" };
   }
 
   await cachePerformanceData(shopId, shopName, apiData);
+  await clearGbpSyncError(shopId, "performance");
 
   return { success: true, totalMonths: apiData.length };
 }

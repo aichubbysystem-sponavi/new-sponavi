@@ -1,7 +1,8 @@
 /**
  * GET /api/cron/sync-search-keywords
  * 全店舗の検索語句をGBP Performance APIから一括同期
- * Vercel Cron: 毎月5日 5:00 JST (UTC 20:00)
+ * Vercel Cron: 毎月15日 5:00 JST (UTC 20:00)
+ *   ※2026-09-05: 5日時点ではGoogleの月次検索語句が未提供で全店0件だったため15日へ変更
  *
  * v2: 共有lib使用 / 未同期+古いのみ対象 / バッチ分割（タイムアウト対策）
  */

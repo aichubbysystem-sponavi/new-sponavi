@@ -1,0 +1,49 @@
+2026-09-05 検索語句・パフォーマンス指標の同期が主トークン1本で349店舗無音失敗 → 全アカウントのトークンで再試行へ
+===========================================================
+
+## 発端
+「検索語句 全店舗実行しました。ちゃんと取れているか確認して」
+
+## 本番DBで確認した事実（scratchpad q.py / q2.py / q3.py、読み取りのみ）
+- 対象818店舗（未解約・gbp_location_nameあり）のうち 2026/8 を持つ店舗 0。最新月が2026/7 = 462、キャッシュ無し = 331
+- 監査ログ「検索語句同期」1142件（12:47〜13:35 JST）。試みたがキャッシュ更新が無い店舗 349 = API が「0ヶ月」
+- 349のうち286店舗は口コミが取れている（うなぎや花道 難波店 2,518件など）→ 検索語句が無いはずがない
+- gbp_full_path のアカウント別に綺麗に分かれる:
+    取れない: accounts/111031567193825395772(192) / 113763883174026708669(90) / 113420220192759473973(33) / 103627062235899273680(9)
+    取れる  : 111148362910776147900(238) / 111745538139442406392(108) / 103024620946642977455(64) / 106785837620168419813(60)
+- system_oauth_tokens は1行のみ・期限切れ。フォールバック元は system.tokens RPC(get_valid_tokens)
+
+## 原因
+- gbp-search-keywords.ts / gbp-performance.ts が getOAuthToken()（Go API主トークン1本）だけで Performance API を叩いていた
+- 口コミ同期(cron/sync-reviews)は 2026-08-15 に getFallbackTokens + 401/403/404 再試行を入れたが、検索語句・指標側には未導入
+- 403/404 を「API returned 0 months of data」として握りつぶし console.log にしか出ないため、画面は「同期失敗0」
+
+## 8月分について（別問題）
+- 成功している466店舗でも 2026/8 は0件 = Google の月次検索語句が 9/5 時点で未提供。毎月5日 Cron は早すぎる
+
+## 実装（ブランチ fix/gbp-sync-token-fallback）
+1. src/lib/gbp-token.ts: fetchGbpWithFallback(url, key) を追加
+   - 主トークン→401/403/404 なら getFallbackTokens() の全トークンで順に再試行、成功トークンを key(locations/xxx) 単位で記憶
+   - 429/5xx はトークン問題ではないので再試行しない
+2. src/lib/gbp-search-keywords.ts
+   - fetchOneMonth が {data,status,errorText} を返す。fetchSearchKeywordsFromGBPDetailed を新設（旧関数は後方互換ラッパー）
+   - 1ヶ月目を単独取得してトークン確定→残りを4並列。1ヶ月目が全トークンで401/403/404なら残り月を打ち切り
+   - 月ターゲットを JST 基準に（従来はサーバーUTC）
+   - syncShopSearchKeywords: 取得失敗は gbp_sync_errors に記録し「権限なし(403)…」等の理由を返す。2xxで空のみ従来の「API returned 0 months of data」
+3. src/lib/gbp-performance.ts: 同様に fetchPerformanceFromGBPDetailed + 失敗記録
+4. src/lib/gbp-sync-errors.ts（新規）: gbp_sync_errors の upsert/delete/select、describeGbpFailure
+5. sql/2026-09-05_gbp_sync_errors.sql（新規・本番SQL Editorで実行必須）
+6. api/search-keywords/status: 各店舗に syncError を付与。client.tsx は再読込後も「前回失敗: …」を赤字表示し「同期失敗」KPIに加算
+7. vercel.json: sync-search-keywords を毎月5日→15日（0 20 15 * *）。sync-performance は5日のまま
+8. src/lib/gbp-token-fallback.test.ts（新規5件）。tsc / vitest 478件 / next lint 通過
+
+## ユーザー作業（残）
+1. 本番 Supabase SQL Editor で sql/2026-09-05_gbp_sync_errors.sql を実行（デプロイ前）
+2. Vercel Preview で検索語句管理画面を確認 → main へマージ（origin）
+3. 検索語句管理画面で「未同期を一括同期」を再実行（約330店舗）
+4. q3.py（アカウント別集計）で no_cache が全アカウント0になることを確認
+
+## 既知の残課題（今回は未対応）
+- 月次 Cron は270秒で打ち切り・自己再スケジュール無し → 800店舗×12リクエストは1回で終わらない。画面からの一括同期が実質の本線
+- gbp_location_name 重複5件（【統合済→…】の旧レコード: 札幌ニュークラブ4店＋熱塩温泉 山形屋）
+- system_oauth_tokens が期限切れ1行のみ（フォールバックは RPC 側で成立しているので実害なし）

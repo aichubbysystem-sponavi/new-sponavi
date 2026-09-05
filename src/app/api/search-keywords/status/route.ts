@@ -6,6 +6,7 @@
 import { NextResponse } from "next/server";
 import { getSupabase, verifyAuth, getUserAllowedShops } from "@/lib/supabase";
 import { getExpectedMonthJST, compareMonths } from "@/lib/gbp-search-keywords";
+import { getGbpSyncErrors } from "@/lib/gbp-sync-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -85,10 +86,14 @@ export async function GET(request: Request) {
     }
   }
 
+  // 2b. 直近の同期失敗（403/404等）。行がある＝直近の同期が失敗
+  const syncErrors = await getGbpSyncErrors("search_keywords");
+
   // 3. Build status list
   const shops = allShops.map((shop) => {
     const hasGbp = !!shop.gbp_location_name;
     const cache = cacheMap.get(shop.id);
+    const syncError = syncErrors.get(shop.id);
 
     let status: "synced" | "stale" | "never" | "no_gbp" = "never";
     if (!hasGbp) {
@@ -109,6 +114,8 @@ export async function GET(request: Request) {
       topKeywords,
       lastSynced: cache?.updated_at || null,
       status,
+      // 直近の同期失敗理由（成功したら消える）。ページ再読込後も「同期失敗」として見せるため
+      syncError: syncError ? { message: syncError.message, httpStatus: syncError.http_status, at: syncError.updated_at } : null,
     };
   });
 

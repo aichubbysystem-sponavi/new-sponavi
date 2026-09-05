@@ -259,3 +259,78 @@ export async function callGbpApi(
     return { ok: false, status: 0, data: { error: e?.message } };
   }
 }
+
+// ============================================================
+// トークンフォールバック付き GET（Performance API 用）
+// 検索語句・パフォーマンス指標は主トークン1本で叩いていたため、
+// 主トークンから見えないアカウント配下の店舗（2026-09-05時点で4アカウント349店舗）が
+// 403/404 → 「0ヶ月」として無音で失敗していた。口コミ同期と同じく
+// 401/403/404 のときだけ全トークンで順に再試行し、成功したトークンをキー単位で記憶する。
+// ============================================================
+
+export interface GbpFetchResult {
+  ok: boolean;
+  status: number;       // 0 = ネットワーク/タイムアウト
+  data: any;            // ok のとき JSON
+  errorText: string;    // !ok のとき本文先頭
+  token: string | null; // 最終的に使ったトークン
+}
+
+/** key（locations/xxx 等）→ 最後に成功したトークン */
+const keyTokenCache = new Map<string, string>();
+
+async function gbpGetOnce(url: string, token: string, timeoutMs: number): Promise<GbpFetchResult> {
+  try {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (res.ok) {
+      return { ok: true, status: res.status, data: await res.json().catch(() => ({})), errorText: "", token };
+    }
+    const text = await res.text().catch(() => "");
+    return { ok: false, status: res.status, data: null, errorText: text.slice(0, 300), token };
+  } catch (e: any) {
+    return { ok: false, status: 0, data: null, errorText: e?.message || "fetch error", token };
+  }
+}
+
+/**
+ * GBP API を GET し、401/403/404 なら全アカウントのトークンで順に再試行する。
+ * @param key 同じロケーションの複数リクエストで成功トークンを使い回すためのキー
+ */
+export async function fetchGbpWithFallback(
+  url: string,
+  key: string,
+  opts: { timeoutMs?: number; primaryToken?: string | null } = {}
+): Promise<GbpFetchResult> {
+  const timeoutMs = opts.timeoutMs ?? 15000;
+  const primary = opts.primaryToken === undefined ? await getOAuthToken() : opts.primaryToken;
+  const tried = new Set<string>();
+
+  const attempt = async (t: string) => {
+    tried.add(t);
+    const r = await gbpGetOnce(url, t, timeoutMs);
+    if (r.ok) keyTokenCache.set(key, t);
+    return r;
+  };
+  const shouldRetry = (r: GbpFetchResult) => !r.ok && TOKEN_RETRY_STATUSES.includes(r.status);
+
+  const first = keyTokenCache.get(key) || primary;
+  let result: GbpFetchResult | null = null;
+  if (first) {
+    result = await attempt(first);
+    if (!shouldRetry(result)) return result;
+  }
+
+  const fallbacks = await getFallbackTokens();
+  for (const t of [primary, ...fallbacks]) {
+    if (!t || tried.has(t)) continue;
+    const r = await attempt(t);
+    if (!shouldRetry(r)) return r;
+    result = r;
+  }
+  if (result) return result;
+  return { ok: false, status: 0, data: null, errorText: "OAuthトークンなし", token: null };
+}
